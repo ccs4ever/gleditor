@@ -1,0 +1,580 @@
+{
+  "journey": "J25",
+  "route": "J25-unavailable",
+  "frames": [
+    {
+      "file": "J25/J25-unavailable/before.png",
+      "location": "?journey=J25&variant=J25-unavailable",
+      "frame": "J25-J25-unavailable-s5-before",
+      "state": {
+        "fixture": "fixture:walk-compass-five-visits-branching-independent",
+        "reading": {
+          "visit": "03",
+          "subject": "cell:Calibration",
+          "store": "store:local-lab",
+          "version": "V5",
+          "occurrence": "occ:calibration-plate-01",
+          "offset": 0,
+          "body": [
+            "System check complete.",
+            "Pressure stayed stable."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "doc:LabNotes",
+            "version": "V12",
+            "occurrence": "occ:lab-passage-09",
+            "offset": 44,
+            "body": [
+              "Pressure stayed stable."
+            ]
+          },
+          {
+            "id": "02",
+            "parent": "01",
+            "subject": "cell:C17",
+            "version": "V8",
+            "occurrence": "occ:c17-pressure-spans-1",
+            "offset": 118,
+            "body": [
+              "Pressure: 3.14 bar."
+            ]
+          },
+          {
+            "id": "03",
+            "parent": "02",
+            "subject": "cell:Calibration",
+            "version": "V5",
+            "occurrence": "occ:calibration-plate-01",
+            "offset": 0,
+            "body": [
+              "System check complete. Pressure stayed stable."
+            ]
+          },
+          {
+            "id": "04",
+            "parent": "02",
+            "subject": "doc:FieldManual",
+            "version": "V3",
+            "occurrence": "occ:field-manual-passage-02",
+            "offset": 220,
+            "body": [
+              "Field manual: chamber procedure."
+            ]
+          },
+          {
+            "id": "05",
+            "parent": "04",
+            "subject": "media:Debrief",
+            "version": "V7",
+            "occurrence": "occ:debrief-recording-01",
+            "mediaLocator": {
+              "clock": "audio",
+              "position": "02:14"
+            },
+            "offset": 0,
+            "body": [
+              "Pressure stayed stable."
+            ]
+          }
+        ],
+        "selection": {
+          "subject": "visit:03",
+          "state": "Calibration V5",
+          "locator": "occ:calibration-plate-01"
+        },
+        "sourceOps": {
+          "store:local-lab": 1402,
+          "store:orion-pub-17": 0
+        },
+        "readerEffects": {
+          "visits": 4,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "current",
+            "title": "Current visit 03",
+            "kind": "cell",
+            "body": [
+              "System check complete.",
+              "Pressure stayed stable."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03"
+              },
+              {
+                "label": "Version",
+                "value": "Calibration plate V5"
+              },
+              {
+                "label": "Offset",
+                "value": 0
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "walk",
+            "title": "Reader activity · independent five-visit fixture",
+            "kind": "history",
+            "body": [
+              "Reader visits form their own branching activity graph, not source microversion ancestry."
+            ],
+            "facts": [
+              {
+                "label": "Origin",
+                "value": "01 · Lab notes V12"
+              },
+              {
+                "label": "Current",
+                "value": "03 · Calibration plate V5"
+              },
+              {
+                "label": "Branches",
+                "value": "01→02→03 · 01→02→04→05"
+              }
+            ],
+            "rows": [
+              {
+                "id": "01",
+                "label": "Visit 01 · origin",
+                "detail": "Lab notes V12",
+                "status": "available",
+                "ordinal": 1
+              },
+              {
+                "id": "02",
+                "label": "Visit 02",
+                "detail": "C17 V8 · child of 01",
+                "status": "available",
+                "ordinal": 2
+              },
+              {
+                "id": "03",
+                "label": "Visit 03 · current",
+                "detail": "Calibration plate V5 · child of 02",
+                "status": "selected",
+                "ordinal": 3
+              },
+              {
+                "id": "04",
+                "label": "Visit 04",
+                "detail": "Field manual V3 · child of 02",
+                "status": "available",
+                "ordinal": 4
+              },
+              {
+                "id": "05",
+                "label": "Visit 05",
+                "detail": "Debrief V7 · child of 04",
+                "status": "available",
+                "ordinal": 5
+              }
+            ],
+            "tone": "selected",
+            "count": {
+              "total": 5,
+              "filtered": 5,
+              "visible": 5
+            }
+          },
+          {
+            "id": "origin",
+            "title": "Walk origin",
+            "kind": "document",
+            "body": [
+              "Lab notes · V12"
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Role",
+                "value": "Origin"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "activity": {
+          "walkId": "walk:pressure-check-branching-01",
+          "nodes": [
+            {
+              "id": "01",
+              "parent": null,
+              "subject": "doc:LabNotes",
+              "version": "V12",
+              "occurrence": "occ:lab-passage-09",
+              "offset": 44,
+              "body": [
+                "Pressure stayed stable."
+              ]
+            },
+            {
+              "id": "02",
+              "parent": "01",
+              "subject": "cell:C17",
+              "version": "V8",
+              "occurrence": "occ:c17-pressure-spans-1",
+              "offset": 118,
+              "body": [
+                "Pressure: 3.14 bar."
+              ]
+            },
+            {
+              "id": "03",
+              "parent": "02",
+              "subject": "cell:Calibration",
+              "version": "V5",
+              "occurrence": "occ:calibration-plate-01",
+              "offset": 0,
+              "body": [
+                "System check complete. Pressure stayed stable."
+              ]
+            },
+            {
+              "id": "04",
+              "parent": "02",
+              "subject": "doc:FieldManual",
+              "version": "V3",
+              "occurrence": "occ:field-manual-passage-02",
+              "offset": 220,
+              "body": [
+                "Field manual: chamber procedure."
+              ]
+            },
+            {
+              "id": "05",
+              "parent": "04",
+              "subject": "media:Debrief",
+              "version": "V7",
+              "occurrence": "occ:debrief-recording-01",
+              "mediaLocator": {
+                "clock": "audio",
+                "position": "02:14"
+              },
+              "offset": 0,
+              "body": [
+                "Pressure stayed stable."
+              ]
+            }
+          ],
+          "current": "03",
+          "preview": null,
+          "references": [],
+          "annotations": [],
+          "unavailableTargets": []
+        },
+        "media": {
+          "visit:05": {
+            "subject": "media:Debrief",
+            "version": "V7",
+            "availability": "cached",
+            "clock": "audio",
+            "position": "02:14"
+          }
+        }
+      },
+      "effects": [],
+      "action": "Before",
+      "note": ""
+    },
+    {
+      "file": "J25/J25-unavailable/J25-unavailable-s5-a1.png",
+      "location": "?journey=J25&variant=J25-unavailable&task=0&action=1",
+      "frame": "J25-unavailable-s5-a1",
+      "state": {
+        "fixture": "fixture:walk-compass-five-visits-branching-independent",
+        "reading": {
+          "visit": "03",
+          "subject": "cell:Calibration",
+          "store": "store:local-lab",
+          "version": "V5",
+          "occurrence": "occ:calibration-plate-01",
+          "offset": 0,
+          "body": [
+            "System check complete.",
+            "Pressure stayed stable."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "doc:LabNotes",
+            "version": "V12",
+            "occurrence": "occ:lab-passage-09",
+            "offset": 44,
+            "body": [
+              "Pressure stayed stable."
+            ]
+          },
+          {
+            "id": "02",
+            "parent": "01",
+            "subject": "cell:C17",
+            "version": "V8",
+            "occurrence": "occ:c17-pressure-spans-1",
+            "offset": 118,
+            "body": [
+              "Pressure: 3.14 bar."
+            ]
+          },
+          {
+            "id": "03",
+            "parent": "02",
+            "subject": "cell:Calibration",
+            "version": "V5",
+            "occurrence": "occ:calibration-plate-01",
+            "offset": 0,
+            "body": [
+              "System check complete. Pressure stayed stable."
+            ]
+          },
+          {
+            "id": "04",
+            "parent": "02",
+            "subject": "doc:FieldManual",
+            "version": "V3",
+            "occurrence": "occ:field-manual-passage-02",
+            "offset": 220,
+            "body": [
+              "Field manual: chamber procedure."
+            ]
+          },
+          {
+            "id": "05",
+            "parent": "04",
+            "subject": "media:Debrief",
+            "version": "V7",
+            "occurrence": "occ:debrief-recording-01",
+            "mediaLocator": {
+              "clock": "audio",
+              "position": "02:14"
+            },
+            "offset": 0,
+            "body": [
+              "Pressure stayed stable."
+            ]
+          }
+        ],
+        "selection": {
+          "subject": "visit:03",
+          "state": "Calibration V5",
+          "locator": "occ:calibration-plate-01"
+        },
+        "sourceOps": {
+          "store:local-lab": 1402,
+          "store:orion-pub-17": 0
+        },
+        "readerEffects": {
+          "visits": 4,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "unavailable",
+            "title": "Visit 05 unavailable",
+            "kind": "notice",
+            "body": [
+              "Exact saved descriptor retained; no substitute target offered as current."
+            ],
+            "facts": [
+              {
+                "label": "Version",
+                "value": "V7"
+              },
+              {
+                "label": "Occurrence",
+                "value": "occ:debrief-recording-01"
+              },
+              {
+                "label": "Position",
+                "value": "02:14"
+              },
+              {
+                "label": "Retry",
+                "value": "Available"
+              }
+            ],
+            "rows": [
+              {
+                "id": "retry",
+                "label": "Retry exact V7",
+                "detail": "Visible",
+                "status": "available"
+              }
+            ],
+            "tone": "neutral"
+          },
+          {
+            "id": "walk",
+            "title": "Reader activity · independent five-visit fixture",
+            "kind": "history",
+            "body": [
+              "Reader visits form their own branching activity graph, not source microversion ancestry."
+            ],
+            "facts": [
+              {
+                "label": "Origin",
+                "value": "01 · Lab notes V12"
+              },
+              {
+                "label": "Current",
+                "value": "06"
+              },
+              {
+                "label": "Branches",
+                "value": "01→02→03 · 01→02→04→05"
+              }
+            ],
+            "rows": [
+              {
+                "id": "01",
+                "label": "Visit 01 · origin",
+                "detail": "Lab notes V12",
+                "status": "available",
+                "ordinal": 1
+              },
+              {
+                "id": "02",
+                "label": "Visit 02",
+                "detail": "C17 V8 · child of 01",
+                "status": "available",
+                "ordinal": 2
+              },
+              {
+                "id": "03",
+                "label": "Visit 03 · current",
+                "detail": "Calibration plate V5 · child of 02",
+                "status": "available",
+                "ordinal": 3
+              },
+              {
+                "id": "04",
+                "label": "Visit 04",
+                "detail": "Field manual V3 · child of 02",
+                "status": "available",
+                "ordinal": 4
+              },
+              {
+                "id": "05",
+                "label": "Visit 05",
+                "detail": "Debrief V7 · child of 04",
+                "status": "available",
+                "ordinal": 5
+              }
+            ],
+            "tone": "selected",
+            "count": {
+              "total": 5,
+              "filtered": 5,
+              "visible": 5
+            }
+          }
+        ],
+        "activity": {
+          "walkId": "walk:pressure-check-branching-01",
+          "nodes": [
+            {
+              "id": "01",
+              "parent": null,
+              "subject": "doc:LabNotes",
+              "version": "V12",
+              "occurrence": "occ:lab-passage-09",
+              "offset": 44,
+              "body": [
+                "Pressure stayed stable."
+              ]
+            },
+            {
+              "id": "02",
+              "parent": "01",
+              "subject": "cell:C17",
+              "version": "V8",
+              "occurrence": "occ:c17-pressure-spans-1",
+              "offset": 118,
+              "body": [
+                "Pressure: 3.14 bar."
+              ]
+            },
+            {
+              "id": "03",
+              "parent": "02",
+              "subject": "cell:Calibration",
+              "version": "V5",
+              "occurrence": "occ:calibration-plate-01",
+              "offset": 0,
+              "body": [
+                "System check complete. Pressure stayed stable."
+              ]
+            },
+            {
+              "id": "04",
+              "parent": "02",
+              "subject": "doc:FieldManual",
+              "version": "V3",
+              "occurrence": "occ:field-manual-passage-02",
+              "offset": 220,
+              "body": [
+                "Field manual: chamber procedure."
+              ]
+            },
+            {
+              "id": "05",
+              "parent": "04",
+              "subject": "media:Debrief",
+              "version": "V7",
+              "occurrence": "occ:debrief-recording-01",
+              "mediaLocator": {
+                "clock": "audio",
+                "position": "02:14"
+              },
+              "offset": 0,
+              "body": [
+                "Pressure stayed stable."
+              ]
+            }
+          ],
+          "current": "06",
+          "preview": null,
+          "references": [],
+          "annotations": [],
+          "unavailableTargets": []
+        },
+        "media": {
+          "visit:05": {
+            "subject": "media:Debrief",
+            "version": "V7",
+            "availability": "unavailable",
+            "clock": "audio",
+            "position": "02:14"
+          }
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state changed.",
+          "identity": "fixture-effect:none"
+        }
+      ],
+      "action": "Reopen with visit 05 unavailable",
+      "note": "The route and saved activity records remain unchanged."
+    }
+  ]
+}

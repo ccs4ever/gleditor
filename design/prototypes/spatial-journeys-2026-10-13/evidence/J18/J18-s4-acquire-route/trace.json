@@ -1,0 +1,462 @@
+{
+  "journey": "J18",
+  "route": "J18-s4-acquire-route",
+  "frames": [
+    {
+      "file": "J18/J18-s4-acquire-route/before.png",
+      "location": "?journey=J18&variant=J18-s4-acquire-route",
+      "frame": "J18-J18-s4-acquire-route-s4-before",
+      "state": {
+        "fixture": "omni-eight-store-mixed-media",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "pressure-video://media",
+          "state": "V9",
+          "locator": "title-field",
+          "evidenceType": "transcript"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "calibration://media": 0,
+          "debrief://media": 0,
+          "pressure-video://media": 0,
+          "field-manual://remote": 0,
+          "archive://remote": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "video",
+            "title": "Pressure rig test · V9",
+            "kind": "inspector",
+            "body": [
+              "A metadata title match is not a video-content match."
+            ],
+            "facts": [
+              {
+                "label": "Origin",
+                "value": "pressure-video://media"
+              },
+              {
+                "label": "Edition",
+                "value": "V9 · pinned manifest video-mf-v9"
+              },
+              {
+                "label": "Match field",
+                "value": "title metadata"
+              },
+              {
+                "label": "Payload",
+                "value": "not held · content not searched"
+              },
+              {
+                "label": "Preview",
+                "value": "not held"
+              },
+              {
+                "label": "Acquisition request",
+                "value": "none"
+              }
+            ],
+            "rows": [
+              {
+                "id": "download",
+                "label": "Acquire pinned V9",
+                "detail": "video-mf-v9",
+                "status": "available"
+              },
+              {
+                "id": "leave",
+                "label": "Leave untouched",
+                "detail": "no request",
+                "status": "available"
+              }
+            ],
+            "tone": "neutral"
+          },
+          {
+            "id": "video-left",
+            "title": "Video left untouched",
+            "kind": "notice",
+            "body": [
+              "No acquisition request was created."
+            ],
+            "facts": [
+              {
+                "label": "Edition",
+                "value": "V9 · video-mf-v9"
+              },
+              {
+                "label": "Payload",
+                "value": "not held"
+              },
+              {
+                "label": "Request",
+                "value": "none"
+              },
+              {
+                "label": "Transcript",
+                "value": "none"
+              },
+              {
+                "label": "Reader place",
+                "value": "unchanged"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "Q18-01",
+          "text": "pressure",
+          "mode": "literal",
+          "caseFold": false,
+          "scope": [
+            "lab://notes",
+            "rig://lab",
+            "review://remote",
+            "calibration://media",
+            "debrief://media",
+            "pressure-video://media",
+            "field-manual://remote",
+            "archive://remote"
+          ],
+          "requestGeneration": 1,
+          "coverage": {
+            "complete": 5,
+            "pending": 3
+          },
+          "results": [
+            [
+              "passage",
+              "Review passage",
+              "review://remote",
+              "V4",
+              "native text",
+              "held · verified cache",
+              "occ-review-r4-12",
+              "Review:V4:span[880,928]"
+            ],
+            [
+              "cell",
+              "Rig slice C17",
+              "rig://lab",
+              "V8",
+              "native cell text",
+              "local · held",
+              "occ-c17-v8-1",
+              "Rig:V8:C17:r17:cB2:span[0,8]"
+            ],
+            [
+              "ocr",
+              "Calibration plate",
+              "calibration://media",
+              "V5",
+              "OCR region",
+              "remote · cached bytes",
+              "occ-cal-v5-ocr1",
+              "Cal:V5:image1:rect[0.42,0.31,0.55,0.38]"
+            ],
+            [
+              "audio",
+              "Debrief recording",
+              "debrief://media",
+              "V7",
+              "transcript",
+              "remote · cached bytes",
+              "occ-debrief-v7-tr1",
+              "Debrief:V7:audio1:00:02:14.000–00:02:18.000"
+            ],
+            [
+              "video",
+              "Pressure rig test",
+              "pressure-video://media",
+              "V9",
+              "title metadata only",
+              "remote · not held",
+              "occ-video-v9-title",
+              "Video:V9:title-field"
+            ]
+          ],
+          "status": "running",
+          "filter": "derived-and-metadata",
+          "selected": "occ-video-v9-title"
+        },
+        "stores": [
+          "lab://notes",
+          "rig://lab",
+          "review://remote",
+          "calibration://media",
+          "debrief://media",
+          "pressure-video://media",
+          "field-manual://remote",
+          "archive://remote"
+        ],
+        "video": {
+          "choice": "leave",
+          "requestId": null
+        }
+      },
+      "effects": [],
+      "action": "Before",
+      "note": ""
+    },
+    {
+      "file": "J18/J18-s4-acquire-route/J18-s4-acquire.png",
+      "location": "?journey=J18&variant=J18-s4-acquire-route&task=0&action=1",
+      "frame": "J18-s4-acquire",
+      "state": {
+        "fixture": "omni-eight-store-mixed-media",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "pressure-video://media",
+          "state": "V9",
+          "locator": "title-field",
+          "evidenceType": "transcript"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "calibration://media": 0,
+          "debrief://media": 0,
+          "pressure-video://media": 0,
+          "field-manual://remote": 0,
+          "archive://remote": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "video",
+            "title": "Pressure rig test · V9",
+            "kind": "inspector",
+            "body": [
+              "A metadata title match is not a video-content match."
+            ],
+            "facts": [
+              {
+                "label": "Origin",
+                "value": "pressure-video://media"
+              },
+              {
+                "label": "Edition",
+                "value": "V9 · pinned manifest video-mf-v9"
+              },
+              {
+                "label": "Match field",
+                "value": "title metadata"
+              },
+              {
+                "label": "Payload",
+                "value": "not held · content not searched"
+              },
+              {
+                "label": "Preview",
+                "value": "not held"
+              },
+              {
+                "label": "Acquisition request",
+                "value": "none"
+              }
+            ],
+            "rows": [
+              {
+                "id": "download",
+                "label": "Acquire pinned V9",
+                "detail": "video-mf-v9",
+                "status": "available"
+              },
+              {
+                "id": "leave",
+                "label": "Leave untouched",
+                "detail": "no request",
+                "status": "available"
+              }
+            ],
+            "tone": "neutral"
+          },
+          {
+            "id": "video-request",
+            "title": "Pinned video acquisition request",
+            "kind": "inspector",
+            "body": [
+              "Acquisition is an explicit separate request."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "req-video-v9-0001"
+              },
+              {
+                "label": "Edition",
+                "value": "V9 · video-mf-v9"
+              },
+              {
+                "label": "Title match",
+                "value": "metadata only"
+              },
+              {
+                "label": "Payload",
+                "value": "pending · no frames/transcript"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "Q18-01",
+          "text": "pressure",
+          "mode": "literal",
+          "caseFold": false,
+          "scope": [
+            "lab://notes",
+            "rig://lab",
+            "review://remote",
+            "calibration://media",
+            "debrief://media",
+            "pressure-video://media",
+            "field-manual://remote",
+            "archive://remote"
+          ],
+          "requestGeneration": 1,
+          "coverage": {
+            "complete": 5,
+            "pending": 3
+          },
+          "results": [
+            [
+              "passage",
+              "Review passage",
+              "review://remote",
+              "V4",
+              "native text",
+              "held · verified cache",
+              "occ-review-r4-12",
+              "Review:V4:span[880,928]"
+            ],
+            [
+              "cell",
+              "Rig slice C17",
+              "rig://lab",
+              "V8",
+              "native cell text",
+              "local · held",
+              "occ-c17-v8-1",
+              "Rig:V8:C17:r17:cB2:span[0,8]"
+            ],
+            [
+              "ocr",
+              "Calibration plate",
+              "calibration://media",
+              "V5",
+              "OCR region",
+              "remote · cached bytes",
+              "occ-cal-v5-ocr1",
+              "Cal:V5:image1:rect[0.42,0.31,0.55,0.38]"
+            ],
+            [
+              "audio",
+              "Debrief recording",
+              "debrief://media",
+              "V7",
+              "transcript",
+              "remote · cached bytes",
+              "occ-debrief-v7-tr1",
+              "Debrief:V7:audio1:00:02:14.000–00:02:18.000"
+            ],
+            [
+              "video",
+              "Pressure rig test",
+              "pressure-video://media",
+              "V9",
+              "title metadata only",
+              "remote · not held",
+              "occ-video-v9-title",
+              "Video:V9:title-field"
+            ]
+          ],
+          "status": "running",
+          "filter": "derived-and-metadata",
+          "selected": "occ-video-v9-title"
+        },
+        "stores": [
+          "lab://notes",
+          "rig://lab",
+          "review://remote",
+          "calibration://media",
+          "debrief://media",
+          "pressure-video://media",
+          "field-manual://remote",
+          "archive://remote"
+        ],
+        "video": {
+          "choice": "acquire",
+          "requestId": "req-video-v9-0001"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No stored effect.",
+          "identity": ""
+        }
+      ],
+      "action": "Acquire pinned V9",
+      "note": "Explicit request does not convert metadata evidence into payload results."
+    }
+  ]
+}

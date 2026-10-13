@@ -29,6 +29,10 @@ Publication, local-swarm discovery, commentary updates and third-party link laye
 seven-journey contract in [publication journeys](ux_workflow_publication.md), with temporary user
 keys and an explicit mock Oracle boundary.
 
+Pre-implementation tests of the spatial mockups have a companion contract,
+[J17–J32: spatial concept journeys](ux_workflow_spatial_concepts.md). They retain this journey
+format but use concept-review outcomes; a storyboard result is not a live journey pass.
+
 Each journey lists its steps, the evidence a pass needs, and the failures to look for. "Evidence"
 means artefacts a reviewer can inspect without rerunning: captured frames and accessibility dumps
 for graphical steps, a terminal transcript for REPL steps, and `xudu-dump` of saved stores.

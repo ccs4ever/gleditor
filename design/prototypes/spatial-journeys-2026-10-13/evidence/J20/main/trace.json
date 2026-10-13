@@ -1,0 +1,4185 @@
+{
+  "journey": "J20",
+  "route": "main",
+  "frames": [
+    {
+      "file": "J20/main/before.png",
+      "location": "?journey=J20",
+      "frame": "J20-main-s1-before",
+      "state": {
+        "fixture": "history-3-14-pressure",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "math://draft-a": 39
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Reading place",
+            "kind": "document",
+            "body": [
+              "Current visit 01 · Lab notes · V12.",
+              "The starting caret and occurrence remain pinned while tools open."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Offset",
+                "value": "p.14 · 54.2"
+              },
+              {
+                "label": "Occurrence",
+                "value": "Lab:p14:r54.2"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "history-query",
+            "title": "Content history · 3.14",
+            "kind": "history",
+            "body": [
+              "Text mode · whole token selected · all branches · current and historical."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "H1"
+              },
+              {
+                "label": "Query",
+                "value": "3.14"
+              },
+              {
+                "label": "Mode",
+                "value": "Literal"
+              },
+              {
+                "label": "Whole token",
+                "value": "on"
+              },
+              {
+                "label": "Scope",
+                "value": "all branches · current+historical"
+              },
+              {
+                "label": "Coverage",
+                "value": "8/10 paths · 2 pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "m",
+                "label": "Math notes",
+                "detail": "Draft A · B07 · 3.14",
+                "status": "match",
+                "ordinal": 1
+              },
+              {
+                "id": "g",
+                "label": "Gauge G7",
+                "detail": "Run B · B04 · 3.14 bar",
+                "status": "match",
+                "ordinal": 2
+              },
+              {
+                "id": "old",
+                "label": "Math notes · V8",
+                "detail": "present at V8 · absent now",
+                "status": "historical",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 3,
+              "filtered": 3,
+              "visible": 3
+            }
+          }
+        ],
+        "query": {
+          "id": "H1",
+          "text": "3.14",
+          "mode": "literal",
+          "caseFold": false,
+          "scope": "math+Rig · all declared branches · current+historical",
+          "results": [
+            "math-A1",
+            "gauge-B4",
+            "math-V8"
+          ],
+          "coverage": "8/10 paths · 2 pending"
+        },
+        "history": {
+          "branches": [
+            {
+              "id": "main",
+              "states": [
+                "V4",
+                "V5",
+                "V6",
+                "V7",
+                "V8"
+              ]
+            },
+            {
+              "id": "branch-b",
+              "states": [
+                "B01",
+                "B02",
+                "B03",
+                "B04"
+              ]
+            },
+            {
+              "id": "branch-c",
+              "states": [
+                "C01",
+                "C02"
+              ]
+            }
+          ],
+          "run": "run-b03-b07",
+          "sameSource": [
+            "P-MATH-001"
+          ],
+          "stateCount": 12,
+          "opCount": 46
+        }
+      },
+      "effects": [],
+      "action": "Before",
+      "note": ""
+    },
+    {
+      "file": "J20/main/J20-s1-a1.png",
+      "location": "?journey=J20&task=0&action=1",
+      "frame": "J20-s1-a1",
+      "state": {
+        "fixture": "history-3-14-pressure",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "math://draft-a": 39
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "history-query",
+            "title": "Content history · 3.14",
+            "kind": "history",
+            "body": [
+              "Text mode · whole token selected · all branches · current and historical."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "H1"
+              },
+              {
+                "label": "Query",
+                "value": "3.14"
+              },
+              {
+                "label": "Mode",
+                "value": "Literal"
+              },
+              {
+                "label": "Whole token",
+                "value": "on"
+              },
+              {
+                "label": "Scope",
+                "value": "all branches · current+historical"
+              },
+              {
+                "label": "Coverage",
+                "value": "8/10 paths · 2 pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "m",
+                "label": "Math notes",
+                "detail": "Draft A · B07 · 3.14",
+                "status": "match",
+                "ordinal": 1
+              },
+              {
+                "id": "g",
+                "label": "Gauge G7",
+                "detail": "Run B · B04 · 3.14 bar",
+                "status": "match",
+                "ordinal": 2
+              },
+              {
+                "id": "old",
+                "label": "Math notes · V8",
+                "detail": "present at V8 · absent now",
+                "status": "historical",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 3,
+              "filtered": 3,
+              "visible": 3
+            }
+          },
+          {
+            "id": "hresults",
+            "title": "3.14 historical results",
+            "kind": "history",
+            "body": [
+              "One match is a mathematical prose occurrence, one is a typed pressure cell, and one is historical removed text."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "H1 · literal 3.14 · whole token"
+              },
+              {
+                "label": "Scope",
+                "value": "all declared branches/current+historical"
+              },
+              {
+                "label": "Coverage",
+                "value": "8/10 paths · 2 pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "mathA",
+                "label": "Math notes",
+                "detail": "Draft A V7 · occurrence math-A1 · P-MATH-001 [200,204]",
+                "status": "match",
+                "ordinal": 1
+              },
+              {
+                "id": "gauge",
+                "label": "Gauge G7",
+                "detail": "Rig V8 · occurrence gauge-B4 · C17:r17:cB2 [0,4] · unit bar",
+                "status": "match",
+                "ordinal": 2
+              },
+              {
+                "id": "hist",
+                "label": "Math notes",
+                "detail": "V8 · occurrence math-V8 · P-MATH-001 [200,204] · absent now",
+                "status": "historical",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 3,
+              "filtered": 3,
+              "visible": 3
+            }
+          }
+        ],
+        "query": {
+          "id": "H1",
+          "text": "3.14",
+          "mode": "literal",
+          "caseFold": false,
+          "scope": "all branches,current,historical",
+          "results": [
+            "math-A1",
+            "gauge-B4",
+            "math-V8"
+          ],
+          "coverage": "8/10 paths · 2 pending"
+        },
+        "history": {
+          "branches": [
+            {
+              "id": "main",
+              "states": [
+                "V4",
+                "V5",
+                "V6",
+                "V7",
+                "V8"
+              ]
+            },
+            {
+              "id": "branch-b",
+              "states": [
+                "B01",
+                "B02",
+                "B03",
+                "B04"
+              ]
+            },
+            {
+              "id": "branch-c",
+              "states": [
+                "C01",
+                "C02"
+              ]
+            }
+          ],
+          "run": "run-b03-b07",
+          "sameSource": [
+            "P-MATH-001"
+          ],
+          "stateCount": 12,
+          "opCount": 46
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Search 3.14 across branches and states",
+      "note": "Search results retain occurrence addresses, state identities and partial coverage."
+    },
+    {
+      "file": "J20/main/J20-s1-a2.png",
+      "location": "?journey=J20&task=0&action=2",
+      "frame": "J20-s1-a2",
+      "state": {
+        "fixture": "history-3-14-pressure",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "gauge-B4",
+          "state": "Rig V8",
+          "locator": "C17:r17:cB2[0,4]"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "math://draft-a": 39
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "hresults",
+            "title": "3.14 historical results",
+            "kind": "history",
+            "body": [
+              "One match is a mathematical prose occurrence, one is a typed pressure cell, and one is historical removed text."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "H1 · literal 3.14 · whole token"
+              },
+              {
+                "label": "Scope",
+                "value": "all declared branches/current+historical"
+              },
+              {
+                "label": "Coverage",
+                "value": "8/10 paths · 2 pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "mathA",
+                "label": "Math notes",
+                "detail": "Draft A V7 · occurrence math-A1 · P-MATH-001 [200,204]",
+                "status": "match",
+                "ordinal": 1
+              },
+              {
+                "id": "gauge",
+                "label": "Gauge G7",
+                "detail": "Rig V8 · occurrence gauge-B4 · C17:r17:cB2 [0,4] · unit bar",
+                "status": "match",
+                "ordinal": 2
+              },
+              {
+                "id": "hist",
+                "label": "Math notes",
+                "detail": "V8 · occurrence math-V8 · P-MATH-001 [200,204] · absent now",
+                "status": "historical",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 3,
+              "filtered": 3,
+              "visible": 3
+            }
+          },
+          {
+            "id": "selected",
+            "title": "Selected exact match",
+            "kind": "inspector",
+            "body": [
+              "Text match and typed pressure value are different source contexts."
+            ],
+            "facts": [
+              {
+                "label": "Math",
+                "value": "Draft A V7 · P-MATH-001[200,204]"
+              },
+              {
+                "label": "Cell",
+                "value": "Rig V8 · C17:r17:cB2[0,4] · 3.14 bar"
+              },
+              {
+                "label": "Occurrence",
+                "value": "gauge-B4"
+              },
+              {
+                "label": "Coverage",
+                "value": "partial · 2 paths pending"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "H1",
+          "text": "3.14",
+          "mode": "literal",
+          "caseFold": false,
+          "scope": "all branches,current,historical",
+          "results": [
+            "math-A1",
+            "gauge-B4",
+            "math-V8"
+          ],
+          "coverage": "8/10 paths · 2 pending"
+        },
+        "history": {
+          "branches": [
+            {
+              "id": "main",
+              "states": [
+                "V4",
+                "V5",
+                "V6",
+                "V7",
+                "V8"
+              ]
+            },
+            {
+              "id": "branch-b",
+              "states": [
+                "B01",
+                "B02",
+                "B03",
+                "B04"
+              ]
+            },
+            {
+              "id": "branch-c",
+              "states": [
+                "C01",
+                "C02"
+              ]
+            }
+          ],
+          "run": "run-b03-b07",
+          "sameSource": [
+            "P-MATH-001"
+          ],
+          "stateCount": 12,
+          "opCount": 46
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Inspect math and pressure matches",
+      "note": "Exact current/historical occurrence identity is retained; no raw permascroll result is substituted."
+    },
+    {
+      "file": "J20/main/J20-s2-a1.png",
+      "location": "?journey=J20&task=1&action=1",
+      "frame": "J20-s2-a1",
+      "state": {
+        "fixture": "history-3-14-pressure",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "gauge-B4",
+          "state": "Rig V8",
+          "locator": "C17:r17:cB2[0,4]"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "math://draft-a": 39
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "history-query",
+            "title": "Content history · 3.14",
+            "kind": "history",
+            "body": [
+              "Text mode · whole token selected · all branches · current and historical."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "H1"
+              },
+              {
+                "label": "Query",
+                "value": "3.14"
+              },
+              {
+                "label": "Mode",
+                "value": "Literal"
+              },
+              {
+                "label": "Whole token",
+                "value": "on"
+              },
+              {
+                "label": "Scope",
+                "value": "all branches · current+historical"
+              },
+              {
+                "label": "Coverage",
+                "value": "8/10 paths · 2 pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "m",
+                "label": "Math notes",
+                "detail": "Draft A · B07 · 3.14",
+                "status": "match",
+                "ordinal": 1
+              },
+              {
+                "id": "g",
+                "label": "Gauge G7",
+                "detail": "Run B · B04 · 3.14 bar",
+                "status": "match",
+                "ordinal": 2
+              },
+              {
+                "id": "old",
+                "label": "Math notes · V8",
+                "detail": "present at V8 · absent now",
+                "status": "historical",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 3,
+              "filtered": 3,
+              "visible": 3
+            }
+          },
+          {
+            "id": "literal",
+            "title": "Literal text matching",
+            "kind": "history",
+            "body": [
+              "Substring text comparison; optional Unicode case folding; no numeric normalization."
+            ],
+            "facts": [
+              {
+                "label": "3.14",
+                "value": "matches literal sequence"
+              },
+              {
+                "label": "3.140",
+                "value": "contains substring 3.14"
+              },
+              {
+                "label": "3.14159",
+                "value": "contains substring 3.14"
+              },
+              {
+                "label": "Units",
+                "value": "not parsed in literal mode"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "H1",
+          "text": "3.14",
+          "mode": "literal",
+          "caseFold": false,
+          "scope": "all branches,current,historical",
+          "results": [
+            "math-A1",
+            "gauge-B4",
+            "math-V8"
+          ],
+          "coverage": "8/10 paths · 2 pending"
+        },
+        "history": {
+          "branches": [
+            {
+              "id": "main",
+              "states": [
+                "V4",
+                "V5",
+                "V6",
+                "V7",
+                "V8"
+              ]
+            },
+            {
+              "id": "branch-b",
+              "states": [
+                "B01",
+                "B02",
+                "B03",
+                "B04"
+              ]
+            },
+            {
+              "id": "branch-c",
+              "states": [
+                "C01",
+                "C02"
+              ]
+            }
+          ],
+          "run": "run-b03-b07",
+          "sameSource": [
+            "P-MATH-001"
+          ],
+          "stateCount": 12,
+          "opCount": 46
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Inspect Literal rule",
+      "note": "Literal performs substring matching without numeric normalization."
+    },
+    {
+      "file": "J20/main/J20-s2-a2.png",
+      "location": "?journey=J20&task=1&action=2",
+      "frame": "J20-s2-a2",
+      "state": {
+        "fixture": "history-3-14-pressure",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "gauge-B4",
+          "state": "Rig V8",
+          "locator": "C17:r17:cB2[0,4]"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "math://draft-a": 39
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "history-query",
+            "title": "Prior query H1 snapshot · 3.14",
+            "kind": "history",
+            "body": [
+              "Saved literal H1 result snapshot; the active query panel below uses whole-token matching."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "H1 · prior snapshot"
+              },
+              {
+                "label": "Query",
+                "value": "3.14"
+              },
+              {
+                "label": "Mode",
+                "value": "Literal · prior rule"
+              },
+              {
+                "label": "Whole token",
+                "value": "on · H1 setting"
+              },
+              {
+                "label": "Scope",
+                "value": "all branches · current+historical"
+              },
+              {
+                "label": "Coverage",
+                "value": "8/10 paths · 2 pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "m",
+                "label": "Math notes",
+                "detail": "Draft A · B07 · 3.14",
+                "status": "match",
+                "ordinal": 1
+              },
+              {
+                "id": "g",
+                "label": "Gauge G7",
+                "detail": "Run B · B04 · 3.14 bar",
+                "status": "match",
+                "ordinal": 2
+              },
+              {
+                "id": "old",
+                "label": "Math notes · V8",
+                "detail": "present at V8 · absent now",
+                "status": "historical",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 3,
+              "filtered": 3,
+              "visible": 3
+            }
+          },
+          {
+            "id": "token",
+            "title": "Whole-token matching",
+            "kind": "history",
+            "body": [
+              "A decimal run is one textual token."
+            ],
+            "facts": [
+              {
+                "label": "3.14",
+                "value": "token 3.14"
+              },
+              {
+                "label": "3.140",
+                "value": "token 3.140 · not equal"
+              },
+              {
+                "label": "3.14159",
+                "value": "token 3.14159 · not equal"
+              },
+              {
+                "label": "Normalization",
+                "value": "none"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "H1",
+          "text": "3.14",
+          "mode": "whole-token",
+          "caseFold": false,
+          "scope": "all branches,current,historical",
+          "results": [
+            "math-A1",
+            "gauge-B4",
+            "math-V8"
+          ],
+          "coverage": "8/10 paths · 2 pending"
+        },
+        "history": {
+          "branches": [
+            {
+              "id": "main",
+              "states": [
+                "V4",
+                "V5",
+                "V6",
+                "V7",
+                "V8"
+              ]
+            },
+            {
+              "id": "branch-b",
+              "states": [
+                "B01",
+                "B02",
+                "B03",
+                "B04"
+              ]
+            },
+            {
+              "id": "branch-c",
+              "states": [
+                "C01",
+                "C02"
+              ]
+            }
+          ],
+          "run": "run-b03-b07",
+          "sameSource": [
+            "P-MATH-001"
+          ],
+          "stateCount": 12,
+          "opCount": 46
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Switch to Whole token",
+      "note": "Decimal token examples show 3.140 and 3.14159 differ from 3.14."
+    },
+    {
+      "file": "J20/main/J20-s2-a3.png",
+      "location": "?journey=J20&task=1&action=3",
+      "frame": "J20-s2-a3",
+      "state": {
+        "fixture": "history-3-14-pressure",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "gauge-B4",
+          "state": "Rig V8",
+          "locator": "C17:r17:cB2[0,4]"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "math://draft-a": 39
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "history-query",
+            "title": "Prior query H1 snapshot · 3.14",
+            "kind": "history",
+            "body": [
+              "Saved H1 result snapshot; the adjacent panel previews a separate numeric rule and does not replace H1."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "H1 · prior snapshot"
+              },
+              {
+                "label": "Query",
+                "value": "3.14"
+              },
+              {
+                "label": "Mode",
+                "value": "Literal · prior rule"
+              },
+              {
+                "label": "Whole token",
+                "value": "on · prior rule"
+              },
+              {
+                "label": "Scope",
+                "value": "all branches · current+historical"
+              },
+              {
+                "label": "Coverage",
+                "value": "8/10 paths · 2 pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "m",
+                "label": "Math notes",
+                "detail": "Draft A · B07 · 3.14",
+                "status": "match",
+                "ordinal": 1
+              },
+              {
+                "id": "g",
+                "label": "Gauge G7",
+                "detail": "Run B · B04 · 3.14 bar",
+                "status": "match",
+                "ordinal": 2
+              },
+              {
+                "id": "old",
+                "label": "Math notes · V8",
+                "detail": "present at V8 · absent now",
+                "status": "historical",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 3,
+              "filtered": 3,
+              "visible": 3
+            }
+          },
+          {
+            "id": "number",
+            "title": "Exact numeric matching",
+            "kind": "history",
+            "body": [
+              "Finite decimal literals compare exactly. No implicit unit conversion."
+            ],
+            "facts": [
+              {
+                "label": "3.14",
+                "value": "exact decimal value"
+              },
+              {
+                "label": "3.140",
+                "value": "equals 3.14 exactly"
+              },
+              {
+                "label": "3.14159",
+                "value": "not equal"
+              },
+              {
+                "label": "Units",
+                "value": "typed groups · unit facet required to compare"
+              },
+              {
+                "label": "unitless vs bar",
+                "value": "not implicitly equal"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "H1",
+          "text": "3.14",
+          "mode": "number",
+          "caseFold": false,
+          "scope": "all branches,current,historical",
+          "results": [
+            "math-A1",
+            "gauge-B4",
+            "math-V8"
+          ],
+          "coverage": "8/10 paths · 2 pending"
+        },
+        "history": {
+          "branches": [
+            {
+              "id": "main",
+              "states": [
+                "V4",
+                "V5",
+                "V6",
+                "V7",
+                "V8"
+              ]
+            },
+            {
+              "id": "branch-b",
+              "states": [
+                "B01",
+                "B02",
+                "B03",
+                "B04"
+              ]
+            },
+            {
+              "id": "branch-c",
+              "states": [
+                "C01",
+                "C02"
+              ]
+            }
+          ],
+          "run": "run-b03-b07",
+          "sameSource": [
+            "P-MATH-001"
+          ],
+          "stateCount": 12,
+          "opCount": 46
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Inspect Number rules and unit facet",
+      "note": "3.140 equals 3.14 exactly; units remain typed and require explicit facet."
+    },
+    {
+      "file": "J20/main/J20-s2-a4.png",
+      "location": "?journey=J20&task=1&action=4",
+      "frame": "J20-s2-a4",
+      "state": {
+        "fixture": "history-3-14-pressure",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "gauge-B4",
+          "state": "Rig V8",
+          "locator": "C17:r17:cB2[0,4]"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "math://draft-a": 39
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "bar-facet",
+            "title": "Numeric query · bar unit facet",
+            "kind": "history",
+            "body": [
+              "The explicit unit facet compares pressure values only; it does not convert unitless mathematical prose into bar."
+            ],
+            "facts": [
+              {
+                "label": "Query",
+                "value": "3.14"
+              },
+              {
+                "label": "Mode",
+                "value": "Number · exact decimal"
+              },
+              {
+                "label": "Unit facet",
+                "value": "bar"
+              },
+              {
+                "label": "Pressure cell",
+                "value": "3.14 bar · included"
+              },
+              {
+                "label": "Unitless math",
+                "value": "not compared to bar"
+              },
+              {
+                "label": "3.140 bar",
+                "value": "equal exact decimal"
+              },
+              {
+                "label": "3.14159 bar",
+                "value": "not equal"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          },
+          {
+            "id": "number",
+            "title": "Exact numeric matching",
+            "kind": "history",
+            "body": [
+              "Finite decimal literals compare exactly. No implicit unit conversion."
+            ],
+            "facts": [
+              {
+                "label": "3.14",
+                "value": "exact decimal value"
+              },
+              {
+                "label": "3.140",
+                "value": "equals 3.14 exactly"
+              },
+              {
+                "label": "3.14159",
+                "value": "not equal"
+              },
+              {
+                "label": "Units",
+                "value": "typed groups · unit facet required to compare"
+              },
+              {
+                "label": "unitless vs bar",
+                "value": "not implicitly equal"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "H1",
+          "text": "3.14",
+          "mode": "number",
+          "caseFold": false,
+          "scope": "all branches,current,historical",
+          "results": [
+            "math-A1",
+            "gauge-B4",
+            "math-V8"
+          ],
+          "coverage": "8/10 paths · 2 pending",
+          "unitFacet": "bar"
+        },
+        "history": {
+          "branches": [
+            {
+              "id": "main",
+              "states": [
+                "V4",
+                "V5",
+                "V6",
+                "V7",
+                "V8"
+              ]
+            },
+            {
+              "id": "branch-b",
+              "states": [
+                "B01",
+                "B02",
+                "B03",
+                "B04"
+              ]
+            },
+            {
+              "id": "branch-c",
+              "states": [
+                "C01",
+                "C02"
+              ]
+            }
+          ],
+          "run": "run-b03-b07",
+          "sameSource": [
+            "P-MATH-001"
+          ],
+          "stateCount": 12,
+          "opCount": 46
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Apply explicit bar unit facet",
+      "note": "Unit grouping is an explicit scope choice; no implicit unit conversion."
+    },
+    {
+      "file": "J20/main/J20-s2-a5.png",
+      "location": "?journey=J20&task=1&action=5",
+      "frame": "J20-s2-a5",
+      "state": {
+        "fixture": "history-3-14-pressure",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "gauge-B4",
+          "state": "Rig V8",
+          "locator": "C17:r17:cB2[0,4]"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "math://draft-a": 39
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "history-query",
+            "title": "Content history · 3.14",
+            "kind": "history",
+            "body": [
+              "Text mode · whole token selected · all branches · current and historical."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "H1"
+              },
+              {
+                "label": "Query",
+                "value": "3.14"
+              },
+              {
+                "label": "Mode",
+                "value": "Literal"
+              },
+              {
+                "label": "Whole token",
+                "value": "on"
+              },
+              {
+                "label": "Scope",
+                "value": "all branches · current+historical"
+              },
+              {
+                "label": "Coverage",
+                "value": "8/10 paths · 2 pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "m",
+                "label": "Math notes",
+                "detail": "Draft A · B07 · 3.14",
+                "status": "match",
+                "ordinal": 1
+              },
+              {
+                "id": "g",
+                "label": "Gauge G7",
+                "detail": "Run B · B04 · 3.14 bar",
+                "status": "match",
+                "ordinal": 2
+              },
+              {
+                "id": "old",
+                "label": "Math notes · V8",
+                "detail": "present at V8 · absent now",
+                "status": "historical",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 3,
+              "filtered": 3,
+              "visible": 3
+            }
+          },
+          {
+            "id": "related",
+            "title": "Related ideas expansion",
+            "kind": "history",
+            "body": [
+              "Suggested concepts are explicit query expansion; similarity never creates shared source identity."
+            ],
+            "facts": [
+              {
+                "label": "Seed",
+                "value": "3.14"
+              },
+              {
+                "label": "Suggestion",
+                "value": "π · related concept"
+              },
+              {
+                "label": "Equality",
+                "value": "π is not exactly 3.14"
+              },
+              {
+                "label": "Expansion",
+                "value": "requires explicit Add suggestion action"
+              }
+            ],
+            "rows": [
+              {
+                "id": "pi",
+                "label": "π",
+                "detail": "related idea · not equality",
+                "status": "suggested",
+                "ordinal": 1
+              },
+              {
+                "id": "add",
+                "label": "Add π to query",
+                "detail": "creates explicit expanded query",
+                "status": "available",
+                "ordinal": 2
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "H1",
+          "text": "3.14",
+          "mode": "related-ideas",
+          "caseFold": false,
+          "scope": "all branches,current,historical",
+          "results": [
+            "math-A1",
+            "gauge-B4",
+            "math-V8"
+          ],
+          "coverage": "8/10 paths · 2 pending",
+          "unitFacet": "bar",
+          "expanded": false
+        },
+        "history": {
+          "branches": [
+            {
+              "id": "main",
+              "states": [
+                "V4",
+                "V5",
+                "V6",
+                "V7",
+                "V8"
+              ]
+            },
+            {
+              "id": "branch-b",
+              "states": [
+                "B01",
+                "B02",
+                "B03",
+                "B04"
+              ]
+            },
+            {
+              "id": "branch-c",
+              "states": [
+                "C01",
+                "C02"
+              ]
+            }
+          ],
+          "run": "run-b03-b07",
+          "sameSource": [
+            "P-MATH-001"
+          ],
+          "stateCount": 12,
+          "opCount": 46
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Inspect Related ideas without expansion",
+      "note": "Suggestions do not enter the query until explicitly added."
+    },
+    {
+      "file": "J20/main/J20-s2-a6.png",
+      "location": "?journey=J20&task=1&action=6",
+      "frame": "J20-s2-a6",
+      "state": {
+        "fixture": "history-3-14-pressure",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "gauge-B4",
+          "state": "Rig V8",
+          "locator": "C17:r17:cB2[0,4]"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "math://draft-a": 39
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "expanded",
+            "title": "Expanded query",
+            "kind": "history",
+            "body": [
+              "The person explicitly added π as a related idea; its results remain distinct from numeric equality."
+            ],
+            "facts": [
+              {
+                "label": "Seed",
+                "value": "3.14"
+              },
+              {
+                "label": "Expansion",
+                "value": "π"
+              },
+              {
+                "label": "Mode",
+                "value": "related ideas · explicitly expanded"
+              },
+              {
+                "label": "Equality claim",
+                "value": "none"
+              },
+              {
+                "label": "Source identity",
+                "value": "unchanged"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          },
+          {
+            "id": "related",
+            "title": "Related ideas expansion",
+            "kind": "history",
+            "body": [
+              "Suggested concepts are explicit query expansion; similarity never creates shared source identity."
+            ],
+            "facts": [
+              {
+                "label": "Seed",
+                "value": "3.14"
+              },
+              {
+                "label": "Suggestion",
+                "value": "π · related concept"
+              },
+              {
+                "label": "Equality",
+                "value": "π is not exactly 3.14"
+              },
+              {
+                "label": "Expansion",
+                "value": "requires explicit Add suggestion action"
+              }
+            ],
+            "rows": [
+              {
+                "id": "pi",
+                "label": "π",
+                "detail": "related idea · not equality",
+                "status": "suggested",
+                "ordinal": 1
+              },
+              {
+                "id": "add",
+                "label": "Add π to query",
+                "detail": "creates explicit expanded query",
+                "status": "available",
+                "ordinal": 2
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "H1",
+          "text": "3.14",
+          "mode": "related-ideas",
+          "caseFold": false,
+          "scope": "all branches,current,historical",
+          "results": [
+            "math-A1",
+            "gauge-B4",
+            "math-V8"
+          ],
+          "coverage": "8/10 paths · 2 pending",
+          "unitFacet": "bar",
+          "expanded": true,
+          "expansion": [
+            "3.14",
+            "π"
+          ],
+          "expansionExplained": true
+        },
+        "history": {
+          "branches": [
+            {
+              "id": "main",
+              "states": [
+                "V4",
+                "V5",
+                "V6",
+                "V7",
+                "V8"
+              ]
+            },
+            {
+              "id": "branch-b",
+              "states": [
+                "B01",
+                "B02",
+                "B03",
+                "B04"
+              ]
+            },
+            {
+              "id": "branch-c",
+              "states": [
+                "C01",
+                "C02"
+              ]
+            }
+          ],
+          "run": "run-b03-b07",
+          "sameSource": [
+            "P-MATH-001"
+          ],
+          "stateCount": 12,
+          "opCount": 46
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Explicitly expand with π suggestion",
+      "note": "Expansion is an explicit query edit, not an equivalence or shared source claim."
+    },
+    {
+      "file": "J20/main/J20-s3-a1.png",
+      "location": "?journey=J20&task=2&action=1",
+      "frame": "J20-s3-a1",
+      "state": {
+        "fixture": "history-3-14-pressure",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "gauge-B4",
+          "state": "Rig V8",
+          "locator": "C17:r17:cB2[0,4]"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "math://draft-a": 39
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "history-query",
+            "title": "Prior query H1 snapshot · 3.14",
+            "kind": "history",
+            "body": [
+              "Prior H1 snapshot · literal 3.14 · whole-token rule · all branches/current and historical; current query is H2 pressure."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "H1 · prior snapshot"
+              },
+              {
+                "label": "Query",
+                "value": "3.14 · prior snapshot"
+              },
+              {
+                "label": "Mode",
+                "value": "Literal · prior rule"
+              },
+              {
+                "label": "Whole token",
+                "value": "on · prior rule"
+              },
+              {
+                "label": "Scope",
+                "value": "all branches · current+historical"
+              },
+              {
+                "label": "Coverage",
+                "value": "8/10 paths · 2 pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "m",
+                "label": "Math notes",
+                "detail": "Draft A · B07 · 3.14",
+                "status": "match",
+                "ordinal": 1
+              },
+              {
+                "id": "g",
+                "label": "Gauge G7",
+                "detail": "Run B · B04 · 3.14 bar",
+                "status": "match",
+                "ordinal": 2
+              },
+              {
+                "id": "old",
+                "label": "Math notes · V8",
+                "detail": "present at V8 · absent now",
+                "status": "historical",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 3,
+              "filtered": 3,
+              "visible": 3
+            }
+          },
+          {
+            "id": "query-switch",
+            "title": "Query changed explicitly",
+            "kind": "history",
+            "body": [
+              "The submitted query is a new request; the saved historical source reference remains pinned."
+            ],
+            "facts": [
+              {
+                "label": "Previous",
+                "value": "H1 · literal 3.14"
+              },
+              {
+                "label": "Current",
+                "value": "H2 · literal pressure"
+              },
+              {
+                "label": "Case folding",
+                "value": "enabled"
+              },
+              {
+                "label": "Scope",
+                "value": "same branches/current+historical"
+              },
+              {
+                "label": "Pinned reference",
+                "value": "C17 V8 · occurrence C17-V8-pressure-01"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "H2",
+          "text": "pressure",
+          "mode": "literal",
+          "caseFold": true,
+          "scope": "all branches,current,historical",
+          "results": [
+            "math-A1",
+            "gauge-B4",
+            "math-V8"
+          ],
+          "coverage": "8/10 paths · 2 pending",
+          "unitFacet": "bar",
+          "expanded": true,
+          "expansion": [
+            "3.14",
+            "π"
+          ],
+          "expansionExplained": true
+        },
+        "history": {
+          "branches": [
+            {
+              "id": "main",
+              "states": [
+                "V4",
+                "V5",
+                "V6",
+                "V7",
+                "V8"
+              ]
+            },
+            {
+              "id": "branch-b",
+              "states": [
+                "B01",
+                "B02",
+                "B03",
+                "B04"
+              ]
+            },
+            {
+              "id": "branch-c",
+              "states": [
+                "C01",
+                "C02"
+              ]
+            }
+          ],
+          "run": "run-b03-b07",
+          "sameSource": [
+            "P-MATH-001"
+          ],
+          "stateCount": 12,
+          "opCount": 46
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Change query from 3.14 to pressure",
+      "note": "A new query and rule are explicit; historical reference identity survives."
+    },
+    {
+      "file": "J20/main/J20-s3-a2.png",
+      "location": "?journey=J20&task=2&action=2",
+      "frame": "J20-s3-a2",
+      "state": {
+        "fixture": "history-3-14-pressure",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "gauge-B4",
+          "state": "Rig V8",
+          "locator": "C17:r17:cB2[0,4]"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "math://draft-a": 39
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "history-query",
+            "title": "Prior query H1 snapshot · 3.14",
+            "kind": "history",
+            "body": [
+              "Prior H1 snapshot · literal 3.14 · whole-token rule · all branches/current and historical; current query is H2 pressure."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "H1 · prior snapshot"
+              },
+              {
+                "label": "Query",
+                "value": "3.14 · prior snapshot"
+              },
+              {
+                "label": "Mode",
+                "value": "Literal · prior rule"
+              },
+              {
+                "label": "Whole token",
+                "value": "on · prior rule"
+              },
+              {
+                "label": "Scope",
+                "value": "all branches · current+historical"
+              },
+              {
+                "label": "Coverage",
+                "value": "8/10 paths · 2 pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "m",
+                "label": "Math notes",
+                "detail": "Draft A · B07 · 3.14",
+                "status": "match",
+                "ordinal": 1
+              },
+              {
+                "id": "g",
+                "label": "Gauge G7",
+                "detail": "Run B · B04 · 3.14 bar",
+                "status": "match",
+                "ordinal": 2
+              },
+              {
+                "id": "old",
+                "label": "Math notes · V8",
+                "detail": "present at V8 · absent now",
+                "status": "historical",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 3,
+              "filtered": 3,
+              "visible": 3
+            }
+          },
+          {
+            "id": "integrated-state",
+            "title": "Pressure investigation · integrated fixture",
+            "kind": "history",
+            "body": [
+              "Query is Literal · case folded. This is the integrated word-removal fixture, separate from the two-state comparison prism."
+            ],
+            "facts": [
+              {
+                "label": "Query",
+                "value": "pressure"
+              },
+              {
+                "label": "Rule",
+                "value": "Literal · case folded"
+              },
+              {
+                "label": "Integrated store",
+                "value": "rig://lab"
+              },
+              {
+                "label": "C17 V8",
+                "value": "3.14 bar · historical match"
+              },
+              {
+                "label": "C17 V12",
+                "value": "3.16 bar · No pressure match"
+              },
+              {
+                "label": "Occurrence",
+                "value": "C17 V8 · occurrence C17-V8-pressure-01"
+              }
+            ],
+            "rows": [
+              {
+                "id": "v8",
+                "label": "C17 V8",
+                "detail": "pressure: 3.14 bar · historical",
+                "status": "match",
+                "ordinal": 1
+              },
+              {
+                "id": "v12",
+                "label": "C17 V12",
+                "detail": "3.16 bar · No pressure match",
+                "status": "absent",
+                "ordinal": 2
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "H2",
+          "text": "pressure",
+          "mode": "literal",
+          "caseFold": true,
+          "scope": "all branches,current,historical",
+          "results": [
+            "math-A1",
+            "gauge-B4",
+            "math-V8"
+          ],
+          "coverage": "8/10 paths · 2 pending",
+          "unitFacet": "bar",
+          "expanded": true,
+          "expansion": [
+            "3.14",
+            "π"
+          ],
+          "expansionExplained": true
+        },
+        "history": {
+          "branches": [
+            {
+              "id": "main",
+              "states": [
+                "V4",
+                "V5",
+                "V6",
+                "V7",
+                "V8"
+              ]
+            },
+            {
+              "id": "branch-b",
+              "states": [
+                "B01",
+                "B02",
+                "B03",
+                "B04"
+              ]
+            },
+            {
+              "id": "branch-c",
+              "states": [
+                "C01",
+                "C02"
+              ]
+            }
+          ],
+          "run": "run-b03-b07",
+          "sameSource": [
+            "P-MATH-001"
+          ],
+          "stateCount": 12,
+          "opCount": 46,
+          "integratedFixture": "pressure-word-removal",
+          "c17V8": "pressure 3.14 historical match",
+          "c17V12": "no pressure match · 3.16 bar"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Show integrated C17 V8/V12 results",
+      "note": "V8 match and V12 no-match are shown in the integrated fixture; this is not prism fixture Store A."
+    },
+    {
+      "file": "J20/main/J20-s3-a3.png",
+      "location": "?journey=J20&task=2&action=3",
+      "frame": "J20-s3-a3",
+      "state": {
+        "fixture": "history-3-14-pressure",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "rig://lab/C17",
+          "state": "V8",
+          "locator": "C17:r17:cB2:span[0,8]",
+          "occurrence": "C17-V8-pressure-01"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "math://draft-a": 39
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "integrated-state",
+            "title": "Pressure investigation · integrated fixture",
+            "kind": "history",
+            "body": [
+              "Query is Literal · case folded. This is the integrated word-removal fixture, separate from the two-state comparison prism."
+            ],
+            "facts": [
+              {
+                "label": "Query",
+                "value": "pressure"
+              },
+              {
+                "label": "Rule",
+                "value": "Literal · case folded"
+              },
+              {
+                "label": "Integrated store",
+                "value": "rig://lab"
+              },
+              {
+                "label": "C17 V8",
+                "value": "3.14 bar · historical match"
+              },
+              {
+                "label": "C17 V12",
+                "value": "3.16 bar · No pressure match"
+              },
+              {
+                "label": "Occurrence",
+                "value": "C17 V8 · occurrence C17-V8-pressure-01"
+              }
+            ],
+            "rows": [
+              {
+                "id": "v8",
+                "label": "C17 V8",
+                "detail": "pressure: 3.14 bar · historical",
+                "status": "match",
+                "ordinal": 1
+              },
+              {
+                "id": "v12",
+                "label": "C17 V12",
+                "detail": "3.16 bar · No pressure match",
+                "status": "absent",
+                "ordinal": 2
+              }
+            ],
+            "tone": "neutral"
+          },
+          {
+            "id": "historical-inspector",
+            "title": "C17 historical occurrence",
+            "kind": "inspector",
+            "body": [
+              "The selected occurrence belongs to V8; current V12 remains a distinct state with no pressure word."
+            ],
+            "facts": [
+              {
+                "label": "Authority",
+                "value": "rig://lab"
+              },
+              {
+                "label": "Cell",
+                "value": "C17"
+              },
+              {
+                "label": "Version",
+                "value": "V8 · branch Run B"
+              },
+              {
+                "label": "Occurrence",
+                "value": "C17-V8-pressure-01"
+              },
+              {
+                "label": "Source range",
+                "value": "C17:r17:cB2:span[0,8]"
+              },
+              {
+                "label": "Current state",
+                "value": "V12 · 3.16 bar · no pressure match"
+              },
+              {
+                "label": "Reading place",
+                "value": "visit 01 unchanged"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "H2",
+          "text": "pressure",
+          "mode": "literal",
+          "caseFold": true,
+          "scope": "all branches,current,historical",
+          "results": [
+            "math-A1",
+            "gauge-B4",
+            "math-V8"
+          ],
+          "coverage": "8/10 paths · 2 pending",
+          "unitFacet": "bar",
+          "expanded": true,
+          "expansion": [
+            "3.14",
+            "π"
+          ],
+          "expansionExplained": true
+        },
+        "history": {
+          "branches": [
+            {
+              "id": "main",
+              "states": [
+                "V4",
+                "V5",
+                "V6",
+                "V7",
+                "V8"
+              ]
+            },
+            {
+              "id": "branch-b",
+              "states": [
+                "B01",
+                "B02",
+                "B03",
+                "B04"
+              ]
+            },
+            {
+              "id": "branch-c",
+              "states": [
+                "C01",
+                "C02"
+              ]
+            }
+          ],
+          "run": "run-b03-b07",
+          "sameSource": [
+            "P-MATH-001"
+          ],
+          "stateCount": 12,
+          "opCount": 46,
+          "integratedFixture": "pressure-word-removal",
+          "c17V8": "pressure 3.14 historical match",
+          "c17V12": "no pressure match · 3.16 bar"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Inspect older V8 occurrence",
+      "note": "Inspect preserves the exact historical occurrence and does not replace current reading place."
+    },
+    {
+      "file": "J20/main/J20-s4-a1.png",
+      "location": "?journey=J20&task=3&action=1",
+      "frame": "J20-s4-a1",
+      "state": {
+        "fixture": "history-3-14-pressure",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "rig://lab/C17",
+          "state": "V8",
+          "locator": "C17:r17:cB2:span[0,8]",
+          "occurrence": "C17-V8-pressure-01"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "math://draft-a": 39
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "hresults",
+            "title": "Prior query H1 snapshot · 3.14",
+            "kind": "history",
+            "body": [
+              "Prior H1 snapshot · literal 3.14 · whole-token rule · all branches/current and historical; current query is H2 pressure."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "H1 · prior snapshot"
+              },
+              {
+                "label": "Scope",
+                "value": "all declared branches/current+historical"
+              },
+              {
+                "label": "Coverage",
+                "value": "8/10 paths · 2 pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "mathA",
+                "label": "Math notes",
+                "detail": "Draft A V7 · occurrence math-A1 · P-MATH-001 [200,204]",
+                "status": "match",
+                "ordinal": 1
+              },
+              {
+                "id": "gauge",
+                "label": "Gauge G7",
+                "detail": "Rig V8 · occurrence gauge-B4 · C17:r17:cB2 [0,4] · unit bar",
+                "status": "match",
+                "ordinal": 2
+              },
+              {
+                "id": "hist",
+                "label": "Math notes",
+                "detail": "V8 · occurrence math-V8 · P-MATH-001 [200,204] · absent now",
+                "status": "historical",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 3,
+              "filtered": 3,
+              "visible": 3
+            }
+          },
+          {
+            "id": "run",
+            "title": "Compacted unchanged state run expanded",
+            "kind": "history",
+            "body": [
+              "Expansion displays exact endpoints and counts without conflating states with operations."
+            ],
+            "facts": [
+              {
+                "label": "Run ID",
+                "value": "run-B03-B07"
+              },
+              {
+                "label": "Branch",
+                "value": "Run B"
+              },
+              {
+                "label": "States represented",
+                "value": "5"
+              },
+              {
+                "label": "Affecting operations",
+                "value": "2"
+              },
+              {
+                "label": "Occurrence projections",
+                "value": "3"
+              },
+              {
+                "label": "Count rule",
+                "value": "states ≠ operations ≠ occurrences"
+              }
+            ],
+            "rows": [
+              {
+                "id": "b03",
+                "label": "B03",
+                "detail": "state 3 · P-MATH-001 use A1",
+                "status": "occurrence",
+                "ordinal": 1
+              },
+              {
+                "id": "b04",
+                "label": "B04",
+                "detail": "state 4 · same source address use A2",
+                "status": "occurrence",
+                "ordinal": 2
+              },
+              {
+                "id": "b07",
+                "label": "B07",
+                "detail": "state 7 · same source address use A3",
+                "status": "occurrence",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 5,
+              "filtered": 5,
+              "visible": 3
+            }
+          }
+        ],
+        "query": {
+          "id": "H2",
+          "text": "pressure",
+          "mode": "literal",
+          "caseFold": true,
+          "scope": "all branches,current,historical",
+          "results": [
+            "math-A1",
+            "gauge-B4",
+            "math-V8"
+          ],
+          "coverage": "8/10 paths · 2 pending",
+          "unitFacet": "bar",
+          "expanded": true,
+          "expansion": [
+            "3.14",
+            "π"
+          ],
+          "expansionExplained": true
+        },
+        "history": {
+          "branches": [
+            {
+              "id": "main",
+              "states": [
+                "V4",
+                "V5",
+                "V6",
+                "V7",
+                "V8"
+              ]
+            },
+            {
+              "id": "branch-b",
+              "states": [
+                "B01",
+                "B02",
+                "B03",
+                "B04"
+              ]
+            },
+            {
+              "id": "branch-c",
+              "states": [
+                "C01",
+                "C02"
+              ]
+            }
+          ],
+          "run": "run-b03-b07",
+          "sameSource": [
+            "P-MATH-001"
+          ],
+          "stateCount": 12,
+          "opCount": 46,
+          "integratedFixture": "pressure-word-removal",
+          "c17V8": "pressure 3.14 historical match",
+          "c17V12": "no pressure match · 3.16 bar",
+          "runExpanded": "run-B03-B07"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Expand compacted B03–B07 state run",
+      "note": "Expanded run shows five states, two affecting operations and three source occurrences separately."
+    },
+    {
+      "file": "J20/main/J20-s4-a2.png",
+      "location": "?journey=J20&task=3&action=2",
+      "frame": "J20-s4-a2",
+      "state": {
+        "fixture": "history-3-14-pressure",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "rig://lab/C17",
+          "state": "V8",
+          "locator": "C17:r17:cB2:span[0,8]",
+          "occurrence": "C17-V8-pressure-01"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "math://draft-a": 39
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "occurrences",
+            "title": "Repeated source address",
+            "kind": "list",
+            "body": [
+              "The same primedia source appears at three distinct occurrences."
+            ],
+            "facts": [
+              {
+                "label": "Source",
+                "value": "P-MATH-001 · span[200,204]"
+              },
+              {
+                "label": "Occurrence A1",
+                "value": "B03"
+              },
+              {
+                "label": "Occurrence A2",
+                "value": "B04"
+              },
+              {
+                "label": "Occurrence A3",
+                "value": "B07"
+              },
+              {
+                "label": "Equal text at other source",
+                "value": "P-MATH-992 · distinct address"
+              }
+            ],
+            "rows": [
+              {
+                "id": "a1",
+                "label": "Occurrence A1",
+                "detail": "P-MATH-001[200,204]",
+                "status": "distinct occurrence",
+                "ordinal": 1
+              },
+              {
+                "id": "a2",
+                "label": "Occurrence A2",
+                "detail": "P-MATH-001[200,204]",
+                "status": "distinct occurrence",
+                "ordinal": 2
+              },
+              {
+                "id": "a3",
+                "label": "Occurrence A3",
+                "detail": "P-MATH-001[200,204]",
+                "status": "distinct occurrence",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral"
+          },
+          {
+            "id": "run",
+            "title": "Compacted unchanged state run expanded",
+            "kind": "history",
+            "body": [
+              "Expansion displays exact endpoints and counts without conflating states with operations."
+            ],
+            "facts": [
+              {
+                "label": "Run ID",
+                "value": "run-B03-B07"
+              },
+              {
+                "label": "Branch",
+                "value": "Run B"
+              },
+              {
+                "label": "States represented",
+                "value": "5"
+              },
+              {
+                "label": "Affecting operations",
+                "value": "2"
+              },
+              {
+                "label": "Occurrence projections",
+                "value": "3"
+              },
+              {
+                "label": "Count rule",
+                "value": "states ≠ operations ≠ occurrences"
+              }
+            ],
+            "rows": [
+              {
+                "id": "b03",
+                "label": "B03",
+                "detail": "state 3 · P-MATH-001 use A1",
+                "status": "occurrence",
+                "ordinal": 1
+              },
+              {
+                "id": "b04",
+                "label": "B04",
+                "detail": "state 4 · same source address use A2",
+                "status": "occurrence",
+                "ordinal": 2
+              },
+              {
+                "id": "b07",
+                "label": "B07",
+                "detail": "state 7 · same source address use A3",
+                "status": "occurrence",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 5,
+              "filtered": 5,
+              "visible": 3
+            }
+          }
+        ],
+        "query": {
+          "id": "H2",
+          "text": "pressure",
+          "mode": "literal",
+          "caseFold": true,
+          "scope": "all branches,current,historical",
+          "results": [
+            "math-A1",
+            "gauge-B4",
+            "math-V8"
+          ],
+          "coverage": "8/10 paths · 2 pending",
+          "unitFacet": "bar",
+          "expanded": true,
+          "expansion": [
+            "3.14",
+            "π"
+          ],
+          "expansionExplained": true
+        },
+        "history": {
+          "branches": [
+            {
+              "id": "main",
+              "states": [
+                "V4",
+                "V5",
+                "V6",
+                "V7",
+                "V8"
+              ]
+            },
+            {
+              "id": "branch-b",
+              "states": [
+                "B01",
+                "B02",
+                "B03",
+                "B04"
+              ]
+            },
+            {
+              "id": "branch-c",
+              "states": [
+                "C01",
+                "C02"
+              ]
+            }
+          ],
+          "run": "run-b03-b07",
+          "sameSource": [
+            "P-MATH-001"
+          ],
+          "stateCount": 12,
+          "opCount": 46,
+          "integratedFixture": "pressure-word-removal",
+          "c17V8": "pressure 3.14 historical match",
+          "c17V12": "no pressure match · 3.16 bar",
+          "runExpanded": "run-B03-B07",
+          "occurrence": "P-MATH-001",
+          "occurrences": [
+            "A1",
+            "A2",
+            "A3"
+          ]
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Inspect repeated source occurrences",
+      "note": "Occurrence identity remains independent even where source address is shared."
+    },
+    {
+      "file": "J20/main/J20-s4-a3.png",
+      "location": "?journey=J20&task=3&action=3",
+      "frame": "J20-s4-a3",
+      "state": {
+        "fixture": "history-3-14-pressure",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "rig://lab/C17",
+          "state": "V8",
+          "locator": "C17:r17:cB2:span[0,8]",
+          "occurrence": "C17-V8-pressure-01"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "math://draft-a": 39
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "run",
+            "title": "Compacted unchanged state run expanded",
+            "kind": "history",
+            "body": [
+              "Expansion displays exact endpoints and counts without conflating states with operations."
+            ],
+            "facts": [
+              {
+                "label": "Run ID",
+                "value": "run-B03-B07"
+              },
+              {
+                "label": "Branch",
+                "value": "Run B"
+              },
+              {
+                "label": "States represented",
+                "value": "5"
+              },
+              {
+                "label": "Affecting operations",
+                "value": "2"
+              },
+              {
+                "label": "Occurrence projections",
+                "value": "3"
+              },
+              {
+                "label": "Count rule",
+                "value": "states ≠ operations ≠ occurrences"
+              }
+            ],
+            "rows": [
+              {
+                "id": "b03",
+                "label": "B03",
+                "detail": "state 3 · P-MATH-001 use A1",
+                "status": "occurrence",
+                "ordinal": 1
+              },
+              {
+                "id": "b04",
+                "label": "B04",
+                "detail": "state 4 · same source address use A2",
+                "status": "occurrence",
+                "ordinal": 2
+              },
+              {
+                "id": "b07",
+                "label": "B07",
+                "detail": "state 7 · same source address use A3",
+                "status": "occurrence",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 5,
+              "filtered": 5,
+              "visible": 3
+            }
+          },
+          {
+            "id": "independent",
+            "title": "Equal text · independent address",
+            "kind": "inspector",
+            "body": [
+              "Equal words from another author do not imply shared primedia."
+            ],
+            "facts": [
+              {
+                "label": "Source 1",
+                "value": "P-MATH-001 · span[200,204]"
+              },
+              {
+                "label": "Source 2",
+                "value": "P-MATH-992 · span[610,614]"
+              },
+              {
+                "label": "Text equality",
+                "value": "yes"
+              },
+              {
+                "label": "Address equality",
+                "value": "no"
+              },
+              {
+                "label": "Merge",
+                "value": "none"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "H2",
+          "text": "pressure",
+          "mode": "literal",
+          "caseFold": true,
+          "scope": "all branches,current,historical",
+          "results": [
+            "math-A1",
+            "gauge-B4",
+            "math-V8"
+          ],
+          "coverage": "8/10 paths · 2 pending",
+          "unitFacet": "bar",
+          "expanded": true,
+          "expansion": [
+            "3.14",
+            "π"
+          ],
+          "expansionExplained": true
+        },
+        "history": {
+          "branches": [
+            {
+              "id": "main",
+              "states": [
+                "V4",
+                "V5",
+                "V6",
+                "V7",
+                "V8"
+              ]
+            },
+            {
+              "id": "branch-b",
+              "states": [
+                "B01",
+                "B02",
+                "B03",
+                "B04"
+              ]
+            },
+            {
+              "id": "branch-c",
+              "states": [
+                "C01",
+                "C02"
+              ]
+            }
+          ],
+          "run": "run-b03-b07",
+          "sameSource": [
+            "P-MATH-001"
+          ],
+          "stateCount": 12,
+          "opCount": 46,
+          "integratedFixture": "pressure-word-removal",
+          "c17V8": "pressure 3.14 historical match",
+          "c17V12": "no pressure match · 3.16 bar",
+          "runExpanded": "run-B03-B07",
+          "occurrence": "P-MATH-001",
+          "occurrences": [
+            "A1",
+            "A2",
+            "A3"
+          ],
+          "independentSource": "P-MATH-992"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Inspect independent equal-text source",
+      "note": "Independent addresses remain separate."
+    },
+    {
+      "file": "J20/main/J20-s5-a1.png",
+      "location": "?journey=J20&task=4&action=1",
+      "frame": "J20-s5-a1",
+      "state": {
+        "fixture": "history-3-14-pressure",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "rig://lab/C17",
+          "state": "V8",
+          "locator": "C17:r17:cB2:span[0,8]",
+          "occurrence": "C17-V8-pressure-01"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "math://draft-a": 39
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "history-query",
+            "title": "Prior query H1 snapshot · 3.14",
+            "kind": "history",
+            "body": [
+              "Prior H1 snapshot · literal 3.14 · whole-token rule · all branches/current and historical; current query is H2 pressure."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "H1 · prior snapshot"
+              },
+              {
+                "label": "Query",
+                "value": "3.14 · prior snapshot"
+              },
+              {
+                "label": "Mode",
+                "value": "Literal · prior rule"
+              },
+              {
+                "label": "Whole token",
+                "value": "on · prior rule"
+              },
+              {
+                "label": "Scope",
+                "value": "all branches · current+historical"
+              },
+              {
+                "label": "Coverage",
+                "value": "8/10 paths · 2 pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "m",
+                "label": "Math notes",
+                "detail": "Draft A · B07 · 3.14",
+                "status": "match",
+                "ordinal": 1
+              },
+              {
+                "id": "g",
+                "label": "Gauge G7",
+                "detail": "Run B · B04 · 3.14 bar",
+                "status": "match",
+                "ordinal": 2
+              },
+              {
+                "id": "old",
+                "label": "Math notes · V8",
+                "detail": "present at V8 · absent now",
+                "status": "historical",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 3,
+              "filtered": 3,
+              "visible": 3
+            }
+          },
+          {
+            "id": "partial",
+            "title": "Partial branch coverage",
+            "kind": "history",
+            "body": [
+              "Only examined paths are counted; unseen branches remain pending."
+            ],
+            "facts": [
+              {
+                "label": "Examined",
+                "value": "8/10 paths"
+              },
+              {
+                "label": "Pending",
+                "value": "2"
+              },
+              {
+                "label": "Matches",
+                "value": "3 found so far"
+              },
+              {
+                "label": "Coverage",
+                "value": "partial"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "H2",
+          "text": "pressure",
+          "mode": "literal",
+          "caseFold": true,
+          "scope": "all branches,current,historical",
+          "results": [
+            "math-A1",
+            "gauge-B4",
+            "math-V8"
+          ],
+          "coverage": "8/10 paths · 2 pending",
+          "unitFacet": "bar",
+          "expanded": true,
+          "expansion": [
+            "3.14",
+            "π"
+          ],
+          "expansionExplained": true
+        },
+        "history": {
+          "branches": [
+            {
+              "id": "main",
+              "states": [
+                "V4",
+                "V5",
+                "V6",
+                "V7",
+                "V8"
+              ]
+            },
+            {
+              "id": "branch-b",
+              "states": [
+                "B01",
+                "B02",
+                "B03",
+                "B04"
+              ]
+            },
+            {
+              "id": "branch-c",
+              "states": [
+                "C01",
+                "C02"
+              ]
+            }
+          ],
+          "run": "run-b03-b07",
+          "sameSource": [
+            "P-MATH-001"
+          ],
+          "stateCount": 12,
+          "opCount": 46,
+          "integratedFixture": "pressure-word-removal",
+          "c17V8": "pressure 3.14 historical match",
+          "c17V12": "no pressure match · 3.16 bar",
+          "runExpanded": "run-B03-B07",
+          "occurrence": "P-MATH-001",
+          "occurrences": [
+            "A1",
+            "A2",
+            "A3"
+          ],
+          "independentSource": "P-MATH-992",
+          "coverage": "partial"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Inspect partial coverage",
+      "note": "Partial scope is named and pending branches are not reported complete."
+    },
+    {
+      "file": "J20/main/J20-s5-a2.png",
+      "location": "?journey=J20&task=4&action=2",
+      "frame": "J20-s5-a2",
+      "state": {
+        "fixture": "history-3-14-pressure",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "rig://lab/C17",
+          "state": "V8",
+          "locator": "C17:r17:cB2:span[0,8]",
+          "occurrence": "C17-V8-pressure-01"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "math://draft-a": 39
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "partial",
+            "title": "Partial branch coverage",
+            "kind": "history",
+            "body": [
+              "Only examined paths are counted; unseen branches remain pending."
+            ],
+            "facts": [
+              {
+                "label": "Examined",
+                "value": "8/10 paths"
+              },
+              {
+                "label": "Pending",
+                "value": "2"
+              },
+              {
+                "label": "Matches",
+                "value": "3 found so far"
+              },
+              {
+                "label": "Coverage",
+                "value": "partial"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          },
+          {
+            "id": "missing",
+            "title": "Historical state missing",
+            "kind": "notice",
+            "body": [
+              "Requested historical state is unavailable; current head is not substituted."
+            ],
+            "facts": [
+              {
+                "label": "Branch",
+                "value": "Run B"
+              },
+              {
+                "label": "Requested state",
+                "value": "B05 · missing"
+              },
+              {
+                "label": "Status",
+                "value": "missing state"
+              },
+              {
+                "label": "Fallback",
+                "value": "none"
+              },
+              {
+                "label": "Occurrence",
+                "value": "descriptor retained"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "H2",
+          "text": "pressure",
+          "mode": "literal",
+          "caseFold": true,
+          "scope": "all branches,current,historical",
+          "results": [
+            "math-A1",
+            "gauge-B4",
+            "math-V8"
+          ],
+          "coverage": "8/10 paths · 2 pending",
+          "unitFacet": "bar",
+          "expanded": true,
+          "expansion": [
+            "3.14",
+            "π"
+          ],
+          "expansionExplained": true
+        },
+        "history": {
+          "branches": [
+            {
+              "id": "main",
+              "states": [
+                "V4",
+                "V5",
+                "V6",
+                "V7",
+                "V8"
+              ]
+            },
+            {
+              "id": "branch-b",
+              "states": [
+                "B01",
+                "B02",
+                "B03",
+                "B04"
+              ]
+            },
+            {
+              "id": "branch-c",
+              "states": [
+                "C01",
+                "C02"
+              ]
+            }
+          ],
+          "run": "run-b03-b07",
+          "sameSource": [
+            "P-MATH-001"
+          ],
+          "stateCount": 12,
+          "opCount": 46,
+          "integratedFixture": "pressure-word-removal",
+          "c17V8": "pressure 3.14 historical match",
+          "c17V12": "no pressure match · 3.16 bar",
+          "runExpanded": "run-B03-B07",
+          "occurrence": "P-MATH-001",
+          "occurrences": [
+            "A1",
+            "A2",
+            "A3"
+          ],
+          "independentSource": "P-MATH-992",
+          "coverage": "partial",
+          "missingState": "Run B · B05"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Inspect missing historical state",
+      "note": "Missing state is not an empty state or current-head fallback."
+    },
+    {
+      "file": "J20/main/J20-s5-a3.png",
+      "location": "?journey=J20&task=4&action=3",
+      "frame": "J20-s5-a3",
+      "state": {
+        "fixture": "history-3-14-pressure",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "rig://lab/C17",
+          "state": "V8",
+          "locator": "C17:r17:cB2:span[0,8]",
+          "occurrence": "C17-V8-pressure-01"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "math://draft-a": 39
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "partial",
+            "title": "Partial branch coverage",
+            "kind": "history",
+            "body": [
+              "Only examined paths are counted; unseen branches remain pending."
+            ],
+            "facts": [
+              {
+                "label": "Examined",
+                "value": "8/10 paths"
+              },
+              {
+                "label": "Pending",
+                "value": "2"
+              },
+              {
+                "label": "Matches",
+                "value": "3 found so far"
+              },
+              {
+                "label": "Coverage",
+                "value": "partial"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          },
+          {
+            "id": "branch-empty",
+            "title": "Completed branch · no matches",
+            "kind": "notice",
+            "body": [
+              "This branch completed under the query and has zero matches."
+            ],
+            "facts": [
+              {
+                "label": "Branch",
+                "value": "Run C"
+              },
+              {
+                "label": "Status",
+                "value": "complete"
+              },
+              {
+                "label": "Matches",
+                "value": "0"
+              },
+              {
+                "label": "Coverage",
+                "value": "complete"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "H2",
+          "text": "pressure",
+          "mode": "literal",
+          "caseFold": true,
+          "scope": "all branches,current,historical",
+          "results": [
+            "math-A1",
+            "gauge-B4",
+            "math-V8"
+          ],
+          "coverage": "8/10 paths · 2 pending",
+          "unitFacet": "bar",
+          "expanded": true,
+          "expansion": [
+            "3.14",
+            "π"
+          ],
+          "expansionExplained": true
+        },
+        "history": {
+          "branches": [
+            {
+              "id": "main",
+              "states": [
+                "V4",
+                "V5",
+                "V6",
+                "V7",
+                "V8"
+              ]
+            },
+            {
+              "id": "branch-b",
+              "states": [
+                "B01",
+                "B02",
+                "B03",
+                "B04"
+              ]
+            },
+            {
+              "id": "branch-c",
+              "states": [
+                "C01",
+                "C02"
+              ]
+            }
+          ],
+          "run": "run-b03-b07",
+          "sameSource": [
+            "P-MATH-001"
+          ],
+          "stateCount": 12,
+          "opCount": 46,
+          "integratedFixture": "pressure-word-removal",
+          "c17V8": "pressure 3.14 historical match",
+          "c17V12": "no pressure match · 3.16 bar",
+          "runExpanded": "run-B03-B07",
+          "occurrence": "P-MATH-001",
+          "occurrences": [
+            "A1",
+            "A2",
+            "A3"
+          ],
+          "independentSource": "P-MATH-992",
+          "coverage": "partial",
+          "missingState": "Run B · B05",
+          "emptyBranch": "Run C"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Inspect completed branch with no matches",
+      "note": "Completed-empty differs from missing and pending."
+    },
+    {
+      "file": "J20/main/J20-s5-a4.png",
+      "location": "?journey=J20&task=4&action=4",
+      "frame": "J20-s5-a4",
+      "state": {
+        "fixture": "history-3-14-pressure",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "rig://lab/C17",
+          "state": "V8",
+          "locator": "C17:r17:cB2:span[0,8]",
+          "occurrence": "C17-V8-pressure-01"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "math://draft-a": 39
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [
+            {
+              "id": "recipe-H2-pressure",
+              "type": "query-recipe"
+            }
+          ],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "partial",
+            "title": "Partial branch coverage",
+            "kind": "history",
+            "body": [
+              "Only examined paths are counted; unseen branches remain pending."
+            ],
+            "facts": [
+              {
+                "label": "Examined",
+                "value": "8/10 paths"
+              },
+              {
+                "label": "Pending",
+                "value": "2"
+              },
+              {
+                "label": "Matches",
+                "value": "3 found so far"
+              },
+              {
+                "label": "Coverage",
+                "value": "partial"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          },
+          {
+            "id": "history-recipe",
+            "title": "Saved query recipe",
+            "kind": "inspector",
+            "body": [
+              "Recipe stores rule/scope, not result membership."
+            ],
+            "facts": [
+              {
+                "label": "ID",
+                "value": "recipe-H2-pressure"
+              },
+              {
+                "label": "Query",
+                "value": "pressure"
+              },
+              {
+                "label": "Mode",
+                "value": "literal · case folded"
+              },
+              {
+                "label": "Scope",
+                "value": "all branches/current+historical"
+              },
+              {
+                "label": "Rerun",
+                "value": "explicit"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "H2",
+          "text": "pressure",
+          "mode": "literal",
+          "caseFold": true,
+          "scope": "all branches,current,historical",
+          "results": [
+            "math-A1",
+            "gauge-B4",
+            "math-V8"
+          ],
+          "coverage": "8/10 paths · 2 pending",
+          "unitFacet": "bar",
+          "expanded": true,
+          "expansion": [
+            "3.14",
+            "π"
+          ],
+          "expansionExplained": true
+        },
+        "history": {
+          "branches": [
+            {
+              "id": "main",
+              "states": [
+                "V4",
+                "V5",
+                "V6",
+                "V7",
+                "V8"
+              ]
+            },
+            {
+              "id": "branch-b",
+              "states": [
+                "B01",
+                "B02",
+                "B03",
+                "B04"
+              ]
+            },
+            {
+              "id": "branch-c",
+              "states": [
+                "C01",
+                "C02"
+              ]
+            }
+          ],
+          "run": "run-b03-b07",
+          "sameSource": [
+            "P-MATH-001"
+          ],
+          "stateCount": 12,
+          "opCount": 46,
+          "integratedFixture": "pressure-word-removal",
+          "c17V8": "pressure 3.14 historical match",
+          "c17V12": "no pressure match · 3.16 bar",
+          "runExpanded": "run-B03-B07",
+          "occurrence": "P-MATH-001",
+          "occurrences": [
+            "A1",
+            "A2",
+            "A3"
+          ],
+          "independentSource": "P-MATH-992",
+          "coverage": "partial",
+          "missingState": "Run B · B05",
+          "emptyBranch": "Run C"
+        }
+      },
+      "effects": [
+        {
+          "domain": "reader collection",
+          "summary": "Saved recipe recipe-H2-pressure.",
+          "identity": "recipe-H2-pressure"
+        }
+      ],
+      "action": "Save query recipe",
+      "note": "Save writes reader recipe metadata only."
+    },
+    {
+      "file": "J20/main/J20-s5-a5.png",
+      "location": "?journey=J20&task=4&action=5",
+      "frame": "J20-s5-a5",
+      "state": {
+        "fixture": "history-3-14-pressure",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "rig://lab/C17",
+          "state": "V8",
+          "locator": "C17:r17:cB2:span[0,8]",
+          "occurrence": "C17-V8-pressure-01"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "math://draft-a": 39
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [
+            {
+              "id": "recipe-H2-pressure",
+              "type": "query-recipe"
+            },
+            {
+              "id": "snapshot-H2-01",
+              "type": "result-snapshot",
+              "request": "H2",
+              "members": [
+                "C17-V8-pressure-01",
+                "math-V8",
+                "gauge-B04"
+              ]
+            }
+          ],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "history-snapshot",
+            "title": "Captured results",
+            "kind": "list",
+            "body": [
+              "Snapshot is immutable and optional; it does not refresh with the recipe."
+            ],
+            "facts": [
+              {
+                "label": "ID",
+                "value": "snapshot-H2-01"
+              },
+              {
+                "label": "Request",
+                "value": "H2"
+              },
+              {
+                "label": "Captured",
+                "value": "3 results"
+              },
+              {
+                "label": "Refresh",
+                "value": "never"
+              }
+            ],
+            "rows": [
+              {
+                "id": "s1",
+                "label": "C17 V8",
+                "detail": "historical match",
+                "status": "captured",
+                "ordinal": 1
+              },
+              {
+                "id": "s2",
+                "label": "Math V8",
+                "detail": "historical match",
+                "status": "captured",
+                "ordinal": 2
+              },
+              {
+                "id": "s3",
+                "label": "Gauge B04",
+                "detail": "pressure value",
+                "status": "captured",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 3,
+              "filtered": 3,
+              "visible": 3
+            }
+          },
+          {
+            "id": "history-recipe",
+            "title": "Saved query recipe",
+            "kind": "inspector",
+            "body": [
+              "Recipe stores rule/scope, not result membership."
+            ],
+            "facts": [
+              {
+                "label": "ID",
+                "value": "recipe-H2-pressure"
+              },
+              {
+                "label": "Query",
+                "value": "pressure"
+              },
+              {
+                "label": "Mode",
+                "value": "literal · case folded"
+              },
+              {
+                "label": "Scope",
+                "value": "all branches/current+historical"
+              },
+              {
+                "label": "Rerun",
+                "value": "explicit"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "H2",
+          "text": "pressure",
+          "mode": "literal",
+          "caseFold": true,
+          "scope": "all branches,current,historical",
+          "results": [
+            "math-A1",
+            "gauge-B4",
+            "math-V8"
+          ],
+          "coverage": "8/10 paths · 2 pending",
+          "unitFacet": "bar",
+          "expanded": true,
+          "expansion": [
+            "3.14",
+            "π"
+          ],
+          "expansionExplained": true
+        },
+        "history": {
+          "branches": [
+            {
+              "id": "main",
+              "states": [
+                "V4",
+                "V5",
+                "V6",
+                "V7",
+                "V8"
+              ]
+            },
+            {
+              "id": "branch-b",
+              "states": [
+                "B01",
+                "B02",
+                "B03",
+                "B04"
+              ]
+            },
+            {
+              "id": "branch-c",
+              "states": [
+                "C01",
+                "C02"
+              ]
+            }
+          ],
+          "run": "run-b03-b07",
+          "sameSource": [
+            "P-MATH-001"
+          ],
+          "stateCount": 12,
+          "opCount": 46,
+          "integratedFixture": "pressure-word-removal",
+          "c17V8": "pressure 3.14 historical match",
+          "c17V12": "no pressure match · 3.16 bar",
+          "runExpanded": "run-B03-B07",
+          "occurrence": "P-MATH-001",
+          "occurrences": [
+            "A1",
+            "A2",
+            "A3"
+          ],
+          "independentSource": "P-MATH-992",
+          "coverage": "partial",
+          "missingState": "Run B · B05",
+          "emptyBranch": "Run C"
+        }
+      },
+      "effects": [
+        {
+          "domain": "reader collection",
+          "summary": "Captured three results; no source or Link changes.",
+          "identity": "snapshot-H2-01"
+        }
+      ],
+      "action": "Capture optional result snapshot",
+      "note": "Snapshot H2-01 is a separate optional captured membership."
+    }
+  ]
+}

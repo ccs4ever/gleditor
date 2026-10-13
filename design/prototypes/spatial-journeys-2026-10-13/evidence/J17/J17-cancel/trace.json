@@ -1,0 +1,281 @@
+{
+  "journey": "J17",
+  "route": "J17-cancel",
+  "frames": [
+    {
+      "file": "J17/J17-cancel/before.png",
+      "location": "?journey=J17&variant=J17-cancel",
+      "frame": "J17-J17-cancel-s4-before",
+      "state": {
+        "fixture": "pub-acquisition-v12",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Reading place",
+            "kind": "document",
+            "body": [
+              "Current visit 01 · Lab notes · V12.",
+              "The starting caret and occurrence remain pinned while tools open."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Offset",
+                "value": "p.14 · 54.2"
+              },
+              {
+                "label": "Occurrence",
+                "value": "Lab:p14:r54.2"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "transfer",
+            "title": "Transfer interrupted",
+            "kind": "inspector",
+            "body": [
+              "Transfer interrupted · progress retained.",
+              "The interface headline and detail both agree this request is interrupted."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "req-v12-0001"
+              },
+              {
+                "label": "Edition",
+                "value": "V12 · mf-v12-7b31"
+              },
+              {
+                "label": "Verified pieces",
+                "value": "68 / 96"
+              },
+              {
+                "label": "Store validation",
+                "value": "pending"
+              },
+              {
+                "label": "Open",
+                "value": "blocked"
+              }
+            ],
+            "rows": [
+              {
+                "id": "retry",
+                "label": "Retry transfer",
+                "detail": "resumes same request ID",
+                "status": "available"
+              },
+              {
+                "id": "cancel",
+                "label": "Cancel request",
+                "detail": "keeps request receipt",
+                "status": "available"
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "publication": {
+          "publisherKey": "pubkey:7a91c4e2…c42e",
+          "publicationId": "pub:spatial-notebooks-01",
+          "manifestId": "mf-v12-7b31",
+          "pinnedEdition": "V12",
+          "pointer": "V12",
+          "requestId": "req-v12-0001",
+          "verifiedPieces": 68,
+          "totalPieces": 96,
+          "storeValidation": "pending",
+          "authorFollowed": false,
+          "linkPackagesEnabled": [],
+          "cache": [],
+          "requestedEdition": "V12",
+          "requestedManifest": "mf-v12-7b31",
+          "transfer": "interrupted"
+        }
+      },
+      "effects": [],
+      "action": "Before",
+      "note": ""
+    },
+    {
+      "file": "J17/J17-cancel/J17-cancel-a1.png",
+      "location": "?journey=J17&variant=J17-cancel&task=0&action=1",
+      "frame": "J17-cancel-a1",
+      "state": {
+        "fixture": "pub-acquisition-v12",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Reading place",
+            "kind": "document",
+            "body": [
+              "Current visit 01 · Lab notes · V12.",
+              "The starting caret and occurrence remain pinned while tools open."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Offset",
+                "value": "p.14 · 54.2"
+              },
+              {
+                "label": "Occurrence",
+                "value": "Lab:p14:r54.2"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "cancelled",
+            "title": "Request cancelled",
+            "kind": "notice",
+            "body": [
+              "Cancellation preserves the pinned request descriptor and verified partial pieces."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "req-v12-0001"
+              },
+              {
+                "label": "Edition",
+                "value": "V12"
+              },
+              {
+                "label": "Verified pieces",
+                "value": "68 / 96"
+              },
+              {
+                "label": "Store validation",
+                "value": "pending"
+              },
+              {
+                "label": "Open",
+                "value": "blocked"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "publication": {
+          "publisherKey": "pubkey:7a91c4e2…c42e",
+          "publicationId": "pub:spatial-notebooks-01",
+          "manifestId": "mf-v12-7b31",
+          "pinnedEdition": "V12",
+          "pointer": "V12",
+          "requestId": "req-v12-0001",
+          "verifiedPieces": 68,
+          "totalPieces": 96,
+          "storeValidation": "pending",
+          "authorFollowed": false,
+          "linkPackagesEnabled": [],
+          "cache": [],
+          "requestedEdition": "V12",
+          "requestedManifest": "mf-v12-7b31",
+          "transfer": "cancelled",
+          "cacheRetained": true
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Cancel interrupted transfer",
+      "note": "Cancellation retains req-v12-0001 and cannot open the incomplete edition."
+    }
+  ]
+}

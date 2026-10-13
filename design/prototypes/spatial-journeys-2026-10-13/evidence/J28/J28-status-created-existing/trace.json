@@ -1,0 +1,5411 @@
+{
+  "journey": "J28",
+  "route": "J28-status-created-existing",
+  "frames": [
+    {
+      "file": "J28/J28-status-created-existing/before.png",
+      "location": "?journey=J28&variant=J28-status-created-existing",
+      "frame": "J28-J28-status-created-existing-s5-before",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run.",
+            "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+          ]
+        },
+        "visits": [
+          {
+            "id": "03",
+            "parent": null,
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "Discussion": 46,
+          "Results": 52,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "d-status",
+            "title": "Draft L7 restored",
+            "kind": "notice",
+            "body": [],
+            "facts": [
+              {
+                "label": "Draft",
+                "value": "L7 · one Comment Link candidate"
+              },
+              {
+                "label": "Members",
+                "value": "2 left / 3 right"
+              },
+              {
+                "label": "Destination",
+                "value": "Review/review-main@V31"
+              },
+              {
+                "label": "Order",
+                "value": "restored before preview bytes"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "d-members",
+            "title": "Ordered endsets",
+            "kind": "list",
+            "body": [],
+            "facts": [],
+            "rows": [
+              {
+                "id": "L1",
+                "label": "Left 1 · Lab V12",
+                "detail": "[3140,3167) · lab-o7",
+                "status": "ready",
+                "ordinal": 1
+              },
+              {
+                "id": "L2",
+                "label": "Left 2 · Lab V12",
+                "detail": "[3200,3228) · lab-o7",
+                "status": "ready",
+                "ordinal": 2
+              },
+              {
+                "id": "R1",
+                "label": "Right 1 · Review V4",
+                "detail": "[80,115) · review-o3",
+                "status": "ready",
+                "ordinal": 1
+              },
+              {
+                "id": "R2",
+                "label": "Right 2 · C17 V8",
+                "detail": "[0,8) · rig-o1",
+                "status": "preview not held",
+                "ordinal": 2
+              },
+              {
+                "id": "R3",
+                "label": "Right 3 · C24 V8",
+                "detail": "[0,4) · rig-o4",
+                "status": "preview not held",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 5,
+              "filtered": 5,
+              "visible": 5
+            }
+          }
+        ],
+        "draft": {
+          "id": "draft:L7",
+          "relation": "Comment",
+          "prominence": "normal",
+          "left": [
+            {
+              "id": "L1",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3140,
+                3167
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Pressure stayed stable over the full duration of the test."
+            },
+            {
+              "id": "L2",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3200,
+                3228
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Temperature was unchanged during the measurement period."
+            }
+          ],
+          "right": [
+            {
+              "id": "R1",
+              "source": "Review@V4",
+              "object": "doc:review",
+              "range": [
+                80,
+                115
+              ],
+              "occurrence": "review-o3",
+              "group": "capture-beta",
+              "text": "The results support the test result."
+            },
+            {
+              "id": "R2",
+              "source": "Rig slice@V8",
+              "object": "cell:C17",
+              "range": [
+                0,
+                8
+              ],
+              "occurrence": "rig-o1",
+              "group": "capture-beta",
+              "text": "3.14 bar"
+            },
+            {
+              "id": "R3",
+              "source": "Rig slice@V8",
+              "object": "cell:C24",
+              "range": [
+                0,
+                4
+              ],
+              "occurrence": "rig-o4",
+              "group": "capture-gamma",
+              "text": "22 °C"
+            }
+          ],
+          "leftOrder": [
+            "L1",
+            "L2"
+          ],
+          "rightOrder": [
+            "R1",
+            "R2",
+            "R3"
+          ],
+          "groups": {
+            "left": {
+              "capture-alpha": [
+                "L1",
+                "L2"
+              ]
+            },
+            "right": {
+              "review": [
+                "R1"
+              ],
+              "cells": [
+                "R2",
+                "R3"
+              ]
+            }
+          },
+          "destination": {
+            "store": "Review store",
+            "branch": "review/main",
+            "base": "Review@V31",
+            "author": "author:ava",
+            "signingKey": "key:ava-k2",
+            "authorStatus": "verified",
+            "mode": "Create child at pinned base"
+          },
+          "status": "saved",
+          "validation": {
+            "R1": "valid",
+            "R2": "required-reference-pending",
+            "R3": "valid"
+          },
+          "previews": {
+            "R1": "not-held-optional",
+            "R2": "not-held-optional",
+            "R3": "not-held-optional"
+          },
+          "dense": {
+            "left": [
+              {
+                "id": "L01",
+                "ordinal": 1,
+                "source": "Lab notes@V12",
+                "object": "cell:C01",
+                "range": [
+                  10,
+                  16
+                ],
+                "occurrences": [
+                  "occ-L01-1"
+                ],
+                "group": "group-1"
+              },
+              {
+                "id": "L02",
+                "ordinal": 2,
+                "source": "Rig slice@V8",
+                "object": "cell:C02",
+                "range": [
+                  20,
+                  26
+                ],
+                "occurrences": [
+                  "occ-L02-1"
+                ],
+                "group": "group-1"
+              },
+              {
+                "id": "L03",
+                "ordinal": 3,
+                "source": "Lab notes@V12",
+                "object": "cell:C03",
+                "range": [
+                  30,
+                  36
+                ],
+                "occurrences": [
+                  "occ-L03-1"
+                ],
+                "group": "group-1"
+              },
+              {
+                "id": "L04",
+                "ordinal": 4,
+                "source": "Rig slice@V8",
+                "object": "cell:C04",
+                "range": [
+                  40,
+                  46
+                ],
+                "occurrences": [
+                  "occ-L04-1"
+                ],
+                "group": "group-1"
+              },
+              {
+                "id": "L05",
+                "ordinal": 5,
+                "source": "Lab notes@V12",
+                "object": "cell:C05",
+                "range": [
+                  50,
+                  56
+                ],
+                "occurrences": [
+                  "occ-L05-1"
+                ],
+                "group": "group-1"
+              },
+              {
+                "id": "L06",
+                "ordinal": 6,
+                "source": "Rig slice@V8",
+                "object": "cell:C06",
+                "range": [
+                  60,
+                  66
+                ],
+                "occurrences": [
+                  "occ-L06-1"
+                ],
+                "group": "group-1"
+              },
+              {
+                "id": "L07",
+                "ordinal": 7,
+                "source": "Lab notes@V12",
+                "object": "cell:C07",
+                "range": [
+                  70,
+                  76
+                ],
+                "occurrences": [
+                  "occ-L07-1"
+                ],
+                "group": "group-1"
+              },
+              {
+                "id": "L08",
+                "ordinal": 8,
+                "source": "Rig slice@V8",
+                "object": "cell:C08",
+                "range": [
+                  80,
+                  86
+                ],
+                "occurrences": [
+                  "occ-L08-1"
+                ],
+                "group": "group-1"
+              },
+              {
+                "id": "L09",
+                "ordinal": 9,
+                "source": "Lab notes@V12",
+                "object": "cell:C09",
+                "range": [
+                  90,
+                  96
+                ],
+                "occurrences": [
+                  "occ-L09-1"
+                ],
+                "group": "group-1"
+              },
+              {
+                "id": "L10",
+                "ordinal": 10,
+                "source": "Rig slice@V8",
+                "object": "cell:C10",
+                "range": [
+                  100,
+                  106
+                ],
+                "occurrences": [
+                  "occ-L10-1"
+                ],
+                "group": "group-1"
+              },
+              {
+                "id": "L11",
+                "ordinal": 11,
+                "source": "Lab notes@V12",
+                "object": "cell:C11",
+                "range": [
+                  110,
+                  116
+                ],
+                "occurrences": [
+                  "occ-L11-1"
+                ],
+                "group": "group-2"
+              },
+              {
+                "id": "L12",
+                "ordinal": 12,
+                "source": "Rig slice@V8",
+                "object": "cell:C12",
+                "range": [
+                  120,
+                  126
+                ],
+                "occurrences": [
+                  "occ-L12-1"
+                ],
+                "group": "group-2"
+              },
+              {
+                "id": "L13",
+                "ordinal": 13,
+                "source": "Lab notes@V12",
+                "object": "cell:C13",
+                "range": [
+                  130,
+                  136
+                ],
+                "occurrences": [
+                  "occ-L13-1"
+                ],
+                "group": "group-2"
+              },
+              {
+                "id": "L14",
+                "ordinal": 14,
+                "source": "Rig slice@V8",
+                "object": "cell:C14",
+                "range": [
+                  140,
+                  146
+                ],
+                "occurrences": [
+                  "occ-L14-1"
+                ],
+                "group": "group-2"
+              },
+              {
+                "id": "L15",
+                "ordinal": 15,
+                "source": "Lab notes@V12",
+                "object": "cell:C15",
+                "range": [
+                  150,
+                  156
+                ],
+                "occurrences": [
+                  "occ-L15-1"
+                ],
+                "group": "group-2"
+              },
+              {
+                "id": "L16",
+                "ordinal": 16,
+                "source": "Rig slice@V8",
+                "object": "cell:C16",
+                "range": [
+                  160,
+                  166
+                ],
+                "occurrences": [
+                  "occ-L16-1"
+                ],
+                "group": "group-2"
+              },
+              {
+                "id": "L17",
+                "ordinal": 17,
+                "source": "Lab notes@V12",
+                "object": "cell:C17",
+                "range": [
+                  170,
+                  176
+                ],
+                "occurrences": [
+                  "occ-L17-1"
+                ],
+                "group": "group-2"
+              },
+              {
+                "id": "L18",
+                "ordinal": 18,
+                "source": "Rig slice@V8",
+                "object": "cell:C18",
+                "range": [
+                  180,
+                  186
+                ],
+                "occurrences": [
+                  "occ-L18-1"
+                ],
+                "group": "group-2"
+              },
+              {
+                "id": "L19",
+                "ordinal": 19,
+                "source": "Lab notes@V12",
+                "object": "cell:C19",
+                "range": [
+                  190,
+                  196
+                ],
+                "occurrences": [
+                  "occ-L19-1"
+                ],
+                "group": "group-2"
+              },
+              {
+                "id": "L20",
+                "ordinal": 20,
+                "source": "Rig slice@V8",
+                "object": "cell:C20",
+                "range": [
+                  200,
+                  206
+                ],
+                "occurrences": [
+                  "occ-L20-1"
+                ],
+                "group": "group-2"
+              },
+              {
+                "id": "L21",
+                "ordinal": 21,
+                "source": "Rig slice@V8",
+                "object": "cell:C17",
+                "range": [
+                  0,
+                  8
+                ],
+                "occurrences": [
+                  "rig-o1",
+                  "rig-o4",
+                  "lab-o7",
+                  "review-o3",
+                  "rig-o8"
+                ],
+                "group": "group-3"
+              },
+              {
+                "id": "L22",
+                "ordinal": 22,
+                "source": "Rig slice@V8",
+                "object": "cell:C22",
+                "range": [
+                  220,
+                  226
+                ],
+                "occurrences": [
+                  "occ-L22-1"
+                ],
+                "group": "group-3"
+              },
+              {
+                "id": "L23",
+                "ordinal": 23,
+                "source": "Lab notes@V12",
+                "object": "cell:C23",
+                "range": [
+                  230,
+                  236
+                ],
+                "occurrences": [
+                  "occ-L23-1"
+                ],
+                "group": "group-3"
+              },
+              {
+                "id": "L24",
+                "ordinal": 24,
+                "source": "Rig slice@V8",
+                "object": "cell:C24",
+                "range": [
+                  240,
+                  246
+                ],
+                "occurrences": [
+                  "occ-L24-1"
+                ],
+                "group": "group-3"
+              },
+              {
+                "id": "L25",
+                "ordinal": 25,
+                "source": "Lab notes@V12",
+                "object": "cell:C25",
+                "range": [
+                  250,
+                  256
+                ],
+                "occurrences": [
+                  "occ-L25-1"
+                ],
+                "group": "group-3"
+              },
+              {
+                "id": "L26",
+                "ordinal": 26,
+                "source": "Rig slice@V8",
+                "object": "cell:C26",
+                "range": [
+                  260,
+                  266
+                ],
+                "occurrences": [
+                  "occ-L26-1"
+                ],
+                "group": "group-3"
+              },
+              {
+                "id": "L27",
+                "ordinal": 27,
+                "source": "Lab notes@V12",
+                "object": "cell:C27",
+                "range": [
+                  270,
+                  276
+                ],
+                "occurrences": [
+                  "occ-L27-1"
+                ],
+                "group": "group-3"
+              },
+              {
+                "id": "L28",
+                "ordinal": 28,
+                "source": "Rig slice@V8",
+                "object": "cell:C28",
+                "range": [
+                  280,
+                  286
+                ],
+                "occurrences": [
+                  "occ-L28-1"
+                ],
+                "group": "group-3"
+              },
+              {
+                "id": "L29",
+                "ordinal": 29,
+                "source": "Lab notes@V12",
+                "object": "cell:C29",
+                "range": [
+                  290,
+                  296
+                ],
+                "occurrences": [
+                  "occ-L29-1"
+                ],
+                "group": "group-3"
+              },
+              {
+                "id": "L30",
+                "ordinal": 30,
+                "source": "Rig slice@V8",
+                "object": "cell:C30",
+                "range": [
+                  300,
+                  306
+                ],
+                "occurrences": [
+                  "occ-L30-1"
+                ],
+                "group": "group-3"
+              },
+              {
+                "id": "L31",
+                "ordinal": 31,
+                "source": "Lab notes@V12",
+                "object": "cell:C31",
+                "range": [
+                  310,
+                  316
+                ],
+                "occurrences": [
+                  "occ-L31-1"
+                ],
+                "group": "group-4"
+              },
+              {
+                "id": "L32",
+                "ordinal": 32,
+                "source": "Rig slice@V8",
+                "object": "cell:C32",
+                "range": [
+                  320,
+                  326
+                ],
+                "occurrences": [
+                  "occ-L32-1"
+                ],
+                "group": "group-4"
+              },
+              {
+                "id": "L33",
+                "ordinal": 33,
+                "source": "Lab notes@V12",
+                "object": "cell:C33",
+                "range": [
+                  330,
+                  336
+                ],
+                "occurrences": [
+                  "occ-L33-1"
+                ],
+                "group": "group-4"
+              },
+              {
+                "id": "L34",
+                "ordinal": 34,
+                "source": "Rig slice@V8",
+                "object": "cell:C34",
+                "range": [
+                  340,
+                  346
+                ],
+                "occurrences": [
+                  "occ-L34-1"
+                ],
+                "group": "group-4"
+              },
+              {
+                "id": "L35",
+                "ordinal": 35,
+                "source": "Lab notes@V12",
+                "object": "cell:C35",
+                "range": [
+                  350,
+                  356
+                ],
+                "occurrences": [
+                  "occ-L35-1"
+                ],
+                "group": "group-4"
+              },
+              {
+                "id": "L36",
+                "ordinal": 36,
+                "source": "Rig slice@V8",
+                "object": "cell:C36",
+                "range": [
+                  360,
+                  366
+                ],
+                "occurrences": [
+                  "occ-L36-1"
+                ],
+                "group": "group-4"
+              },
+              {
+                "id": "L37",
+                "ordinal": 37,
+                "source": "Lab notes@V12",
+                "object": "cell:C37",
+                "range": [
+                  370,
+                  376
+                ],
+                "occurrences": [
+                  "occ-L37-1"
+                ],
+                "group": "group-4"
+              },
+              {
+                "id": "L38",
+                "ordinal": 38,
+                "source": "Rig slice@V8",
+                "object": "cell:C38",
+                "range": [
+                  380,
+                  386
+                ],
+                "occurrences": [
+                  "occ-L38-1"
+                ],
+                "group": "group-4"
+              },
+              {
+                "id": "L39",
+                "ordinal": 39,
+                "source": "Lab notes@V12",
+                "object": "cell:C39",
+                "range": [
+                  390,
+                  396
+                ],
+                "occurrences": [
+                  "occ-L39-1"
+                ],
+                "group": "group-4"
+              },
+              {
+                "id": "L40",
+                "ordinal": 40,
+                "source": "Rig slice@V8",
+                "object": "cell:C40",
+                "range": [
+                  400,
+                  406
+                ],
+                "occurrences": [
+                  "occ-L40-1"
+                ],
+                "group": "group-4"
+              }
+            ],
+            "right": [
+              {
+                "id": "R01",
+                "ordinal": 1,
+                "source": "Discussion@V6",
+                "object": "doc:R01",
+                "range": [
+                  5,
+                  9
+                ],
+                "occurrences": [
+                  "occ-R01-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R02",
+                "ordinal": 2,
+                "source": "Cells@V8",
+                "object": "doc:R02",
+                "range": [
+                  10,
+                  14
+                ],
+                "occurrences": [
+                  "occ-R02-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R03",
+                "ordinal": 3,
+                "source": "Results@V11",
+                "object": "doc:R03",
+                "range": [
+                  15,
+                  19
+                ],
+                "occurrences": [
+                  "occ-R03-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R04",
+                "ordinal": 4,
+                "source": "Discussion@V6",
+                "object": "doc:R04",
+                "range": [
+                  20,
+                  24
+                ],
+                "occurrences": [
+                  "occ-R04-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R05",
+                "ordinal": 5,
+                "source": "Cells@V8",
+                "object": "doc:R05",
+                "range": [
+                  25,
+                  29
+                ],
+                "occurrences": [
+                  "occ-R05-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R06",
+                "ordinal": 6,
+                "source": "Results@V11",
+                "object": "doc:R06",
+                "range": [
+                  30,
+                  34
+                ],
+                "occurrences": [
+                  "occ-R06-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R07",
+                "ordinal": 7,
+                "source": "Discussion@V6",
+                "object": "doc:R07",
+                "range": [
+                  35,
+                  39
+                ],
+                "occurrences": [
+                  "occ-R07-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R08",
+                "ordinal": 8,
+                "source": "Cells@V8",
+                "object": "doc:R08",
+                "range": [
+                  40,
+                  44
+                ],
+                "occurrences": [
+                  "occ-R08-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R09",
+                "ordinal": 9,
+                "source": "Results@V11",
+                "object": "doc:R09",
+                "range": [
+                  45,
+                  49
+                ],
+                "occurrences": [
+                  "occ-R09-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R10",
+                "ordinal": 10,
+                "source": "Discussion@V6",
+                "object": "doc:R10",
+                "range": [
+                  50,
+                  54
+                ],
+                "occurrences": [
+                  "occ-R10-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R11",
+                "ordinal": 11,
+                "source": "Cells@V8",
+                "object": "doc:R11",
+                "range": [
+                  55,
+                  59
+                ],
+                "occurrences": [
+                  "occ-R11-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R12",
+                "ordinal": 12,
+                "source": "Results@V11",
+                "object": "doc:R12",
+                "range": [
+                  60,
+                  64
+                ],
+                "occurrences": [
+                  "occ-R12-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R13",
+                "ordinal": 13,
+                "source": "Discussion@V6",
+                "object": "doc:R13",
+                "range": [
+                  65,
+                  69
+                ],
+                "occurrences": [
+                  "occ-R13-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R14",
+                "ordinal": 14,
+                "source": "Cells@V8",
+                "object": "doc:R14",
+                "range": [
+                  70,
+                  74
+                ],
+                "occurrences": [
+                  "occ-R14-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R15",
+                "ordinal": 15,
+                "source": "Results@V11",
+                "object": "doc:R15",
+                "range": [
+                  75,
+                  79
+                ],
+                "occurrences": [
+                  "occ-R15-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R16",
+                "ordinal": 16,
+                "source": "Discussion@V6",
+                "object": "doc:R16",
+                "range": [
+                  80,
+                  84
+                ],
+                "occurrences": [
+                  "occ-R16-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R17",
+                "ordinal": 17,
+                "source": "Cells@V8",
+                "object": "doc:R17",
+                "range": [
+                  85,
+                  89
+                ],
+                "occurrences": [
+                  "occ-R17-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R18",
+                "ordinal": 18,
+                "source": "Results@V11",
+                "object": "doc:R18",
+                "range": [
+                  90,
+                  94
+                ],
+                "occurrences": [
+                  "occ-R18-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R19",
+                "ordinal": 19,
+                "source": "Discussion@V6",
+                "object": "doc:R19",
+                "range": [
+                  95,
+                  99
+                ],
+                "occurrences": [
+                  "occ-R19-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R20",
+                "ordinal": 20,
+                "source": "Cells@V8",
+                "object": "doc:R20",
+                "range": [
+                  100,
+                  104
+                ],
+                "occurrences": [
+                  "occ-R20-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R21",
+                "ordinal": 21,
+                "source": "Results@V11",
+                "object": "doc:R21",
+                "range": [
+                  105,
+                  109
+                ],
+                "occurrences": [
+                  "occ-R21-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R22",
+                "ordinal": 22,
+                "source": "Discussion@V6",
+                "object": "doc:R22",
+                "range": [
+                  110,
+                  114
+                ],
+                "occurrences": [
+                  "occ-R22-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R23",
+                "ordinal": 23,
+                "source": "Cells@V8",
+                "object": "doc:R23",
+                "range": [
+                  115,
+                  119
+                ],
+                "occurrences": [
+                  "occ-R23-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R24",
+                "ordinal": 24,
+                "source": "Results@V11",
+                "object": "doc:R24",
+                "range": [
+                  120,
+                  124
+                ],
+                "occurrences": [
+                  "occ-R24-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R25",
+                "ordinal": 25,
+                "source": "Discussion@V6",
+                "object": "doc:R25",
+                "range": [
+                  125,
+                  129
+                ],
+                "occurrences": [
+                  "occ-R25-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R26",
+                "ordinal": 26,
+                "source": "Cells@V8",
+                "object": "doc:R26",
+                "range": [
+                  130,
+                  134
+                ],
+                "occurrences": [
+                  "occ-R26-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R27",
+                "ordinal": 27,
+                "source": "Results@V11",
+                "object": "doc:R27",
+                "range": [
+                  135,
+                  139
+                ],
+                "occurrences": [
+                  "occ-R27-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R28",
+                "ordinal": 28,
+                "source": "Discussion@V6",
+                "object": "doc:R28",
+                "range": [
+                  140,
+                  144
+                ],
+                "occurrences": [
+                  "occ-R28-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R29",
+                "ordinal": 29,
+                "source": "Cells@V8",
+                "object": "doc:R29",
+                "range": [
+                  145,
+                  149
+                ],
+                "occurrences": [
+                  "occ-R29-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R30",
+                "ordinal": 30,
+                "source": "Results@V11",
+                "object": "doc:R30",
+                "range": [
+                  150,
+                  154
+                ],
+                "occurrences": [
+                  "occ-R30-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R31",
+                "ordinal": 31,
+                "source": "Discussion@V6",
+                "object": "doc:R31",
+                "range": [
+                  155,
+                  159
+                ],
+                "occurrences": [
+                  "occ-R31-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R32",
+                "ordinal": 32,
+                "source": "Cells@V8",
+                "object": "doc:R32",
+                "range": [
+                  160,
+                  164
+                ],
+                "occurrences": [
+                  "occ-R32-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R33",
+                "ordinal": 33,
+                "source": "Results@V11",
+                "object": "doc:R33",
+                "range": [
+                  165,
+                  169
+                ],
+                "occurrences": [
+                  "occ-R33-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R34",
+                "ordinal": 34,
+                "source": "Discussion@V6",
+                "object": "doc:R34",
+                "range": [
+                  170,
+                  174
+                ],
+                "occurrences": [
+                  "occ-R34-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R35",
+                "ordinal": 35,
+                "source": "Cells@V8",
+                "object": "doc:R35",
+                "range": [
+                  175,
+                  179
+                ],
+                "occurrences": [
+                  "occ-R35-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R36",
+                "ordinal": 36,
+                "source": "Results@V11",
+                "object": "doc:R36",
+                "range": [
+                  180,
+                  184
+                ],
+                "occurrences": [
+                  "occ-R36-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R37",
+                "ordinal": 37,
+                "source": "Discussion@V6",
+                "object": "doc:R37",
+                "range": [
+                  185,
+                  189
+                ],
+                "occurrences": [
+                  "occ-R37-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R38",
+                "ordinal": 38,
+                "source": "Cells@V8",
+                "object": "doc:R38",
+                "range": [
+                  190,
+                  194
+                ],
+                "occurrences": [
+                  "occ-R38-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R39",
+                "ordinal": 39,
+                "source": "Results@V11",
+                "object": "doc:R39",
+                "range": [
+                  195,
+                  199
+                ],
+                "occurrences": [
+                  "occ-R39-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R40",
+                "ordinal": 40,
+                "source": "Discussion@V6",
+                "object": "doc:R40",
+                "range": [
+                  200,
+                  204
+                ],
+                "occurrences": [
+                  "occ-R40-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R41",
+                "ordinal": 41,
+                "source": "Cells@V8",
+                "object": "doc:R41",
+                "range": [
+                  205,
+                  209
+                ],
+                "occurrences": [
+                  "occ-R41-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R42",
+                "ordinal": 42,
+                "source": "Results@V11",
+                "object": "doc:R42",
+                "range": [
+                  210,
+                  214
+                ],
+                "occurrences": [
+                  "occ-R42-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R43",
+                "ordinal": 43,
+                "source": "Discussion@V6",
+                "object": "doc:R43",
+                "range": [
+                  215,
+                  219
+                ],
+                "occurrences": [
+                  "occ-R43-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R44",
+                "ordinal": 44,
+                "source": "Cells@V8",
+                "object": "doc:R44",
+                "range": [
+                  220,
+                  224
+                ],
+                "occurrences": [
+                  "occ-R44-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R45",
+                "ordinal": 45,
+                "source": "Results@V11",
+                "object": "doc:R45",
+                "range": [
+                  225,
+                  229
+                ],
+                "occurrences": [
+                  "occ-R45-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R46",
+                "ordinal": 46,
+                "source": "Discussion@V6",
+                "object": "doc:R46",
+                "range": [
+                  230,
+                  234
+                ],
+                "occurrences": [
+                  "occ-R46-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R47",
+                "ordinal": 47,
+                "source": "Cells@V8",
+                "object": "doc:R47",
+                "range": [
+                  235,
+                  239
+                ],
+                "occurrences": [
+                  "occ-R47-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R48",
+                "ordinal": 48,
+                "source": "Results@V11",
+                "object": "doc:R48",
+                "range": [
+                  240,
+                  244
+                ],
+                "occurrences": [
+                  "occ-R48-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R49",
+                "ordinal": 49,
+                "source": "Discussion@V6",
+                "object": "doc:R49",
+                "range": [
+                  245,
+                  249
+                ],
+                "occurrences": [
+                  "occ-R49-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R50",
+                "ordinal": 50,
+                "source": "Cells@V8",
+                "object": "doc:R50",
+                "range": [
+                  250,
+                  254
+                ],
+                "occurrences": [
+                  "occ-R50-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R51",
+                "ordinal": 51,
+                "source": "Results@V11",
+                "object": "doc:R51",
+                "range": [
+                  255,
+                  259
+                ],
+                "occurrences": [
+                  "occ-R51-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R52",
+                "ordinal": 52,
+                "source": "Discussion@V6",
+                "object": "doc:R52",
+                "range": [
+                  260,
+                  264
+                ],
+                "occurrences": [
+                  "occ-R52-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R53",
+                "ordinal": 53,
+                "source": "Cells@V8",
+                "object": "doc:R53",
+                "range": [
+                  265,
+                  269
+                ],
+                "occurrences": [
+                  "occ-R53-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R54",
+                "ordinal": 54,
+                "source": "Results@V11",
+                "object": "doc:R54",
+                "range": [
+                  270,
+                  274
+                ],
+                "occurrences": [
+                  "occ-R54-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R55",
+                "ordinal": 55,
+                "source": "Discussion@V6",
+                "object": "doc:R55",
+                "range": [
+                  275,
+                  279
+                ],
+                "occurrences": [
+                  "occ-R55-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R56",
+                "ordinal": 56,
+                "source": "Cells@V8",
+                "object": "doc:R56",
+                "range": [
+                  280,
+                  284
+                ],
+                "occurrences": [
+                  "occ-R56-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R57",
+                "ordinal": 57,
+                "source": "Results@V11",
+                "object": "doc:R57",
+                "range": [
+                  285,
+                  289
+                ],
+                "occurrences": [
+                  "occ-R57-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R58",
+                "ordinal": 58,
+                "source": "Discussion@V6",
+                "object": "doc:R58",
+                "range": [
+                  290,
+                  294
+                ],
+                "occurrences": [
+                  "occ-R58-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R59",
+                "ordinal": 59,
+                "source": "Cells@V8",
+                "object": "doc:R59",
+                "range": [
+                  295,
+                  299
+                ],
+                "occurrences": [
+                  "occ-R59-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R60",
+                "ordinal": 60,
+                "source": "Results@V11",
+                "object": "doc:R60",
+                "range": [
+                  300,
+                  304
+                ],
+                "occurrences": [
+                  "occ-R60-1"
+                ],
+                "group": "right-group-4"
+              }
+            ],
+            "selectedLeft": "L21",
+            "selectedOccurrences": [
+              "rig-o1",
+              "rig-o4",
+              "lab-o7",
+              "review-o3",
+              "rig-o8"
+            ],
+            "leftFilter": "",
+            "rightFilter": "",
+            "visibleLeft": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6
+            ],
+            "visibleRight": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6
+            ],
+            "leftOrderBeforeFilter": [
+              "L01",
+              "L02",
+              "L03",
+              "L04",
+              "L05",
+              "L06",
+              "L07",
+              "L08",
+              "L09",
+              "L10",
+              "L11",
+              "L12",
+              "L13",
+              "L14",
+              "L15",
+              "L16",
+              "L17",
+              "L18",
+              "L19",
+              "L20",
+              "L21",
+              "L22",
+              "L23",
+              "L24",
+              "L25",
+              "L26",
+              "L27",
+              "L28",
+              "L29",
+              "L30",
+              "L31",
+              "L32",
+              "L33",
+              "L34",
+              "L35",
+              "L36",
+              "L37",
+              "L38",
+              "L39",
+              "L40"
+            ],
+            "rightOrderBeforeFilter": [
+              "R01",
+              "R02",
+              "R03",
+              "R04",
+              "R05",
+              "R06",
+              "R07",
+              "R08",
+              "R09",
+              "R10",
+              "R11",
+              "R12",
+              "R13",
+              "R14",
+              "R15",
+              "R16",
+              "R17",
+              "R18",
+              "R19",
+              "R20",
+              "R21",
+              "R22",
+              "R23",
+              "R24",
+              "R25",
+              "R26",
+              "R27",
+              "R28",
+              "R29",
+              "R30",
+              "R31",
+              "R32",
+              "R33",
+              "R34",
+              "R35",
+              "R36",
+              "R37",
+              "R38",
+              "R39",
+              "R40",
+              "R41",
+              "R42",
+              "R43",
+              "R44",
+              "R45",
+              "R46",
+              "R47",
+              "R48",
+              "R49",
+              "R50",
+              "R51",
+              "R52",
+              "R53",
+              "R54",
+              "R55",
+              "R56",
+              "R57",
+              "R58",
+              "R59",
+              "R60"
+            ]
+          }
+        },
+        "commit": {
+          "attempt": null,
+          "status": "none",
+          "receipt": null
+        },
+        "pouchDrafts": [
+          "draft:L7"
+        ],
+        "densityFixture": {
+          "leftCount": 40,
+          "rightCount": 60,
+          "pairConnectionsRendered": 0
+        }
+      },
+      "effects": [],
+      "action": "Before",
+      "note": ""
+    },
+    {
+      "file": "J28/J28-status-created-existing/J28-status-created-existing-a1.png",
+      "location": "?journey=J28&variant=J28-status-created-existing&task=0&action=1",
+      "frame": "J28-status-created-existing-a1",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run.",
+            "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+          ]
+        },
+        "visits": [
+          {
+            "id": "03",
+            "parent": null,
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "Discussion": 46,
+          "Results": 52,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J28-status-created-existing-a1-reading",
+            "title": "Reading · visit 03 · Review@V4",
+            "kind": "document",
+            "body": [
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03"
+              },
+              {
+                "label": "Subject",
+                "value": "Review passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "review-o3"
+              },
+              {
+                "label": "Offset",
+                "value": 80
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "v-u",
+            "title": "Outcome unknown after publish",
+            "kind": "notice",
+            "body": [],
+            "facts": [
+              {
+                "label": "Attempt",
+                "value": "attempt:L7-dense:1"
+              },
+              {
+                "label": "Controls",
+                "value": "Forge and Retry blocked"
+              },
+              {
+                "label": "Only action",
+                "value": "Check status"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "draft": {
+          "id": "draft:L7",
+          "relation": "Comment",
+          "prominence": "normal",
+          "left": [
+            {
+              "id": "L1",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3140,
+                3167
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Pressure stayed stable over the full duration of the test."
+            },
+            {
+              "id": "L2",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3200,
+                3228
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Temperature was unchanged during the measurement period."
+            }
+          ],
+          "right": [
+            {
+              "id": "R1",
+              "source": "Review@V4",
+              "object": "doc:review",
+              "range": [
+                80,
+                115
+              ],
+              "occurrence": "review-o3",
+              "group": "capture-beta",
+              "text": "The results support the test result."
+            },
+            {
+              "id": "R2",
+              "source": "Rig slice@V8",
+              "object": "cell:C17",
+              "range": [
+                0,
+                8
+              ],
+              "occurrence": "rig-o1",
+              "group": "capture-beta",
+              "text": "3.14 bar"
+            },
+            {
+              "id": "R3",
+              "source": "Rig slice@V8",
+              "object": "cell:C24",
+              "range": [
+                0,
+                4
+              ],
+              "occurrence": "rig-o4",
+              "group": "capture-gamma",
+              "text": "22 °C"
+            }
+          ],
+          "leftOrder": [
+            "L1",
+            "L2"
+          ],
+          "rightOrder": [
+            "R1",
+            "R2",
+            "R3"
+          ],
+          "groups": {
+            "left": {
+              "capture-alpha": [
+                "L1",
+                "L2"
+              ]
+            },
+            "right": {
+              "review": [
+                "R1"
+              ],
+              "cells": [
+                "R2",
+                "R3"
+              ]
+            }
+          },
+          "destination": {
+            "store": "Review store",
+            "branch": "review/main",
+            "base": "Review@V31",
+            "author": "author:ava",
+            "signingKey": "key:ava-k2",
+            "authorStatus": "verified",
+            "mode": "Create child at pinned base"
+          },
+          "status": "saved",
+          "validation": {
+            "R1": "valid",
+            "R2": "required-reference-pending",
+            "R3": "valid"
+          },
+          "previews": {
+            "R1": "not-held-optional",
+            "R2": "not-held-optional",
+            "R3": "not-held-optional"
+          },
+          "dense": {
+            "left": [
+              {
+                "id": "L01",
+                "ordinal": 1,
+                "source": "Lab notes@V12",
+                "object": "cell:C01",
+                "range": [
+                  10,
+                  16
+                ],
+                "occurrences": [
+                  "occ-L01-1"
+                ],
+                "group": "group-1"
+              },
+              {
+                "id": "L02",
+                "ordinal": 2,
+                "source": "Rig slice@V8",
+                "object": "cell:C02",
+                "range": [
+                  20,
+                  26
+                ],
+                "occurrences": [
+                  "occ-L02-1"
+                ],
+                "group": "group-1"
+              },
+              {
+                "id": "L03",
+                "ordinal": 3,
+                "source": "Lab notes@V12",
+                "object": "cell:C03",
+                "range": [
+                  30,
+                  36
+                ],
+                "occurrences": [
+                  "occ-L03-1"
+                ],
+                "group": "group-1"
+              },
+              {
+                "id": "L04",
+                "ordinal": 4,
+                "source": "Rig slice@V8",
+                "object": "cell:C04",
+                "range": [
+                  40,
+                  46
+                ],
+                "occurrences": [
+                  "occ-L04-1"
+                ],
+                "group": "group-1"
+              },
+              {
+                "id": "L05",
+                "ordinal": 5,
+                "source": "Lab notes@V12",
+                "object": "cell:C05",
+                "range": [
+                  50,
+                  56
+                ],
+                "occurrences": [
+                  "occ-L05-1"
+                ],
+                "group": "group-1"
+              },
+              {
+                "id": "L06",
+                "ordinal": 6,
+                "source": "Rig slice@V8",
+                "object": "cell:C06",
+                "range": [
+                  60,
+                  66
+                ],
+                "occurrences": [
+                  "occ-L06-1"
+                ],
+                "group": "group-1"
+              },
+              {
+                "id": "L07",
+                "ordinal": 7,
+                "source": "Lab notes@V12",
+                "object": "cell:C07",
+                "range": [
+                  70,
+                  76
+                ],
+                "occurrences": [
+                  "occ-L07-1"
+                ],
+                "group": "group-1"
+              },
+              {
+                "id": "L08",
+                "ordinal": 8,
+                "source": "Rig slice@V8",
+                "object": "cell:C08",
+                "range": [
+                  80,
+                  86
+                ],
+                "occurrences": [
+                  "occ-L08-1"
+                ],
+                "group": "group-1"
+              },
+              {
+                "id": "L09",
+                "ordinal": 9,
+                "source": "Lab notes@V12",
+                "object": "cell:C09",
+                "range": [
+                  90,
+                  96
+                ],
+                "occurrences": [
+                  "occ-L09-1"
+                ],
+                "group": "group-1"
+              },
+              {
+                "id": "L10",
+                "ordinal": 10,
+                "source": "Rig slice@V8",
+                "object": "cell:C10",
+                "range": [
+                  100,
+                  106
+                ],
+                "occurrences": [
+                  "occ-L10-1"
+                ],
+                "group": "group-1"
+              },
+              {
+                "id": "L11",
+                "ordinal": 11,
+                "source": "Lab notes@V12",
+                "object": "cell:C11",
+                "range": [
+                  110,
+                  116
+                ],
+                "occurrences": [
+                  "occ-L11-1"
+                ],
+                "group": "group-2"
+              },
+              {
+                "id": "L12",
+                "ordinal": 12,
+                "source": "Rig slice@V8",
+                "object": "cell:C12",
+                "range": [
+                  120,
+                  126
+                ],
+                "occurrences": [
+                  "occ-L12-1"
+                ],
+                "group": "group-2"
+              },
+              {
+                "id": "L13",
+                "ordinal": 13,
+                "source": "Lab notes@V12",
+                "object": "cell:C13",
+                "range": [
+                  130,
+                  136
+                ],
+                "occurrences": [
+                  "occ-L13-1"
+                ],
+                "group": "group-2"
+              },
+              {
+                "id": "L14",
+                "ordinal": 14,
+                "source": "Rig slice@V8",
+                "object": "cell:C14",
+                "range": [
+                  140,
+                  146
+                ],
+                "occurrences": [
+                  "occ-L14-1"
+                ],
+                "group": "group-2"
+              },
+              {
+                "id": "L15",
+                "ordinal": 15,
+                "source": "Lab notes@V12",
+                "object": "cell:C15",
+                "range": [
+                  150,
+                  156
+                ],
+                "occurrences": [
+                  "occ-L15-1"
+                ],
+                "group": "group-2"
+              },
+              {
+                "id": "L16",
+                "ordinal": 16,
+                "source": "Rig slice@V8",
+                "object": "cell:C16",
+                "range": [
+                  160,
+                  166
+                ],
+                "occurrences": [
+                  "occ-L16-1"
+                ],
+                "group": "group-2"
+              },
+              {
+                "id": "L17",
+                "ordinal": 17,
+                "source": "Lab notes@V12",
+                "object": "cell:C17",
+                "range": [
+                  170,
+                  176
+                ],
+                "occurrences": [
+                  "occ-L17-1"
+                ],
+                "group": "group-2"
+              },
+              {
+                "id": "L18",
+                "ordinal": 18,
+                "source": "Rig slice@V8",
+                "object": "cell:C18",
+                "range": [
+                  180,
+                  186
+                ],
+                "occurrences": [
+                  "occ-L18-1"
+                ],
+                "group": "group-2"
+              },
+              {
+                "id": "L19",
+                "ordinal": 19,
+                "source": "Lab notes@V12",
+                "object": "cell:C19",
+                "range": [
+                  190,
+                  196
+                ],
+                "occurrences": [
+                  "occ-L19-1"
+                ],
+                "group": "group-2"
+              },
+              {
+                "id": "L20",
+                "ordinal": 20,
+                "source": "Rig slice@V8",
+                "object": "cell:C20",
+                "range": [
+                  200,
+                  206
+                ],
+                "occurrences": [
+                  "occ-L20-1"
+                ],
+                "group": "group-2"
+              },
+              {
+                "id": "L21",
+                "ordinal": 21,
+                "source": "Rig slice@V8",
+                "object": "cell:C17",
+                "range": [
+                  0,
+                  8
+                ],
+                "occurrences": [
+                  "rig-o1",
+                  "rig-o4",
+                  "lab-o7",
+                  "review-o3",
+                  "rig-o8"
+                ],
+                "group": "group-3"
+              },
+              {
+                "id": "L22",
+                "ordinal": 22,
+                "source": "Rig slice@V8",
+                "object": "cell:C22",
+                "range": [
+                  220,
+                  226
+                ],
+                "occurrences": [
+                  "occ-L22-1"
+                ],
+                "group": "group-3"
+              },
+              {
+                "id": "L23",
+                "ordinal": 23,
+                "source": "Lab notes@V12",
+                "object": "cell:C23",
+                "range": [
+                  230,
+                  236
+                ],
+                "occurrences": [
+                  "occ-L23-1"
+                ],
+                "group": "group-3"
+              },
+              {
+                "id": "L24",
+                "ordinal": 24,
+                "source": "Rig slice@V8",
+                "object": "cell:C24",
+                "range": [
+                  240,
+                  246
+                ],
+                "occurrences": [
+                  "occ-L24-1"
+                ],
+                "group": "group-3"
+              },
+              {
+                "id": "L25",
+                "ordinal": 25,
+                "source": "Lab notes@V12",
+                "object": "cell:C25",
+                "range": [
+                  250,
+                  256
+                ],
+                "occurrences": [
+                  "occ-L25-1"
+                ],
+                "group": "group-3"
+              },
+              {
+                "id": "L26",
+                "ordinal": 26,
+                "source": "Rig slice@V8",
+                "object": "cell:C26",
+                "range": [
+                  260,
+                  266
+                ],
+                "occurrences": [
+                  "occ-L26-1"
+                ],
+                "group": "group-3"
+              },
+              {
+                "id": "L27",
+                "ordinal": 27,
+                "source": "Lab notes@V12",
+                "object": "cell:C27",
+                "range": [
+                  270,
+                  276
+                ],
+                "occurrences": [
+                  "occ-L27-1"
+                ],
+                "group": "group-3"
+              },
+              {
+                "id": "L28",
+                "ordinal": 28,
+                "source": "Rig slice@V8",
+                "object": "cell:C28",
+                "range": [
+                  280,
+                  286
+                ],
+                "occurrences": [
+                  "occ-L28-1"
+                ],
+                "group": "group-3"
+              },
+              {
+                "id": "L29",
+                "ordinal": 29,
+                "source": "Lab notes@V12",
+                "object": "cell:C29",
+                "range": [
+                  290,
+                  296
+                ],
+                "occurrences": [
+                  "occ-L29-1"
+                ],
+                "group": "group-3"
+              },
+              {
+                "id": "L30",
+                "ordinal": 30,
+                "source": "Rig slice@V8",
+                "object": "cell:C30",
+                "range": [
+                  300,
+                  306
+                ],
+                "occurrences": [
+                  "occ-L30-1"
+                ],
+                "group": "group-3"
+              },
+              {
+                "id": "L31",
+                "ordinal": 31,
+                "source": "Lab notes@V12",
+                "object": "cell:C31",
+                "range": [
+                  310,
+                  316
+                ],
+                "occurrences": [
+                  "occ-L31-1"
+                ],
+                "group": "group-4"
+              },
+              {
+                "id": "L32",
+                "ordinal": 32,
+                "source": "Rig slice@V8",
+                "object": "cell:C32",
+                "range": [
+                  320,
+                  326
+                ],
+                "occurrences": [
+                  "occ-L32-1"
+                ],
+                "group": "group-4"
+              },
+              {
+                "id": "L33",
+                "ordinal": 33,
+                "source": "Lab notes@V12",
+                "object": "cell:C33",
+                "range": [
+                  330,
+                  336
+                ],
+                "occurrences": [
+                  "occ-L33-1"
+                ],
+                "group": "group-4"
+              },
+              {
+                "id": "L34",
+                "ordinal": 34,
+                "source": "Rig slice@V8",
+                "object": "cell:C34",
+                "range": [
+                  340,
+                  346
+                ],
+                "occurrences": [
+                  "occ-L34-1"
+                ],
+                "group": "group-4"
+              },
+              {
+                "id": "L35",
+                "ordinal": 35,
+                "source": "Lab notes@V12",
+                "object": "cell:C35",
+                "range": [
+                  350,
+                  356
+                ],
+                "occurrences": [
+                  "occ-L35-1"
+                ],
+                "group": "group-4"
+              },
+              {
+                "id": "L36",
+                "ordinal": 36,
+                "source": "Rig slice@V8",
+                "object": "cell:C36",
+                "range": [
+                  360,
+                  366
+                ],
+                "occurrences": [
+                  "occ-L36-1"
+                ],
+                "group": "group-4"
+              },
+              {
+                "id": "L37",
+                "ordinal": 37,
+                "source": "Lab notes@V12",
+                "object": "cell:C37",
+                "range": [
+                  370,
+                  376
+                ],
+                "occurrences": [
+                  "occ-L37-1"
+                ],
+                "group": "group-4"
+              },
+              {
+                "id": "L38",
+                "ordinal": 38,
+                "source": "Rig slice@V8",
+                "object": "cell:C38",
+                "range": [
+                  380,
+                  386
+                ],
+                "occurrences": [
+                  "occ-L38-1"
+                ],
+                "group": "group-4"
+              },
+              {
+                "id": "L39",
+                "ordinal": 39,
+                "source": "Lab notes@V12",
+                "object": "cell:C39",
+                "range": [
+                  390,
+                  396
+                ],
+                "occurrences": [
+                  "occ-L39-1"
+                ],
+                "group": "group-4"
+              },
+              {
+                "id": "L40",
+                "ordinal": 40,
+                "source": "Rig slice@V8",
+                "object": "cell:C40",
+                "range": [
+                  400,
+                  406
+                ],
+                "occurrences": [
+                  "occ-L40-1"
+                ],
+                "group": "group-4"
+              }
+            ],
+            "right": [
+              {
+                "id": "R01",
+                "ordinal": 1,
+                "source": "Discussion@V6",
+                "object": "doc:R01",
+                "range": [
+                  5,
+                  9
+                ],
+                "occurrences": [
+                  "occ-R01-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R02",
+                "ordinal": 2,
+                "source": "Cells@V8",
+                "object": "doc:R02",
+                "range": [
+                  10,
+                  14
+                ],
+                "occurrences": [
+                  "occ-R02-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R03",
+                "ordinal": 3,
+                "source": "Results@V11",
+                "object": "doc:R03",
+                "range": [
+                  15,
+                  19
+                ],
+                "occurrences": [
+                  "occ-R03-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R04",
+                "ordinal": 4,
+                "source": "Discussion@V6",
+                "object": "doc:R04",
+                "range": [
+                  20,
+                  24
+                ],
+                "occurrences": [
+                  "occ-R04-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R05",
+                "ordinal": 5,
+                "source": "Cells@V8",
+                "object": "doc:R05",
+                "range": [
+                  25,
+                  29
+                ],
+                "occurrences": [
+                  "occ-R05-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R06",
+                "ordinal": 6,
+                "source": "Results@V11",
+                "object": "doc:R06",
+                "range": [
+                  30,
+                  34
+                ],
+                "occurrences": [
+                  "occ-R06-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R07",
+                "ordinal": 7,
+                "source": "Discussion@V6",
+                "object": "doc:R07",
+                "range": [
+                  35,
+                  39
+                ],
+                "occurrences": [
+                  "occ-R07-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R08",
+                "ordinal": 8,
+                "source": "Cells@V8",
+                "object": "doc:R08",
+                "range": [
+                  40,
+                  44
+                ],
+                "occurrences": [
+                  "occ-R08-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R09",
+                "ordinal": 9,
+                "source": "Results@V11",
+                "object": "doc:R09",
+                "range": [
+                  45,
+                  49
+                ],
+                "occurrences": [
+                  "occ-R09-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R10",
+                "ordinal": 10,
+                "source": "Discussion@V6",
+                "object": "doc:R10",
+                "range": [
+                  50,
+                  54
+                ],
+                "occurrences": [
+                  "occ-R10-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R11",
+                "ordinal": 11,
+                "source": "Cells@V8",
+                "object": "doc:R11",
+                "range": [
+                  55,
+                  59
+                ],
+                "occurrences": [
+                  "occ-R11-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R12",
+                "ordinal": 12,
+                "source": "Results@V11",
+                "object": "doc:R12",
+                "range": [
+                  60,
+                  64
+                ],
+                "occurrences": [
+                  "occ-R12-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R13",
+                "ordinal": 13,
+                "source": "Discussion@V6",
+                "object": "doc:R13",
+                "range": [
+                  65,
+                  69
+                ],
+                "occurrences": [
+                  "occ-R13-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R14",
+                "ordinal": 14,
+                "source": "Cells@V8",
+                "object": "doc:R14",
+                "range": [
+                  70,
+                  74
+                ],
+                "occurrences": [
+                  "occ-R14-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R15",
+                "ordinal": 15,
+                "source": "Results@V11",
+                "object": "doc:R15",
+                "range": [
+                  75,
+                  79
+                ],
+                "occurrences": [
+                  "occ-R15-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R16",
+                "ordinal": 16,
+                "source": "Discussion@V6",
+                "object": "doc:R16",
+                "range": [
+                  80,
+                  84
+                ],
+                "occurrences": [
+                  "occ-R16-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R17",
+                "ordinal": 17,
+                "source": "Cells@V8",
+                "object": "doc:R17",
+                "range": [
+                  85,
+                  89
+                ],
+                "occurrences": [
+                  "occ-R17-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R18",
+                "ordinal": 18,
+                "source": "Results@V11",
+                "object": "doc:R18",
+                "range": [
+                  90,
+                  94
+                ],
+                "occurrences": [
+                  "occ-R18-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R19",
+                "ordinal": 19,
+                "source": "Discussion@V6",
+                "object": "doc:R19",
+                "range": [
+                  95,
+                  99
+                ],
+                "occurrences": [
+                  "occ-R19-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R20",
+                "ordinal": 20,
+                "source": "Cells@V8",
+                "object": "doc:R20",
+                "range": [
+                  100,
+                  104
+                ],
+                "occurrences": [
+                  "occ-R20-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R21",
+                "ordinal": 21,
+                "source": "Results@V11",
+                "object": "doc:R21",
+                "range": [
+                  105,
+                  109
+                ],
+                "occurrences": [
+                  "occ-R21-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R22",
+                "ordinal": 22,
+                "source": "Discussion@V6",
+                "object": "doc:R22",
+                "range": [
+                  110,
+                  114
+                ],
+                "occurrences": [
+                  "occ-R22-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R23",
+                "ordinal": 23,
+                "source": "Cells@V8",
+                "object": "doc:R23",
+                "range": [
+                  115,
+                  119
+                ],
+                "occurrences": [
+                  "occ-R23-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R24",
+                "ordinal": 24,
+                "source": "Results@V11",
+                "object": "doc:R24",
+                "range": [
+                  120,
+                  124
+                ],
+                "occurrences": [
+                  "occ-R24-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R25",
+                "ordinal": 25,
+                "source": "Discussion@V6",
+                "object": "doc:R25",
+                "range": [
+                  125,
+                  129
+                ],
+                "occurrences": [
+                  "occ-R25-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R26",
+                "ordinal": 26,
+                "source": "Cells@V8",
+                "object": "doc:R26",
+                "range": [
+                  130,
+                  134
+                ],
+                "occurrences": [
+                  "occ-R26-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R27",
+                "ordinal": 27,
+                "source": "Results@V11",
+                "object": "doc:R27",
+                "range": [
+                  135,
+                  139
+                ],
+                "occurrences": [
+                  "occ-R27-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R28",
+                "ordinal": 28,
+                "source": "Discussion@V6",
+                "object": "doc:R28",
+                "range": [
+                  140,
+                  144
+                ],
+                "occurrences": [
+                  "occ-R28-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R29",
+                "ordinal": 29,
+                "source": "Cells@V8",
+                "object": "doc:R29",
+                "range": [
+                  145,
+                  149
+                ],
+                "occurrences": [
+                  "occ-R29-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R30",
+                "ordinal": 30,
+                "source": "Results@V11",
+                "object": "doc:R30",
+                "range": [
+                  150,
+                  154
+                ],
+                "occurrences": [
+                  "occ-R30-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R31",
+                "ordinal": 31,
+                "source": "Discussion@V6",
+                "object": "doc:R31",
+                "range": [
+                  155,
+                  159
+                ],
+                "occurrences": [
+                  "occ-R31-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R32",
+                "ordinal": 32,
+                "source": "Cells@V8",
+                "object": "doc:R32",
+                "range": [
+                  160,
+                  164
+                ],
+                "occurrences": [
+                  "occ-R32-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R33",
+                "ordinal": 33,
+                "source": "Results@V11",
+                "object": "doc:R33",
+                "range": [
+                  165,
+                  169
+                ],
+                "occurrences": [
+                  "occ-R33-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R34",
+                "ordinal": 34,
+                "source": "Discussion@V6",
+                "object": "doc:R34",
+                "range": [
+                  170,
+                  174
+                ],
+                "occurrences": [
+                  "occ-R34-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R35",
+                "ordinal": 35,
+                "source": "Cells@V8",
+                "object": "doc:R35",
+                "range": [
+                  175,
+                  179
+                ],
+                "occurrences": [
+                  "occ-R35-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R36",
+                "ordinal": 36,
+                "source": "Results@V11",
+                "object": "doc:R36",
+                "range": [
+                  180,
+                  184
+                ],
+                "occurrences": [
+                  "occ-R36-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R37",
+                "ordinal": 37,
+                "source": "Discussion@V6",
+                "object": "doc:R37",
+                "range": [
+                  185,
+                  189
+                ],
+                "occurrences": [
+                  "occ-R37-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R38",
+                "ordinal": 38,
+                "source": "Cells@V8",
+                "object": "doc:R38",
+                "range": [
+                  190,
+                  194
+                ],
+                "occurrences": [
+                  "occ-R38-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R39",
+                "ordinal": 39,
+                "source": "Results@V11",
+                "object": "doc:R39",
+                "range": [
+                  195,
+                  199
+                ],
+                "occurrences": [
+                  "occ-R39-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R40",
+                "ordinal": 40,
+                "source": "Discussion@V6",
+                "object": "doc:R40",
+                "range": [
+                  200,
+                  204
+                ],
+                "occurrences": [
+                  "occ-R40-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R41",
+                "ordinal": 41,
+                "source": "Cells@V8",
+                "object": "doc:R41",
+                "range": [
+                  205,
+                  209
+                ],
+                "occurrences": [
+                  "occ-R41-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R42",
+                "ordinal": 42,
+                "source": "Results@V11",
+                "object": "doc:R42",
+                "range": [
+                  210,
+                  214
+                ],
+                "occurrences": [
+                  "occ-R42-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R43",
+                "ordinal": 43,
+                "source": "Discussion@V6",
+                "object": "doc:R43",
+                "range": [
+                  215,
+                  219
+                ],
+                "occurrences": [
+                  "occ-R43-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R44",
+                "ordinal": 44,
+                "source": "Cells@V8",
+                "object": "doc:R44",
+                "range": [
+                  220,
+                  224
+                ],
+                "occurrences": [
+                  "occ-R44-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R45",
+                "ordinal": 45,
+                "source": "Results@V11",
+                "object": "doc:R45",
+                "range": [
+                  225,
+                  229
+                ],
+                "occurrences": [
+                  "occ-R45-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R46",
+                "ordinal": 46,
+                "source": "Discussion@V6",
+                "object": "doc:R46",
+                "range": [
+                  230,
+                  234
+                ],
+                "occurrences": [
+                  "occ-R46-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R47",
+                "ordinal": 47,
+                "source": "Cells@V8",
+                "object": "doc:R47",
+                "range": [
+                  235,
+                  239
+                ],
+                "occurrences": [
+                  "occ-R47-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R48",
+                "ordinal": 48,
+                "source": "Results@V11",
+                "object": "doc:R48",
+                "range": [
+                  240,
+                  244
+                ],
+                "occurrences": [
+                  "occ-R48-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R49",
+                "ordinal": 49,
+                "source": "Discussion@V6",
+                "object": "doc:R49",
+                "range": [
+                  245,
+                  249
+                ],
+                "occurrences": [
+                  "occ-R49-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R50",
+                "ordinal": 50,
+                "source": "Cells@V8",
+                "object": "doc:R50",
+                "range": [
+                  250,
+                  254
+                ],
+                "occurrences": [
+                  "occ-R50-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R51",
+                "ordinal": 51,
+                "source": "Results@V11",
+                "object": "doc:R51",
+                "range": [
+                  255,
+                  259
+                ],
+                "occurrences": [
+                  "occ-R51-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R52",
+                "ordinal": 52,
+                "source": "Discussion@V6",
+                "object": "doc:R52",
+                "range": [
+                  260,
+                  264
+                ],
+                "occurrences": [
+                  "occ-R52-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R53",
+                "ordinal": 53,
+                "source": "Cells@V8",
+                "object": "doc:R53",
+                "range": [
+                  265,
+                  269
+                ],
+                "occurrences": [
+                  "occ-R53-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R54",
+                "ordinal": 54,
+                "source": "Results@V11",
+                "object": "doc:R54",
+                "range": [
+                  270,
+                  274
+                ],
+                "occurrences": [
+                  "occ-R54-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R55",
+                "ordinal": 55,
+                "source": "Discussion@V6",
+                "object": "doc:R55",
+                "range": [
+                  275,
+                  279
+                ],
+                "occurrences": [
+                  "occ-R55-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R56",
+                "ordinal": 56,
+                "source": "Cells@V8",
+                "object": "doc:R56",
+                "range": [
+                  280,
+                  284
+                ],
+                "occurrences": [
+                  "occ-R56-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R57",
+                "ordinal": 57,
+                "source": "Results@V11",
+                "object": "doc:R57",
+                "range": [
+                  285,
+                  289
+                ],
+                "occurrences": [
+                  "occ-R57-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R58",
+                "ordinal": 58,
+                "source": "Discussion@V6",
+                "object": "doc:R58",
+                "range": [
+                  290,
+                  294
+                ],
+                "occurrences": [
+                  "occ-R58-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R59",
+                "ordinal": 59,
+                "source": "Cells@V8",
+                "object": "doc:R59",
+                "range": [
+                  295,
+                  299
+                ],
+                "occurrences": [
+                  "occ-R59-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R60",
+                "ordinal": 60,
+                "source": "Results@V11",
+                "object": "doc:R60",
+                "range": [
+                  300,
+                  304
+                ],
+                "occurrences": [
+                  "occ-R60-1"
+                ],
+                "group": "right-group-4"
+              }
+            ],
+            "selectedLeft": "L21",
+            "selectedOccurrences": [
+              "rig-o1",
+              "rig-o4",
+              "lab-o7",
+              "review-o3",
+              "rig-o8"
+            ],
+            "leftFilter": "",
+            "rightFilter": "",
+            "visibleLeft": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6
+            ],
+            "visibleRight": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6
+            ],
+            "leftOrderBeforeFilter": [
+              "L01",
+              "L02",
+              "L03",
+              "L04",
+              "L05",
+              "L06",
+              "L07",
+              "L08",
+              "L09",
+              "L10",
+              "L11",
+              "L12",
+              "L13",
+              "L14",
+              "L15",
+              "L16",
+              "L17",
+              "L18",
+              "L19",
+              "L20",
+              "L21",
+              "L22",
+              "L23",
+              "L24",
+              "L25",
+              "L26",
+              "L27",
+              "L28",
+              "L29",
+              "L30",
+              "L31",
+              "L32",
+              "L33",
+              "L34",
+              "L35",
+              "L36",
+              "L37",
+              "L38",
+              "L39",
+              "L40"
+            ],
+            "rightOrderBeforeFilter": [
+              "R01",
+              "R02",
+              "R03",
+              "R04",
+              "R05",
+              "R06",
+              "R07",
+              "R08",
+              "R09",
+              "R10",
+              "R11",
+              "R12",
+              "R13",
+              "R14",
+              "R15",
+              "R16",
+              "R17",
+              "R18",
+              "R19",
+              "R20",
+              "R21",
+              "R22",
+              "R23",
+              "R24",
+              "R25",
+              "R26",
+              "R27",
+              "R28",
+              "R29",
+              "R30",
+              "R31",
+              "R32",
+              "R33",
+              "R34",
+              "R35",
+              "R36",
+              "R37",
+              "R38",
+              "R39",
+              "R40",
+              "R41",
+              "R42",
+              "R43",
+              "R44",
+              "R45",
+              "R46",
+              "R47",
+              "R48",
+              "R49",
+              "R50",
+              "R51",
+              "R52",
+              "R53",
+              "R54",
+              "R55",
+              "R56",
+              "R57",
+              "R58",
+              "R59",
+              "R60"
+            ]
+          }
+        },
+        "commit": {
+          "attempt": {
+            "token": "attempt:L7-dense:1",
+            "payloadDigest": "sha256:9b4d-draft-L7"
+          },
+          "status": "outcome-unknown",
+          "receipt": {
+            "id": "receipt:attempt-L7-dense-1",
+            "link": "Link:L19",
+            "childState": "Review@V32"
+          },
+          "forgeEnabled": false,
+          "retryEnabled": false
+        },
+        "pouchDrafts": [
+          "draft:L7"
+        ],
+        "densityFixture": {
+          "leftCount": 40,
+          "rightCount": 60,
+          "pairConnectionsRendered": 0
+        }
+      },
+      "effects": [
+        {
+          "domain": "authored destination",
+          "summary": "One receipt is already published; response was lost.",
+          "identity": "attempt:L7-dense:1; receipt:attempt-L7-dense-1"
+        }
+      ],
+      "action": "Simulate lost reply after receipt publication",
+      "note": "No Forge or Retry is available while outcome is unknown."
+    },
+    {
+      "file": "J28/J28-status-created-existing/J28-status-created-existing-a2.png",
+      "location": "?journey=J28&variant=J28-status-created-existing&task=0&action=2",
+      "frame": "J28-status-created-existing-a2",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run.",
+            "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+          ]
+        },
+        "visits": [
+          {
+            "id": "03",
+            "parent": null,
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "Discussion": 46,
+          "Results": 52,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J28-status-created-existing-a2-reading",
+            "title": "Reading · visit 03 · Review@V4",
+            "kind": "document",
+            "body": [
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03"
+              },
+              {
+                "label": "Subject",
+                "value": "Review passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "review-o3"
+              },
+              {
+                "label": "Offset",
+                "value": 80
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "v-created",
+            "title": "Existing receipt found",
+            "kind": "notice",
+            "body": [],
+            "facts": [
+              {
+                "label": "Result",
+                "value": "Created"
+              },
+              {
+                "label": "Link",
+                "value": "L19"
+              },
+              {
+                "label": "Action",
+                "value": "Open existing Link"
+              },
+              {
+                "label": "Forge again",
+                "value": "blocked"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "draft": {
+          "id": "draft:L7",
+          "relation": "Comment",
+          "prominence": "normal",
+          "left": [
+            {
+              "id": "L1",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3140,
+                3167
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Pressure stayed stable over the full duration of the test."
+            },
+            {
+              "id": "L2",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3200,
+                3228
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Temperature was unchanged during the measurement period."
+            }
+          ],
+          "right": [
+            {
+              "id": "R1",
+              "source": "Review@V4",
+              "object": "doc:review",
+              "range": [
+                80,
+                115
+              ],
+              "occurrence": "review-o3",
+              "group": "capture-beta",
+              "text": "The results support the test result."
+            },
+            {
+              "id": "R2",
+              "source": "Rig slice@V8",
+              "object": "cell:C17",
+              "range": [
+                0,
+                8
+              ],
+              "occurrence": "rig-o1",
+              "group": "capture-beta",
+              "text": "3.14 bar"
+            },
+            {
+              "id": "R3",
+              "source": "Rig slice@V8",
+              "object": "cell:C24",
+              "range": [
+                0,
+                4
+              ],
+              "occurrence": "rig-o4",
+              "group": "capture-gamma",
+              "text": "22 °C"
+            }
+          ],
+          "leftOrder": [
+            "L1",
+            "L2"
+          ],
+          "rightOrder": [
+            "R1",
+            "R2",
+            "R3"
+          ],
+          "groups": {
+            "left": {
+              "capture-alpha": [
+                "L1",
+                "L2"
+              ]
+            },
+            "right": {
+              "review": [
+                "R1"
+              ],
+              "cells": [
+                "R2",
+                "R3"
+              ]
+            }
+          },
+          "destination": {
+            "store": "Review store",
+            "branch": "review/main",
+            "base": "Review@V31",
+            "author": "author:ava",
+            "signingKey": "key:ava-k2",
+            "authorStatus": "verified",
+            "mode": "Create child at pinned base"
+          },
+          "status": "saved",
+          "validation": {
+            "R1": "valid",
+            "R2": "required-reference-pending",
+            "R3": "valid"
+          },
+          "previews": {
+            "R1": "not-held-optional",
+            "R2": "not-held-optional",
+            "R3": "not-held-optional"
+          },
+          "dense": {
+            "left": [
+              {
+                "id": "L01",
+                "ordinal": 1,
+                "source": "Lab notes@V12",
+                "object": "cell:C01",
+                "range": [
+                  10,
+                  16
+                ],
+                "occurrences": [
+                  "occ-L01-1"
+                ],
+                "group": "group-1"
+              },
+              {
+                "id": "L02",
+                "ordinal": 2,
+                "source": "Rig slice@V8",
+                "object": "cell:C02",
+                "range": [
+                  20,
+                  26
+                ],
+                "occurrences": [
+                  "occ-L02-1"
+                ],
+                "group": "group-1"
+              },
+              {
+                "id": "L03",
+                "ordinal": 3,
+                "source": "Lab notes@V12",
+                "object": "cell:C03",
+                "range": [
+                  30,
+                  36
+                ],
+                "occurrences": [
+                  "occ-L03-1"
+                ],
+                "group": "group-1"
+              },
+              {
+                "id": "L04",
+                "ordinal": 4,
+                "source": "Rig slice@V8",
+                "object": "cell:C04",
+                "range": [
+                  40,
+                  46
+                ],
+                "occurrences": [
+                  "occ-L04-1"
+                ],
+                "group": "group-1"
+              },
+              {
+                "id": "L05",
+                "ordinal": 5,
+                "source": "Lab notes@V12",
+                "object": "cell:C05",
+                "range": [
+                  50,
+                  56
+                ],
+                "occurrences": [
+                  "occ-L05-1"
+                ],
+                "group": "group-1"
+              },
+              {
+                "id": "L06",
+                "ordinal": 6,
+                "source": "Rig slice@V8",
+                "object": "cell:C06",
+                "range": [
+                  60,
+                  66
+                ],
+                "occurrences": [
+                  "occ-L06-1"
+                ],
+                "group": "group-1"
+              },
+              {
+                "id": "L07",
+                "ordinal": 7,
+                "source": "Lab notes@V12",
+                "object": "cell:C07",
+                "range": [
+                  70,
+                  76
+                ],
+                "occurrences": [
+                  "occ-L07-1"
+                ],
+                "group": "group-1"
+              },
+              {
+                "id": "L08",
+                "ordinal": 8,
+                "source": "Rig slice@V8",
+                "object": "cell:C08",
+                "range": [
+                  80,
+                  86
+                ],
+                "occurrences": [
+                  "occ-L08-1"
+                ],
+                "group": "group-1"
+              },
+              {
+                "id": "L09",
+                "ordinal": 9,
+                "source": "Lab notes@V12",
+                "object": "cell:C09",
+                "range": [
+                  90,
+                  96
+                ],
+                "occurrences": [
+                  "occ-L09-1"
+                ],
+                "group": "group-1"
+              },
+              {
+                "id": "L10",
+                "ordinal": 10,
+                "source": "Rig slice@V8",
+                "object": "cell:C10",
+                "range": [
+                  100,
+                  106
+                ],
+                "occurrences": [
+                  "occ-L10-1"
+                ],
+                "group": "group-1"
+              },
+              {
+                "id": "L11",
+                "ordinal": 11,
+                "source": "Lab notes@V12",
+                "object": "cell:C11",
+                "range": [
+                  110,
+                  116
+                ],
+                "occurrences": [
+                  "occ-L11-1"
+                ],
+                "group": "group-2"
+              },
+              {
+                "id": "L12",
+                "ordinal": 12,
+                "source": "Rig slice@V8",
+                "object": "cell:C12",
+                "range": [
+                  120,
+                  126
+                ],
+                "occurrences": [
+                  "occ-L12-1"
+                ],
+                "group": "group-2"
+              },
+              {
+                "id": "L13",
+                "ordinal": 13,
+                "source": "Lab notes@V12",
+                "object": "cell:C13",
+                "range": [
+                  130,
+                  136
+                ],
+                "occurrences": [
+                  "occ-L13-1"
+                ],
+                "group": "group-2"
+              },
+              {
+                "id": "L14",
+                "ordinal": 14,
+                "source": "Rig slice@V8",
+                "object": "cell:C14",
+                "range": [
+                  140,
+                  146
+                ],
+                "occurrences": [
+                  "occ-L14-1"
+                ],
+                "group": "group-2"
+              },
+              {
+                "id": "L15",
+                "ordinal": 15,
+                "source": "Lab notes@V12",
+                "object": "cell:C15",
+                "range": [
+                  150,
+                  156
+                ],
+                "occurrences": [
+                  "occ-L15-1"
+                ],
+                "group": "group-2"
+              },
+              {
+                "id": "L16",
+                "ordinal": 16,
+                "source": "Rig slice@V8",
+                "object": "cell:C16",
+                "range": [
+                  160,
+                  166
+                ],
+                "occurrences": [
+                  "occ-L16-1"
+                ],
+                "group": "group-2"
+              },
+              {
+                "id": "L17",
+                "ordinal": 17,
+                "source": "Lab notes@V12",
+                "object": "cell:C17",
+                "range": [
+                  170,
+                  176
+                ],
+                "occurrences": [
+                  "occ-L17-1"
+                ],
+                "group": "group-2"
+              },
+              {
+                "id": "L18",
+                "ordinal": 18,
+                "source": "Rig slice@V8",
+                "object": "cell:C18",
+                "range": [
+                  180,
+                  186
+                ],
+                "occurrences": [
+                  "occ-L18-1"
+                ],
+                "group": "group-2"
+              },
+              {
+                "id": "L19",
+                "ordinal": 19,
+                "source": "Lab notes@V12",
+                "object": "cell:C19",
+                "range": [
+                  190,
+                  196
+                ],
+                "occurrences": [
+                  "occ-L19-1"
+                ],
+                "group": "group-2"
+              },
+              {
+                "id": "L20",
+                "ordinal": 20,
+                "source": "Rig slice@V8",
+                "object": "cell:C20",
+                "range": [
+                  200,
+                  206
+                ],
+                "occurrences": [
+                  "occ-L20-1"
+                ],
+                "group": "group-2"
+              },
+              {
+                "id": "L21",
+                "ordinal": 21,
+                "source": "Rig slice@V8",
+                "object": "cell:C17",
+                "range": [
+                  0,
+                  8
+                ],
+                "occurrences": [
+                  "rig-o1",
+                  "rig-o4",
+                  "lab-o7",
+                  "review-o3",
+                  "rig-o8"
+                ],
+                "group": "group-3"
+              },
+              {
+                "id": "L22",
+                "ordinal": 22,
+                "source": "Rig slice@V8",
+                "object": "cell:C22",
+                "range": [
+                  220,
+                  226
+                ],
+                "occurrences": [
+                  "occ-L22-1"
+                ],
+                "group": "group-3"
+              },
+              {
+                "id": "L23",
+                "ordinal": 23,
+                "source": "Lab notes@V12",
+                "object": "cell:C23",
+                "range": [
+                  230,
+                  236
+                ],
+                "occurrences": [
+                  "occ-L23-1"
+                ],
+                "group": "group-3"
+              },
+              {
+                "id": "L24",
+                "ordinal": 24,
+                "source": "Rig slice@V8",
+                "object": "cell:C24",
+                "range": [
+                  240,
+                  246
+                ],
+                "occurrences": [
+                  "occ-L24-1"
+                ],
+                "group": "group-3"
+              },
+              {
+                "id": "L25",
+                "ordinal": 25,
+                "source": "Lab notes@V12",
+                "object": "cell:C25",
+                "range": [
+                  250,
+                  256
+                ],
+                "occurrences": [
+                  "occ-L25-1"
+                ],
+                "group": "group-3"
+              },
+              {
+                "id": "L26",
+                "ordinal": 26,
+                "source": "Rig slice@V8",
+                "object": "cell:C26",
+                "range": [
+                  260,
+                  266
+                ],
+                "occurrences": [
+                  "occ-L26-1"
+                ],
+                "group": "group-3"
+              },
+              {
+                "id": "L27",
+                "ordinal": 27,
+                "source": "Lab notes@V12",
+                "object": "cell:C27",
+                "range": [
+                  270,
+                  276
+                ],
+                "occurrences": [
+                  "occ-L27-1"
+                ],
+                "group": "group-3"
+              },
+              {
+                "id": "L28",
+                "ordinal": 28,
+                "source": "Rig slice@V8",
+                "object": "cell:C28",
+                "range": [
+                  280,
+                  286
+                ],
+                "occurrences": [
+                  "occ-L28-1"
+                ],
+                "group": "group-3"
+              },
+              {
+                "id": "L29",
+                "ordinal": 29,
+                "source": "Lab notes@V12",
+                "object": "cell:C29",
+                "range": [
+                  290,
+                  296
+                ],
+                "occurrences": [
+                  "occ-L29-1"
+                ],
+                "group": "group-3"
+              },
+              {
+                "id": "L30",
+                "ordinal": 30,
+                "source": "Rig slice@V8",
+                "object": "cell:C30",
+                "range": [
+                  300,
+                  306
+                ],
+                "occurrences": [
+                  "occ-L30-1"
+                ],
+                "group": "group-3"
+              },
+              {
+                "id": "L31",
+                "ordinal": 31,
+                "source": "Lab notes@V12",
+                "object": "cell:C31",
+                "range": [
+                  310,
+                  316
+                ],
+                "occurrences": [
+                  "occ-L31-1"
+                ],
+                "group": "group-4"
+              },
+              {
+                "id": "L32",
+                "ordinal": 32,
+                "source": "Rig slice@V8",
+                "object": "cell:C32",
+                "range": [
+                  320,
+                  326
+                ],
+                "occurrences": [
+                  "occ-L32-1"
+                ],
+                "group": "group-4"
+              },
+              {
+                "id": "L33",
+                "ordinal": 33,
+                "source": "Lab notes@V12",
+                "object": "cell:C33",
+                "range": [
+                  330,
+                  336
+                ],
+                "occurrences": [
+                  "occ-L33-1"
+                ],
+                "group": "group-4"
+              },
+              {
+                "id": "L34",
+                "ordinal": 34,
+                "source": "Rig slice@V8",
+                "object": "cell:C34",
+                "range": [
+                  340,
+                  346
+                ],
+                "occurrences": [
+                  "occ-L34-1"
+                ],
+                "group": "group-4"
+              },
+              {
+                "id": "L35",
+                "ordinal": 35,
+                "source": "Lab notes@V12",
+                "object": "cell:C35",
+                "range": [
+                  350,
+                  356
+                ],
+                "occurrences": [
+                  "occ-L35-1"
+                ],
+                "group": "group-4"
+              },
+              {
+                "id": "L36",
+                "ordinal": 36,
+                "source": "Rig slice@V8",
+                "object": "cell:C36",
+                "range": [
+                  360,
+                  366
+                ],
+                "occurrences": [
+                  "occ-L36-1"
+                ],
+                "group": "group-4"
+              },
+              {
+                "id": "L37",
+                "ordinal": 37,
+                "source": "Lab notes@V12",
+                "object": "cell:C37",
+                "range": [
+                  370,
+                  376
+                ],
+                "occurrences": [
+                  "occ-L37-1"
+                ],
+                "group": "group-4"
+              },
+              {
+                "id": "L38",
+                "ordinal": 38,
+                "source": "Rig slice@V8",
+                "object": "cell:C38",
+                "range": [
+                  380,
+                  386
+                ],
+                "occurrences": [
+                  "occ-L38-1"
+                ],
+                "group": "group-4"
+              },
+              {
+                "id": "L39",
+                "ordinal": 39,
+                "source": "Lab notes@V12",
+                "object": "cell:C39",
+                "range": [
+                  390,
+                  396
+                ],
+                "occurrences": [
+                  "occ-L39-1"
+                ],
+                "group": "group-4"
+              },
+              {
+                "id": "L40",
+                "ordinal": 40,
+                "source": "Rig slice@V8",
+                "object": "cell:C40",
+                "range": [
+                  400,
+                  406
+                ],
+                "occurrences": [
+                  "occ-L40-1"
+                ],
+                "group": "group-4"
+              }
+            ],
+            "right": [
+              {
+                "id": "R01",
+                "ordinal": 1,
+                "source": "Discussion@V6",
+                "object": "doc:R01",
+                "range": [
+                  5,
+                  9
+                ],
+                "occurrences": [
+                  "occ-R01-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R02",
+                "ordinal": 2,
+                "source": "Cells@V8",
+                "object": "doc:R02",
+                "range": [
+                  10,
+                  14
+                ],
+                "occurrences": [
+                  "occ-R02-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R03",
+                "ordinal": 3,
+                "source": "Results@V11",
+                "object": "doc:R03",
+                "range": [
+                  15,
+                  19
+                ],
+                "occurrences": [
+                  "occ-R03-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R04",
+                "ordinal": 4,
+                "source": "Discussion@V6",
+                "object": "doc:R04",
+                "range": [
+                  20,
+                  24
+                ],
+                "occurrences": [
+                  "occ-R04-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R05",
+                "ordinal": 5,
+                "source": "Cells@V8",
+                "object": "doc:R05",
+                "range": [
+                  25,
+                  29
+                ],
+                "occurrences": [
+                  "occ-R05-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R06",
+                "ordinal": 6,
+                "source": "Results@V11",
+                "object": "doc:R06",
+                "range": [
+                  30,
+                  34
+                ],
+                "occurrences": [
+                  "occ-R06-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R07",
+                "ordinal": 7,
+                "source": "Discussion@V6",
+                "object": "doc:R07",
+                "range": [
+                  35,
+                  39
+                ],
+                "occurrences": [
+                  "occ-R07-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R08",
+                "ordinal": 8,
+                "source": "Cells@V8",
+                "object": "doc:R08",
+                "range": [
+                  40,
+                  44
+                ],
+                "occurrences": [
+                  "occ-R08-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R09",
+                "ordinal": 9,
+                "source": "Results@V11",
+                "object": "doc:R09",
+                "range": [
+                  45,
+                  49
+                ],
+                "occurrences": [
+                  "occ-R09-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R10",
+                "ordinal": 10,
+                "source": "Discussion@V6",
+                "object": "doc:R10",
+                "range": [
+                  50,
+                  54
+                ],
+                "occurrences": [
+                  "occ-R10-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R11",
+                "ordinal": 11,
+                "source": "Cells@V8",
+                "object": "doc:R11",
+                "range": [
+                  55,
+                  59
+                ],
+                "occurrences": [
+                  "occ-R11-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R12",
+                "ordinal": 12,
+                "source": "Results@V11",
+                "object": "doc:R12",
+                "range": [
+                  60,
+                  64
+                ],
+                "occurrences": [
+                  "occ-R12-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R13",
+                "ordinal": 13,
+                "source": "Discussion@V6",
+                "object": "doc:R13",
+                "range": [
+                  65,
+                  69
+                ],
+                "occurrences": [
+                  "occ-R13-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R14",
+                "ordinal": 14,
+                "source": "Cells@V8",
+                "object": "doc:R14",
+                "range": [
+                  70,
+                  74
+                ],
+                "occurrences": [
+                  "occ-R14-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R15",
+                "ordinal": 15,
+                "source": "Results@V11",
+                "object": "doc:R15",
+                "range": [
+                  75,
+                  79
+                ],
+                "occurrences": [
+                  "occ-R15-1"
+                ],
+                "group": "right-group-1"
+              },
+              {
+                "id": "R16",
+                "ordinal": 16,
+                "source": "Discussion@V6",
+                "object": "doc:R16",
+                "range": [
+                  80,
+                  84
+                ],
+                "occurrences": [
+                  "occ-R16-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R17",
+                "ordinal": 17,
+                "source": "Cells@V8",
+                "object": "doc:R17",
+                "range": [
+                  85,
+                  89
+                ],
+                "occurrences": [
+                  "occ-R17-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R18",
+                "ordinal": 18,
+                "source": "Results@V11",
+                "object": "doc:R18",
+                "range": [
+                  90,
+                  94
+                ],
+                "occurrences": [
+                  "occ-R18-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R19",
+                "ordinal": 19,
+                "source": "Discussion@V6",
+                "object": "doc:R19",
+                "range": [
+                  95,
+                  99
+                ],
+                "occurrences": [
+                  "occ-R19-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R20",
+                "ordinal": 20,
+                "source": "Cells@V8",
+                "object": "doc:R20",
+                "range": [
+                  100,
+                  104
+                ],
+                "occurrences": [
+                  "occ-R20-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R21",
+                "ordinal": 21,
+                "source": "Results@V11",
+                "object": "doc:R21",
+                "range": [
+                  105,
+                  109
+                ],
+                "occurrences": [
+                  "occ-R21-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R22",
+                "ordinal": 22,
+                "source": "Discussion@V6",
+                "object": "doc:R22",
+                "range": [
+                  110,
+                  114
+                ],
+                "occurrences": [
+                  "occ-R22-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R23",
+                "ordinal": 23,
+                "source": "Cells@V8",
+                "object": "doc:R23",
+                "range": [
+                  115,
+                  119
+                ],
+                "occurrences": [
+                  "occ-R23-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R24",
+                "ordinal": 24,
+                "source": "Results@V11",
+                "object": "doc:R24",
+                "range": [
+                  120,
+                  124
+                ],
+                "occurrences": [
+                  "occ-R24-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R25",
+                "ordinal": 25,
+                "source": "Discussion@V6",
+                "object": "doc:R25",
+                "range": [
+                  125,
+                  129
+                ],
+                "occurrences": [
+                  "occ-R25-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R26",
+                "ordinal": 26,
+                "source": "Cells@V8",
+                "object": "doc:R26",
+                "range": [
+                  130,
+                  134
+                ],
+                "occurrences": [
+                  "occ-R26-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R27",
+                "ordinal": 27,
+                "source": "Results@V11",
+                "object": "doc:R27",
+                "range": [
+                  135,
+                  139
+                ],
+                "occurrences": [
+                  "occ-R27-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R28",
+                "ordinal": 28,
+                "source": "Discussion@V6",
+                "object": "doc:R28",
+                "range": [
+                  140,
+                  144
+                ],
+                "occurrences": [
+                  "occ-R28-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R29",
+                "ordinal": 29,
+                "source": "Cells@V8",
+                "object": "doc:R29",
+                "range": [
+                  145,
+                  149
+                ],
+                "occurrences": [
+                  "occ-R29-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R30",
+                "ordinal": 30,
+                "source": "Results@V11",
+                "object": "doc:R30",
+                "range": [
+                  150,
+                  154
+                ],
+                "occurrences": [
+                  "occ-R30-1"
+                ],
+                "group": "right-group-2"
+              },
+              {
+                "id": "R31",
+                "ordinal": 31,
+                "source": "Discussion@V6",
+                "object": "doc:R31",
+                "range": [
+                  155,
+                  159
+                ],
+                "occurrences": [
+                  "occ-R31-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R32",
+                "ordinal": 32,
+                "source": "Cells@V8",
+                "object": "doc:R32",
+                "range": [
+                  160,
+                  164
+                ],
+                "occurrences": [
+                  "occ-R32-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R33",
+                "ordinal": 33,
+                "source": "Results@V11",
+                "object": "doc:R33",
+                "range": [
+                  165,
+                  169
+                ],
+                "occurrences": [
+                  "occ-R33-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R34",
+                "ordinal": 34,
+                "source": "Discussion@V6",
+                "object": "doc:R34",
+                "range": [
+                  170,
+                  174
+                ],
+                "occurrences": [
+                  "occ-R34-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R35",
+                "ordinal": 35,
+                "source": "Cells@V8",
+                "object": "doc:R35",
+                "range": [
+                  175,
+                  179
+                ],
+                "occurrences": [
+                  "occ-R35-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R36",
+                "ordinal": 36,
+                "source": "Results@V11",
+                "object": "doc:R36",
+                "range": [
+                  180,
+                  184
+                ],
+                "occurrences": [
+                  "occ-R36-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R37",
+                "ordinal": 37,
+                "source": "Discussion@V6",
+                "object": "doc:R37",
+                "range": [
+                  185,
+                  189
+                ],
+                "occurrences": [
+                  "occ-R37-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R38",
+                "ordinal": 38,
+                "source": "Cells@V8",
+                "object": "doc:R38",
+                "range": [
+                  190,
+                  194
+                ],
+                "occurrences": [
+                  "occ-R38-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R39",
+                "ordinal": 39,
+                "source": "Results@V11",
+                "object": "doc:R39",
+                "range": [
+                  195,
+                  199
+                ],
+                "occurrences": [
+                  "occ-R39-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R40",
+                "ordinal": 40,
+                "source": "Discussion@V6",
+                "object": "doc:R40",
+                "range": [
+                  200,
+                  204
+                ],
+                "occurrences": [
+                  "occ-R40-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R41",
+                "ordinal": 41,
+                "source": "Cells@V8",
+                "object": "doc:R41",
+                "range": [
+                  205,
+                  209
+                ],
+                "occurrences": [
+                  "occ-R41-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R42",
+                "ordinal": 42,
+                "source": "Results@V11",
+                "object": "doc:R42",
+                "range": [
+                  210,
+                  214
+                ],
+                "occurrences": [
+                  "occ-R42-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R43",
+                "ordinal": 43,
+                "source": "Discussion@V6",
+                "object": "doc:R43",
+                "range": [
+                  215,
+                  219
+                ],
+                "occurrences": [
+                  "occ-R43-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R44",
+                "ordinal": 44,
+                "source": "Cells@V8",
+                "object": "doc:R44",
+                "range": [
+                  220,
+                  224
+                ],
+                "occurrences": [
+                  "occ-R44-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R45",
+                "ordinal": 45,
+                "source": "Results@V11",
+                "object": "doc:R45",
+                "range": [
+                  225,
+                  229
+                ],
+                "occurrences": [
+                  "occ-R45-1"
+                ],
+                "group": "right-group-3"
+              },
+              {
+                "id": "R46",
+                "ordinal": 46,
+                "source": "Discussion@V6",
+                "object": "doc:R46",
+                "range": [
+                  230,
+                  234
+                ],
+                "occurrences": [
+                  "occ-R46-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R47",
+                "ordinal": 47,
+                "source": "Cells@V8",
+                "object": "doc:R47",
+                "range": [
+                  235,
+                  239
+                ],
+                "occurrences": [
+                  "occ-R47-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R48",
+                "ordinal": 48,
+                "source": "Results@V11",
+                "object": "doc:R48",
+                "range": [
+                  240,
+                  244
+                ],
+                "occurrences": [
+                  "occ-R48-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R49",
+                "ordinal": 49,
+                "source": "Discussion@V6",
+                "object": "doc:R49",
+                "range": [
+                  245,
+                  249
+                ],
+                "occurrences": [
+                  "occ-R49-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R50",
+                "ordinal": 50,
+                "source": "Cells@V8",
+                "object": "doc:R50",
+                "range": [
+                  250,
+                  254
+                ],
+                "occurrences": [
+                  "occ-R50-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R51",
+                "ordinal": 51,
+                "source": "Results@V11",
+                "object": "doc:R51",
+                "range": [
+                  255,
+                  259
+                ],
+                "occurrences": [
+                  "occ-R51-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R52",
+                "ordinal": 52,
+                "source": "Discussion@V6",
+                "object": "doc:R52",
+                "range": [
+                  260,
+                  264
+                ],
+                "occurrences": [
+                  "occ-R52-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R53",
+                "ordinal": 53,
+                "source": "Cells@V8",
+                "object": "doc:R53",
+                "range": [
+                  265,
+                  269
+                ],
+                "occurrences": [
+                  "occ-R53-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R54",
+                "ordinal": 54,
+                "source": "Results@V11",
+                "object": "doc:R54",
+                "range": [
+                  270,
+                  274
+                ],
+                "occurrences": [
+                  "occ-R54-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R55",
+                "ordinal": 55,
+                "source": "Discussion@V6",
+                "object": "doc:R55",
+                "range": [
+                  275,
+                  279
+                ],
+                "occurrences": [
+                  "occ-R55-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R56",
+                "ordinal": 56,
+                "source": "Cells@V8",
+                "object": "doc:R56",
+                "range": [
+                  280,
+                  284
+                ],
+                "occurrences": [
+                  "occ-R56-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R57",
+                "ordinal": 57,
+                "source": "Results@V11",
+                "object": "doc:R57",
+                "range": [
+                  285,
+                  289
+                ],
+                "occurrences": [
+                  "occ-R57-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R58",
+                "ordinal": 58,
+                "source": "Discussion@V6",
+                "object": "doc:R58",
+                "range": [
+                  290,
+                  294
+                ],
+                "occurrences": [
+                  "occ-R58-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R59",
+                "ordinal": 59,
+                "source": "Cells@V8",
+                "object": "doc:R59",
+                "range": [
+                  295,
+                  299
+                ],
+                "occurrences": [
+                  "occ-R59-1"
+                ],
+                "group": "right-group-4"
+              },
+              {
+                "id": "R60",
+                "ordinal": 60,
+                "source": "Results@V11",
+                "object": "doc:R60",
+                "range": [
+                  300,
+                  304
+                ],
+                "occurrences": [
+                  "occ-R60-1"
+                ],
+                "group": "right-group-4"
+              }
+            ],
+            "selectedLeft": "L21",
+            "selectedOccurrences": [
+              "rig-o1",
+              "rig-o4",
+              "lab-o7",
+              "review-o3",
+              "rig-o8"
+            ],
+            "leftFilter": "",
+            "rightFilter": "",
+            "visibleLeft": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6
+            ],
+            "visibleRight": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6
+            ],
+            "leftOrderBeforeFilter": [
+              "L01",
+              "L02",
+              "L03",
+              "L04",
+              "L05",
+              "L06",
+              "L07",
+              "L08",
+              "L09",
+              "L10",
+              "L11",
+              "L12",
+              "L13",
+              "L14",
+              "L15",
+              "L16",
+              "L17",
+              "L18",
+              "L19",
+              "L20",
+              "L21",
+              "L22",
+              "L23",
+              "L24",
+              "L25",
+              "L26",
+              "L27",
+              "L28",
+              "L29",
+              "L30",
+              "L31",
+              "L32",
+              "L33",
+              "L34",
+              "L35",
+              "L36",
+              "L37",
+              "L38",
+              "L39",
+              "L40"
+            ],
+            "rightOrderBeforeFilter": [
+              "R01",
+              "R02",
+              "R03",
+              "R04",
+              "R05",
+              "R06",
+              "R07",
+              "R08",
+              "R09",
+              "R10",
+              "R11",
+              "R12",
+              "R13",
+              "R14",
+              "R15",
+              "R16",
+              "R17",
+              "R18",
+              "R19",
+              "R20",
+              "R21",
+              "R22",
+              "R23",
+              "R24",
+              "R25",
+              "R26",
+              "R27",
+              "R28",
+              "R29",
+              "R30",
+              "R31",
+              "R32",
+              "R33",
+              "R34",
+              "R35",
+              "R36",
+              "R37",
+              "R38",
+              "R39",
+              "R40",
+              "R41",
+              "R42",
+              "R43",
+              "R44",
+              "R45",
+              "R46",
+              "R47",
+              "R48",
+              "R49",
+              "R50",
+              "R51",
+              "R52",
+              "R53",
+              "R54",
+              "R55",
+              "R56",
+              "R57",
+              "R58",
+              "R59",
+              "R60"
+            ]
+          }
+        },
+        "commit": {
+          "attempt": {
+            "token": "attempt:L7-dense:1",
+            "payloadDigest": "sha256:9b4d-draft-L7"
+          },
+          "status": "created",
+          "receipt": {
+            "id": "receipt:attempt-L7-dense-1",
+            "link": "Link:L19",
+            "childState": "Review@V32"
+          },
+          "forgeEnabled": false,
+          "retryEnabled": false,
+          "statusReceipt": {
+            "attempt": "attempt:L7-dense:1",
+            "result": "Created",
+            "link": "Link:L19",
+            "receipt": "receipt:attempt-L7-dense-1"
+          }
+        },
+        "pouchDrafts": [
+          "draft:L7"
+        ],
+        "densityFixture": {
+          "leftCount": 40,
+          "rightCount": 60,
+          "pairConnectionsRendered": 0
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "Status returns existing receipt; no new destination effect.",
+          "identity": "Link:L19"
+        }
+      ],
+      "action": "Check status → Created, open existing Link L19",
+      "note": "Open existing Link is the only authoring follow-up; Forge again is not shown."
+    }
+  ]
+}

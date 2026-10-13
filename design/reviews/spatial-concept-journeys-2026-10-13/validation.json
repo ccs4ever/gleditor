@@ -1,0 +1,13 @@
+{
+  "coverage": "all 16 journeys / 86 base steps / 37 variants / 144 repeated checks",
+  "runners": 3,
+  "model": "gpt-6-luna",
+  "unique_base_step_pairs": 86,
+  "unique_cross_check_pairs": 144,
+  "spec_unchanged": true,
+  "frozen_image_hashes_unchanged": 31,
+  "report_links_exist": true,
+  "markdown_format": "mdformat with gfm/dollarmath/frontmatter, wrap100: passed",
+  "markdown_lint": "markdownlint-cli2 with repository-compatible rules: passed",
+  "actual_input_network_storage_or_performance_validation": false
+}

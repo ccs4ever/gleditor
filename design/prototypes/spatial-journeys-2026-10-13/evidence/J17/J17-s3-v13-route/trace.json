@@ -1,0 +1,283 @@
+{
+  "journey": "J17",
+  "route": "J17-s3-v13-route",
+  "frames": [
+    {
+      "file": "J17/J17-s3-v13-route/before.png",
+      "location": "?journey=J17&variant=J17-s3-v13-route",
+      "frame": "J17-J17-s3-v13-route-s3-before",
+      "state": {
+        "fixture": "pub-acquisition-v12",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "pub:spatial-notebooks-01",
+          "state": "V12",
+          "locator": "pub:spatial-notebooks-01@V12"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "remote://pub:spatial-notebooks": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Reading place",
+            "kind": "document",
+            "body": [
+              "Current visit 01 · Lab notes · V12.",
+              "The starting caret and occurrence remain pinned while tools open."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Offset",
+                "value": "p.14 · 54.2"
+              },
+              {
+                "label": "Occurrence",
+                "value": "Lab:p14:r54.2"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "choice",
+            "title": "Keep pinned request",
+            "kind": "inspector",
+            "body": [
+              "Continue req-v12-0001 against manifest mf-v12-7b31."
+            ],
+            "facts": [
+              {
+                "label": "Active request",
+                "value": "req-v12-0001"
+              },
+              {
+                "label": "Edition",
+                "value": "V12"
+              },
+              {
+                "label": "Pointer",
+                "value": "V13"
+              },
+              {
+                "label": "Second request",
+                "value": "none"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "publication": {
+          "publisherKey": "pubkey:7a91c4e2…c42e",
+          "publicationId": "pub:spatial-notebooks-01",
+          "manifestId": "mf-v12-7b31",
+          "pinnedEdition": "V12",
+          "pointer": "V13",
+          "requestId": "req-v12-0001",
+          "verifiedPieces": 0,
+          "totalPieces": 96,
+          "storeValidation": "not-started",
+          "authorFollowed": true,
+          "linkPackagesEnabled": [],
+          "cache": [],
+          "inspection": "verification-boundaries",
+          "requestedEdition": "V12",
+          "requestedManifest": "mf-v12-7b31",
+          "choice": "keep-v12"
+        },
+        "discovery": {
+          "scope": "publication-uri",
+          "uri": "xanadu://pub/7a91c4e2/spatial-notebooks"
+        }
+      },
+      "effects": [],
+      "action": "Before",
+      "note": ""
+    },
+    {
+      "file": "J17/J17-s3-v13-route/J17-s3-v13.png",
+      "location": "?journey=J17&variant=J17-s3-v13-route&task=0&action=1",
+      "frame": "J17-s3-v13",
+      "state": {
+        "fixture": "pub-acquisition-v12",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "pub:spatial-notebooks-01",
+          "state": "V12",
+          "locator": "pub:spatial-notebooks-01@V12"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "remote://pub:spatial-notebooks": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Reading place",
+            "kind": "document",
+            "body": [
+              "Current visit 01 · Lab notes · V12.",
+              "The starting caret and occurrence remain pinned while tools open."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Offset",
+                "value": "p.14 · 54.2"
+              },
+              {
+                "label": "Occurrence",
+                "value": "Lab:p14:r54.2"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "two-requests",
+            "title": "Separate edition requests",
+            "kind": "list",
+            "body": [
+              "V12 and V13 are separate immutable requests."
+            ],
+            "facts": [
+              {
+                "label": "Request 1",
+                "value": "req-v12-0001 · V12 · mf-v12-7b31"
+              },
+              {
+                "label": "Request 2",
+                "value": "req-v13-0002 · V13 · mf-v13-94d0"
+              },
+              {
+                "label": "Pointer",
+                "value": "V13"
+              }
+            ],
+            "rows": [
+              {
+                "id": "r12",
+                "label": "V12",
+                "detail": "req-v12-0001 · mf-v12-7b31",
+                "status": "pending",
+                "ordinal": 1
+              },
+              {
+                "id": "r13",
+                "label": "V13",
+                "detail": "req-v13-0002 · mf-v13-94d0",
+                "status": "pending",
+                "ordinal": 2
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "publication": {
+          "publisherKey": "pubkey:7a91c4e2…c42e",
+          "publicationId": "pub:spatial-notebooks-01",
+          "manifestId": "mf-v12-7b31",
+          "pinnedEdition": "V12",
+          "pointer": "V13",
+          "requestId": "req-v12-0001",
+          "verifiedPieces": 0,
+          "totalPieces": 96,
+          "storeValidation": "not-started",
+          "authorFollowed": true,
+          "linkPackagesEnabled": [],
+          "cache": [],
+          "inspection": "verification-boundaries",
+          "requestedEdition": "V12",
+          "requestedManifest": "mf-v12-7b31",
+          "choice": "keep-v12",
+          "secondRequestId": "req-v13-0002",
+          "secondRequestedEdition": "V13"
+        },
+        "discovery": {
+          "scope": "publication-uri",
+          "uri": "xanadu://pub/7a91c4e2/spatial-notebooks"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No stored effect.",
+          "identity": ""
+        }
+      ],
+      "action": "Request V13 separately",
+      "note": "Creates a separate request only; does not replace V12."
+    }
+  ]
+}

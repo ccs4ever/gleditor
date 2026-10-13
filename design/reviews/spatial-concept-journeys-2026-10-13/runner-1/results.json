@@ -1,0 +1,1299 @@
+{
+  "runner": "runner-1",
+  "model": "GPT-6 Luna",
+  "mode": "AI expert visual support assessment; static concepts only",
+  "journeys": [
+    {
+      "id": "J17",
+      "title": "Discover and acquire an exact remote edition"
+    },
+    {
+      "id": "J18",
+      "title": "Find one term across media and store origins"
+    },
+    {
+      "id": "J19",
+      "title": "Filter a running query without losing the selected result"
+    },
+    {
+      "id": "J20",
+      "title": "Search historical occurrences with visible matching rules"
+    },
+    {
+      "id": "J21",
+      "title": "Compare pinned states at text and topology changes"
+    }
+  ],
+  "inspected_assets": [
+    {
+      "path": "design/mockups/store-telescope-2026-10-13/01-discovery.png",
+      "sha256": "3e068baaa5ce0a11a19bbe32daeb5251bde86589dd939cae6d5f4aa1585a8944",
+      "role": "final visual concept inspected at original resolution"
+    },
+    {
+      "path": "design/mockups/store-telescope-2026-10-13/02-acquisition.png",
+      "sha256": "9b78ef82d3a1b32692f868186d0d2047d6d11a991a8a7cef20d532eaafc0448b",
+      "role": "final visual concept inspected at original resolution"
+    },
+    {
+      "path": "design/mockups/omni-search-2026-10-13/01-omni-search.png",
+      "sha256": "446bf3502cec8b347fabb711c496ee9a9051cbf0fece2f1e4339e40ee19e63f6",
+      "role": "final visual concept inspected at original resolution"
+    },
+    {
+      "path": "design/mockups/hypertime-loom-journeys-2026-10-12/03-content-search-v2.png",
+      "sha256": "ea23a815700d22ae6e132e2f27cfc25f9813cdbdf7b85c5295353b1f3aa21876",
+      "role": "final visual concept inspected at original resolution"
+    },
+    {
+      "path": "design/mockups/spatial-elements-2026-10-13/02-comparison-prism.png",
+      "sha256": "0628382472678ea22dd487bc07e1ab05509372c39abfceb3c48815cd37244d53",
+      "role": "final visual concept inspected at original resolution"
+    },
+    {
+      "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+      "sha256": "c30c4c4837322f5a8ed1a86944e6ce59cbec6f97d8b3344db7fdb0265607a11a",
+      "role": "final integrated investigation state inspected to evaluate J20/3"
+    }
+  ],
+  "steps": [
+    {
+      "journey": "J17",
+      "step": 1,
+      "outcome": "Concept supported",
+      "affordance": "Topic #hypermedia; followed-author list; publication URI/search field; select card; Return to workspace",
+      "prediction": "Expect a scoped publication result to be inspectable while Lab notes V12 remains the reading place.",
+      "observed": "Topic, followed-author scope, URI/search field, six visible publication cards, selected Spatial notebooks inspector, and a retained Lab notes V12 card are shown.",
+      "missing": "No transition trace establishes what selection does; result itself and retained reading-place label are visually represented.",
+      "represented_observations": "The exact task subparts of selecting a visible candidate, inspecting it, and seeing the named reading-place card are represented; no user behavior is observed.",
+      "evidence": [
+        {
+          "path": "design/mockups/store-telescope-2026-10-13/01-discovery.png",
+          "region": "left Topics and Followed authors; top URI/search field; center publication cards; lower-left Reading place retained"
+        }
+      ]
+    },
+    {
+      "journey": "J17",
+      "step": 2,
+      "outcome": "Concept supported",
+      "affordance": "Read the Spatial notebooks inspector and provenance wing",
+      "prediction": "Expect identity and verification dimensions to be stated separately.",
+      "observed": "Publisher key 7a91…c42e, edition V12 pinned, valid catalog signature, author identity not independently verified, payload integrity not checked, and availability not checked are separately labelled.",
+      "missing": "Full publisher key expansion and any cryptographic validation are not shown; claims remain labels in a concept image.",
+      "represented_observations": "The distinctions and unknown statuses can be read in the inspector.",
+      "evidence": [
+        {
+          "path": "design/mockups/store-telescope-2026-10-13/01-discovery.png",
+          "region": "right inspector status rows from Publisher key through Availability; narrow Publication identity wing"
+        }
+      ]
+    },
+    {
+      "journey": "J17",
+      "step": 3,
+      "outcome": "Not represented",
+      "affordance": "Download pinned edition visible in start frame; later choose keep request or Download another edition",
+      "prediction": "Expect pending V12 identity to remain pinned after the publisher pointer advances, with V13 as a distinct optional request.",
+      "observed": "No pointer-advance state or choice dialog/card is shown. The acquisition image says a newer edition never replaces this request and offers Download another edition only in Ready V12.",
+      "missing": "No publisher pointer state, pending V13 request, or scripted selection outcome.",
+      "represented_observations": "The interface labels suggest request identity retention and a separate download action, but neither required transition is pictured.",
+      "evidence": [
+        {
+          "path": "design/mockups/store-telescope-2026-10-13/01-discovery.png",
+          "region": "discovery: right inspector Download pinned edition button"
+        },
+        {
+          "path": "design/mockups/store-telescope-2026-10-13/02-acquisition.png",
+          "region": "right Ready V12 panel footer Download another edition and caption"
+        }
+      ]
+    },
+    {
+      "journey": "J17",
+      "step": 4,
+      "outcome": "Not represented",
+      "affordance": "Retry transfer and Cancel download in interrupted panel",
+      "prediction": "Expect interrupted 68/96 request to retain progress; separately reject invalid payload and unavailable peers before Open.",
+      "observed": "68 of 96 verified, store validation pending, progress retained, Retry and Cancel are visible; Open is dimmed. There is no invalid-payload or unavailable-peer panel.",
+      "missing": "Invalid and unavailable variants, their statuses, and completed validation after retry are absent.",
+      "represented_observations": "Interrupted retry/cancel and disabled open gate are represented; the full base step needs additional states.",
+      "evidence": [
+        {
+          "path": "design/mockups/store-telescope-2026-10-13/02-acquisition.png",
+          "region": "left Acquire and verify panel: Content pieces, validation, 68/96 bar, interrupted message, Retry/Cancel/Open controls"
+        }
+      ]
+    },
+    {
+      "journey": "J17",
+      "step": 5,
+      "outcome": "Not represented",
+      "affordance": "Open pinned edition button in Ready panel; Save reference, Follow author and third-party layer status labels",
+      "prediction": "Expect explicit open to change reading place, followed by offline reopen of cached V12; follow/layer choices remain independent.",
+      "observed": "Ready panel says 96/96 verified, validation complete and Ready offline V12; Open pinned edition is visible, author identity remains unverified, follow is a separate control, and no third-party layers are enabled.",
+      "missing": "No resulting reading-place state or offline reopen card; controls are shown but no effects are.",
+      "represented_observations": "Readiness/offline availability and separate follow/layer labels are represented; open and reopen transitions are not.",
+      "evidence": [
+        {
+          "path": "design/mockups/store-telescope-2026-10-13/02-acquisition.png",
+          "region": "right Ready to open panel: top identity/status rows; Open pinned edition; Save reference/Follow author; no-third-party-layers note"
+        }
+      ]
+    },
+    {
+      "journey": "J18",
+      "step": 1,
+      "outcome": "Concept supported",
+      "affordance": "Query field pressure; All media, Local + remote, All reachable versions; result cards",
+      "prediction": "Expect one search surface to show the five distinct match surfaces across an eight-store scope.",
+      "observed": "Query pressure and global controls are visible; cards show native document text, historical cell text, image OCR, audio transcript and video title-only (not held). Coverage shows local 3/3, remote 2/5 and 3 pending.",
+      "missing": "Eight-store selection details and fully completed results are not shown; counts remain found-so-far.",
+      "represented_observations": "The representative five media/evidence classes are visible together without switching tools.",
+      "evidence": [
+        {
+          "path": "design/mockups/omni-search-2026-10-13/01-omni-search.png",
+          "region": "top query/scope controls; central six result cards; bottom coverage ribbon"
+        }
+      ]
+    },
+    {
+      "journey": "J18",
+      "step": 2,
+      "outcome": "Not represented",
+      "affordance": "Select each card and inspect its provenance/status",
+      "prediction": "Expect media, source store, exact version, matching field and held state, with remote origin retained on cached content.",
+      "observed": "Some versions, evidence types and remote cached/not-held badges are visible; C17 inspector states local V8. No originating store identity is displayed for each result.",
+      "missing": "Per-result source-store identity and explicit remote-origin descriptor for cached results are missing.",
+      "represented_observations": "Media/evidence and some versions/statuses are represented, but not enough to complete the identification task.",
+      "evidence": [
+        {
+          "path": "design/mockups/omni-search-2026-10-13/01-omni-search.png",
+          "region": "result badges on Calibration plate, Debrief, Pressure rig test; right C17 inspector"
+        }
+      ]
+    },
+    {
+      "journey": "J18",
+      "step": 3,
+      "outcome": "Not represented",
+      "affordance": "Inspect OCR image and transcript card",
+      "prediction": "Expect exact OCR word region and transcript start/end locator, with derived text separated from authored content and media bytes.",
+      "observed": "Image card shows OCR label and pressure highlight; audio shows a waveform, 02:14 time and transcript snippet.",
+      "missing": "Image locator coordinates, transcript end time, provenance distinctions from authored spans/media bytes are absent.",
+      "represented_observations": "OCR and transcript as matching fields are visible, but exact locator and type distinctions are not.",
+      "evidence": [
+        {
+          "path": "design/mockups/omni-search-2026-10-13/01-omni-search.png",
+          "region": "middle-left Calibration plate OCR card; middle-right Debrief transcript card"
+        }
+      ]
+    },
+    {
+      "journey": "J18",
+      "step": 4,
+      "outcome": "Not represented",
+      "affordance": "Download V9 action on title-only card, or leave it untouched",
+      "prediction": "Expect an explicit acquisition choice while metadata-only status remains and no payload preview is implied.",
+      "observed": "Card shows Remote · not held, Title match, Content not searched, Preview not held, and Download V9.",
+      "missing": "No choice result state; “pinned edition” identity and post-acquisition state are not shown.",
+      "represented_observations": "The not-held metadata-only status and explicit download affordance are represented.",
+      "evidence": [
+        {
+          "path": "design/mockups/omni-search-2026-10-13/01-omni-search.png",
+          "region": "lower-left Pressure rig test V9 card and Download V9 action"
+        }
+      ]
+    },
+    {
+      "journey": "J18",
+      "step": 5,
+      "outcome": "Not represented",
+      "affordance": "Enter V8 on C17 inspector; Return at top; inspect source distinctions",
+      "prediction": "Expect explicit entry then return to original reading position, and separate identities for equal-text sources versus shared-source occurrence.",
+      "observed": "C17 V8 has an Enter V8 action; global Return is present; inspector says inspecting keeps reading place.",
+      "missing": "No entered/returned state, original-position confirmation, independent equal-text examples, or true shared-source occurrence identity.",
+      "represented_observations": "The enter/return controls and read-place promise are visible, but required result and source comparison evidence are absent.",
+      "evidence": [
+        {
+          "path": "design/mockups/omni-search-2026-10-13/01-omni-search.png",
+          "region": "right C17 inspector, Enter V8 / Compare states / Save reference; top-right Return"
+        }
+      ]
+    },
+    {
+      "journey": "J19",
+      "step": 1,
+      "outcome": "Not represented",
+      "affordance": "Media and Match in checkboxes; Local + remote/Cached only; version scope controls",
+      "prediction": "Expect filters to narrow and restore result membership while keeping selected C17 V8 pinned.",
+      "observed": "Checkboxes for Text, Cells, Images, Audio, Video and Native text/OCR/Transcripts/Metadata; Local + remote and Cached only; All reachable versions and Current only are visible.",
+      "missing": "No filtered outcomes, selected-record persistence, or subset-of-stores choice/result is pictured.",
+      "represented_observations": "Filter controls and selected C17 V8 inspector exist in one frame.",
+      "evidence": [
+        {
+          "path": "design/mockups/omni-search-2026-10-13/01-omni-search.png",
+          "region": "left filter panel; selected C17 V8 card and right inspector"
+        }
+      ]
+    },
+    {
+      "journey": "J19",
+      "step": 2,
+      "outcome": "Not represented",
+      "affordance": "Group: subject dropdown; List view; filter checkboxes",
+      "prediction": "Expect group/sort changes to retain selected occurrence and inspector after exclusion, with a clear/restore choice.",
+      "observed": "Grouping and List view controls are visible; C17 is selected and inspector remains present.",
+      "missing": "No sort control/outcome, excluded-from-results status, retained selection after filtering, or recovery choice.",
+      "represented_observations": "Grouping/list affordances and a selected record are visible.",
+      "evidence": [
+        {
+          "path": "design/mockups/omni-search-2026-10-13/01-omni-search.png",
+          "region": "top-center Matches controls; highlighted C17 card; right inspector"
+        }
+      ]
+    },
+    {
+      "journey": "J19",
+      "step": 3,
+      "outcome": "State undefined",
+      "affordance": "No visible async request identity control",
+      "prediction": "Expect current counts to remain tied to active request and stale response to be identified as superseded.",
+      "observed": "A found-so-far count and pending coverage are shown; no request IDs, superseded response or update ordering status.",
+      "missing": "No concurrency policy/state.",
+      "represented_observations": "Pending work is indicated, but its relationship to changing requests is undefined.",
+      "evidence": [
+        {
+          "path": "design/mockups/omni-search-2026-10-13/01-omni-search.png",
+          "region": "Matches found so far and bottom coverage ribbon"
+        }
+      ]
+    },
+    {
+      "journey": "J19",
+      "step": 4,
+      "outcome": "Not represented",
+      "affordance": "Cancel search and Coverage details",
+      "prediction": "Expect coverage by store/media/branch, unsupported OCR, cancellation retaining results, and explicit rerun.",
+      "observed": "Coverage summary and Cancel search/Coverage details controls are visible.",
+      "missing": "Coverage detail state, unsupported OCR surface, retained-after-cancel state and rerun control absent.",
+      "represented_observations": "Partial coverage and cancel affordance are represented only at summary level.",
+      "evidence": [
+        {
+          "path": "design/mockups/omni-search-2026-10-13/01-omni-search.png",
+          "region": "bottom ribbon"
+        }
+      ]
+    },
+    {
+      "journey": "J19",
+      "step": 5,
+      "outcome": "Not represented",
+      "affordance": "Save search button",
+      "prediction": "Expect distinct completed-empty and incomplete-zero states; recipe saved apart from result snapshot and later rerun.",
+      "observed": "Save search button appears; current example has 24 found so far and pending sources.",
+      "missing": "Neither empty state, separate snapshot object, nor rerun/new-match state is shown.",
+      "represented_observations": "Recipe save affordance is visible.",
+      "evidence": [
+        {
+          "path": "design/mockups/omni-search-2026-10-13/01-omni-search.png",
+          "region": "top-right Save search; bottom coverage"
+        }
+      ]
+    },
+    {
+      "journey": "J20",
+      "step": 1,
+      "outcome": "Concept supported",
+      "affordance": "Search field; Text/whole-token; Store · all branches · current + historical scope",
+      "prediction": "Expect literal 3.14 search to show math prose and a pressure cell over history/branches.",
+      "observed": "Math notes prose, Gauge G7 cell, and a historical Math notes V8 card are all visible in the results tray. The tray label says “2 shown of 3,” creating ambiguity about whether the historical card is a result or context. Scope says all branches/current+historical; coverage is 8/10 paths examined with 2 pending.",
+      "missing": "The count label conflicts with the three visible result-like cards; full branch coverage is not established.",
+      "represented_observations": "The requested text/cell match types and a historical occurrence are pictured, but the number of displayed matches is ambiguous.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/03-content-search-v2.png",
+          "region": "header query/rule/scope; left Math notes and right Gauge G7 cards; lower results and 8/10 coverage"
+        }
+      ]
+    },
+    {
+      "journey": "J20",
+      "step": 2,
+      "outcome": "State undefined",
+      "affordance": "Text, Whole token, Number and Related ideas controls",
+      "prediction": "Expect literal versus token distinctions, explicit normalization/unit rules before numeric mode, and explicit related expansion with pi not equal.",
+      "observed": "Text active and Whole token checked; Number and Related ideas buttons visible; Related ideas box says explicit expansion required and offers pi/π.",
+      "missing": "Numeric normalization, unit semantics, 3.14159/3.140 behavior and explanation of non-equality for related ideas are not shown.",
+      "represented_observations": "Mode controls and explicit-expansion wording are represented; matching policy remains undefined.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/03-content-search-v2.png",
+          "region": "top rule controls; lower-right Related ideas inactive box"
+        }
+      ]
+    },
+    {
+      "journey": "J20",
+      "step": 3,
+      "outcome": "Not represented",
+      "affordance": "Replace query with pressure; choose literal and case folding; inspect V8 while keeping V12 separate",
+      "prediction": "Expect historical C17 V8 hit while integrated V12 lacks pressure, without replacing historical reference.",
+      "observed": "The expanded investigation frame shows the resulting integrated state: query pressure with Literal · case folded, C17 V8 selected with pressure: 3.14 bar / Historical match, and C17 V12 pinned with 3.16 bar / No pressure match. This is the integrated word-removal fixture, distinct from the independent two-state comparison prism.",
+      "missing": "The frame does not show the explicit query-switch sequence from 3.14 to literal pressure with case folding, or a transition proving that the historical reference was retained through the change.",
+      "represented_observations": "The exact integrated C17 V8/V12 identities and match/no-match states are visible together, with V8 selected and V12 pinned.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/03-content-search-v2.png",
+          "region": "bottom historical result Math notes · V8 / Present at V8 · absent now; top query controls"
+        },
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "top query header shows pressure / Literal · case folded; lower-left Inspect C17 shows V8 selected, pressure: 3.14 bar, Historical match and V12 pinned, 3.16 bar, No pressure match"
+        }
+      ]
+    },
+    {
+      "journey": "J20",
+      "step": 4,
+      "outcome": "Not represented",
+      "affordance": "Expand a compacted state run and repeated occurrence",
+      "prediction": "Expect occurrence, state and affecting-operation counts to remain distinct, including equal-text independent sources.",
+      "observed": "Image labels branch exits B01–B10 and note “Same text · independent sources.”",
+      "missing": "No compacted state-run expansion, repeat-occurrence details, or separate state/op counts.",
+      "represented_observations": "Distinct branch labels and independent-source caution are visible.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/03-content-search-v2.png",
+          "region": "central loom branch labels; lower-left Same text · independent sources"
+        }
+      ]
+    },
+    {
+      "journey": "J20",
+      "step": 5,
+      "outcome": "Not represented",
+      "affordance": "Inspect coverage; save query recipe separately from optional result capture",
+      "prediction": "Expect partial, missing-state and completed-empty branch cards, plus distinct recipe/result objects.",
+      "observed": "Coverage says 8/10 paths examined · 2 pending; Cancel search is visible.",
+      "missing": "Missing historical state, completed branch with no matches, Save recipe and optional captured-results separation are absent.",
+      "represented_observations": "Partial coverage and cancel are visible.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/03-content-search-v2.png",
+          "region": "bottom coverage and Cancel search"
+        }
+      ]
+    },
+    {
+      "journey": "J21",
+      "step": 1,
+      "outcome": "Not represented",
+      "affordance": "Read both pinned face descriptors and selected-difference inspector",
+      "prediction": "Expect same C17 identity at Store A / Run B V8 and V12, pressure prefix shared, values changed, while retaining integrated fixture distinction.",
+      "observed": "Left/right explicitly show Store A, Run B, C17, V8/V12 pinned. Center says same cell C17, value 3.14→3.16 bar, changed value source spans differ. Gold ports connect only pressure:; subtitle calls it Independent comparison fixture.",
+      "missing": "Independent equal-text passages must be distinguished as separate sources, and no such examples are shown; this required subtask is absent even though the two-state shared-prefix comparison itself is clear.",
+      "represented_observations": "Two-state shared-prefix prism is clearly separated from the integrated word-removal fixture; exact identities and changed/shared distinction read visibly.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/02-comparison-prism.png",
+          "region": "top both state headers; central Selected difference; gold Shared original span; footer Independent comparison fixture"
+        }
+      ]
+    },
+    {
+      "journey": "J21",
+      "step": 2,
+      "outcome": "Not represented",
+      "affordance": "Select earlier state and both branch-tip state cards",
+      "prediction": "Expect explicit three-state ancestry view with LCA relationship grounded in parent links.",
+      "observed": "Only V8 and V12 faces are present; no branch ancestry cards or LCA.",
+      "missing": "Required third state and ancestry evidence absent.",
+      "represented_observations": "Pinned two-state comparison is present.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/02-comparison-prism.png",
+          "region": "entire two-face comparison; no three-state selector shown"
+        }
+      ]
+    },
+    {
+      "journey": "J21",
+      "step": 3,
+      "outcome": "Not represented",
+      "affordance": "Select text/value and topology changes; focus each site in context",
+      "prediction": "Expect typed values/units, cell membership and reciprocal dimension changes with page/rank neighborhood context.",
+      "observed": "One value difference 3.14→3.16 bar and shared cell identity are shown.",
+      "missing": "Cell membership, dimension connection changes and neighborhood focus are absent.",
+      "represented_observations": "A typed changed value and same cell identity are clearly shown.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/02-comparison-prism.png",
+          "region": "central difference card and two C17 tables"
+        }
+      ]
+    },
+    {
+      "journey": "J21",
+      "step": 4,
+      "outcome": "Not represented",
+      "affordance": "Swap sides or choose difference; inspect unavailable region",
+      "prediction": "Expect side swap without changing pinned states and unavailable target descriptor retained.",
+      "observed": "Swap sides, List view and Differences · 1 shown are visible. No unavailable region state.",
+      "missing": "No retained descriptor for unavailable region or evidence that swap preserves pin identities.",
+      "represented_observations": "Swap sides is a discoverable action; required resulting states absent.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/02-comparison-prism.png",
+          "region": "top Swap sides and Differences · 1 shown controls"
+        }
+      ]
+    },
+    {
+      "journey": "J21",
+      "step": 5,
+      "outcome": "Not represented",
+      "affordance": "Enter one occurrence, return, save comparison, reopen; invoke Recover passage separately",
+      "prediction": "Expect explicit entry and return, saved comparison descriptor restored, separate uncommitted authoring preview for recovery.",
+      "observed": "Enter V8/V12, Reading place retained, Save comparison, and Recover passage… Opens an authoring preview are visible; footer says inspection changes neither source.",
+      "missing": "No entered/returned result or reopen card; authoring preview contents and its non-commit state are not pictured.",
+      "represented_observations": "Entry, save, retained reading-place label and separation from source editing are represented.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/02-comparison-prism.png",
+          "region": "bottom Reading place retained, Save comparison, Recover passage panel; Enter V8/V12 buttons"
+        }
+      ]
+    }
+  ],
+  "variants": [
+    {
+      "journey": "J17",
+      "step": 3,
+      "variant": "Publisher pointer advances to V13 while V12 is pending",
+      "outcome": "Not represented",
+      "affordance": "Ready V12 card later offers Download another edition, but no pointer-advance state.",
+      "prediction": "V12 remains pinned; V13 can only be requested separately.",
+      "observed": "Caption states a newer edition never replaces this request; no V13 card or state change.",
+      "missing": "No pointer update, separate request record or result state.",
+      "evidence": [
+        {
+          "path": "design/mockups/store-telescope-2026-10-13/02-acquisition.png",
+          "region": "right Ready V12 panel footer"
+        }
+      ]
+    },
+    {
+      "journey": "J17",
+      "step": 5,
+      "variant": "Offline reopen, author follow, third-party package activation",
+      "outcome": "Not represented",
+      "affordance": "Ready offline label and independent Follow author control; layer note says none enabled.",
+      "prediction": "Reopen cached V12 without silently following author or enabling layers.",
+      "observed": "Controls/statuses appear on ready card; no reopen result.",
+      "missing": "Offline reopen transition and before/after preference ledger.",
+      "evidence": [
+        {
+          "path": "design/mockups/store-telescope-2026-10-13/02-acquisition.png",
+          "region": "right ready card status and lower controls"
+        }
+      ]
+    },
+    {
+      "journey": "J18",
+      "step": 4,
+      "variant": "Not-held video with title metadata only",
+      "outcome": "Concept supported",
+      "affordance": "Download V9 button on result card.",
+      "prediction": "Metadata match does not produce a frame/transcript unless separately acquired.",
+      "observed": "Card says Remote · not held, Title match, Content not searched, Preview not held; action Download V9.",
+      "missing": "No acquisition result.",
+      "evidence": [
+        {
+          "path": "design/mockups/omni-search-2026-10-13/01-omni-search.png",
+          "region": "lower-left Pressure rig test V9 card"
+        }
+      ]
+    },
+    {
+      "journey": "J19",
+      "step": 3,
+      "variant": "Superseded query response arrives late",
+      "outcome": "State undefined",
+      "affordance": "No request identity/status affordance.",
+      "prediction": "A late response should not silently replace current query results.",
+      "observed": "No asynchronous update state in image.",
+      "missing": "Stale-response policy and request identity display.",
+      "evidence": [
+        {
+          "path": "design/mockups/omni-search-2026-10-13/01-omni-search.png",
+          "region": "no stale-response state depicted"
+        }
+      ]
+    },
+    {
+      "journey": "J20",
+      "step": 2,
+      "variant": "Related ideas proposes pi/π for 3.14",
+      "outcome": "Not represented",
+      "affordance": "Related ideas toggle and pi/π suggestions; text says explicit expansion required.",
+      "prediction": "Related suggestions are distinct from exact numeric equality.",
+      "observed": "Explicit expansion required is stated, but no equivalence explanation.",
+      "missing": "Visible policy explicitly saying pi is not exactly equal.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/03-content-search-v2.png",
+          "region": "top Related ideas control and bottom-right suggestion box"
+        }
+      ]
+    },
+    {
+      "journey": "J21",
+      "step": 1,
+      "variant": "Shared-prefix prism versus integrated pressure-word removal",
+      "outcome": "Concept supported",
+      "affordance": "Read fixture subtitle and source/value legend.",
+      "prediction": "Pressure prefix shared across both prism states, unlike integrated C17 V12 where pressure is absent.",
+      "observed": "Prism gold ports connect pressure: boxes only; values differ; subtitle Independent comparison fixture.",
+      "missing": "Nothing for the fixture distinction in this frame; no integrated comparison state is pictured.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/02-comparison-prism.png",
+          "region": "gold Shared original span line and Independent comparison fixture footer"
+        }
+      ]
+    },
+    {
+      "journey": "J17",
+      "step": 4,
+      "variant": "Invalid payload",
+      "outcome": "Not represented",
+      "affordance": "No variant control/card shown.",
+      "prediction": "This state is distinguishable from interrupted transfer and blocks opening until policy-defined recovery or validation.",
+      "observed": "The image shows interrupted 68/96 and ready 96/96 panels only.",
+      "missing": "Invalid payload state, status label, recovery path and opening gate are not pictured.",
+      "evidence": [
+        {
+          "path": "design/mockups/store-telescope-2026-10-13/02-acquisition.png",
+          "region": "left Acquire and verify panel compared with right Ready to open panel"
+        }
+      ]
+    },
+    {
+      "journey": "J17",
+      "step": 4,
+      "variant": "Unavailable peers",
+      "outcome": "Not represented",
+      "affordance": "No variant control/card shown.",
+      "prediction": "This state is distinguishable from interrupted transfer and blocks opening until policy-defined recovery or validation.",
+      "observed": "The image shows interrupted 68/96 and ready 96/96 panels only.",
+      "missing": "Unavailable peers state, status label, recovery path and opening gate are not pictured.",
+      "evidence": [
+        {
+          "path": "design/mockups/store-telescope-2026-10-13/02-acquisition.png",
+          "region": "left Acquire and verify panel compared with right Ready to open panel"
+        }
+      ]
+    },
+    {
+      "journey": "J17",
+      "step": 4,
+      "variant": "Acquisition heading versus interruption status",
+      "outcome": "Confusing",
+      "affordance": "Read the left panel heading and transfer status.",
+      "prediction": "Both labels should describe the same request state.",
+      "observed": "Heading says “The edition is being transferred and verified” while the status says “Transfer interrupted · progress retained.”",
+      "missing": "The card does not reconcile whether transfer is active or interrupted.",
+      "evidence": [
+        {
+          "path": "design/mockups/store-telescope-2026-10-13/02-acquisition.png",
+          "region": "upper-left subtitle and left panel status below 68/96 progress"
+        }
+      ]
+    },
+    {
+      "journey": "J20",
+      "step": 1,
+      "variant": "Historical result card versus “2 shown of 3” count",
+      "outcome": "Confusing",
+      "affordance": "Read the Search results header and visible lower tray cards.",
+      "prediction": "The displayed count should match the result cards or identify a separate contextual card.",
+      "observed": "The header reads “2 shown of 3,” while three result-like cards are visible: Math notes / Draft A, Gauge G7 / Run B and Historical Math notes · V8.",
+      "missing": "No label marks the historical card as context rather than a result.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/03-content-search-v2.png",
+          "region": "lower Search results tray header and three adjacent cards"
+        }
+      ]
+    }
+  ],
+  "cross_checks": [
+    {
+      "journey": "J17",
+      "check": "Pointer and discoverability",
+      "outcome": "Concept supported",
+      "observation": "Visible controls provide plausible pointer entry points for the pictured subtask; no pointer input was delivered and undisplayed steps remain uncovered.",
+      "evidence": [
+        {
+          "path": "design/mockups/store-telescope-2026-10-13/01-discovery.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J17",
+      "check": "List and keyboard",
+      "outcome": "Not represented",
+      "observation": "The static desktop concept does not show this repeat path or resulting state; keyboard/accessibility delivery, responsive density, enlarged text, reduced motion and persistence cannot be inferred.",
+      "evidence": [
+        {
+          "path": "design/mockups/store-telescope-2026-10-13/01-discovery.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J17",
+      "check": "Accessibility",
+      "outcome": "Not represented",
+      "observation": "The static desktop concept does not show this repeat path or resulting state; keyboard/accessibility delivery, responsive density, enlarged text, reduced motion and persistence cannot be inferred.",
+      "evidence": [
+        {
+          "path": "design/mockups/store-telescope-2026-10-13/01-discovery.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J17",
+      "check": "Density and narrow views",
+      "outcome": "Not represented",
+      "observation": "The static desktop concept does not show this repeat path or resulting state; keyboard/accessibility delivery, responsive density, enlarged text, reduced motion and persistence cannot be inferred.",
+      "evidence": [
+        {
+          "path": "design/mockups/store-telescope-2026-10-13/01-discovery.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J17",
+      "check": "Enlarged text and optics",
+      "outcome": "Not represented",
+      "observation": "The static desktop concept does not show this repeat path or resulting state; keyboard/accessibility delivery, responsive density, enlarged text, reduced motion and persistence cannot be inferred.",
+      "evidence": [
+        {
+          "path": "design/mockups/store-telescope-2026-10-13/01-discovery.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J17",
+      "check": "Reduced motion",
+      "outcome": "Not represented",
+      "observation": "The static desktop concept does not show this repeat path or resulting state; keyboard/accessibility delivery, responsive density, enlarged text, reduced motion and persistence cannot be inferred.",
+      "evidence": [
+        {
+          "path": "design/mockups/store-telescope-2026-10-13/01-discovery.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J17",
+      "check": "Lifecycle and unavailable states",
+      "outcome": "Concept supported",
+      "observation": "J17 shows interrupted 68/96 transfer and a separate ready-offline panel, but invalid payload, unavailable peers, pointer advancement and offline reopen are absent.",
+      "evidence": [
+        {
+          "path": "design/mockups/store-telescope-2026-10-13/01-discovery.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J17",
+      "check": "Storage boundaries",
+      "outcome": "Not represented",
+      "observation": "The static desktop concept does not show this repeat path or resulting state; keyboard/accessibility delivery, responsive density, enlarged text, reduced motion and persistence cannot be inferred.",
+      "evidence": [
+        {
+          "path": "design/mockups/store-telescope-2026-10-13/01-discovery.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J17",
+      "check": "Relation language",
+      "outcome": "Not represented",
+      "observation": "Assigned frame does not test the relevant distinction sufficiently; no relation transition was observed.",
+      "evidence": [
+        {
+          "path": "design/mockups/store-telescope-2026-10-13/01-discovery.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J18",
+      "check": "Pointer and discoverability",
+      "outcome": "Concept supported",
+      "observation": "Visible controls provide plausible pointer entry points for the pictured subtask; no pointer input was delivered and undisplayed steps remain uncovered.",
+      "evidence": [
+        {
+          "path": "design/mockups/omni-search-2026-10-13/01-omni-search.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J18",
+      "check": "List and keyboard",
+      "outcome": "Not represented",
+      "observation": "The static desktop concept does not show this repeat path or resulting state; keyboard/accessibility delivery, responsive density, enlarged text, reduced motion and persistence cannot be inferred.",
+      "evidence": [
+        {
+          "path": "design/mockups/omni-search-2026-10-13/01-omni-search.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J18",
+      "check": "Accessibility",
+      "outcome": "Not represented",
+      "observation": "The static desktop concept does not show this repeat path or resulting state; keyboard/accessibility delivery, responsive density, enlarged text, reduced motion and persistence cannot be inferred.",
+      "evidence": [
+        {
+          "path": "design/mockups/omni-search-2026-10-13/01-omni-search.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J18",
+      "check": "Density and narrow views",
+      "outcome": "Not represented",
+      "observation": "The static desktop concept does not show this repeat path or resulting state; keyboard/accessibility delivery, responsive density, enlarged text, reduced motion and persistence cannot be inferred.",
+      "evidence": [
+        {
+          "path": "design/mockups/omni-search-2026-10-13/01-omni-search.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J18",
+      "check": "Enlarged text and optics",
+      "outcome": "Not represented",
+      "observation": "The static desktop concept does not show this repeat path or resulting state; keyboard/accessibility delivery, responsive density, enlarged text, reduced motion and persistence cannot be inferred.",
+      "evidence": [
+        {
+          "path": "design/mockups/omni-search-2026-10-13/01-omni-search.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J18",
+      "check": "Reduced motion",
+      "outcome": "Not represented",
+      "observation": "The static desktop concept does not show this repeat path or resulting state; keyboard/accessibility delivery, responsive density, enlarged text, reduced motion and persistence cannot be inferred.",
+      "evidence": [
+        {
+          "path": "design/mockups/omni-search-2026-10-13/01-omni-search.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J18",
+      "check": "Lifecycle and unavailable states",
+      "outcome": "Not represented",
+      "observation": "Lifecycle is either incomplete or absent in the assigned static frame; no runtime state change can be assessed.",
+      "evidence": [
+        {
+          "path": "design/mockups/omni-search-2026-10-13/01-omni-search.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J18",
+      "check": "Storage boundaries",
+      "outcome": "Not represented",
+      "observation": "The static desktop concept does not show this repeat path or resulting state; keyboard/accessibility delivery, responsive density, enlarged text, reduced motion and persistence cannot be inferred.",
+      "evidence": [
+        {
+          "path": "design/mockups/omni-search-2026-10-13/01-omni-search.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J18",
+      "check": "Relation language",
+      "outcome": "Not represented",
+      "observation": "Assigned frame does not test the relevant distinction sufficiently; no relation transition was observed.",
+      "evidence": [
+        {
+          "path": "design/mockups/omni-search-2026-10-13/01-omni-search.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J19",
+      "check": "Pointer and discoverability",
+      "outcome": "Concept supported",
+      "observation": "Visible controls provide plausible pointer entry points for the pictured subtask; no pointer input was delivered and undisplayed steps remain uncovered.",
+      "evidence": [
+        {
+          "path": "design/mockups/omni-search-2026-10-13/01-omni-search.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J19",
+      "check": "List and keyboard",
+      "outcome": "Not represented",
+      "observation": "The static desktop concept does not show this repeat path or resulting state; keyboard/accessibility delivery, responsive density, enlarged text, reduced motion and persistence cannot be inferred.",
+      "evidence": [
+        {
+          "path": "design/mockups/omni-search-2026-10-13/01-omni-search.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J19",
+      "check": "Accessibility",
+      "outcome": "Not represented",
+      "observation": "The static desktop concept does not show this repeat path or resulting state; keyboard/accessibility delivery, responsive density, enlarged text, reduced motion and persistence cannot be inferred.",
+      "evidence": [
+        {
+          "path": "design/mockups/omni-search-2026-10-13/01-omni-search.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J19",
+      "check": "Density and narrow views",
+      "outcome": "Not represented",
+      "observation": "The static desktop concept does not show this repeat path or resulting state; keyboard/accessibility delivery, responsive density, enlarged text, reduced motion and persistence cannot be inferred.",
+      "evidence": [
+        {
+          "path": "design/mockups/omni-search-2026-10-13/01-omni-search.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J19",
+      "check": "Enlarged text and optics",
+      "outcome": "Not represented",
+      "observation": "The static desktop concept does not show this repeat path or resulting state; keyboard/accessibility delivery, responsive density, enlarged text, reduced motion and persistence cannot be inferred.",
+      "evidence": [
+        {
+          "path": "design/mockups/omni-search-2026-10-13/01-omni-search.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J19",
+      "check": "Reduced motion",
+      "outcome": "Not represented",
+      "observation": "The static desktop concept does not show this repeat path or resulting state; keyboard/accessibility delivery, responsive density, enlarged text, reduced motion and persistence cannot be inferred.",
+      "evidence": [
+        {
+          "path": "design/mockups/omni-search-2026-10-13/01-omni-search.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J19",
+      "check": "Lifecycle and unavailable states",
+      "outcome": "Not represented",
+      "observation": "Lifecycle is either incomplete or absent in the assigned static frame; no runtime state change can be assessed.",
+      "evidence": [
+        {
+          "path": "design/mockups/omni-search-2026-10-13/01-omni-search.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J19",
+      "check": "Storage boundaries",
+      "outcome": "Not represented",
+      "observation": "The static desktop concept does not show this repeat path or resulting state; keyboard/accessibility delivery, responsive density, enlarged text, reduced motion and persistence cannot be inferred.",
+      "evidence": [
+        {
+          "path": "design/mockups/omni-search-2026-10-13/01-omni-search.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J19",
+      "check": "Relation language",
+      "outcome": "Not represented",
+      "observation": "Assigned frame does not test the relevant distinction sufficiently; no relation transition was observed.",
+      "evidence": [
+        {
+          "path": "design/mockups/omni-search-2026-10-13/01-omni-search.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J20",
+      "check": "Pointer and discoverability",
+      "outcome": "Concept supported",
+      "observation": "Visible controls provide plausible pointer entry points for the pictured subtask; no pointer input was delivered and undisplayed steps remain uncovered.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/03-content-search-v2.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J20",
+      "check": "List and keyboard",
+      "outcome": "Not represented",
+      "observation": "The static desktop concept does not show this repeat path or resulting state; keyboard/accessibility delivery, responsive density, enlarged text, reduced motion and persistence cannot be inferred.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/03-content-search-v2.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J20",
+      "check": "Accessibility",
+      "outcome": "Not represented",
+      "observation": "The static desktop concept does not show this repeat path or resulting state; keyboard/accessibility delivery, responsive density, enlarged text, reduced motion and persistence cannot be inferred.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/03-content-search-v2.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J20",
+      "check": "Density and narrow views",
+      "outcome": "Not represented",
+      "observation": "The static desktop concept does not show this repeat path or resulting state; keyboard/accessibility delivery, responsive density, enlarged text, reduced motion and persistence cannot be inferred.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/03-content-search-v2.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J20",
+      "check": "Enlarged text and optics",
+      "outcome": "Not represented",
+      "observation": "The static desktop concept does not show this repeat path or resulting state; keyboard/accessibility delivery, responsive density, enlarged text, reduced motion and persistence cannot be inferred.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/03-content-search-v2.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J20",
+      "check": "Reduced motion",
+      "outcome": "Not represented",
+      "observation": "The static desktop concept does not show this repeat path or resulting state; keyboard/accessibility delivery, responsive density, enlarged text, reduced motion and persistence cannot be inferred.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/03-content-search-v2.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J20",
+      "check": "Lifecycle and unavailable states",
+      "outcome": "Not represented",
+      "observation": "Lifecycle is either incomplete or absent in the assigned static frame; no runtime state change can be assessed.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/03-content-search-v2.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J20",
+      "check": "Storage boundaries",
+      "outcome": "Not represented",
+      "observation": "The static desktop concept does not show this repeat path or resulting state; keyboard/accessibility delivery, responsive density, enlarged text, reduced motion and persistence cannot be inferred.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/03-content-search-v2.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J20",
+      "check": "Relation language",
+      "outcome": "Concept supported",
+      "observation": "J20 explicitly labels independent equal-text sources; J21 labels the same original pressure span and distinct changed values. This is concept language only.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/03-content-search-v2.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J21",
+      "check": "Pointer and discoverability",
+      "outcome": "Concept supported",
+      "observation": "Visible controls provide plausible pointer entry points for the pictured subtask; no pointer input was delivered and undisplayed steps remain uncovered.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/02-comparison-prism.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J21",
+      "check": "List and keyboard",
+      "outcome": "Not represented",
+      "observation": "The static desktop concept does not show this repeat path or resulting state; keyboard/accessibility delivery, responsive density, enlarged text, reduced motion and persistence cannot be inferred.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/02-comparison-prism.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J21",
+      "check": "Accessibility",
+      "outcome": "Not represented",
+      "observation": "The static desktop concept does not show this repeat path or resulting state; keyboard/accessibility delivery, responsive density, enlarged text, reduced motion and persistence cannot be inferred.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/02-comparison-prism.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J21",
+      "check": "Density and narrow views",
+      "outcome": "Not represented",
+      "observation": "The static desktop concept does not show this repeat path or resulting state; keyboard/accessibility delivery, responsive density, enlarged text, reduced motion and persistence cannot be inferred.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/02-comparison-prism.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J21",
+      "check": "Enlarged text and optics",
+      "outcome": "Not represented",
+      "observation": "The static desktop concept does not show this repeat path or resulting state; keyboard/accessibility delivery, responsive density, enlarged text, reduced motion and persistence cannot be inferred.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/02-comparison-prism.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J21",
+      "check": "Reduced motion",
+      "outcome": "Not represented",
+      "observation": "The static desktop concept does not show this repeat path or resulting state; keyboard/accessibility delivery, responsive density, enlarged text, reduced motion and persistence cannot be inferred.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/02-comparison-prism.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J21",
+      "check": "Lifecycle and unavailable states",
+      "outcome": "Not represented",
+      "observation": "Lifecycle is either incomplete or absent in the assigned static frame; no runtime state change can be assessed.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/02-comparison-prism.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J21",
+      "check": "Storage boundaries",
+      "outcome": "Not represented",
+      "observation": "The static desktop concept does not show this repeat path or resulting state; keyboard/accessibility delivery, responsive density, enlarged text, reduced motion and persistence cannot be inferred.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/02-comparison-prism.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    },
+    {
+      "journey": "J21",
+      "check": "Relation language",
+      "outcome": "Concept supported",
+      "observation": "J20 explicitly labels independent equal-text sources; J21 labels the same original pressure span and distinct changed values. This is concept language only.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/02-comparison-prism.png",
+          "region": "full assigned concept frame; no cross-check-specific alternate state"
+        }
+      ]
+    }
+  ],
+  "findings": [
+    {
+      "id": "R1-01",
+      "severity": "major",
+      "references": [
+        "J17/3",
+        "J17/4",
+        "J17/5"
+      ],
+      "attempted": "Follow a pinned request through pointer advancement, invalid/unavailable results and offline reopen.",
+      "visible_result_or_gap": "The concept distinguishes request identity, interrupted transfer and ready/offline status, but omits the publisher pointer change, invalid/unavailable states and reopen outcome. The left card also conflicts internally: its subtitle says transfer is active while its status says interrupted.",
+      "evidence": [
+        {
+          "path": "design/mockups/store-telescope-2026-10-13/01-discovery.png",
+          "region": "right selected publication inspector; Download pinned edition action"
+        },
+        {
+          "path": "design/mockups/store-telescope-2026-10-13/02-acquisition.png",
+          "region": "68/96 interrupted panel; Ready V12 panel"
+        }
+      ],
+      "proposed_design_change": "Add separate cards for V12 pending plus pointer V13, invalid payload, unavailable peers, and cached-offline reopen; retain request/version identity and show author-follow/layer ledger unchanged or explicitly changed. Resolve the active-versus-interrupted wording on the acquisition card.",
+      "readiness_implication": "Acquisition concepts are partially legible; exact-version lifecycle is not ready for interaction validation."
+    },
+    {
+      "id": "R1-02",
+      "severity": "major",
+      "references": [
+        "J18/2",
+        "J18/3",
+        "J18/5"
+      ],
+      "attempted": "Explain result provenance, media locators and source identity, then enter and return.",
+      "visible_result_or_gap": "Cards distinguish evidence type, version and some held states, but source store is absent; OCR region and transcript end locator are absent; equal-text versus shared-source inspection and return result are unpictured.",
+      "evidence": [
+        {
+          "path": "design/mockups/omni-search-2026-10-13/01-omni-search.png",
+          "region": "mixed-media result cards and C17 inspector"
+        }
+      ],
+      "proposed_design_change": "Give every result a readable origin store/version/evidence descriptor; add OCR coordinates and transcript time range with derived-text/source distinction; include separate equal-address/equal-text and shared-source occurrence cards plus entered/returned state.",
+      "readiness_implication": "Cross-media matching is visually promising, but provenance and locator explanation need cards before user testing."
+    },
+    {
+      "id": "R1-03",
+      "severity": "major",
+      "references": [
+        "J19/2",
+        "J19/3",
+        "J19/4",
+        "J19/5"
+      ],
+      "attempted": "Preserve selection during filter/query changes and understand coverage, cancellation and saved outputs.",
+      "visible_result_or_gap": "Filter/group controls and a partial coverage summary are present; excluded selection, stale response, detailed unsupported surface, post-cancel retention, empty states, result snapshots and rerun are absent.",
+      "evidence": [
+        {
+          "path": "design/mockups/omni-search-2026-10-13/01-omni-search.png",
+          "region": "left filters, selected result and bottom coverage ribbon"
+        }
+      ],
+      "proposed_design_change": "Add filter-excluded inspector state with clear/restore, request IDs with stale-response handling, coverage detail including unsupported OCR, cancel-retained results, completed-empty versus incomplete-zero cards, and distinct saved recipe/result snapshot/re-run controls.",
+      "readiness_implication": "Query refinement and result lifecycle cannot yet be evaluated as a complete workflow."
+    },
+    {
+      "id": "R1-04",
+      "severity": "major",
+      "references": [
+        "J20/2",
+        "J20/3",
+        "J20/4",
+        "J20/5"
+      ],
+      "attempted": "Apply explicit matching rules to historical branches, then preserve occurrences and result coverage.",
+      "visible_result_or_gap": "The history image shows text/whole-token/number/related controls and partial history coverage, but no numeric normalization/unit rule, state-run expansion or empty/missing state distinctions. The expanded investigation frame does show the integrated C17 V8 pressure 3.14 historical match and pinned V12 3.16 with No pressure match; it does not show the explicit query-switch transition from 3.14 to literal pressure with case folding. The “2 shown of 3” count also conflicts with three visible result-like cards (R1-06).",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/03-content-search-v2.png",
+          "region": "header query rules and scope; lower results and coverage"
+        },
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "top query header shows pressure / Literal · case folded; lower-left Inspect C17 shows V8 selected, pressure: 3.14 bar, Historical match and V12 pinned, 3.16 bar, No pressure match"
+        }
+      ],
+      "proposed_design_change": "Keep the existing integrated V8/V12 pressure word-removal state. Add a transition card from the 3.14 history search to literal pressure with case folding that shows the exact query/rule change while retaining the V8 historical reference and V12 no-match state. Add matching-rule detail for numeric units, state-run expansion, missing versus completed-empty branch states, and separate recipe/result capture.",
+      "readiness_implication": "Historical query controls are visible, while their semantics and completeness states remain unvalidated."
+    },
+    {
+      "id": "R1-05",
+      "severity": "major",
+      "references": [
+        "J21/1",
+        "J21/2",
+        "J21/3",
+        "J21/4",
+        "J21/5"
+      ],
+      "attempted": "Compare branches/topology, inspect unavailable region, enter and reopen a saved comparison.",
+      "visible_result_or_gap": "The independent two-state text/value prism is clear; required three-state ancestry, topology, unavailable target descriptor and reopen/entered outcomes are absent. The required independent equal-text source distinction is also absent from J21/1.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/02-comparison-prism.png",
+          "region": "two pinned faces, one selected difference, bottom controls"
+        }
+      ],
+      "proposed_design_change": "Add a three-state ancestry card grounded in actual parent identity, reciprocal topology/membership difference cards with neighborhoods, unavailable-region inspector retaining target identity, and explicit enter/return/save/reopen cards. Include separate independently equal-text passages in the two-state comparison.",
+      "readiness_implication": "The two-state text/value concept is coherent; broader comparison behavior needs designed evidence before testing."
+    },
+    {
+      "id": "R1-06",
+      "severity": "minor",
+      "references": [
+        "J20/1"
+      ],
+      "attempted": "Use the historical search results count to understand how many matches are shown.",
+      "visible_result_or_gap": "The results tray header says “2 shown of 3,” while three result-like cards are visibly present: Math notes / Draft A, Gauge G7 / Run B, and Historical Math notes · V8. The image does not identify the third card as context rather than a result.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/03-content-search-v2.png",
+          "region": "lower Search results tray: header count and three adjacent cards"
+        }
+      ],
+      "proposed_design_change": "Clarify whether the historical card is a result or contextual reference, and make the shown/total count match the visible result-card count.",
+      "readiness_implication": "Result counts may be interpreted inconsistently during a concept walkthrough."
+    }
+  ]
+}

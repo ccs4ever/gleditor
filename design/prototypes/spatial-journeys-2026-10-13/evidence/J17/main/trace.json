@@ -1,0 +1,2554 @@
+{
+  "journey": "J17",
+  "route": "main",
+  "frames": [
+    {
+      "file": "J17/main/before.png",
+      "location": "?journey=J17",
+      "frame": "J17-main-s1-before",
+      "state": {
+        "fixture": "pub-acquisition-v12",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "remote://pub:spatial-notebooks": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Reading place",
+            "kind": "document",
+            "body": [
+              "Current visit 01 · Lab notes · V12.",
+              "The starting caret and occurrence remain pinned while tools open."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Offset",
+                "value": "p.14 · 54.2"
+              },
+              {
+                "label": "Occurrence",
+                "value": "Lab:p14:r54.2"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "discovery",
+            "title": "Store telescope",
+            "kind": "list",
+            "body": [
+              "Scope is visible and can be changed independently of the retained reading place."
+            ],
+            "facts": [
+              {
+                "label": "Topic",
+                "value": "hypermedia"
+              },
+              {
+                "label": "Followed author",
+                "value": "Mira Chen · 3 publications"
+              },
+              {
+                "label": "URI",
+                "value": "none"
+              },
+              {
+                "label": "Results",
+                "value": "18 found so far · 3 channels pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "spatial",
+                "label": "Spatial notebooks",
+                "detail": "Mira Chen · V12 · Store",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "guide",
+                "label": "Hypermedia field guide",
+                "detail": "Alex Rios · V8",
+                "status": "available",
+                "ordinal": 2
+              },
+              {
+                "id": "rigpub",
+                "label": "Rig slice",
+                "detail": "Samir Patel · V4",
+                "status": "available",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 18,
+              "filtered": 18,
+              "visible": 3
+            }
+          },
+          {
+            "id": "publication",
+            "title": "Spatial notebooks · publication identity",
+            "kind": "inspector",
+            "body": [
+              "A title is a display name; the immutable IDs below identify the publication and requested edition."
+            ],
+            "facts": [
+              {
+                "label": "Publisher key",
+                "value": "pubkey:7a91c4e2…c42e"
+              },
+              {
+                "label": "Publication",
+                "value": "pub:spatial-notebooks-01"
+              },
+              {
+                "label": "Edition",
+                "value": "V12 · manifest:mf-v12-7b31 · pinned"
+              },
+              {
+                "label": "Catalog signature",
+                "value": "valid · catalog only"
+              },
+              {
+                "label": "Author trust",
+                "value": "not independently verified"
+              },
+              {
+                "label": "Payload integrity",
+                "value": "not checked"
+              },
+              {
+                "label": "Availability",
+                "value": "not checked"
+              }
+            ],
+            "rows": [
+              {
+                "id": "v12",
+                "label": "V12",
+                "detail": "Pinned edition · manifest mf-v12-7b31",
+                "status": "Catalog only"
+              }
+            ],
+            "tone": "selected"
+          }
+        ],
+        "publication": {
+          "publisherKey": "pubkey:7a91c4e2…c42e",
+          "publicationId": "pub:spatial-notebooks-01",
+          "manifestId": "mf-v12-7b31",
+          "pinnedEdition": "V12",
+          "pointer": "V12",
+          "requestId": null,
+          "verifiedPieces": 0,
+          "totalPieces": 96,
+          "storeValidation": "not-started",
+          "authorFollowed": true,
+          "linkPackagesEnabled": [],
+          "cache": []
+        }
+      },
+      "effects": [],
+      "action": "Before",
+      "note": ""
+    },
+    {
+      "file": "J17/main/J17-s1-a1.png",
+      "location": "?journey=J17&task=0&action=1",
+      "frame": "J17-s1-a1",
+      "state": {
+        "fixture": "pub-acquisition-v12",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "remote://pub:spatial-notebooks": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Reading place",
+            "kind": "document",
+            "body": [
+              "Current visit 01 · Lab notes · V12.",
+              "The starting caret and occurrence remain pinned while tools open."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Offset",
+                "value": "p.14 · 54.2"
+              },
+              {
+                "label": "Occurrence",
+                "value": "Lab:p14:r54.2"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "discovery",
+            "title": "Discover publications",
+            "kind": "list",
+            "body": [
+              "Choose one scope; results retain publication IDs and a found-so-far coverage count."
+            ],
+            "facts": [
+              {
+                "label": "Active scope",
+                "value": "Topic · #hypermedia"
+              },
+              {
+                "label": "Coverage",
+                "value": "18 so far · 3 channels pending"
+              },
+              {
+                "label": "Reading place",
+                "value": "01 · Lab notes V12 · unchanged"
+              }
+            ],
+            "rows": [
+              {
+                "id": "spatial",
+                "label": "Spatial notebooks",
+                "detail": "pub:spatial-notebooks-01 · Mira Chen · V12",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "guide",
+                "label": "Hypermedia field guide",
+                "detail": "pub:field-guide-02 · Alex Rios · V8",
+                "status": "available",
+                "ordinal": 2
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 18,
+              "filtered": 18,
+              "visible": 2
+            }
+          }
+        ],
+        "publication": {
+          "publisherKey": "pubkey:7a91c4e2…c42e",
+          "publicationId": "pub:spatial-notebooks-01",
+          "manifestId": "mf-v12-7b31",
+          "pinnedEdition": "V12",
+          "pointer": "V12",
+          "requestId": null,
+          "verifiedPieces": 0,
+          "totalPieces": 96,
+          "storeValidation": "not-started",
+          "authorFollowed": true,
+          "linkPackagesEnabled": [],
+          "cache": []
+        },
+        "discovery": {
+          "scope": "topic:#hypermedia"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Browse topic #hypermedia",
+      "note": "Topic scope returns the listed publications; it does not download or open them."
+    },
+    {
+      "file": "J17/main/J17-s1-a2.png",
+      "location": "?journey=J17&task=0&action=2",
+      "frame": "J17-s1-a2",
+      "state": {
+        "fixture": "pub-acquisition-v12",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "remote://pub:spatial-notebooks": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Reading place",
+            "kind": "document",
+            "body": [
+              "Current visit 01 · Lab notes · V12.",
+              "The starting caret and occurrence remain pinned while tools open."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Offset",
+                "value": "p.14 · 54.2"
+              },
+              {
+                "label": "Occurrence",
+                "value": "Lab:p14:r54.2"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "discovery",
+            "title": "Followed-author results",
+            "kind": "list",
+            "body": [
+              "Followed-author scope filters the catalog only."
+            ],
+            "facts": [
+              {
+                "label": "Scope",
+                "value": "Author · pubkey:mira-chen"
+              },
+              {
+                "label": "Coverage",
+                "value": "3 publications"
+              }
+            ],
+            "rows": [
+              {
+                "id": "spatial",
+                "label": "Spatial notebooks",
+                "detail": "pub:spatial-notebooks-01 · V12",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "other",
+                "label": "Field journal",
+                "detail": "pub:field-journal-03 · V6",
+                "status": "available",
+                "ordinal": 2
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 3,
+              "filtered": 3,
+              "visible": 2
+            }
+          }
+        ],
+        "publication": {
+          "publisherKey": "pubkey:7a91c4e2…c42e",
+          "publicationId": "pub:spatial-notebooks-01",
+          "manifestId": "mf-v12-7b31",
+          "pinnedEdition": "V12",
+          "pointer": "V12",
+          "requestId": null,
+          "verifiedPieces": 0,
+          "totalPieces": 96,
+          "storeValidation": "not-started",
+          "authorFollowed": true,
+          "linkPackagesEnabled": [],
+          "cache": []
+        },
+        "discovery": {
+          "scope": "author:pubkey:mira-chen"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Browse followed author Mira Chen",
+      "note": "Author scope does not change the followed-author preference."
+    },
+    {
+      "file": "J17/main/J17-s1-a3.png",
+      "location": "?journey=J17&task=0&action=3",
+      "frame": "J17-s1-a3",
+      "state": {
+        "fixture": "pub-acquisition-v12",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "remote://pub:spatial-notebooks": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Reading place",
+            "kind": "document",
+            "body": [
+              "Current visit 01 · Lab notes · V12.",
+              "The starting caret and occurrence remain pinned while tools open."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Offset",
+                "value": "p.14 · 54.2"
+              },
+              {
+                "label": "Occurrence",
+                "value": "Lab:p14:r54.2"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "publication",
+            "title": "Spatial notebooks · publication identity",
+            "kind": "inspector",
+            "body": [
+              "A title is a display name; the immutable IDs below identify the publication and requested edition."
+            ],
+            "facts": [
+              {
+                "label": "Publisher key",
+                "value": "pubkey:7a91c4e2…c42e"
+              },
+              {
+                "label": "Publication",
+                "value": "pub:spatial-notebooks-01"
+              },
+              {
+                "label": "Edition",
+                "value": "V12 · manifest:mf-v12-7b31 · pinned"
+              },
+              {
+                "label": "Catalog signature",
+                "value": "valid · catalog only"
+              },
+              {
+                "label": "Author trust",
+                "value": "not independently verified"
+              },
+              {
+                "label": "Payload integrity",
+                "value": "not checked"
+              },
+              {
+                "label": "Availability",
+                "value": "not checked"
+              }
+            ],
+            "rows": [
+              {
+                "id": "v12",
+                "label": "V12",
+                "detail": "Pinned edition · manifest mf-v12-7b31",
+                "status": "Catalog only"
+              }
+            ],
+            "tone": "selected"
+          },
+          {
+            "id": "uri",
+            "title": "Publication URI lookup",
+            "kind": "inspector",
+            "body": [
+              "URI resolves a publication identity; selection is still inspection only."
+            ],
+            "facts": [
+              {
+                "label": "URI",
+                "value": "xanadu://pub/7a91c4e2/spatial-notebooks"
+              },
+              {
+                "label": "Resolved publication",
+                "value": "pub:spatial-notebooks-01"
+              },
+              {
+                "label": "Pinned edition",
+                "value": "V12"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "publication": {
+          "publisherKey": "pubkey:7a91c4e2…c42e",
+          "publicationId": "pub:spatial-notebooks-01",
+          "manifestId": "mf-v12-7b31",
+          "pinnedEdition": "V12",
+          "pointer": "V12",
+          "requestId": null,
+          "verifiedPieces": 0,
+          "totalPieces": 96,
+          "storeValidation": "not-started",
+          "authorFollowed": true,
+          "linkPackagesEnabled": [],
+          "cache": []
+        },
+        "discovery": {
+          "scope": "publication-uri",
+          "uri": "xanadu://pub/7a91c4e2/spatial-notebooks"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Paste supported publication URI",
+      "note": "URI lookup resolves the same publication ID; no acquisition begins."
+    },
+    {
+      "file": "J17/main/J17-s1-a4.png",
+      "location": "?journey=J17&task=0&action=4",
+      "frame": "J17-s1-a4",
+      "state": {
+        "fixture": "pub-acquisition-v12",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "pub:spatial-notebooks-01",
+          "state": "V12",
+          "locator": "pub:spatial-notebooks-01@V12"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "remote://pub:spatial-notebooks": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Reading place",
+            "kind": "document",
+            "body": [
+              "Current visit 01 · Lab notes · V12.",
+              "The starting caret and occurrence remain pinned while tools open."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Offset",
+                "value": "p.14 · 54.2"
+              },
+              {
+                "label": "Occurrence",
+                "value": "Lab:p14:r54.2"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "publication",
+            "title": "Spatial notebooks · publication identity",
+            "kind": "inspector",
+            "body": [
+              "A title is a display name; the immutable IDs below identify the publication and requested edition."
+            ],
+            "facts": [
+              {
+                "label": "Publisher key",
+                "value": "pubkey:7a91c4e2…c42e"
+              },
+              {
+                "label": "Publication",
+                "value": "pub:spatial-notebooks-01"
+              },
+              {
+                "label": "Edition",
+                "value": "V12 · manifest:mf-v12-7b31 · pinned"
+              },
+              {
+                "label": "Catalog signature",
+                "value": "valid · catalog only"
+              },
+              {
+                "label": "Author trust",
+                "value": "not independently verified"
+              },
+              {
+                "label": "Payload integrity",
+                "value": "not checked"
+              },
+              {
+                "label": "Availability",
+                "value": "not checked"
+              }
+            ],
+            "rows": [
+              {
+                "id": "v12",
+                "label": "V12",
+                "detail": "Pinned edition · manifest mf-v12-7b31",
+                "status": "Catalog only"
+              }
+            ],
+            "tone": "selected"
+          }
+        ],
+        "publication": {
+          "publisherKey": "pubkey:7a91c4e2…c42e",
+          "publicationId": "pub:spatial-notebooks-01",
+          "manifestId": "mf-v12-7b31",
+          "pinnedEdition": "V12",
+          "pointer": "V12",
+          "requestId": null,
+          "verifiedPieces": 0,
+          "totalPieces": 96,
+          "storeValidation": "not-started",
+          "authorFollowed": true,
+          "linkPackagesEnabled": [],
+          "cache": []
+        },
+        "discovery": {
+          "scope": "publication-uri",
+          "uri": "xanadu://pub/7a91c4e2/spatial-notebooks"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Inspect Spatial notebooks",
+      "note": "Publication is inspected while reading visit 01 and its offset remain unchanged."
+    },
+    {
+      "file": "J17/main/J17-s2-a1.png",
+      "location": "?journey=J17&task=1&action=1",
+      "frame": "J17-s2-a1",
+      "state": {
+        "fixture": "pub-acquisition-v12",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "pub:spatial-notebooks-01",
+          "state": "V12",
+          "locator": "pub:spatial-notebooks-01@V12"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "remote://pub:spatial-notebooks": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Reading place",
+            "kind": "document",
+            "body": [
+              "Current visit 01 · Lab notes · V12.",
+              "The starting caret and occurrence remain pinned while tools open."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Offset",
+                "value": "p.14 · 54.2"
+              },
+              {
+                "label": "Occurrence",
+                "value": "Lab:p14:r54.2"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "identity",
+            "title": "Identity and verification",
+            "kind": "inspector",
+            "body": [
+              "Each status is independent; catalog signature is not payload verification."
+            ],
+            "facts": [
+              {
+                "label": "Publisher key",
+                "value": "pubkey:7a91c4e2…c42e"
+              },
+              {
+                "label": "Publication",
+                "value": "pub:spatial-notebooks-01"
+              },
+              {
+                "label": "Edition",
+                "value": "V12 · mf-v12-7b31 · pinned"
+              },
+              {
+                "label": "Catalog signature",
+                "value": "valid · catalog metadata signed"
+              },
+              {
+                "label": "Author trust",
+                "value": "not independently verified"
+              },
+              {
+                "label": "Payload integrity",
+                "value": "not checked"
+              },
+              {
+                "label": "Availability",
+                "value": "not checked · no peer count asserted"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "publication": {
+          "publisherKey": "pubkey:7a91c4e2…c42e",
+          "publicationId": "pub:spatial-notebooks-01",
+          "manifestId": "mf-v12-7b31",
+          "pinnedEdition": "V12",
+          "pointer": "V12",
+          "requestId": null,
+          "verifiedPieces": 0,
+          "totalPieces": 96,
+          "storeValidation": "not-started",
+          "authorFollowed": true,
+          "linkPackagesEnabled": [],
+          "cache": [],
+          "inspection": "identity"
+        },
+        "discovery": {
+          "scope": "publication-uri",
+          "uri": "xanadu://pub/7a91c4e2/spatial-notebooks"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Inspect publication identity",
+      "note": "All identity and verification facts remain distinct; no payload claim is made."
+    },
+    {
+      "file": "J17/main/J17-s2-a2.png",
+      "location": "?journey=J17&task=1&action=2",
+      "frame": "J17-s2-a2",
+      "state": {
+        "fixture": "pub-acquisition-v12",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "pub:spatial-notebooks-01",
+          "state": "V12",
+          "locator": "pub:spatial-notebooks-01@V12"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "remote://pub:spatial-notebooks": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Reading place",
+            "kind": "document",
+            "body": [
+              "Current visit 01 · Lab notes · V12.",
+              "The starting caret and occurrence remain pinned while tools open."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Offset",
+                "value": "p.14 · 54.2"
+              },
+              {
+                "label": "Occurrence",
+                "value": "Lab:p14:r54.2"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "verification",
+            "title": "What has been checked",
+            "kind": "notice",
+            "body": [
+              "Catalog signature validates catalog metadata only.",
+              "Author identity is not independently verified.",
+              "Payload integrity and peer availability are unchecked."
+            ],
+            "facts": [
+              {
+                "label": "Publisher key",
+                "value": "pubkey:7a91c4e2…c42e"
+              },
+              {
+                "label": "Publication",
+                "value": "pub:spatial-notebooks-01"
+              },
+              {
+                "label": "Edition",
+                "value": "V12 · mf-v12-7b31 · pinned"
+              },
+              {
+                "label": "Catalog signature",
+                "value": "valid · catalog metadata signed"
+              },
+              {
+                "label": "Author trust",
+                "value": "not independently verified"
+              },
+              {
+                "label": "Payload integrity",
+                "value": "not checked"
+              },
+              {
+                "label": "Availability",
+                "value": "not checked · no peer count asserted"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "publication": {
+          "publisherKey": "pubkey:7a91c4e2…c42e",
+          "publicationId": "pub:spatial-notebooks-01",
+          "manifestId": "mf-v12-7b31",
+          "pinnedEdition": "V12",
+          "pointer": "V12",
+          "requestId": null,
+          "verifiedPieces": 0,
+          "totalPieces": 96,
+          "storeValidation": "not-started",
+          "authorFollowed": true,
+          "linkPackagesEnabled": [],
+          "cache": [],
+          "inspection": "verification-boundaries"
+        },
+        "discovery": {
+          "scope": "publication-uri",
+          "uri": "xanadu://pub/7a91c4e2/spatial-notebooks"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Review verification boundaries",
+      "note": "No unknown status is converted to a positive or zero-valued claim."
+    },
+    {
+      "file": "J17/main/J17-s3-a1.png",
+      "location": "?journey=J17&task=2&action=1",
+      "frame": "J17-s3-a1",
+      "state": {
+        "fixture": "pub-acquisition-v12",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "pub:spatial-notebooks-01",
+          "state": "V12",
+          "locator": "pub:spatial-notebooks-01@V12"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "remote://pub:spatial-notebooks": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Reading place",
+            "kind": "document",
+            "body": [
+              "Current visit 01 · Lab notes · V12.",
+              "The starting caret and occurrence remain pinned while tools open."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Offset",
+                "value": "p.14 · 54.2"
+              },
+              {
+                "label": "Occurrence",
+                "value": "Lab:p14:r54.2"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "request",
+            "title": "Acquisition request",
+            "kind": "inspector",
+            "body": [
+              "The request is bound to the immutable V12 manifest."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "req-v12-0001"
+              },
+              {
+                "label": "Publisher key",
+                "value": "pubkey:7a91c4e2…c42e"
+              },
+              {
+                "label": "Publication",
+                "value": "pub:spatial-notebooks-01"
+              },
+              {
+                "label": "Manifest",
+                "value": "mf-v12-7b31"
+              },
+              {
+                "label": "Pinned edition",
+                "value": "V12"
+              },
+              {
+                "label": "Publisher pointer",
+                "value": "V12"
+              }
+            ],
+            "rows": [
+              {
+                "id": "r12",
+                "label": "Request V12",
+                "detail": "Pinned · 0/96 pieces",
+                "status": "pending",
+                "ordinal": 1
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "publication": {
+          "publisherKey": "pubkey:7a91c4e2…c42e",
+          "publicationId": "pub:spatial-notebooks-01",
+          "manifestId": "mf-v12-7b31",
+          "pinnedEdition": "V12",
+          "pointer": "V12",
+          "requestId": "req-v12-0001",
+          "verifiedPieces": 0,
+          "totalPieces": 96,
+          "storeValidation": "not-started",
+          "authorFollowed": true,
+          "linkPackagesEnabled": [],
+          "cache": [],
+          "inspection": "verification-boundaries",
+          "requestedEdition": "V12",
+          "requestedManifest": "mf-v12-7b31"
+        },
+        "discovery": {
+          "scope": "publication-uri",
+          "uri": "xanadu://pub/7a91c4e2/spatial-notebooks"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Request pinned V12",
+      "note": "Fixture starts request req-v12-0001 for V12; reading stays at visit 01."
+    },
+    {
+      "file": "J17/main/J17-s3-a2.png",
+      "location": "?journey=J17&task=2&action=2",
+      "frame": "J17-s3-a2",
+      "state": {
+        "fixture": "pub-acquisition-v12",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "pub:spatial-notebooks-01",
+          "state": "V12",
+          "locator": "pub:spatial-notebooks-01@V12"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "remote://pub:spatial-notebooks": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Reading place",
+            "kind": "document",
+            "body": [
+              "Current visit 01 · Lab notes · V12.",
+              "The starting caret and occurrence remain pinned while tools open."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Offset",
+                "value": "p.14 · 54.2"
+              },
+              {
+                "label": "Occurrence",
+                "value": "Lab:p14:r54.2"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "request",
+            "title": "Acquisition request",
+            "kind": "inspector",
+            "body": [
+              "The request is bound to the immutable V12 manifest; the publisher pointer observed at request time was V12."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "req-v12-0001"
+              },
+              {
+                "label": "Publisher key",
+                "value": "pubkey:7a91c4e2…c42e"
+              },
+              {
+                "label": "Publication",
+                "value": "pub:spatial-notebooks-01"
+              },
+              {
+                "label": "Manifest",
+                "value": "mf-v12-7b31"
+              },
+              {
+                "label": "Pinned edition",
+                "value": "V12"
+              },
+              {
+                "label": "Publisher pointer",
+                "value": "V12 · pointer at request time"
+              }
+            ],
+            "rows": [
+              {
+                "id": "r12",
+                "label": "Request V12",
+                "detail": "Pinned · 0/96 pieces",
+                "status": "pending",
+                "ordinal": 1
+              }
+            ],
+            "tone": "neutral"
+          },
+          {
+            "id": "pointer",
+            "title": "Publisher pointer advanced",
+            "kind": "notice",
+            "body": [
+              "The mutable latest pointer now names V13. The active request still names V12."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "req-v12-0001"
+              },
+              {
+                "label": "Requested edition",
+                "value": "V12 · mf-v12-7b31"
+              },
+              {
+                "label": "Current pointer",
+                "value": "V13"
+              },
+              {
+                "label": "Identity rule",
+                "value": "pointer update never replaces request"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "publication": {
+          "publisherKey": "pubkey:7a91c4e2…c42e",
+          "publicationId": "pub:spatial-notebooks-01",
+          "manifestId": "mf-v12-7b31",
+          "pinnedEdition": "V12",
+          "pointer": "V13",
+          "requestId": "req-v12-0001",
+          "verifiedPieces": 0,
+          "totalPieces": 96,
+          "storeValidation": "not-started",
+          "authorFollowed": true,
+          "linkPackagesEnabled": [],
+          "cache": [],
+          "inspection": "verification-boundaries",
+          "requestedEdition": "V12",
+          "requestedManifest": "mf-v12-7b31"
+        },
+        "discovery": {
+          "scope": "publication-uri",
+          "uri": "xanadu://pub/7a91c4e2/spatial-notebooks"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Advance publisher pointer to V13",
+      "note": "Only the mutable pointer changes; immutable V12 request identity remains pinned."
+    },
+    {
+      "file": "J17/main/J17-s3-a3.png",
+      "location": "?journey=J17&task=2&action=3",
+      "frame": "J17-s3-a3",
+      "state": {
+        "fixture": "pub-acquisition-v12",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "pub:spatial-notebooks-01",
+          "state": "V12",
+          "locator": "pub:spatial-notebooks-01@V12"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "remote://pub:spatial-notebooks": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Reading place",
+            "kind": "document",
+            "body": [
+              "Current visit 01 · Lab notes · V12.",
+              "The starting caret and occurrence remain pinned while tools open."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Offset",
+                "value": "p.14 · 54.2"
+              },
+              {
+                "label": "Occurrence",
+                "value": "Lab:p14:r54.2"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "choice",
+            "title": "Keep pinned request",
+            "kind": "inspector",
+            "body": [
+              "Continue req-v12-0001 against manifest mf-v12-7b31."
+            ],
+            "facts": [
+              {
+                "label": "Active request",
+                "value": "req-v12-0001"
+              },
+              {
+                "label": "Edition",
+                "value": "V12"
+              },
+              {
+                "label": "Pointer",
+                "value": "V13"
+              },
+              {
+                "label": "Second request",
+                "value": "none"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "publication": {
+          "publisherKey": "pubkey:7a91c4e2…c42e",
+          "publicationId": "pub:spatial-notebooks-01",
+          "manifestId": "mf-v12-7b31",
+          "pinnedEdition": "V12",
+          "pointer": "V13",
+          "requestId": "req-v12-0001",
+          "verifiedPieces": 0,
+          "totalPieces": 96,
+          "storeValidation": "not-started",
+          "authorFollowed": true,
+          "linkPackagesEnabled": [],
+          "cache": [],
+          "inspection": "verification-boundaries",
+          "requestedEdition": "V12",
+          "requestedManifest": "mf-v12-7b31",
+          "choice": "keep-v12"
+        },
+        "discovery": {
+          "scope": "publication-uri",
+          "uri": "xanadu://pub/7a91c4e2/spatial-notebooks"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Keep the V12 request",
+      "note": "V12 remains the sole active request."
+    },
+    {
+      "file": "J17/main/J17-s4-a1.png",
+      "location": "?journey=J17&task=3&action=1",
+      "frame": "J17-s4-a1",
+      "state": {
+        "fixture": "pub-acquisition-v12",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "pub:spatial-notebooks-01",
+          "state": "V12",
+          "locator": "pub:spatial-notebooks-01@V12"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "remote://pub:spatial-notebooks": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Reading place",
+            "kind": "document",
+            "body": [
+              "Current visit 01 · Lab notes · V12.",
+              "The starting caret and occurrence remain pinned while tools open."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Offset",
+                "value": "p.14 · 54.2"
+              },
+              {
+                "label": "Occurrence",
+                "value": "Lab:p14:r54.2"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "transfer",
+            "title": "Transfer interrupted",
+            "kind": "inspector",
+            "body": [
+              "Transfer interrupted · progress retained.",
+              "The interface headline and detail both agree this request is interrupted."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "req-v12-0001"
+              },
+              {
+                "label": "Edition",
+                "value": "V12 · mf-v12-7b31"
+              },
+              {
+                "label": "Verified pieces",
+                "value": "68 / 96"
+              },
+              {
+                "label": "Store validation",
+                "value": "pending"
+              },
+              {
+                "label": "Open",
+                "value": "blocked"
+              }
+            ],
+            "rows": [
+              {
+                "id": "retry",
+                "label": "Retry transfer",
+                "detail": "resumes same request ID",
+                "status": "available"
+              },
+              {
+                "id": "cancel",
+                "label": "Cancel request",
+                "detail": "keeps request receipt",
+                "status": "available"
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "publication": {
+          "publisherKey": "pubkey:7a91c4e2…c42e",
+          "publicationId": "pub:spatial-notebooks-01",
+          "manifestId": "mf-v12-7b31",
+          "pinnedEdition": "V12",
+          "pointer": "V13",
+          "requestId": "req-v12-0001",
+          "verifiedPieces": 68,
+          "totalPieces": 96,
+          "storeValidation": "pending",
+          "authorFollowed": true,
+          "linkPackagesEnabled": [],
+          "cache": [],
+          "inspection": "verification-boundaries",
+          "requestedEdition": "V12",
+          "requestedManifest": "mf-v12-7b31",
+          "choice": "keep-v12",
+          "transfer": "interrupted"
+        },
+        "discovery": {
+          "scope": "publication-uri",
+          "uri": "xanadu://pub/7a91c4e2/spatial-notebooks"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Inspect interrupted request",
+      "note": "Fixture reports 68/96 verified and retained; Open remains blocked."
+    },
+    {
+      "file": "J17/main/J17-s4-a2.png",
+      "location": "?journey=J17&task=3&action=2",
+      "frame": "J17-s4-a2",
+      "state": {
+        "fixture": "pub-acquisition-v12",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "pub:spatial-notebooks-01",
+          "state": "V12",
+          "locator": "pub:spatial-notebooks-01@V12"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "remote://pub:spatial-notebooks": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Reading place",
+            "kind": "document",
+            "body": [
+              "Current visit 01 · Lab notes · V12.",
+              "The starting caret and occurrence remain pinned while tools open."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Offset",
+                "value": "p.14 · 54.2"
+              },
+              {
+                "label": "Occurrence",
+                "value": "Lab:p14:r54.2"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "retry",
+            "title": "Retry in progress",
+            "kind": "inspector",
+            "body": [
+              "Retry resumes the same pinned request."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "req-v12-0001"
+              },
+              {
+                "label": "Edition",
+                "value": "V12"
+              },
+              {
+                "label": "Verified pieces",
+                "value": "68 / 96 retained"
+              },
+              {
+                "label": "New request",
+                "value": "no"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "publication": {
+          "publisherKey": "pubkey:7a91c4e2…c42e",
+          "publicationId": "pub:spatial-notebooks-01",
+          "manifestId": "mf-v12-7b31",
+          "pinnedEdition": "V12",
+          "pointer": "V13",
+          "requestId": "req-v12-0001",
+          "verifiedPieces": 68,
+          "totalPieces": 96,
+          "storeValidation": "pending",
+          "authorFollowed": true,
+          "linkPackagesEnabled": [],
+          "cache": [],
+          "inspection": "verification-boundaries",
+          "requestedEdition": "V12",
+          "requestedManifest": "mf-v12-7b31",
+          "choice": "keep-v12",
+          "transfer": "active",
+          "retryOf": "req-v12-0001"
+        },
+        "discovery": {
+          "scope": "publication-uri",
+          "uri": "xanadu://pub/7a91c4e2/spatial-notebooks"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Retry same request",
+      "note": "Retry uses the existing identity, not a newly minted request."
+    },
+    {
+      "file": "J17/main/J17-s4-a3.png",
+      "location": "?journey=J17&task=3&action=3",
+      "frame": "J17-s4-a3",
+      "state": {
+        "fixture": "pub-acquisition-v12",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "pub:spatial-notebooks-01",
+          "state": "V12",
+          "locator": "pub:spatial-notebooks-01@V12"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "remote://pub:spatial-notebooks": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Reading place",
+            "kind": "document",
+            "body": [
+              "Current visit 01 · Lab notes · V12.",
+              "The starting caret and occurrence remain pinned while tools open."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Offset",
+                "value": "p.14 · 54.2"
+              },
+              {
+                "label": "Occurrence",
+                "value": "Lab:p14:r54.2"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "ready",
+            "title": "Ready to open",
+            "kind": "inspector",
+            "body": [
+              "All 96 content pieces and complete-store validation are verified."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "req-v12-0001"
+              },
+              {
+                "label": "Edition",
+                "value": "V12 · mf-v12-7b31"
+              },
+              {
+                "label": "Pieces",
+                "value": "96 / 96 verified"
+              },
+              {
+                "label": "Store validation",
+                "value": "complete"
+              },
+              {
+                "label": "Payload integrity",
+                "value": "verified"
+              },
+              {
+                "label": "Availability",
+                "value": "cached offline"
+              },
+              {
+                "label": "Author trust",
+                "value": "not independently verified"
+              }
+            ],
+            "rows": [
+              {
+                "id": "open",
+                "label": "Open pinned edition",
+                "detail": "explicit action required",
+                "status": "available"
+              },
+              {
+                "id": "follow",
+                "label": "Author follow preference",
+                "detail": "already followed · unchanged",
+                "status": "unchanged"
+              },
+              {
+                "id": "layers",
+                "label": "Third-party link packages",
+                "detail": "0 enabled",
+                "status": "available"
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "publication": {
+          "publisherKey": "pubkey:7a91c4e2…c42e",
+          "publicationId": "pub:spatial-notebooks-01",
+          "manifestId": "mf-v12-7b31",
+          "pinnedEdition": "V12",
+          "pointer": "V13",
+          "requestId": "req-v12-0001",
+          "verifiedPieces": 96,
+          "totalPieces": 96,
+          "storeValidation": "complete",
+          "authorFollowed": true,
+          "linkPackagesEnabled": [],
+          "cache": [
+            {
+              "publication": "pub:spatial-notebooks-01",
+              "publisherKey": "pubkey:7a91c4e2…c42e",
+              "edition": "V12",
+              "manifest": "mf-v12-7b31",
+              "request": "req-v12-0001",
+              "validatedPieces": 96,
+              "storeValidation": "complete",
+              "offline": true
+            }
+          ],
+          "inspection": "verification-boundaries",
+          "requestedEdition": "V12",
+          "requestedManifest": "mf-v12-7b31",
+          "choice": "keep-v12",
+          "transfer": "ready",
+          "retryOf": "req-v12-0001",
+          "payloadIntegrity": "verified"
+        },
+        "discovery": {
+          "scope": "publication-uri",
+          "uri": "xanadu://pub/7a91c4e2/spatial-notebooks"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Complete verification",
+      "note": "Only complete validation enables Open; author follow and package activation remain unchanged."
+    },
+    {
+      "file": "J17/main/J17-s5-a1.png",
+      "location": "?journey=J17&task=4&action=1",
+      "frame": "J17-s5-a1",
+      "state": {
+        "fixture": "pub-acquisition-v12",
+        "reading": {
+          "visit": "02",
+          "subject": "pub:spatial-notebooks-01",
+          "store": "remote://pub:spatial-notebooks-01",
+          "version": "V12",
+          "occurrence": "occ-publication",
+          "offset": "page 1",
+          "body": [
+            "Field observations connect passages, experiments and dimensional notes."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          },
+          {
+            "id": "02",
+            "parent": "01",
+            "subject": "pub:spatial-notebooks-01",
+            "store": "remote://pub:spatial-notebooks-01",
+            "version": "V12",
+            "occurrence": "page-1"
+          }
+        ],
+        "selection": {
+          "subject": "pub:spatial-notebooks-01",
+          "state": "V12",
+          "locator": "pub:spatial-notebooks-01@V12"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "remote://pub:spatial-notebooks": 0
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "opened",
+            "title": "Opened edition",
+            "kind": "document",
+            "body": [
+              "Spatial notebooks · V12 opened at the exact publication edition."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "02"
+              },
+              {
+                "label": "Subject",
+                "value": "pub:spatial-notebooks-01"
+              },
+              {
+                "label": "Store",
+                "value": "remote://pub:spatial-notebooks-01"
+              },
+              {
+                "label": "Edition",
+                "value": "V12 · mf-v12-7b31"
+              },
+              {
+                "label": "Offline cache",
+                "value": "verified"
+              },
+              {
+                "label": "Author followed",
+                "value": "yes · already followed"
+              },
+              {
+                "label": "Packages enabled",
+                "value": "none"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "preferences",
+            "title": "Independent preferences",
+            "kind": "notice",
+            "body": [
+              "Opening does not follow Mira Chen and does not enable third-party packages."
+            ],
+            "facts": [
+              {
+                "label": "Follow",
+                "value": "on · unchanged"
+              },
+              {
+                "label": "Packages enabled",
+                "value": "0"
+              },
+              {
+                "label": "Cache",
+                "value": "V12 verified"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "publication": {
+          "publisherKey": "pubkey:7a91c4e2…c42e",
+          "publicationId": "pub:spatial-notebooks-01",
+          "manifestId": "mf-v12-7b31",
+          "pinnedEdition": "V12",
+          "pointer": "V13",
+          "requestId": "req-v12-0001",
+          "verifiedPieces": 96,
+          "totalPieces": 96,
+          "storeValidation": "complete",
+          "authorFollowed": true,
+          "linkPackagesEnabled": [],
+          "cache": [
+            {
+              "publication": "pub:spatial-notebooks-01",
+              "publisherKey": "pubkey:7a91c4e2…c42e",
+              "edition": "V12",
+              "manifest": "mf-v12-7b31",
+              "request": "req-v12-0001",
+              "validatedPieces": 96,
+              "storeValidation": "complete",
+              "offline": true
+            }
+          ],
+          "inspection": "verification-boundaries",
+          "requestedEdition": "V12",
+          "requestedManifest": "mf-v12-7b31",
+          "choice": "keep-v12",
+          "transfer": "ready",
+          "retryOf": "req-v12-0001",
+          "payloadIntegrity": "verified"
+        },
+        "discovery": {
+          "scope": "publication-uri",
+          "uri": "xanadu://pub/7a91c4e2/spatial-notebooks"
+        }
+      },
+      "effects": [
+        {
+          "domain": "reader activity",
+          "summary": "One completed reader visit: 01 → 02.",
+          "identity": "visit:02"
+        }
+      ],
+      "action": "Open verified V12",
+      "note": "Explicit Enter creates reader visit 02; acquisition itself changed neither author follow nor package preferences."
+    },
+    {
+      "file": "J17/main/J17-s5-a2.png",
+      "location": "?journey=J17&task=4&action=2",
+      "frame": "J17-s5-a2",
+      "state": {
+        "fixture": "pub-acquisition-v12",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "Lab:p14:r54.2",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          },
+          {
+            "id": "02",
+            "parent": "01",
+            "subject": "pub:spatial-notebooks-01",
+            "store": "remote://pub:spatial-notebooks-01",
+            "version": "V12",
+            "occurrence": "page-1"
+          }
+        ],
+        "selection": {
+          "subject": "pub:spatial-notebooks-01",
+          "state": "V12",
+          "locator": "pub:spatial-notebooks-01@V12"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "remote://pub:spatial-notebooks": 0
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Reading place",
+            "kind": "document",
+            "body": [
+              "Current visit 01 · Lab notes · V12.",
+              "The starting caret and occurrence remain pinned while tools open."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Offset",
+                "value": "p.14 · 54.2"
+              },
+              {
+                "label": "Occurrence",
+                "value": "Lab:p14:r54.2"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "cache",
+            "title": "Offline cache record",
+            "kind": "inspector",
+            "body": [
+              "V12 is verified and available offline under its pinned manifest."
+            ],
+            "facts": [
+              {
+                "label": "Publisher",
+                "value": "pubkey:7a91c4e2…c42e"
+              },
+              {
+                "label": "Publication",
+                "value": "pub:spatial-notebooks-01"
+              },
+              {
+                "label": "Edition",
+                "value": "V12"
+              },
+              {
+                "label": "Manifest",
+                "value": "mf-v12-7b31"
+              },
+              {
+                "label": "Cache state",
+                "value": "verified offline"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "publication": {
+          "publisherKey": "pubkey:7a91c4e2…c42e",
+          "publicationId": "pub:spatial-notebooks-01",
+          "manifestId": "mf-v12-7b31",
+          "pinnedEdition": "V12",
+          "pointer": "V13",
+          "requestId": "req-v12-0001",
+          "verifiedPieces": 96,
+          "totalPieces": 96,
+          "storeValidation": "complete",
+          "authorFollowed": true,
+          "linkPackagesEnabled": [],
+          "cache": [
+            {
+              "publication": "pub:spatial-notebooks-01",
+              "publisherKey": "pubkey:7a91c4e2…c42e",
+              "edition": "V12",
+              "manifest": "mf-v12-7b31",
+              "request": "req-v12-0001",
+              "validatedPieces": 96,
+              "storeValidation": "complete",
+              "offline": true
+            }
+          ],
+          "inspection": "verification-boundaries",
+          "requestedEdition": "V12",
+          "requestedManifest": "mf-v12-7b31",
+          "choice": "keep-v12",
+          "transfer": "ready",
+          "retryOf": "req-v12-0001",
+          "payloadIntegrity": "verified"
+        },
+        "discovery": {
+          "scope": "publication-uri",
+          "uri": "xanadu://pub/7a91c4e2/spatial-notebooks"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Return to origin 01",
+      "note": "Restore origin does not create a visit or edit the source."
+    },
+    {
+      "file": "J17/main/J17-s5-a3.png",
+      "location": "?journey=J17&task=4&action=3",
+      "frame": "J17-s5-a3",
+      "state": {
+        "fixture": "pub-acquisition-v12",
+        "reading": {
+          "visit": "03",
+          "subject": "pub:spatial-notebooks-01",
+          "store": "remote://pub:spatial-notebooks",
+          "version": "V12",
+          "occurrence": "page-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Field observations connect passages, experiments and dimensional notes."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          },
+          {
+            "id": "02",
+            "parent": "01",
+            "subject": "pub:spatial-notebooks-01",
+            "store": "remote://pub:spatial-notebooks",
+            "version": "V12",
+            "occurrence": "page-1"
+          },
+          {
+            "id": "03",
+            "parent": "01",
+            "subject": "pub:spatial-notebooks-01",
+            "store": "remote://pub:spatial-notebooks",
+            "version": "V12",
+            "occurrence": "page-1"
+          }
+        ],
+        "selection": {
+          "subject": "pub:spatial-notebooks-01",
+          "state": "V12",
+          "locator": "pub:spatial-notebooks-01@V12"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "remote://pub:spatial-notebooks": 0
+        },
+        "readerEffects": {
+          "visits": 2,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "opened",
+            "title": "Opened edition",
+            "kind": "document",
+            "body": [
+              "Spatial notebooks · V12 reopened at exact publication edition as visit 03."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03 · reopened offline"
+              },
+              {
+                "label": "Subject",
+                "value": "pub:spatial-notebooks-01"
+              },
+              {
+                "label": "Store",
+                "value": "remote://pub:spatial-notebooks-01"
+              },
+              {
+                "label": "Edition",
+                "value": "V12 · mf-v12-7b31"
+              },
+              {
+                "label": "Offline cache",
+                "value": "verified"
+              },
+              {
+                "label": "Author followed",
+                "value": "yes · already followed"
+              },
+              {
+                "label": "Packages enabled",
+                "value": "none"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "offline",
+            "title": "Offline reopen",
+            "kind": "notice",
+            "body": [
+              "The exact cached V12 is explicitly opened offline as a new visit."
+            ],
+            "facts": [
+              {
+                "label": "Network",
+                "value": "offline"
+              },
+              {
+                "label": "Visit",
+                "value": "03"
+              },
+              {
+                "label": "Resolved edition",
+                "value": "V12 · mf-v12-7b31"
+              },
+              {
+                "label": "Author followed",
+                "value": "yes · already followed"
+              },
+              {
+                "label": "Packages enabled",
+                "value": "0"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "publication": {
+          "publisherKey": "pubkey:7a91c4e2…c42e",
+          "publicationId": "pub:spatial-notebooks-01",
+          "manifestId": "mf-v12-7b31",
+          "pinnedEdition": "V12",
+          "pointer": "V13",
+          "requestId": "req-v12-0001",
+          "verifiedPieces": 96,
+          "totalPieces": 96,
+          "storeValidation": "complete",
+          "authorFollowed": true,
+          "linkPackagesEnabled": [],
+          "cache": [
+            {
+              "publication": "pub:spatial-notebooks-01",
+              "publisherKey": "pubkey:7a91c4e2…c42e",
+              "edition": "V12",
+              "manifest": "mf-v12-7b31",
+              "request": "req-v12-0001",
+              "validatedPieces": 96,
+              "storeValidation": "complete",
+              "offline": true
+            }
+          ],
+          "inspection": "verification-boundaries",
+          "requestedEdition": "V12",
+          "requestedManifest": "mf-v12-7b31",
+          "choice": "keep-v12",
+          "transfer": "ready",
+          "retryOf": "req-v12-0001",
+          "payloadIntegrity": "verified",
+          "openedOffline": "V12"
+        },
+        "discovery": {
+          "scope": "publication-uri",
+          "uri": "xanadu://pub/7a91c4e2/spatial-notebooks"
+        },
+        "environment": {
+          "network": "offline"
+        }
+      },
+      "effects": [
+        {
+          "domain": "reader activity",
+          "summary": "One reader visit: 01 → 03, exact V12 cache.",
+          "identity": "visit:03"
+        }
+      ],
+      "action": "Reopen cached V12 while offline",
+      "note": "Explicit offline reopen adds visit 03; sourceOps and author/package preferences remain unchanged."
+    }
+  ]
+}

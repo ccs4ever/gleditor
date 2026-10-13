@@ -1,0 +1,404 @@
+{
+  "journey": "J19",
+  "route": "J19-stale",
+  "frames": [
+    {
+      "file": "J19/J19-stale/before.png",
+      "location": "?journey=J19&variant=J19-stale",
+      "frame": "J19-J19-stale-s3-before",
+      "state": {
+        "fixture": "query-lifecycle-q1-q2",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "q2",
+            "title": "Current request Q2",
+            "kind": "list",
+            "body": [
+              "Only responses for current request ID and fixture generation update displayed results."
+            ],
+            "facts": [
+              {
+                "label": "Current request",
+                "value": "Q2 · generation 2"
+              },
+              {
+                "label": "Superseded request",
+                "value": "Q1 · generation 1"
+              },
+              {
+                "label": "Displayed counts belong to",
+                "value": "Q2"
+              },
+              {
+                "label": "Selection",
+                "value": "occ-C17-V8 pinned"
+              },
+              {
+                "label": "Last reply",
+                "value": "Q2 · generation 2 response received; no Q1 late reply yet"
+              }
+            ],
+            "rows": [
+              {
+                "id": "q2review",
+                "label": "Review V4",
+                "detail": "Q2 result",
+                "status": "match",
+                "ordinal": 1
+              },
+              {
+                "id": "q2c17",
+                "label": "C17 V8",
+                "detail": "Q2 result",
+                "status": "selected",
+                "ordinal": 2
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 9,
+              "filtered": 9,
+              "visible": 2
+            }
+          },
+          {
+            "id": "query",
+            "title": "Prior query Q1 snapshot · pressure",
+            "kind": "list",
+            "body": [
+              "Superseded Q1 result snapshot; current response state and counts belong to Q2."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "Q1 · prior snapshot · superseded"
+              },
+              {
+                "label": "Query",
+                "value": "literal pressure"
+              },
+              {
+                "label": "Selection",
+                "value": "occ-C17-V8 · C17 V8"
+              },
+              {
+                "label": "Coverage",
+                "value": "local 3/3 · remote 2/5 · 3 pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "c17",
+                "label": "C17 · Rig slice",
+                "detail": "V8 · native cell · historical",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "review",
+                "label": "Review passage",
+                "detail": "V4 · native text",
+                "status": "match",
+                "ordinal": 2
+              },
+              {
+                "id": "ocr",
+                "label": "Calibration plate",
+                "detail": "V5 · OCR",
+                "status": "match",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 24,
+              "filtered": 24,
+              "visible": 3
+            }
+          }
+        ],
+        "query": {
+          "id": "Q2",
+          "text": "pressure",
+          "mode": "literal",
+          "media": [
+            "text",
+            "cells",
+            "images",
+            "audio",
+            "video"
+          ],
+          "fields": [
+            "native",
+            "OCR",
+            "transcript",
+            "metadata"
+          ],
+          "stores": [
+            "all-eight"
+          ],
+          "versions": "reachable",
+          "status": "complete",
+          "coverage": "complete for Q2 fixture response",
+          "results": [
+            "occ-review-V4",
+            "occ-C17-V8"
+          ],
+          "selected": "occ-C17-V8",
+          "counts": {
+            "total": 9,
+            "filtered": 9,
+            "visible": 2
+          },
+          "generation": 2
+        }
+      },
+      "effects": [],
+      "action": "Before",
+      "note": ""
+    },
+    {
+      "file": "J19/J19-stale/J19-stale-a1.png",
+      "location": "?journey=J19&variant=J19-stale&task=0&action=1",
+      "frame": "J19-stale-a1",
+      "state": {
+        "fixture": "query-lifecycle-q1-q2",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "q2",
+            "title": "Current request Q2",
+            "kind": "list",
+            "body": [
+              "Only responses for current request ID and fixture generation update displayed results."
+            ],
+            "facts": [
+              {
+                "label": "Current request",
+                "value": "Q2 · generation 2"
+              },
+              {
+                "label": "Superseded request",
+                "value": "Q1 · generation 1"
+              },
+              {
+                "label": "Displayed counts belong to",
+                "value": "Q2"
+              },
+              {
+                "label": "Selection",
+                "value": "occ-C17-V8 pinned"
+              },
+              {
+                "label": "Last reply",
+                "value": "Q1 late response · ignored"
+              }
+            ],
+            "rows": [
+              {
+                "id": "q2review",
+                "label": "Review V4",
+                "detail": "Q2 result",
+                "status": "match",
+                "ordinal": 1
+              },
+              {
+                "id": "q2c17",
+                "label": "C17 V8",
+                "detail": "Q2 result",
+                "status": "selected",
+                "ordinal": 2
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 9,
+              "filtered": 9,
+              "visible": 2
+            }
+          },
+          {
+            "id": "query",
+            "title": "Query Q1 · pressure",
+            "kind": "list",
+            "body": [
+              "Request identity and selected occurrence remain pinned through filtering."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "Q1 · generation 1"
+              },
+              {
+                "label": "Query",
+                "value": "literal pressure"
+              },
+              {
+                "label": "Selection",
+                "value": "occ-C17-V8 · C17 V8"
+              },
+              {
+                "label": "Coverage",
+                "value": "local 3/3 · remote 2/5 · 3 pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "c17",
+                "label": "C17 · Rig slice",
+                "detail": "V8 · native cell · historical",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "review",
+                "label": "Review passage",
+                "detail": "V4 · native text",
+                "status": "match",
+                "ordinal": 2
+              },
+              {
+                "id": "ocr",
+                "label": "Calibration plate",
+                "detail": "V5 · OCR",
+                "status": "match",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 24,
+              "filtered": 24,
+              "visible": 3
+            }
+          }
+        ],
+        "query": {
+          "id": "Q2",
+          "text": "pressure",
+          "mode": "literal",
+          "media": [
+            "text",
+            "cells",
+            "images",
+            "audio",
+            "video"
+          ],
+          "fields": [
+            "native",
+            "OCR",
+            "transcript",
+            "metadata"
+          ],
+          "stores": [
+            "all-eight"
+          ],
+          "versions": "reachable",
+          "status": "complete",
+          "coverage": "complete for Q2 fixture response",
+          "results": [
+            "occ-review-V4",
+            "occ-C17-V8"
+          ],
+          "selected": "occ-C17-V8",
+          "counts": {
+            "total": 9,
+            "filtered": 9,
+            "visible": 2
+          },
+          "generation": 2,
+          "lateResponseDisposition": "ignored",
+          "lateResponse": "Q1 · generation 1"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Deliver late Q1 response after Q2 resolved",
+      "note": "Current query Q2 remains unchanged when Q1 replies late."
+    }
+  ]
+}

@@ -1,0 +1,607 @@
+{
+  "journey": "J29",
+  "route": "J29-unsupported-word-seek",
+  "frames": [
+    {
+      "file": "J29/J29-unsupported-word-seek/before.png",
+      "location": "?journey=J29&variant=J29-unsupported-word-seek",
+      "frame": "J29-J29-unsupported-word-seek-s4-before",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "03",
+            "parent": null,
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "Calibration plate": 17,
+          "Debrief": 21,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "m-media",
+            "title": "Source panes · four independent identities",
+            "kind": "media",
+            "body": [
+              "Media bytes, transcript and visual cues remain distinct subjects."
+            ],
+            "facts": [
+              {
+                "label": "Video",
+                "value": "Rig test · V9 · remote cached"
+              },
+              {
+                "label": "Audio",
+                "value": "Debrief · V7 · remote cached"
+              },
+              {
+                "label": "Document",
+                "value": "Lab notes · V12 local"
+              },
+              {
+                "label": "Image",
+                "value": "Calibration plate · V5 · remote cached"
+              }
+            ],
+            "rows": [
+              {
+                "id": "video",
+                "label": "Video V9",
+                "detail": "locator 00:38 / duration 01:26",
+                "status": "cached",
+                "ordinal": 1
+              },
+              {
+                "id": "audio",
+                "label": "Audio V7",
+                "detail": "locator 02:14–02:18; transcript derived",
+                "status": "cached",
+                "ordinal": 2
+              },
+              {
+                "id": "passage",
+                "label": "Lab passage",
+                "detail": "range [12,35) · lab-o6",
+                "status": "selected",
+                "ordinal": 3
+              },
+              {
+                "id": "region",
+                "label": "Image region",
+                "detail": "normalized box [0.31,0.22,0.55,0.41]",
+                "status": "selected",
+                "ordinal": 4
+              }
+            ],
+            "tone": "neutral"
+          },
+          {
+            "id": "m-cue",
+            "title": "Manual viewing cue set · staging",
+            "kind": "inspector",
+            "body": [],
+            "facts": [
+              {
+                "label": "Cue identity",
+                "value": "cue-set:CS1"
+              },
+              {
+                "label": "Relation",
+                "value": "none · view-only"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "media": {
+          "sources": {
+            "video": {
+              "id": "Rig test",
+              "version": "V9",
+              "authority": "remote:rig",
+              "cache": "cached verified"
+            },
+            "audio": {
+              "id": "Debrief",
+              "version": "V7",
+              "authority": "remote:debrief",
+              "cache": "cached verified",
+              "transcript": {
+                "id": "transcript:T7",
+                "derived": true,
+                "text": "Pressure stayed stable.",
+                "wordTimestamps": false
+              }
+            },
+            "document": {
+              "id": "Lab notes",
+              "version": "V12",
+              "authority": "local",
+              "range": [
+                12,
+                35
+              ],
+              "occurrence": "lab-o6"
+            },
+            "image": {
+              "id": "Calibration plate",
+              "version": "V5",
+              "authority": "remote:calibration",
+              "cache": "cached verified",
+              "region": [
+                0.31,
+                0.22,
+                0.55,
+                0.41
+              ]
+            }
+          },
+          "cueSet": {
+            "id": "cue-set:CS1",
+            "cues": [
+              {
+                "id": "cue:C1",
+                "video": {
+                  "source": "Rig test@V9",
+                  "timeSeconds": 38
+                },
+                "audio": {
+                  "source": "Debrief@V7",
+                  "rangeSeconds": [
+                    134,
+                    138
+                  ]
+                },
+                "alignment": "manual",
+                "offsetSeconds": 96,
+                "status": "available"
+              }
+            ],
+            "saved": false,
+            "playback": {
+              "state": "paused",
+              "videoSeconds": 38,
+              "audioSeconds": 134
+            }
+          },
+          "staging": [
+            "cue:C1"
+          ]
+        },
+        "forgeChooser": null
+      },
+      "effects": [],
+      "action": "Before",
+      "note": ""
+    },
+    {
+      "file": "J29/J29-unsupported-word-seek/J29-unsupported-word-seek-a1.png",
+      "location": "?journey=J29&variant=J29-unsupported-word-seek&task=0&action=1",
+      "frame": "J29-unsupported-word-seek-a1",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "03",
+            "parent": null,
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "Calibration plate": 17,
+          "Debrief": 21,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J29-unsupported-word-seek-a1-reading",
+            "title": "Reading · visit 03 · Review@V4",
+            "kind": "document",
+            "body": [
+              "The recorded pressure remained stable during the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03"
+              },
+              {
+                "label": "Subject",
+                "value": "Review passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "review-o3"
+              },
+              {
+                "label": "Offset",
+                "value": 80
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "v-seek",
+            "title": "Unsupported seek basis",
+            "kind": "notice",
+            "body": [],
+            "facts": [
+              {
+                "label": "Requested target",
+                "value": "derived transcript word"
+              },
+              {
+                "label": "Available basis",
+                "value": "audio segment only"
+              },
+              {
+                "label": "Cue status",
+                "value": "unavailable · correction required"
+              },
+              {
+                "label": "Source text",
+                "value": "preserved as derived transcript"
+              }
+            ],
+            "rows": [],
+            "tone": "comment"
+          }
+        ],
+        "media": {
+          "sources": {
+            "video": {
+              "id": "Rig test",
+              "version": "V9",
+              "authority": "remote:rig",
+              "cache": "cached verified"
+            },
+            "audio": {
+              "id": "Debrief",
+              "version": "V7",
+              "authority": "remote:debrief",
+              "cache": "cached verified",
+              "transcript": {
+                "id": "transcript:T7",
+                "derived": true,
+                "text": "Pressure stayed stable.",
+                "wordTimestamps": false
+              }
+            },
+            "document": {
+              "id": "Lab notes",
+              "version": "V12",
+              "authority": "local",
+              "range": [
+                12,
+                35
+              ],
+              "occurrence": "lab-o6"
+            },
+            "image": {
+              "id": "Calibration plate",
+              "version": "V5",
+              "authority": "remote:calibration",
+              "cache": "cached verified",
+              "region": [
+                0.31,
+                0.22,
+                0.55,
+                0.41
+              ]
+            }
+          },
+          "cueSet": {
+            "id": "cue-set:CS1",
+            "cues": [
+              {
+                "id": "cue:C3",
+                "video": {
+                  "source": "Rig test@V9",
+                  "timeSeconds": 38
+                },
+                "audio": {
+                  "source": "Debrief@V7",
+                  "transcriptSpan": "Pressure stayed stable",
+                  "timeBasis": "unsupported-word-seek"
+                },
+                "alignment": "manual",
+                "status": "unavailable",
+                "reason": "audio has segment locator but no word timestamps"
+              }
+            ],
+            "saved": false,
+            "playback": {
+              "state": "paused",
+              "videoSeconds": 38,
+              "audioSeconds": 134
+            }
+          },
+          "staging": [
+            "cue:C1"
+          ]
+        },
+        "forgeChooser": null
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "Do not invent an audio time from derived transcript text; preserve the attempted locator as unavailable.",
+          "identity": "cue:C3; transcript:T7; unsupported word seek"
+        }
+      ],
+      "action": "Attempt to cue a derived transcript word without word timestamps",
+      "note": "The failure does not change source media or substitute a guessed interval."
+    },
+    {
+      "file": "J29/J29-unsupported-word-seek/J29-unsupported-word-seek-a2.png",
+      "location": "?journey=J29&variant=J29-unsupported-word-seek&task=0&action=2",
+      "frame": "J29-unsupported-word-seek-a2",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "03",
+            "parent": null,
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "Calibration plate": 17,
+          "Debrief": 21,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J29-unsupported-word-seek-a2-reading",
+            "title": "Reading · visit 03 · Review@V4",
+            "kind": "document",
+            "body": [
+              "The recorded pressure remained stable during the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03"
+              },
+              {
+                "label": "Subject",
+                "value": "Review passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "review-o3"
+              },
+              {
+                "label": "Offset",
+                "value": 80
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "v-seek",
+            "title": "Supported locator chosen",
+            "kind": "inspector",
+            "body": [],
+            "facts": [
+              {
+                "label": "Video",
+                "value": "V9 · 38s"
+              },
+              {
+                "label": "Audio",
+                "value": "V7 · 134–138s"
+              },
+              {
+                "label": "Correction",
+                "value": "explicit supported segment"
+              },
+              {
+                "label": "Autoplay",
+                "value": "off"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "media": {
+          "sources": {
+            "video": {
+              "id": "Rig test",
+              "version": "V9",
+              "authority": "remote:rig",
+              "cache": "cached verified"
+            },
+            "audio": {
+              "id": "Debrief",
+              "version": "V7",
+              "authority": "remote:debrief",
+              "cache": "cached verified",
+              "transcript": {
+                "id": "transcript:T7",
+                "derived": true,
+                "text": "Pressure stayed stable.",
+                "wordTimestamps": false
+              }
+            },
+            "document": {
+              "id": "Lab notes",
+              "version": "V12",
+              "authority": "local",
+              "range": [
+                12,
+                35
+              ],
+              "occurrence": "lab-o6"
+            },
+            "image": {
+              "id": "Calibration plate",
+              "version": "V5",
+              "authority": "remote:calibration",
+              "cache": "cached verified",
+              "region": [
+                0.31,
+                0.22,
+                0.55,
+                0.41
+              ]
+            }
+          },
+          "cueSet": {
+            "id": "cue-set:CS1",
+            "cues": [
+              {
+                "id": "cue:C3",
+                "video": {
+                  "source": "Rig test@V9",
+                  "timeSeconds": 38
+                },
+                "audio": {
+                  "source": "Debrief@V7",
+                  "rangeSeconds": [
+                    134,
+                    138
+                  ]
+                },
+                "alignment": "manual",
+                "status": "available",
+                "correction": "explicitly selected supported segment"
+              }
+            ],
+            "saved": false,
+            "playback": {
+              "state": "paused",
+              "videoSeconds": 38,
+              "audioSeconds": 134
+            }
+          },
+          "staging": [
+            "cue:C1"
+          ]
+        },
+        "forgeChooser": null
+      },
+      "effects": [
+        {
+          "domain": "reader collection",
+          "summary": "Replace unsupported seek basis only after explicit correction; no content or Link write.",
+          "identity": "cue:C3; V9@38s; V7@[134,138)s"
+        }
+      ],
+      "action": "Correct locator to supported audio segment [134,138) seconds",
+      "note": "Corrected cue remains manual and separately versioned."
+    }
+  ]
+}

@@ -1,0 +1,1034 @@
+{
+  "journey": "J31",
+  "route": "J31-invalid-author-destination",
+  "frames": [
+    {
+      "file": "J31/J31-invalid-author-destination/before.png",
+      "location": "?journey=J31&variant=J31-invalid-author-destination",
+      "frame": "J31-J31-invalid-author-destination-s5-before",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "03",
+            "parent": null,
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Draft A": 67,
+          "Draft B": 124,
+          "Review store": 214,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "r-source",
+            "title": "Recovery source",
+            "kind": "document",
+            "body": [
+              "The passage is selected from historical Draft A V27."
+            ],
+            "facts": [
+              {
+                "label": "Authority/state",
+                "value": "Draft A@V27"
+              },
+              {
+                "label": "Object",
+                "value": "doc:draft-a"
+              },
+              {
+                "label": "Exact ranges",
+                "value": "[100,142)"
+              },
+              {
+                "label": "Occurrence",
+                "value": "a-o5"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "r-dest",
+            "title": "Receiving state and futures",
+            "kind": "history",
+            "body": [],
+            "facts": [
+              {
+                "label": "Pinned base",
+                "value": "Draft B@V31"
+              },
+              {
+                "label": "Current old future",
+                "value": "Draft B@V40 · retained"
+              },
+              {
+                "label": "New mode",
+                "value": "Create child at pinned base"
+              }
+            ],
+            "rows": [
+              {
+                "id": "b31",
+                "label": "B V31",
+                "detail": "chosen immutable base",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "b40",
+                "label": "B V40",
+                "detail": "existing future retained",
+                "status": "ready",
+                "ordinal": 2
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "recovery": {
+          "id": "recovery-draft:R1",
+          "source": {
+            "id": "source:DraftA-V27-p3",
+            "authority": "Draft A",
+            "state": "V27",
+            "object": "doc:draft-a",
+            "ranges": [
+              [
+                100,
+                142
+              ]
+            ],
+            "occurrence": "a-o5",
+            "text": "Pressure stayed stable during the observation window."
+          },
+          "targetBase": {
+            "id": "Draft B@V31",
+            "store": "Draft B",
+            "branch": "draft-b/main",
+            "state": "V31",
+            "fullStateFixture": "B31-content-map-7-ranges",
+            "selectedRange": [
+              100,
+              124
+            ],
+            "text": "Field conditions were steady through the observation window. No further adjustment was required."
+          },
+          "destination": {
+            "store": "Draft B",
+            "branch": "draft-b/main",
+            "base": "V31",
+            "author": "author:ava",
+            "signingKey": "key:ava-k2",
+            "status": "verified",
+            "mode": "Create child"
+          },
+          "oldFutures": [
+            {
+              "id": "Draft B@V40",
+              "parent": "Draft B@V39",
+              "kind": "existing future",
+              "unchangedByRecovery": true
+            }
+          ],
+          "payload": {
+            "operation": "transclude selected historical passage",
+            "ranges": [
+              [
+                100,
+                142
+              ]
+            ],
+            "origin": "Draft A@V27 · source:DraftA-V27-p3 · occurrence a-o5",
+            "retainsBaseContent": true
+          },
+          "status": "draft",
+          "preview": null
+        },
+        "draft": null,
+        "comparison": {
+          "left": "Draft A@V27",
+          "right": "Draft B@V40",
+          "badge": {
+            "count": 3,
+            "unit": "difference categories",
+            "scope": "comparison A@V27 vs B@V40"
+          },
+          "categories": [
+            "paragraph removed",
+            "wording changed",
+            "section reordered"
+          ]
+        },
+        "commit": {
+          "attempt": null,
+          "status": "none",
+          "receipt": null
+        }
+      },
+      "effects": [],
+      "action": "Before",
+      "note": ""
+    },
+    {
+      "file": "J31/J31-invalid-author-destination/J31-invalid-author-destination-a1.png",
+      "location": "?journey=J31&variant=J31-invalid-author-destination&task=0&action=1",
+      "frame": "J31-invalid-author-destination-a1",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "03",
+            "parent": null,
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Draft A": 67,
+          "Draft B": 124,
+          "Review store": 214,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J31-invalid-author-destination-a1-reading",
+            "title": "Reading · visit 03 · Review@V4",
+            "kind": "document",
+            "body": [
+              "The recorded pressure remained stable during the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03"
+              },
+              {
+                "label": "Subject",
+                "value": "Review passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "review-o3"
+              },
+              {
+                "label": "Offset",
+                "value": 80
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "v-auth",
+            "title": "Author verification failed",
+            "kind": "notice",
+            "body": [],
+            "facts": [
+              {
+                "label": "Author",
+                "value": "ava"
+              },
+              {
+                "label": "Signing key",
+                "value": "key:ava-k2 · revoked"
+              },
+              {
+                "label": "Preflight",
+                "value": "failed"
+              },
+              {
+                "label": "Destination operations",
+                "value": 0
+              },
+              {
+                "label": "Draft",
+                "value": "retained"
+              }
+            ],
+            "rows": [],
+            "tone": "comment"
+          }
+        ],
+        "recovery": {
+          "id": "recovery-draft:R1",
+          "source": {
+            "id": "source:DraftA-V27-p3",
+            "authority": "Draft A",
+            "state": "V27",
+            "object": "doc:draft-a",
+            "ranges": [
+              [
+                100,
+                142
+              ]
+            ],
+            "occurrence": "a-o5",
+            "text": "Pressure stayed stable during the observation window."
+          },
+          "targetBase": {
+            "id": "Draft B@V31",
+            "store": "Draft B",
+            "branch": "draft-b/main",
+            "state": "V31",
+            "fullStateFixture": "B31-content-map-7-ranges",
+            "selectedRange": [
+              100,
+              124
+            ],
+            "text": "Field conditions were steady through the observation window. No further adjustment was required."
+          },
+          "destination": {
+            "store": "Draft B",
+            "branch": "draft-b/main",
+            "base": "V31",
+            "author": "author:ava",
+            "signingKey": "key:ava-k2",
+            "status": "verified",
+            "mode": "Create child",
+            "authorStatus": "revoked"
+          },
+          "oldFutures": [
+            {
+              "id": "Draft B@V40",
+              "parent": "Draft B@V39",
+              "kind": "existing future",
+              "unchangedByRecovery": true
+            }
+          ],
+          "payload": {
+            "operation": "transclude selected historical passage",
+            "ranges": [
+              [
+                100,
+                142
+              ]
+            ],
+            "origin": "Draft A@V27 · source:DraftA-V27-p3 · occurrence a-o5",
+            "retainsBaseContent": true
+          },
+          "status": "draft",
+          "preview": null,
+          "commitStatus": "preflight-failed",
+          "failure": {
+            "gate": "author signing identity",
+            "reason": "key revoked",
+            "published": false
+          }
+        },
+        "draft": null,
+        "comparison": {
+          "left": "Draft A@V27",
+          "right": "Draft B@V40",
+          "badge": {
+            "count": 3,
+            "unit": "difference categories",
+            "scope": "comparison A@V27 vs B@V40"
+          },
+          "categories": [
+            "paragraph removed",
+            "wording changed",
+            "section reordered"
+          ]
+        },
+        "commit": {
+          "attempt": null,
+          "status": "none",
+          "receipt": null
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "Invalid author status blocks all destination writes.",
+          "identity": "recovery-draft:R1; author:ava signing identity revoked"
+        }
+      ],
+      "action": "Preflight with revoked author signing identity",
+      "note": "The exact source and base remain pinned; failure preserves the draft."
+    },
+    {
+      "file": "J31/J31-invalid-author-destination/J31-invalid-author-destination-a2.png",
+      "location": "?journey=J31&variant=J31-invalid-author-destination&task=0&action=2",
+      "frame": "J31-invalid-author-destination-a2",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "03",
+            "parent": null,
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Draft A": 67,
+          "Draft B": 124,
+          "Review store": 214,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J31-invalid-author-destination-a2-reading",
+            "title": "Reading · visit 03 · Review@V4",
+            "kind": "document",
+            "body": [
+              "The recorded pressure remained stable during the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03"
+              },
+              {
+                "label": "Subject",
+                "value": "Review passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "review-o3"
+              },
+              {
+                "label": "Offset",
+                "value": 80
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "v-auth",
+            "title": "Author identity valid",
+            "kind": "notice",
+            "body": [],
+            "facts": [
+              {
+                "label": "Author",
+                "value": "ava"
+              },
+              {
+                "label": "Key",
+                "value": "key:ava-k2 · verified"
+              },
+              {
+                "label": "Destination",
+                "value": "not yet prepared"
+              },
+              {
+                "label": "Next gate",
+                "value": "destination/base validation"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "recovery": {
+          "id": "recovery-draft:R1",
+          "source": {
+            "id": "source:DraftA-V27-p3",
+            "authority": "Draft A",
+            "state": "V27",
+            "object": "doc:draft-a",
+            "ranges": [
+              [
+                100,
+                142
+              ]
+            ],
+            "occurrence": "a-o5",
+            "text": "Pressure stayed stable during the observation window."
+          },
+          "targetBase": {
+            "id": "Draft B@V31",
+            "store": "Draft B",
+            "branch": "draft-b/main",
+            "state": "V31",
+            "fullStateFixture": "B31-content-map-7-ranges",
+            "selectedRange": [
+              100,
+              124
+            ],
+            "text": "Field conditions were steady through the observation window. No further adjustment was required."
+          },
+          "destination": {
+            "store": "Draft B",
+            "branch": "draft-b/main",
+            "base": "V31",
+            "author": "author:ava",
+            "signingKey": "key:ava-k2",
+            "status": "verified",
+            "mode": "Create child",
+            "authorStatus": "verified"
+          },
+          "oldFutures": [
+            {
+              "id": "Draft B@V40",
+              "parent": "Draft B@V39",
+              "kind": "existing future",
+              "unchangedByRecovery": true
+            }
+          ],
+          "payload": {
+            "operation": "transclude selected historical passage",
+            "ranges": [
+              [
+                100,
+                142
+              ]
+            ],
+            "origin": "Draft A@V27 · source:DraftA-V27-p3 · occurrence a-o5",
+            "retainsBaseContent": true
+          },
+          "status": "draft",
+          "preview": null,
+          "commitStatus": "preflight-ready",
+          "failure": {
+            "gate": "author signing identity",
+            "reason": "key revoked",
+            "published": false
+          }
+        },
+        "draft": null,
+        "comparison": {
+          "left": "Draft A@V27",
+          "right": "Draft B@V40",
+          "badge": {
+            "count": 3,
+            "unit": "difference categories",
+            "scope": "comparison A@V27 vs B@V40"
+          },
+          "categories": [
+            "paragraph removed",
+            "wording changed",
+            "section reordered"
+          ]
+        },
+        "commit": {
+          "attempt": null,
+          "status": "none",
+          "receipt": null
+        }
+      },
+      "effects": [
+        {
+          "domain": "private staging",
+          "summary": "Update draft author declaration only; no destination effect.",
+          "identity": "author:ava; key:ava-k2 verified"
+        }
+      ],
+      "action": "Select valid verified author identity and re-run preflight",
+      "note": "Preflight can continue only with a valid verified author."
+    },
+    {
+      "file": "J31/J31-invalid-author-destination/J31-invalid-author-destination-a3.png",
+      "location": "?journey=J31&variant=J31-invalid-author-destination&task=0&action=3",
+      "frame": "J31-invalid-author-destination-a3",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "03",
+            "parent": null,
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Draft A": 67,
+          "Draft B": 124,
+          "Review store": 214,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J31-invalid-author-destination-a3-reading",
+            "title": "Reading · visit 03 · Review@V4",
+            "kind": "document",
+            "body": [
+              "The recorded pressure remained stable during the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03"
+              },
+              {
+                "label": "Subject",
+                "value": "Review passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "review-o3"
+              },
+              {
+                "label": "Offset",
+                "value": 80
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "v-dest",
+            "title": "Destination preflight failed",
+            "kind": "notice",
+            "body": [],
+            "facts": [
+              {
+                "label": "Source",
+                "value": "A@V27 · valid"
+              },
+              {
+                "label": "Author",
+                "value": "verified"
+              },
+              {
+                "label": "Destination/base",
+                "value": "B@V31 · permission denied"
+              },
+              {
+                "label": "Prepared ops",
+                "value": 0
+              },
+              {
+                "label": "Published receipt",
+                "value": "none"
+              }
+            ],
+            "rows": [],
+            "tone": "comment"
+          }
+        ],
+        "recovery": {
+          "id": "recovery-draft:R1",
+          "source": {
+            "id": "source:DraftA-V27-p3",
+            "authority": "Draft A",
+            "state": "V27",
+            "object": "doc:draft-a",
+            "ranges": [
+              [
+                100,
+                142
+              ]
+            ],
+            "occurrence": "a-o5",
+            "text": "Pressure stayed stable during the observation window."
+          },
+          "targetBase": {
+            "id": "Draft B@V31",
+            "store": "Draft B",
+            "branch": "draft-b/main",
+            "state": "V31",
+            "fullStateFixture": "B31-content-map-7-ranges",
+            "selectedRange": [
+              100,
+              124
+            ],
+            "text": "Field conditions were steady through the observation window. No further adjustment was required."
+          },
+          "destination": {
+            "store": "Draft B",
+            "branch": "draft-b/main",
+            "base": "V31",
+            "author": "author:ava",
+            "signingKey": "key:ava-k2",
+            "status": "verified",
+            "mode": "Create child",
+            "authorStatus": "verified"
+          },
+          "oldFutures": [
+            {
+              "id": "Draft B@V40",
+              "parent": "Draft B@V39",
+              "kind": "existing future",
+              "unchangedByRecovery": true
+            }
+          ],
+          "payload": {
+            "operation": "transclude selected historical passage",
+            "ranges": [
+              [
+                100,
+                142
+              ]
+            ],
+            "origin": "Draft A@V27 · source:DraftA-V27-p3 · occurrence a-o5",
+            "retainsBaseContent": true
+          },
+          "status": "draft",
+          "preview": null,
+          "commitStatus": "preflight-failed",
+          "failure": {
+            "gate": "destination/base",
+            "reason": "write permission denied at B V31",
+            "published": false
+          },
+          "destinationValidation": "invalid"
+        },
+        "draft": null,
+        "comparison": {
+          "left": "Draft A@V27",
+          "right": "Draft B@V40",
+          "badge": {
+            "count": 3,
+            "unit": "difference categories",
+            "scope": "comparison A@V27 vs B@V40"
+          },
+          "categories": [
+            "paragraph removed",
+            "wording changed",
+            "section reordered"
+          ]
+        },
+        "commit": {
+          "attempt": null,
+          "status": "none",
+          "receipt": null
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "Invalid receiving permission blocks preparation and publication.",
+          "identity": "Draft B@V31; no destination effect"
+        }
+      ],
+      "action": "Fail destination permission/base validation",
+      "note": "Valid source and author do not bypass destination validation."
+    },
+    {
+      "file": "J31/J31-invalid-author-destination/J31-invalid-author-destination-a4.png",
+      "location": "?journey=J31&variant=J31-invalid-author-destination&task=0&action=4",
+      "frame": "J31-invalid-author-destination-a4",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "03",
+            "parent": null,
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Draft A": 67,
+          "Draft B": 124,
+          "Review store": 214,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J31-invalid-author-destination-a4-reading",
+            "title": "Reading · visit 03 · Review@V4",
+            "kind": "document",
+            "body": [
+              "The recorded pressure remained stable during the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03"
+              },
+              {
+                "label": "Subject",
+                "value": "Review passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "review-o3"
+              },
+              {
+                "label": "Offset",
+                "value": 80
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "v-dest",
+            "title": "Pinned destination valid",
+            "kind": "notice",
+            "body": [],
+            "facts": [
+              {
+                "label": "Base",
+                "value": "B@V31"
+              },
+              {
+                "label": "Head",
+                "value": "V41"
+              },
+              {
+                "label": "Choice",
+                "value": "Keep V31 explicitly"
+              },
+              {
+                "label": "Validation",
+                "value": "valid"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "recovery": {
+          "id": "recovery-draft:R1",
+          "source": {
+            "id": "source:DraftA-V27-p3",
+            "authority": "Draft A",
+            "state": "V27",
+            "object": "doc:draft-a",
+            "ranges": [
+              [
+                100,
+                142
+              ]
+            ],
+            "occurrence": "a-o5",
+            "text": "Pressure stayed stable during the observation window."
+          },
+          "targetBase": {
+            "id": "Draft B@V31",
+            "store": "Draft B",
+            "branch": "draft-b/main",
+            "state": "V31",
+            "fullStateFixture": "B31-content-map-7-ranges",
+            "selectedRange": [
+              100,
+              124
+            ],
+            "text": "Field conditions were steady through the observation window. No further adjustment was required."
+          },
+          "destination": {
+            "store": "Draft B",
+            "branch": "draft-b/main",
+            "base": "V31",
+            "author": "author:ava",
+            "signingKey": "key:ava-k2",
+            "status": "verified",
+            "mode": "Create child",
+            "authorStatus": "verified"
+          },
+          "oldFutures": [
+            {
+              "id": "Draft B@V40",
+              "parent": "Draft B@V39",
+              "kind": "existing future",
+              "unchangedByRecovery": true
+            }
+          ],
+          "payload": {
+            "operation": "transclude selected historical passage",
+            "ranges": [
+              [
+                100,
+                142
+              ]
+            ],
+            "origin": "Draft A@V27 · source:DraftA-V27-p3 · occurrence a-o5",
+            "retainsBaseContent": true
+          },
+          "status": "draft",
+          "preview": null,
+          "commitStatus": "preflight-ready",
+          "failure": {
+            "gate": "destination/base",
+            "reason": "write permission denied at B V31",
+            "published": false
+          },
+          "destinationValidation": "valid"
+        },
+        "draft": null,
+        "comparison": {
+          "left": "Draft A@V27",
+          "right": "Draft B@V40",
+          "badge": {
+            "count": 3,
+            "unit": "difference categories",
+            "scope": "comparison A@V27 vs B@V40"
+          },
+          "categories": [
+            "paragraph removed",
+            "wording changed",
+            "section reordered"
+          ]
+        },
+        "commit": {
+          "attempt": null,
+          "status": "none",
+          "receipt": null
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "Revalidation opens preflight for exact V31; it does not move to current head.",
+          "identity": "Draft B@V31"
+        }
+      ],
+      "action": "Restore destination permission and revalidate exact V31 base",
+      "note": "No commit is implied until an explicit author action follows."
+    }
+  ]
+}

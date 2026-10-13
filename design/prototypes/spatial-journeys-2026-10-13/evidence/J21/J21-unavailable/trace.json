@@ -1,0 +1,335 @@
+{
+  "journey": "J21",
+  "route": "J21-unavailable",
+  "frames": [
+    {
+      "file": "J21/J21-unavailable/before.png",
+      "location": "?journey=J21&variant=J21-unavailable",
+      "frame": "J21-J21-unavailable-s4-before",
+      "state": {
+        "fixture": "prism-store-a-independent-two-state",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "store-A://rig": 56
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Reading place",
+            "kind": "document",
+            "body": [
+              "Current visit 01 · Lab notes · V12.",
+              "The starting caret and occurrence remain pinned while tools open."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Offset",
+                "value": "p.14 · 54.2"
+              },
+              {
+                "label": "Occurrence",
+                "value": "Lab:p14:r54.2"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "prism",
+            "title": "Comparison prism · Store A",
+            "kind": "comparison",
+            "body": [
+              "Independent two-state fixture. Gold marks only the shared original prefix; changed value spans are violet."
+            ],
+            "facts": [
+              {
+                "label": "Left",
+                "value": "store-A://rig · C17 V8 · pinned"
+              },
+              {
+                "label": "Right",
+                "value": "store-A://rig · C17 V12 · pinned"
+              },
+              {
+                "label": "Shared source",
+                "value": "primedia-A17[0,8] · “pressure:”"
+              },
+              {
+                "label": "Changed value",
+                "value": "3.14 bar → 3.16 bar"
+              },
+              {
+                "label": "Source op delta",
+                "value": "0"
+              }
+            ],
+            "rows": [
+              {
+                "id": "left",
+                "label": "Before V8",
+                "detail": "pressure: 3.14 bar",
+                "status": "pinned",
+                "ordinal": 1
+              },
+              {
+                "id": "right",
+                "label": "After V12",
+                "detail": "pressure: 3.16 bar",
+                "status": "pinned",
+                "ordinal": 2
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "comparison": {
+          "fixture": "Store A · prism independent fixture",
+          "left": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V8",
+            "occurrence": "A-C17-V8",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A17-value[9,16]"
+            ]
+          },
+          "right": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V12",
+            "occurrence": "A-C17-V12",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A12-value[9,16]"
+            ]
+          },
+          "shared": [
+            "primedia-A17[0,8]"
+          ],
+          "changes": [
+            "value 3.14 bar → 3.16 bar"
+          ],
+          "sourceOps": {
+            "store-A://rig": 56
+          }
+        }
+      },
+      "effects": [],
+      "action": "Before",
+      "note": ""
+    },
+    {
+      "file": "J21/J21-unavailable/J21-unavailable-a1.png",
+      "location": "?journey=J21&variant=J21-unavailable&task=0&action=1",
+      "frame": "J21-unavailable-a1",
+      "state": {
+        "fixture": "prism-store-a-independent-two-state",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "store-A://rig": 56
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Reading place",
+            "kind": "document",
+            "body": [
+              "Current visit 01 · Lab notes · V12.",
+              "The starting caret and occurrence remain pinned while tools open."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Offset",
+                "value": "p.14 · 54.2"
+              },
+              {
+                "label": "Occurrence",
+                "value": "Lab:p14:r54.2"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "unavailable",
+            "title": "Region unavailable · target retained",
+            "kind": "inspector",
+            "body": [
+              "No substitute preview is selected. The target identity remains available for retry."
+            ],
+            "facts": [
+              {
+                "label": "Target store",
+                "value": "store-A://rig"
+              },
+              {
+                "label": "Object",
+                "value": "C17"
+              },
+              {
+                "label": "Version",
+                "value": "V12"
+              },
+              {
+                "label": "Occurrence",
+                "value": "A-C17-V12"
+              },
+              {
+                "label": "Range",
+                "value": "primedia-A12[9,16]"
+              },
+              {
+                "label": "Status",
+                "value": "unavailable · exact region"
+              },
+              {
+                "label": "Fallback",
+                "value": "none"
+              }
+            ],
+            "rows": [
+              {
+                "id": "retry",
+                "label": "Retry exact target",
+                "detail": "same identity",
+                "status": "available"
+              },
+              {
+                "id": "keep",
+                "label": "Keep unavailable descriptor",
+                "detail": "no substitute",
+                "status": "available"
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "comparison": {
+          "fixture": "Store A · prism independent fixture",
+          "left": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V8",
+            "occurrence": "A-C17-V8",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A17-value[9,16]"
+            ]
+          },
+          "right": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V12",
+            "occurrence": "A-C17-V12",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A12-value[9,16]"
+            ]
+          },
+          "shared": [
+            "primedia-A17[0,8]"
+          ],
+          "changes": [
+            "value 3.14 bar → 3.16 bar"
+          ],
+          "sourceOps": {
+            "store-A://rig": 56
+          },
+          "unavailableTarget": "A-C17-V12"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Retain unavailable exact descriptor",
+      "note": "Exact target descriptor remains pinned; no replacement preview."
+    }
+  ]
+}

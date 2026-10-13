@@ -1,0 +1,623 @@
+{
+  "journey": "J31",
+  "route": "J31-recovery-status-unavailable",
+  "frames": [
+    {
+      "file": "J31/J31-recovery-status-unavailable/before.png",
+      "location": "?journey=J31&variant=J31-recovery-status-unavailable",
+      "frame": "J31-J31-recovery-status-unavailable-s5-before",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "03",
+            "parent": null,
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Draft A": 67,
+          "Draft B": 124,
+          "Review store": 214,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "r-source",
+            "title": "Recovery source",
+            "kind": "document",
+            "body": [
+              "The passage is selected from historical Draft A V27."
+            ],
+            "facts": [
+              {
+                "label": "Authority/state",
+                "value": "Draft A@V27"
+              },
+              {
+                "label": "Object",
+                "value": "doc:draft-a"
+              },
+              {
+                "label": "Exact ranges",
+                "value": "[100,142)"
+              },
+              {
+                "label": "Occurrence",
+                "value": "a-o5"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "r-dest",
+            "title": "Receiving state and futures",
+            "kind": "history",
+            "body": [],
+            "facts": [
+              {
+                "label": "Pinned base",
+                "value": "Draft B@V31"
+              },
+              {
+                "label": "Current old future",
+                "value": "Draft B@V40 · retained"
+              },
+              {
+                "label": "New mode",
+                "value": "Create child at pinned base"
+              }
+            ],
+            "rows": [
+              {
+                "id": "b31",
+                "label": "B V31",
+                "detail": "chosen immutable base",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "b40",
+                "label": "B V40",
+                "detail": "existing future retained",
+                "status": "ready",
+                "ordinal": 2
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "recovery": {
+          "id": "recovery-draft:R1",
+          "source": {
+            "id": "source:DraftA-V27-p3",
+            "authority": "Draft A",
+            "state": "V27",
+            "object": "doc:draft-a",
+            "ranges": [
+              [
+                100,
+                142
+              ]
+            ],
+            "occurrence": "a-o5",
+            "text": "Pressure stayed stable during the observation window."
+          },
+          "targetBase": {
+            "id": "Draft B@V31",
+            "store": "Draft B",
+            "branch": "draft-b/main",
+            "state": "V31",
+            "fullStateFixture": "B31-content-map-7-ranges",
+            "selectedRange": [
+              100,
+              124
+            ],
+            "text": "Field conditions were steady through the observation window. No further adjustment was required."
+          },
+          "destination": {
+            "store": "Draft B",
+            "branch": "draft-b/main",
+            "base": "V31",
+            "author": "author:ava",
+            "signingKey": "key:ava-k2",
+            "status": "verified",
+            "mode": "Create child"
+          },
+          "oldFutures": [
+            {
+              "id": "Draft B@V40",
+              "parent": "Draft B@V39",
+              "kind": "existing future",
+              "unchangedByRecovery": true
+            }
+          ],
+          "payload": {
+            "operation": "transclude selected historical passage",
+            "ranges": [
+              [
+                100,
+                142
+              ]
+            ],
+            "origin": "Draft A@V27 · source:DraftA-V27-p3 · occurrence a-o5",
+            "retainsBaseContent": true
+          },
+          "status": "draft",
+          "preview": null
+        },
+        "draft": null,
+        "comparison": {
+          "left": "Draft A@V27",
+          "right": "Draft B@V40",
+          "badge": {
+            "count": 3,
+            "unit": "difference categories",
+            "scope": "comparison A@V27 vs B@V40"
+          },
+          "categories": [
+            "paragraph removed",
+            "wording changed",
+            "section reordered"
+          ]
+        },
+        "commit": {
+          "attempt": null,
+          "status": "none",
+          "receipt": null
+        }
+      },
+      "effects": [],
+      "action": "Before",
+      "note": ""
+    },
+    {
+      "file": "J31/J31-recovery-status-unavailable/J31-recovery-status-unavailable-a1.png",
+      "location": "?journey=J31&variant=J31-recovery-status-unavailable&task=0&action=1",
+      "frame": "J31-recovery-status-unavailable-a1",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "03",
+            "parent": null,
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Draft A": 67,
+          "Draft B": 124,
+          "Review store": 214,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J31-recovery-status-unavailable-a1-reading",
+            "title": "Reading · visit 03 · Review@V4",
+            "kind": "document",
+            "body": [
+              "The recorded pressure remained stable during the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03"
+              },
+              {
+                "label": "Subject",
+                "value": "Review passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "review-o3"
+              },
+              {
+                "label": "Offset",
+                "value": 80
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "v-unknown",
+            "title": "Recovery result unknown",
+            "kind": "notice",
+            "body": [],
+            "facts": [
+              {
+                "label": "Attempt",
+                "value": "R1:1"
+              },
+              {
+                "label": "Controls",
+                "value": "Forge/Retry/Edit/Discard blocked"
+              },
+              {
+                "label": "Action",
+                "value": "Check status"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "recovery": {
+          "id": "recovery-draft:R1",
+          "source": {
+            "id": "source:DraftA-V27-p3",
+            "authority": "Draft A",
+            "state": "V27",
+            "object": "doc:draft-a",
+            "ranges": [
+              [
+                100,
+                142
+              ]
+            ],
+            "occurrence": "a-o5",
+            "text": "Pressure stayed stable during the observation window."
+          },
+          "targetBase": {
+            "id": "Draft B@V31",
+            "store": "Draft B",
+            "branch": "draft-b/main",
+            "state": "V31",
+            "fullStateFixture": "B31-content-map-7-ranges",
+            "selectedRange": [
+              100,
+              124
+            ],
+            "text": "Field conditions were steady through the observation window. No further adjustment was required."
+          },
+          "destination": {
+            "store": "Draft B",
+            "branch": "draft-b/main",
+            "base": "V31",
+            "author": "author:ava",
+            "signingKey": "key:ava-k2",
+            "status": "verified",
+            "mode": "Create child"
+          },
+          "oldFutures": [
+            {
+              "id": "Draft B@V40",
+              "parent": "Draft B@V39",
+              "kind": "existing future",
+              "unchangedByRecovery": true
+            }
+          ],
+          "payload": {
+            "operation": "transclude selected historical passage",
+            "ranges": [
+              [
+                100,
+                142
+              ]
+            ],
+            "origin": "Draft A@V27 · source:DraftA-V27-p3 · occurrence a-o5",
+            "retainsBaseContent": true
+          },
+          "status": "draft",
+          "preview": null,
+          "attempt": {
+            "token": "attempt:R1:1",
+            "draftId": "recovery-draft:R1",
+            "payloadDigest": "sha256:recovery-R1-a-v27-b-v31",
+            "source": "A@V27[100,142)·a-o5",
+            "base": "B@V31",
+            "author": "author:ava",
+            "mode": "Create child"
+          },
+          "commitStatus": "outcome-unknown",
+          "forgeEnabled": false,
+          "retryEnabled": false
+        },
+        "draft": null,
+        "comparison": {
+          "left": "Draft A@V27",
+          "right": "Draft B@V40",
+          "badge": {
+            "count": 3,
+            "unit": "difference categories",
+            "scope": "comparison A@V27 vs B@V40"
+          },
+          "categories": [
+            "paragraph removed",
+            "wording changed",
+            "section reordered"
+          ]
+        },
+        "commit": {
+          "attempt": null,
+          "status": "none",
+          "receipt": null
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "Keep exact attempt unresolved and block edits/commit/discard.",
+          "identity": "attempt:R1:1"
+        }
+      ],
+      "action": "Simulate recovery publication attempt with lost reply",
+      "note": "The user can only request status."
+    },
+    {
+      "file": "J31/J31-recovery-status-unavailable/J31-recovery-status-unavailable-a2.png",
+      "location": "?journey=J31&variant=J31-recovery-status-unavailable&task=0&action=2",
+      "frame": "J31-recovery-status-unavailable-a2",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "03",
+            "parent": null,
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Draft A": 67,
+          "Draft B": 124,
+          "Review store": 214,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J31-recovery-status-unavailable-a2-reading",
+            "title": "Reading · visit 03 · Review@V4",
+            "kind": "document",
+            "body": [
+              "The recorded pressure remained stable during the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03"
+              },
+              {
+                "label": "Subject",
+                "value": "Review passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "review-o3"
+              },
+              {
+                "label": "Offset",
+                "value": 80
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "v-unknown",
+            "title": "Status unavailable",
+            "kind": "notice",
+            "body": [],
+            "facts": [
+              {
+                "label": "Attempt",
+                "value": "R1:1 · unresolved"
+              },
+              {
+                "label": "Source/base",
+                "value": "A V27 → B V31 preserved"
+              },
+              {
+                "label": "Forge/Retry",
+                "value": "blocked"
+              },
+              {
+                "label": "Next",
+                "value": "Check status later"
+              }
+            ],
+            "rows": [],
+            "tone": "comment"
+          }
+        ],
+        "recovery": {
+          "id": "recovery-draft:R1",
+          "source": {
+            "id": "source:DraftA-V27-p3",
+            "authority": "Draft A",
+            "state": "V27",
+            "object": "doc:draft-a",
+            "ranges": [
+              [
+                100,
+                142
+              ]
+            ],
+            "occurrence": "a-o5",
+            "text": "Pressure stayed stable during the observation window."
+          },
+          "targetBase": {
+            "id": "Draft B@V31",
+            "store": "Draft B",
+            "branch": "draft-b/main",
+            "state": "V31",
+            "fullStateFixture": "B31-content-map-7-ranges",
+            "selectedRange": [
+              100,
+              124
+            ],
+            "text": "Field conditions were steady through the observation window. No further adjustment was required."
+          },
+          "destination": {
+            "store": "Draft B",
+            "branch": "draft-b/main",
+            "base": "V31",
+            "author": "author:ava",
+            "signingKey": "key:ava-k2",
+            "status": "verified",
+            "mode": "Create child"
+          },
+          "oldFutures": [
+            {
+              "id": "Draft B@V40",
+              "parent": "Draft B@V39",
+              "kind": "existing future",
+              "unchangedByRecovery": true
+            }
+          ],
+          "payload": {
+            "operation": "transclude selected historical passage",
+            "ranges": [
+              [
+                100,
+                142
+              ]
+            ],
+            "origin": "Draft A@V27 · source:DraftA-V27-p3 · occurrence a-o5",
+            "retainsBaseContent": true
+          },
+          "status": "draft",
+          "preview": null,
+          "attempt": {
+            "token": "attempt:R1:1",
+            "draftId": "recovery-draft:R1",
+            "payloadDigest": "sha256:recovery-R1-a-v27-b-v31",
+            "source": "A@V27[100,142)·a-o5",
+            "base": "B@V31",
+            "author": "author:ava",
+            "mode": "Create child"
+          },
+          "commitStatus": "status-unavailable",
+          "forgeEnabled": false,
+          "retryEnabled": false,
+          "statusRetryAvailable": true
+        },
+        "draft": null,
+        "comparison": {
+          "left": "Draft A@V27",
+          "right": "Draft B@V40",
+          "badge": {
+            "count": 3,
+            "unit": "difference categories",
+            "scope": "comparison A@V27 vs B@V40"
+          },
+          "categories": [
+            "paragraph removed",
+            "wording changed",
+            "section reordered"
+          ]
+        },
+        "commit": {
+          "attempt": null,
+          "status": "none",
+          "receipt": null
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "Status service cannot resolve the attempt; keep the descriptor and token for later check.",
+          "identity": "attempt:R1:1 unresolved"
+        }
+      ],
+      "action": "Check status → unavailable",
+      "note": "Do not infer uncommitted or create a new token."
+    }
+  ]
+}

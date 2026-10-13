@@ -1,0 +1,554 @@
+{
+  "journey": "J24",
+  "route": "J24-reenable-carrier",
+  "frames": [
+    {
+      "file": "J24/J24-reenable-carrier/before.png",
+      "location": "?journey=J24&variant=J24-reenable-carrier",
+      "frame": "J24-J24-reenable-carrier-s5-before",
+      "state": {
+        "fixture": "fixture:integrated-pressure-investigation-v12-v4-link-L17",
+        "reading": {
+          "visit": "03",
+          "subject": "doc:Review",
+          "store": "store:orion-pub-17",
+          "version": "V4",
+          "occurrence": "occ:review-pressure-passage-02",
+          "offset": 1184,
+          "body": [
+            "Review of the pressure test.",
+            "The recorded pressure remained stable during the run.",
+            "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "doc:LabNotes",
+            "version": "V12",
+            "occurrence": "occ:lab-passage-09"
+          },
+          {
+            "id": "02",
+            "parent": "01",
+            "subject": "cell:C17",
+            "version": "V8",
+            "occurrence": "occ:c17-pressure-spans-1"
+          },
+          {
+            "id": "03",
+            "parent": "02",
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02"
+          },
+          {
+            "id": "04",
+            "parent": "02",
+            "subject": "doc:Calibration",
+            "version": "V5",
+            "occurrence": "occ:calibration-page-01"
+          }
+        ],
+        "selection": {
+          "subject": "link:L17",
+          "state": "Review V4",
+          "locator": "occ:review-pressure-passage-02",
+          "activeSide": "right"
+        },
+        "sourceOps": {
+          "store:local-lab": 1402,
+          "store:orion-pub-17": 0,
+          "store:remote-lab": 0
+        },
+        "readerEffects": {
+          "visits": 3,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "layers",
+            "title": "Layer disabled",
+            "kind": "notice",
+            "body": [
+              "The drawing hides because carrier #12 is disabled. The retained inspector keeps Link L17 and its complete identity."
+            ],
+            "facts": [
+              {
+                "label": "Carrier",
+                "value": "carrier:lab-review-12:sha256:8b6e2d91a407c3f1"
+              },
+              {
+                "label": "Enabled",
+                "value": "No"
+              },
+              {
+                "label": "Retained",
+                "value": "Yes"
+              },
+              {
+                "label": "Selected Link",
+                "value": "L17"
+              }
+            ],
+            "rows": [
+              {
+                "id": "dismiss",
+                "label": "Dismiss selected context",
+                "detail": "Explicit",
+                "status": "available"
+              },
+              {
+                "id": "reenable",
+                "label": "Re-enable carrier #12",
+                "detail": "Explicit",
+                "status": "available"
+              }
+            ],
+            "tone": "neutral"
+          },
+          {
+            "id": "retained-link",
+            "title": "Pinned Link · disabled carrier",
+            "kind": "inspector",
+            "body": [
+              "L17 is still inspectable; its carrier identity does not change."
+            ],
+            "facts": [
+              {
+                "label": "Link",
+                "value": "link:L17"
+              },
+              {
+                "label": "Carrier",
+                "value": "carrier:lab-review-12:sha256:8b6e2d91a407c3f1"
+              },
+              {
+                "label": "Status",
+                "value": "Drawing hidden · context retained"
+              },
+              {
+                "label": "Cursors",
+                "value": "Left 2/2 · Right 1/3"
+              }
+            ],
+            "rows": [
+              {
+                "id": "L17-L1",
+                "label": "Left 1 · doc:LabNotes V12",
+                "detail": "prim:LN12:44-83 · occ occ:lab-passage-09",
+                "status": "available",
+                "ordinal": 1
+              },
+              {
+                "id": "L17-L2",
+                "label": "Left 2 · cell:C17 V8",
+                "detail": "prim:C17V8:118-142 · prim:C17V8:151-166 · occ occ:c17-pressure-spans-1",
+                "status": "selected",
+                "ordinal": 2
+              },
+              {
+                "id": "L17-R1",
+                "label": "Right 1 · doc:Review V4",
+                "detail": "prim:RV4:320-374 · occ occ:review-pressure-passage-02",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "L17-R2",
+                "label": "Right 2 · cell:C24 V8",
+                "detail": "prim:C24V8:51-82 · occ occ:c24-temperature-01",
+                "status": "available",
+                "ordinal": 2
+              },
+              {
+                "id": "L17-R3",
+                "label": "Right 3 · remote-span:rs-778 V9",
+                "detail": "prim:RS778V9:700-748 · occ occ:rs778-01 · unavailable, exact target retained",
+                "status": "unavailable",
+                "ordinal": 3
+              }
+            ],
+            "tone": "comment"
+          }
+        ],
+        "linkSession": {
+          "link": {
+            "id": "link:L17",
+            "carrier": "carrier:lab-review-12:sha256:8b6e2d91a407c3f1",
+            "relation": "Comment",
+            "left": [
+              {
+                "ordinal": 1,
+                "subject": "doc:LabNotes",
+                "store": "store:local-lab",
+                "version": "V12",
+                "ranges": [
+                  "prim:LN12:44-83"
+                ],
+                "occurrences": [
+                  "occ:lab-passage-09"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C17",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C17V8:118-142",
+                  "prim:C17V8:151-166"
+                ],
+                "occurrences": [
+                  "occ:c17-pressure-spans-1",
+                  "occ:c17-pressure-spans-2"
+                ]
+              }
+            ],
+            "right": [
+              {
+                "ordinal": 1,
+                "subject": "doc:Review",
+                "store": "store:orion-pub-17",
+                "version": "V4",
+                "ranges": [
+                  "prim:RV4:320-374"
+                ],
+                "occurrences": [
+                  "occ:review-pressure-passage-02"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C24",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C24V8:51-82"
+                ],
+                "occurrences": [
+                  "occ:c24-temperature-01"
+                ]
+              },
+              {
+                "ordinal": 3,
+                "subject": "remote-span:rs-778",
+                "store": "store:remote-lab",
+                "version": "V9",
+                "ranges": [
+                  "prim:RS778V9:700-748"
+                ],
+                "occurrences": [
+                  "occ:rs778-01"
+                ],
+                "availability": "unavailable"
+              }
+            ]
+          },
+          "activeSide": "right",
+          "leftCursor": 2,
+          "rightCursor": 1,
+          "originVisit": "01",
+          "savedContexts": {
+            "visit:03": {
+              "originVisit": "01",
+              "leftCursor": 2,
+              "rightCursor": 1,
+              "activeSide": "right"
+            }
+          },
+          "pinnedWhileDisabled": true
+        },
+        "packages": {
+          "carrier:lab-review-12:sha256:8b6e2d91a407c3f1": {
+            "enabled": false,
+            "emphasis": "normal"
+          }
+        },
+        "availability": {
+          "remote:rs-778:V9": "unavailable"
+        }
+      },
+      "effects": [],
+      "action": "Before",
+      "note": ""
+    },
+    {
+      "file": "J24/J24-reenable-carrier/J24-reenable-carrier-a1.png",
+      "location": "?journey=J24&variant=J24-reenable-carrier&task=0&action=1",
+      "frame": "J24-reenable-carrier-a1",
+      "state": {
+        "fixture": "fixture:integrated-pressure-investigation-v12-v4-link-L17",
+        "reading": {
+          "visit": "03",
+          "subject": "doc:Review",
+          "store": "store:orion-pub-17",
+          "version": "V4",
+          "occurrence": "occ:review-pressure-passage-02",
+          "offset": 1184,
+          "body": [
+            "Review of the pressure test.",
+            "The recorded pressure remained stable during the run.",
+            "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "doc:LabNotes",
+            "version": "V12",
+            "occurrence": "occ:lab-passage-09"
+          },
+          {
+            "id": "02",
+            "parent": "01",
+            "subject": "cell:C17",
+            "version": "V8",
+            "occurrence": "occ:c17-pressure-spans-1"
+          },
+          {
+            "id": "03",
+            "parent": "02",
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02"
+          },
+          {
+            "id": "04",
+            "parent": "02",
+            "subject": "doc:Calibration",
+            "version": "V5",
+            "occurrence": "occ:calibration-page-01"
+          }
+        ],
+        "selection": {
+          "subject": "link:L17",
+          "state": "Review V4",
+          "locator": "occ:review-pressure-passage-02",
+          "activeSide": "right"
+        },
+        "sourceOps": {
+          "store:local-lab": 1402,
+          "store:orion-pub-17": 0,
+          "store:remote-lab": 0
+        },
+        "readerEffects": {
+          "visits": 3,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "layer-enabled",
+            "title": "Carrier #12 re-enabled",
+            "kind": "notice",
+            "body": [
+              "The complete L17 inspector remains selected. Re-enabling the carrier restores its drawing without changing Link identity or cursor position."
+            ],
+            "facts": [
+              {
+                "label": "Carrier",
+                "value": "carrier:lab-review-12:sha256:8b6e2d91a407c3f1"
+              },
+              {
+                "label": "Enabled",
+                "value": "Yes"
+              },
+              {
+                "label": "Selected",
+                "value": "link:L17"
+              },
+              {
+                "label": "Cursors",
+                "value": "Left 2/2 · Right 1/3"
+              }
+            ],
+            "rows": [
+              {
+                "id": "L17",
+                "label": "L17 · Comment",
+                "detail": "same immutable carrier and member identity",
+                "status": "selected"
+              }
+            ],
+            "tone": "selected"
+          },
+          {
+            "id": "retained-link",
+            "title": "L17 after re-enable",
+            "kind": "inspector",
+            "body": [
+              "The visual layer is available again; selected context remains pinned."
+            ],
+            "facts": [
+              {
+                "label": "Carrier",
+                "value": "#12 · enabled"
+              },
+              {
+                "label": "Selection",
+                "value": "L17 retained"
+              },
+              {
+                "label": "Visit delta",
+                "value": "0"
+              },
+              {
+                "label": "Source ops",
+                "value": "unchanged"
+              }
+            ],
+            "rows": [
+              {
+                "id": "left-1",
+                "label": "Left 1/2",
+                "detail": "Lab notes V12 · exact original range",
+                "status": "available",
+                "ordinal": 1
+              },
+              {
+                "id": "left-2",
+                "label": "Left 2/2",
+                "detail": "C17 V8 · two content spans retained",
+                "status": "selected",
+                "ordinal": 2
+              },
+              {
+                "id": "right-1",
+                "label": "Right 1/3",
+                "detail": "Review V4",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "right-2",
+                "label": "Right 2/3",
+                "detail": "C24 V8",
+                "status": "available",
+                "ordinal": 2
+              },
+              {
+                "id": "right-3",
+                "label": "Right 3/3",
+                "detail": "Remote V9 · unavailable exact descriptor retained",
+                "status": "unavailable",
+                "ordinal": 3
+              }
+            ],
+            "tone": "comment"
+          }
+        ],
+        "linkSession": {
+          "link": {
+            "id": "link:L17",
+            "carrier": "carrier:lab-review-12:sha256:8b6e2d91a407c3f1",
+            "relation": "Comment",
+            "left": [
+              {
+                "ordinal": 1,
+                "subject": "doc:LabNotes",
+                "store": "store:local-lab",
+                "version": "V12",
+                "ranges": [
+                  "prim:LN12:44-83"
+                ],
+                "occurrences": [
+                  "occ:lab-passage-09"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C17",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C17V8:118-142",
+                  "prim:C17V8:151-166"
+                ],
+                "occurrences": [
+                  "occ:c17-pressure-spans-1",
+                  "occ:c17-pressure-spans-2"
+                ]
+              }
+            ],
+            "right": [
+              {
+                "ordinal": 1,
+                "subject": "doc:Review",
+                "store": "store:orion-pub-17",
+                "version": "V4",
+                "ranges": [
+                  "prim:RV4:320-374"
+                ],
+                "occurrences": [
+                  "occ:review-pressure-passage-02"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C24",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C24V8:51-82"
+                ],
+                "occurrences": [
+                  "occ:c24-temperature-01"
+                ]
+              },
+              {
+                "ordinal": 3,
+                "subject": "remote-span:rs-778",
+                "store": "store:remote-lab",
+                "version": "V9",
+                "ranges": [
+                  "prim:RS778V9:700-748"
+                ],
+                "occurrences": [
+                  "occ:rs778-01"
+                ],
+                "availability": "unavailable"
+              }
+            ]
+          },
+          "activeSide": "right",
+          "leftCursor": 2,
+          "rightCursor": 1,
+          "originVisit": "01",
+          "savedContexts": {
+            "visit:03": {
+              "originVisit": "01",
+              "leftCursor": 2,
+              "rightCursor": 1,
+              "activeSide": "right"
+            }
+          },
+          "pinnedWhileDisabled": false
+        },
+        "packages": {
+          "carrier:lab-review-12:sha256:8b6e2d91a407c3f1": {
+            "enabled": true,
+            "emphasis": "normal"
+          }
+        },
+        "availability": {
+          "remote:rs-778:V9": "unavailable"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "Re-enable changes the reader layer preference only; selected Link identity, cursors, source data and visit count are retained.",
+          "identity": "carrier #12 ↔ link:L17"
+        }
+      ],
+      "action": "Re-enable carrier #12 while retaining selected L17",
+      "note": "This is an actionable re-enable alternative from the disabled state. It does not rewrite or replace L17."
+    }
+  ]
+}

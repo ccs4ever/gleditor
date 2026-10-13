@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Xuzz · Spatial journey prototype</title>
+  <link rel="stylesheet" href="prototype.css">
+</head>
+<body>
+  <a class="skip" href="#actions">Skip to actions</a>
+  <header class="glass masthead">
+    <div><span class="eyebrow">Xuzz / concept prototype</span><h1 id="journey-title">Spatial investigations</h1></div>
+    <div class="scope"><strong id="query-label">Exact subjects · pinned states</strong><span id="scope-label">Scripted fixtures · no live service writes</span></div>
+    <button id="list-mode" aria-pressed="false">List view</button>
+    <button id="large-text" aria-pressed="false">Larger text</button>
+    <button id="reduce-motion" aria-pressed="false">Reduce motion</button>
+  </header>
+  <details class="glass guide" id="guide" open>
+    <summary>Journey guide · facilitator controls</summary>
+    <div class="guide-controls">
+      <label>Journey<select id="journey-picker"></select></label>
+      <label>Task<select id="step-picker"></select></label>
+      <label>Fixture route<select id="variant-picker"></select></label>
+      <button id="reset-route">Restart route</button>
+      <button id="previous-step">Previous task</button>
+      <button id="next-step">Next task</button>
+    </div>
+    <p id="goal"></p><small id="frame-id"></small>
+  </details>
+  <div class="workspace" id="workspace">
+    <aside id="left-wing" aria-label="Investigation tools"></aside>
+    <main id="reading-anchor" class="reading glass" aria-label="Current reading place">
+      <div class="reading-heading"><span class="eyebrow" id="visit-label"></span><h2 id="reading-title"></h2><p id="reading-meta"></p></div>
+      <article id="reading-body"></article>
+      <div class="reading-footer"><span id="reading-position"></span><span class="badge">Pinned reading place</span></div>
+    </main>
+    <aside id="right-wing" aria-label="Subject inspectors"></aside>
+  </div>
+  <section class="glass actions" id="actions" tabindex="-1" aria-label="Available actions">
+    <div><span class="eyebrow">Select · inspect · enter explicitly</span><h2>Available actions</h2></div>
+    <div id="product-actions"></div><div id="fixture-actions"></div>
+  </section>
+  <section class="glass receipt" aria-label="Action result and proposed effects">
+    <p id="result-note" role="status" aria-live="polite">Choose an action to inspect its represented result.</p>
+    <ul id="effect-list"></ul>
+  </section>
+  <footer class="glass walk" aria-label="Reader visits">
+    <strong>Reader visits</strong><span id="visit-rail"></span>
+    <button id="inspect-state">Inspect fixture record</button>
+    <span class="eyebrow">Scripted design effects · source identity retained</span>
+  </footer>
+  <dialog id="inspector"><button id="close-inspector">Close inspector</button><h2 id="inspector-title"></h2><div id="inspector-body"></div></dialog>
+  <script src="journey-data.js"></script>
+  <script src="prototype.js"></script>
+</body>
+</html>

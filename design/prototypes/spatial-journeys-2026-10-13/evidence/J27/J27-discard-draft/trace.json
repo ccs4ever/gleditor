@@ -1,0 +1,346 @@
+{
+  "journey": "J27",
+  "route": "J27-discard-draft",
+  "frames": [
+    {
+      "file": "J27/J27-discard-draft/before.png",
+      "location": "?journey=J27&variant=J27-discard-draft",
+      "frame": "J27-J27-discard-draft-s5-before",
+      "state": {
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes passage",
+          "store": "Lab notes",
+          "version": "V12",
+          "occurrence": "lab-o7",
+          "offset": 3140,
+          "body": [
+            "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes passage",
+            "store": "Lab notes",
+            "version": "V12",
+            "occurrence": "lab-o7",
+            "offset": 3140,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:lab-notes",
+          "state": "Lab notes@V12",
+          "locator": {
+            "ranges": [
+              [
+                3140,
+                3167
+              ],
+              [
+                3200,
+                3228
+              ]
+            ],
+            "occurrence": "lab-o7"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "f-source",
+            "title": "Selected Lab source ranges",
+            "kind": "document",
+            "body": [
+              "Choose two disjoint ranges; the gap is unmarked."
+            ],
+            "facts": [
+              {
+                "label": "Range 1",
+                "value": "[3140,3167) · lab-o7"
+              },
+              {
+                "label": "Gap",
+                "value": "[3167,3200) unmarked"
+              },
+              {
+                "label": "Range 2",
+                "value": "[3200,3228) · lab-o7"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "f-draft",
+            "title": "Draft L7 · empty endsets",
+            "kind": "list",
+            "body": [],
+            "facts": [
+              {
+                "label": "Left",
+                "value": 0
+              },
+              {
+                "label": "Right",
+                "value": 0
+              },
+              {
+                "label": "State",
+                "value": "No Link authored"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral",
+            "count": {
+              "total": 0,
+              "filtered": 0,
+              "visible": 0
+            }
+          }
+        ],
+        "draft": {
+          "id": "draft:L7",
+          "relation": "Comment",
+          "prominence": "normal",
+          "left": [],
+          "right": [],
+          "leftOrder": [],
+          "rightOrder": [],
+          "sourceGroups": {
+            "capture-alpha": [
+              "L1",
+              "L2"
+            ],
+            "capture-beta": [
+              "R1",
+              "R2"
+            ],
+            "capture-gamma": [
+              "R3"
+            ]
+          },
+          "occurrences": {
+            "L1": "lab-o7",
+            "L2": "lab-o7",
+            "R1": "review-o3",
+            "R2": "rig-o1",
+            "R3": "rig-o4"
+          },
+          "destination": {
+            "store": null,
+            "branch": null,
+            "base": null,
+            "author": null,
+            "signingKey": null,
+            "authorStatus": "not declared",
+            "mode": null
+          },
+          "status": "empty",
+          "attempt": null,
+          "preview": "not requested"
+        },
+        "linkPreview": null,
+        "forgeReceipt": null
+      },
+      "effects": [],
+      "action": "Before",
+      "note": ""
+    },
+    {
+      "file": "J27/J27-discard-draft/J27-discard-draft-a1.png",
+      "location": "?journey=J27&variant=J27-discard-draft&task=0&action=1",
+      "frame": "J27-discard-draft-a1",
+      "state": {
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes passage",
+          "store": "Lab notes",
+          "version": "V12",
+          "occurrence": "lab-o7",
+          "offset": 3140,
+          "body": [
+            "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes passage",
+            "store": "Lab notes",
+            "version": "V12",
+            "occurrence": "lab-o7",
+            "offset": 3140,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:lab-notes",
+          "state": "Lab notes@V12",
+          "locator": {
+            "ranges": [
+              [
+                3140,
+                3167
+              ],
+              [
+                3200,
+                3228
+              ]
+            ],
+            "occurrence": "lab-o7"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J27-discard-draft-a1-reading",
+            "title": "Reading · visit 01 · Lab notes@V12",
+            "kind": "document",
+            "body": [
+              "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Subject",
+                "value": "Lab notes passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "lab-o7"
+              },
+              {
+                "label": "Offset",
+                "value": 3140
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "f-discard",
+            "title": "Draft discarded",
+            "kind": "notice",
+            "body": [],
+            "facts": [
+              {
+                "label": "Draft",
+                "value": "L7 removed from active staging"
+              },
+              {
+                "label": "Source ranges",
+                "value": "still exist and are unchanged"
+              },
+              {
+                "label": "Destination",
+                "value": "no Link authored"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          },
+          {
+            "id": "f-source",
+            "title": "Sources unchanged",
+            "kind": "inspector",
+            "body": [],
+            "facts": [
+              {
+                "label": "Source operations",
+                "value": "Lab 58 · Review 214 · Rig 33"
+              },
+              {
+                "label": "Reader visits",
+                "value": "01 · unchanged"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "draft": {
+          "id": "draft:L7",
+          "relation": "Comment",
+          "prominence": "normal",
+          "left": [],
+          "right": [],
+          "leftOrder": [],
+          "rightOrder": [],
+          "sourceGroups": {
+            "capture-alpha": [
+              "L1",
+              "L2"
+            ],
+            "capture-beta": [
+              "R1",
+              "R2"
+            ],
+            "capture-gamma": [
+              "R3"
+            ]
+          },
+          "occurrences": {
+            "L1": "lab-o7",
+            "L2": "lab-o7",
+            "R1": "review-o3",
+            "R2": "rig-o1",
+            "R3": "rig-o4"
+          },
+          "destination": {
+            "store": null,
+            "branch": null,
+            "base": null,
+            "author": null,
+            "signingKey": null,
+            "authorStatus": "not declared",
+            "mode": null
+          },
+          "status": "discarded",
+          "attempt": null,
+          "preview": "not requested",
+          "membership": null
+        },
+        "linkPreview": null,
+        "forgeReceipt": null
+      },
+      "effects": [
+        {
+          "domain": "private staging",
+          "summary": "Remove resolved draft membership only; source ranges and stores remain intact.",
+          "identity": "draft:L7; status=discarded"
+        }
+      ],
+      "action": "Discard resolved draft L7",
+      "note": "The draft card closes. Lab/Review/Rig source content and all source op counts remain unchanged."
+    }
+  ]
+}

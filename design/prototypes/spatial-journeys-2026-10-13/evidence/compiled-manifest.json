@@ -1,0 +1,116 @@
+{
+  "journeys": [
+    {
+      "id": "J17",
+      "steps": 5,
+      "actions": 15,
+      "variants": 4,
+      "variantActions": 7
+    },
+    {
+      "id": "J18",
+      "steps": 5,
+      "actions": 15,
+      "variants": 2,
+      "variantActions": 2
+    },
+    {
+      "id": "J19",
+      "steps": 5,
+      "actions": 18,
+      "variants": 1,
+      "variantActions": 1
+    },
+    {
+      "id": "J20",
+      "steps": 5,
+      "actions": 19,
+      "variants": 4,
+      "variantActions": 4
+    },
+    {
+      "id": "J21",
+      "steps": 5,
+      "actions": 16,
+      "variants": 3,
+      "variantActions": 3
+    },
+    {
+      "id": "J22",
+      "steps": 5,
+      "actions": 15,
+      "variants": 3,
+      "variantActions": 3
+    },
+    {
+      "id": "J23",
+      "steps": 5,
+      "actions": 13,
+      "variants": 3,
+      "variantActions": 3
+    },
+    {
+      "id": "J24",
+      "steps": 5,
+      "actions": 23,
+      "variants": 5,
+      "variantActions": 5
+    },
+    {
+      "id": "J25",
+      "steps": 5,
+      "actions": 24,
+      "variants": 2,
+      "variantActions": 2
+    },
+    {
+      "id": "J26",
+      "steps": 6,
+      "actions": 24,
+      "variants": 5,
+      "variantActions": 5
+    },
+    {
+      "id": "J27",
+      "steps": 5,
+      "actions": 17,
+      "variants": 1,
+      "variantActions": 1
+    },
+    {
+      "id": "J28",
+      "steps": 6,
+      "actions": 20,
+      "variants": 5,
+      "variantActions": 11
+    },
+    {
+      "id": "J29",
+      "steps": 5,
+      "actions": 15,
+      "variants": 2,
+      "variantActions": 4
+    },
+    {
+      "id": "J30",
+      "steps": 7,
+      "actions": 24,
+      "variants": 1,
+      "variantActions": 2
+    },
+    {
+      "id": "J31",
+      "steps": 6,
+      "actions": 16,
+      "variants": 6,
+      "variantActions": 17
+    },
+    {
+      "id": "J32",
+      "steps": 6,
+      "actions": 21,
+      "variants": 2,
+      "variantActions": 5
+    }
+  ]
+}

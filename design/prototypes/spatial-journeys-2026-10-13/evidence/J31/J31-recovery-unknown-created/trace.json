@@ -1,0 +1,656 @@
+{
+  "journey": "J31",
+  "route": "J31-recovery-unknown-created",
+  "frames": [
+    {
+      "file": "J31/J31-recovery-unknown-created/before.png",
+      "location": "?journey=J31&variant=J31-recovery-unknown-created",
+      "frame": "J31-J31-recovery-unknown-created-s5-before",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "03",
+            "parent": null,
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Draft A": 67,
+          "Draft B": 124,
+          "Review store": 214,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "r-source",
+            "title": "Recovery source",
+            "kind": "document",
+            "body": [
+              "The passage is selected from historical Draft A V27."
+            ],
+            "facts": [
+              {
+                "label": "Authority/state",
+                "value": "Draft A@V27"
+              },
+              {
+                "label": "Object",
+                "value": "doc:draft-a"
+              },
+              {
+                "label": "Exact ranges",
+                "value": "[100,142)"
+              },
+              {
+                "label": "Occurrence",
+                "value": "a-o5"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "r-dest",
+            "title": "Receiving state and futures",
+            "kind": "history",
+            "body": [],
+            "facts": [
+              {
+                "label": "Pinned base",
+                "value": "Draft B@V31"
+              },
+              {
+                "label": "Current old future",
+                "value": "Draft B@V40 · retained"
+              },
+              {
+                "label": "New mode",
+                "value": "Create child at pinned base"
+              }
+            ],
+            "rows": [
+              {
+                "id": "b31",
+                "label": "B V31",
+                "detail": "chosen immutable base",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "b40",
+                "label": "B V40",
+                "detail": "existing future retained",
+                "status": "ready",
+                "ordinal": 2
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "recovery": {
+          "id": "recovery-draft:R1",
+          "source": {
+            "id": "source:DraftA-V27-p3",
+            "authority": "Draft A",
+            "state": "V27",
+            "object": "doc:draft-a",
+            "ranges": [
+              [
+                100,
+                142
+              ]
+            ],
+            "occurrence": "a-o5",
+            "text": "Pressure stayed stable during the observation window."
+          },
+          "targetBase": {
+            "id": "Draft B@V31",
+            "store": "Draft B",
+            "branch": "draft-b/main",
+            "state": "V31",
+            "fullStateFixture": "B31-content-map-7-ranges",
+            "selectedRange": [
+              100,
+              124
+            ],
+            "text": "Field conditions were steady through the observation window. No further adjustment was required."
+          },
+          "destination": {
+            "store": "Draft B",
+            "branch": "draft-b/main",
+            "base": "V31",
+            "author": "author:ava",
+            "signingKey": "key:ava-k2",
+            "status": "verified",
+            "mode": "Create child"
+          },
+          "oldFutures": [
+            {
+              "id": "Draft B@V40",
+              "parent": "Draft B@V39",
+              "kind": "existing future",
+              "unchangedByRecovery": true
+            }
+          ],
+          "payload": {
+            "operation": "transclude selected historical passage",
+            "ranges": [
+              [
+                100,
+                142
+              ]
+            ],
+            "origin": "Draft A@V27 · source:DraftA-V27-p3 · occurrence a-o5",
+            "retainsBaseContent": true
+          },
+          "status": "draft",
+          "preview": null
+        },
+        "draft": null,
+        "comparison": {
+          "left": "Draft A@V27",
+          "right": "Draft B@V40",
+          "badge": {
+            "count": 3,
+            "unit": "difference categories",
+            "scope": "comparison A@V27 vs B@V40"
+          },
+          "categories": [
+            "paragraph removed",
+            "wording changed",
+            "section reordered"
+          ]
+        },
+        "commit": {
+          "attempt": null,
+          "status": "none",
+          "receipt": null
+        }
+      },
+      "effects": [],
+      "action": "Before",
+      "note": ""
+    },
+    {
+      "file": "J31/J31-recovery-unknown-created/J31-recovery-unknown-created-a1.png",
+      "location": "?journey=J31&variant=J31-recovery-unknown-created&task=0&action=1",
+      "frame": "J31-recovery-unknown-created-a1",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "03",
+            "parent": null,
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Draft A": 67,
+          "Draft B": 124,
+          "Review store": 214,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {
+          "Draft B": {
+            "newBranch": "branch:DraftB/recovery-R1",
+            "newState": "Draft B@R1.1",
+            "parent": "V31",
+            "receipt": "receipt:R1:1"
+          }
+        },
+        "panels": [
+          {
+            "id": "J31-recovery-unknown-created-a1-reading",
+            "title": "Reading · visit 03 · Review@V4",
+            "kind": "document",
+            "body": [
+              "The recorded pressure remained stable during the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03"
+              },
+              {
+                "label": "Subject",
+                "value": "Review passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "review-o3"
+              },
+              {
+                "label": "Offset",
+                "value": 80
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "v-runknown",
+            "title": "Recovery outcome unknown",
+            "kind": "notice",
+            "body": [],
+            "facts": [
+              {
+                "label": "Attempt",
+                "value": "attempt:R1:1"
+              },
+              {
+                "label": "Forge/Retry",
+                "value": "blocked"
+              },
+              {
+                "label": "Edit/Discard",
+                "value": "blocked"
+              },
+              {
+                "label": "Action",
+                "value": "Check status"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "recovery": {
+          "id": "recovery-draft:R1",
+          "source": {
+            "id": "source:DraftA-V27-p3",
+            "authority": "Draft A",
+            "state": "V27",
+            "object": "doc:draft-a",
+            "ranges": [
+              [
+                100,
+                142
+              ]
+            ],
+            "occurrence": "a-o5",
+            "text": "Pressure stayed stable during the observation window."
+          },
+          "targetBase": {
+            "id": "Draft B@V31",
+            "store": "Draft B",
+            "branch": "draft-b/main",
+            "state": "V31",
+            "fullStateFixture": "B31-content-map-7-ranges",
+            "selectedRange": [
+              100,
+              124
+            ],
+            "text": "Field conditions were steady through the observation window. No further adjustment was required."
+          },
+          "destination": {
+            "store": "Draft B",
+            "branch": "draft-b/main",
+            "base": "V31",
+            "author": "author:ava",
+            "signingKey": "key:ava-k2",
+            "status": "verified",
+            "mode": "Create child"
+          },
+          "oldFutures": [
+            {
+              "id": "Draft B@V40",
+              "parent": "Draft B@V39",
+              "kind": "existing future",
+              "unchangedByRecovery": true
+            }
+          ],
+          "payload": {
+            "operation": "transclude selected historical passage",
+            "ranges": [
+              [
+                100,
+                142
+              ]
+            ],
+            "origin": "Draft A@V27 · source:DraftA-V27-p3 · occurrence a-o5",
+            "retainsBaseContent": true
+          },
+          "status": "draft",
+          "preview": null,
+          "attempt": {
+            "token": "attempt:R1:1",
+            "draftId": "recovery-draft:R1",
+            "payloadDigest": "sha256:recovery-R1-a-v27-b-v31",
+            "source": "A@V27[100,142)·a-o5",
+            "base": "B@V31",
+            "author": "author:ava",
+            "mode": "Create child"
+          },
+          "commitStatus": "outcome-unknown",
+          "forgeEnabled": false,
+          "retryEnabled": false,
+          "receipt": {
+            "id": "receipt:R1:1",
+            "branch": "branch:DraftB/recovery-R1",
+            "state": "Draft B@R1.1"
+          }
+        },
+        "draft": null,
+        "comparison": {
+          "left": "Draft A@V27",
+          "right": "Draft B@V40",
+          "badge": {
+            "count": 3,
+            "unit": "difference categories",
+            "scope": "comparison A@V27 vs B@V40"
+          },
+          "categories": [
+            "paragraph removed",
+            "wording changed",
+            "section reordered"
+          ]
+        },
+        "commit": {
+          "attempt": null,
+          "status": "none",
+          "receipt": null
+        }
+      },
+      "effects": [
+        {
+          "domain": "authored destination",
+          "summary": "Receipt may already exist; keep exact attempt token and block retry/edit/discard.",
+          "identity": "attempt:R1:1"
+        }
+      ],
+      "action": "Simulate lost reply after recovery receipt publication",
+      "note": "Only Check status is available while unresolved."
+    },
+    {
+      "file": "J31/J31-recovery-unknown-created/J31-recovery-unknown-created-a2.png",
+      "location": "?journey=J31&variant=J31-recovery-unknown-created&task=0&action=2",
+      "frame": "J31-recovery-unknown-created-a2",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "03",
+            "parent": null,
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Draft A": 67,
+          "Draft B": 124,
+          "Review store": 214,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {
+          "Draft B": {
+            "newBranch": "branch:DraftB/recovery-R1",
+            "newState": "Draft B@R1.1",
+            "parent": "V31",
+            "receipt": "receipt:R1:1"
+          }
+        },
+        "panels": [
+          {
+            "id": "J31-recovery-unknown-created-a2-reading",
+            "title": "Reading · visit 03 · Review@V4",
+            "kind": "document",
+            "body": [
+              "The recorded pressure remained stable during the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03"
+              },
+              {
+                "label": "Subject",
+                "value": "Review passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "review-o3"
+              },
+              {
+                "label": "Offset",
+                "value": 80
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "v-rcreated",
+            "title": "Existing recovery branch found",
+            "kind": "notice",
+            "body": [],
+            "facts": [
+              {
+                "label": "Status",
+                "value": "Created"
+              },
+              {
+                "label": "Branch",
+                "value": "DraftB/recovery-R1"
+              },
+              {
+                "label": "Source origin",
+                "value": "A V27 [100,142) · a-o5"
+              },
+              {
+                "label": "New commit",
+                "value": "blocked"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "recovery": {
+          "id": "recovery-draft:R1",
+          "source": {
+            "id": "source:DraftA-V27-p3",
+            "authority": "Draft A",
+            "state": "V27",
+            "object": "doc:draft-a",
+            "ranges": [
+              [
+                100,
+                142
+              ]
+            ],
+            "occurrence": "a-o5",
+            "text": "Pressure stayed stable during the observation window."
+          },
+          "targetBase": {
+            "id": "Draft B@V31",
+            "store": "Draft B",
+            "branch": "draft-b/main",
+            "state": "V31",
+            "fullStateFixture": "B31-content-map-7-ranges",
+            "selectedRange": [
+              100,
+              124
+            ],
+            "text": "Field conditions were steady through the observation window. No further adjustment was required."
+          },
+          "destination": {
+            "store": "Draft B",
+            "branch": "draft-b/main",
+            "base": "V31",
+            "author": "author:ava",
+            "signingKey": "key:ava-k2",
+            "status": "verified",
+            "mode": "Create child"
+          },
+          "oldFutures": [
+            {
+              "id": "Draft B@V40",
+              "parent": "Draft B@V39",
+              "kind": "existing future",
+              "unchangedByRecovery": true
+            }
+          ],
+          "payload": {
+            "operation": "transclude selected historical passage",
+            "ranges": [
+              [
+                100,
+                142
+              ]
+            ],
+            "origin": "Draft A@V27 · source:DraftA-V27-p3 · occurrence a-o5",
+            "retainsBaseContent": true
+          },
+          "status": "draft",
+          "preview": null,
+          "attempt": {
+            "token": "attempt:R1:1",
+            "draftId": "recovery-draft:R1",
+            "payloadDigest": "sha256:recovery-R1-a-v27-b-v31",
+            "source": "A@V27[100,142)·a-o5",
+            "base": "B@V31",
+            "author": "author:ava",
+            "mode": "Create child"
+          },
+          "commitStatus": "created",
+          "forgeEnabled": false,
+          "retryEnabled": false,
+          "receipt": {
+            "id": "receipt:R1:1",
+            "branch": "branch:DraftB/recovery-R1",
+            "state": "Draft B@R1.1"
+          },
+          "statusReceipt": {
+            "attempt": "attempt:R1:1",
+            "branch": "DraftB/recovery-R1",
+            "state": "R1.1",
+            "origin": "A@V27[100,142)·a-o5"
+          }
+        },
+        "draft": null,
+        "comparison": {
+          "left": "Draft A@V27",
+          "right": "Draft B@V40",
+          "badge": {
+            "count": 3,
+            "unit": "difference categories",
+            "scope": "comparison A@V27 vs B@V40"
+          },
+          "categories": [
+            "paragraph removed",
+            "wording changed",
+            "section reordered"
+          ]
+        },
+        "commit": {
+          "attempt": null,
+          "status": "none",
+          "receipt": null
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "Read-only status returns the existing recovery receipt.",
+          "identity": "receipt:R1:1"
+        }
+      ],
+      "action": "Check recovery status → Created existing receipt",
+      "note": "Open the existing branch; do not publish another recovery."
+    }
+  ]
+}

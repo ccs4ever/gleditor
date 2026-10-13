@@ -1,0 +1,375 @@
+{
+  "run_date": "2026-10-13",
+  "mode": "AI concept walkthrough; not a human participant session or live implementation validation",
+  "spec_path": "design/ux_workflow_spatial_concepts.md",
+  "spec_sha256": "4b3e58d4122742d4107bb454301c1d6582981e1c1ce2d1d12a94ef274c9a7167",
+  "model": "gpt-6-luna",
+  "assignments": {
+    "runner-1": [
+      "J17",
+      "J18",
+      "J19",
+      "J20",
+      "J21"
+    ],
+    "runner-2": [
+      "J22",
+      "J23",
+      "J24",
+      "J25",
+      "J26"
+    ],
+    "runner-3": [
+      "J27",
+      "J28",
+      "J29",
+      "J30",
+      "J31",
+      "J32"
+    ]
+  },
+  "journeys": [
+    {
+      "id": "J17",
+      "title": "Discover and acquire an exact remote edition",
+      "step_count": 5,
+      "steps": [
+        "Start from the [store telescope](mockups/store-telescope-2026-10-13/01-discovery.png). Find a publication through a topic, followed-author scope or supported publication URI. Inspect it while keeping the original reading place.",
+        "Identify the publisher key, publication, pinned edition, catalog signature, independent author trust, payload integrity and availability. Explain which facts have and have not been checked.",
+        "Request the pinned edition. Advance the publisher's pointer to V13 while the V12 request is pending; choose whether to keep V12 or make a separate request for V13.",
+        "Use the [acquisition states](mockups/store-telescope-2026-10-13/02-acquisition.png) to inspect interruption at 68/96 verified pieces, retry and cancellation. Encounter an invalid payload and unavailable peers as separate variants; opening remains gated on complete-store validation.",
+        "At Ready V12, explicitly open it, then reopen the declared cached V12 offline. Check separately whether author following or third-party package enablement changed."
+      ]
+    },
+    {
+      "id": "J18",
+      "title": "Find one term across media and store origins",
+      "step_count": 5,
+      "steps": [
+        "Start from [Omni lens](mockups/omni-search-2026-10-13/01-omni-search.png) and search for pressure in the eight-store scope. Find a native passage, cell match, image OCR region, audio transcript and video title-only result without switching to unrelated search tools.",
+        "Inspect each result and identify its media, originating store, exact version, matching field and held/not-held status. Explain why cached remote content still has a remote origin.",
+        "Locate the image's recognized word region and the recording's transcript time range. Distinguish derived text from an authored content span and from the media bytes themselves.",
+        "Inspect the not-held video's title match. Choose to acquire its pinned edition or leave it untouched; no frame or transcript appears merely because metadata matched.",
+        "Open one resolved exact occurrence explicitly, then return to the original reading place. Inspect independent equal-text passages and the true shared-source occurrence separately."
+      ]
+    },
+    {
+      "id": "J19",
+      "title": "Filter a running query without losing the selected result",
+      "step_count": 5,
+      "steps": [
+        "From the same query, pin C17 V8 and narrow to cells, native text and historical states. Restore all media, then select cached-only and a subset of stores. State which exclusions each choice makes.",
+        "Switch grouping and sort order while keeping the exact selected occurrence. Apply a filter that excludes it; find the retained inspector's excluded-from-results status and choose to clear it or restore the filter.",
+        "Deliver new results asynchronously and a response from the superseded query. The participant identifies which request the displayed counts and selected record belong to.",
+        "Inspect store/media/branch coverage with three stores pending and an unsupported OCR surface. Cancel the current request without losing collected results. Rerun explicitly.",
+        "Inspect both a completed-empty scope and an incomplete zero-found-so-far scope. Save the recipe separately from a captured result set; later rerun it with one new match."
+      ]
+    },
+    {
+      "id": "J20",
+      "title": "Search historical occurrences with visible matching rules",
+      "step_count": 5,
+      "steps": [
+        "Start from the [content-history study](mockups/hypertime-loom-journeys-2026-10-12/03-content-search-v2.png). Search 3.14 in math prose and a pressure cell across declared branches and historical states.",
+        "Compare literal text with whole-token mode using 3.14159 and 3.140 variants. Switch to numeric matching only after inspecting its normalization and unit rules. Related ideas requires a separate explicit expansion; pi is not exactly equal to 3.14.",
+        "Change the query explicitly to literal pressure with case folding. Find C17 V8's pressure match while V12 lacks that word. Inspect the older occurrence without treating the current state as a result or replacing the historical reference.",
+        "Expand a compacted unchanged state run and a repeated source occurrence. Distinguish occurrences, states and affecting-operation counts; retain independent equal-text sources.",
+        "Show partial branch coverage, then a missing historical state and a completed branch with no matches. Save the query recipe and its optional captured results separately."
+      ]
+    },
+    {
+      "id": "J21",
+      "title": "Compare pinned states at text and topology changes",
+      "step_count": 5,
+      "steps": [
+        "Start from the [comparison prism](mockups/spatial-elements-2026-10-13/02-comparison-prism.png). Use its independent two-state fixture, with the shared pressure prefix present in both V8 and V12, rather than the integrated investigation's word-removal fixture. Pin both exact states of C17, inspect the reading difference and distinguish unchanged shared source ranges from changed spans and independently equal text.",
+        "Use the comparison-variant state cards to select an earlier state before the lowest common ancestor and both branch tips. Identify actual ancestry without inferring it from left/right order.",
+        "Inspect changed text and typed values with units, then changed cell membership and reciprocal dimension connections. Focus each change site with its surrounding page or rank neighborhood.",
+        "Swap sides or choose another difference without replacing either pinned version. Inspect an unavailable region with a retained target descriptor rather than a substitute preview.",
+        "Explicitly enter one chosen occurrence, return, save the comparison and replay a reopen card. Recovery opens a separate authoring preview rather than applying the difference immediately."
+      ]
+    },
+    {
+      "id": "J22",
+      "title": "Investigate around a stable reading place",
+      "step_count": 5,
+      "steps": [
+        "Start from [quiet reading](mockups/investigation-workspace-2026-10-13/01-quiet-reading.png). Identify current visit 03, Review V4, search scope, selected L17 cursors, origin and saved pouch.",
+        "Open [expanded view](mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png). Locate search results, pinned C17 comparison, layers and pouch without losing the readable Review passage or treating a tool preview as a completed visit.",
+        "Inspect C17 V8 and pinned V12. Explain why the latter's no-pressure state is not a search hit and why it is unrelated to L17's C24 right member.",
+        "Fold comparison alone, change a layer's view emphasis, inspect saved evidence, then fold all tools. Keep the query, both member cursors, reading offset, version and return path.",
+        "Use Activity Back to visit 02 and Return to origin 01. Reopen the tools after returning, and inspect the retained sibling route 02 → 04."
+      ]
+    },
+    {
+      "id": "J23",
+      "title": "Control immutable link packages without editing their relations",
+      "step_count": 5,
+      "steps": [
+        "Start from the [layer console](mockups/spatial-elements-2026-10-13/04-layer-console.png). Identify the three retained packages, two enabled packages and their distinct normal/quiet emphasis.",
+        "Inspect a disabled package without enabling it. Inspect immutable carrier identity, publisher, signature and independent trust; encountering an unchecked/invalid package exposes a declared policy.",
+        "Quiet Methods annotations and disable it separately. Explain the difference between reducing visual emphasis and excluding its links, including how a quiet link remains reachable by list.",
+        "Inspect Lab review #13 as a separate candidate while #12 stays enabled. Compare and explicitly choose whether to switch; retain the old package and exact selected Link identity.",
+        "Reopen the scripted session and restore the participant's chosen carrier-specific preferences. Compute enabled/retained counts from that resulting ledger: 22/85 describes only the initial fixture. Retaining candidate #13 adds its nine links to the retained inventory; merely reviewing it does not. Disabling a package changes enabled counts without removing its retained links."
+      ]
+    },
+    {
+      "id": "J24",
+      "title": "Keep one complete relation through distant and unavailable members",
+      "step_count": 5,
+      "steps": [
+        "In the integrated workspace, inspect the already-pinned L17 session and identify both complete ordered endsets, active right, remembered Left 2/2, Right 1/3 and link origin 01. Cross previews a side; Enter changes place.",
+        "Cycle left and right members independently, choose an exact repeated occurrence, and inspect the other overlapping Link without inheriting L17's cursors. Reselect L17 deliberately as a new session rooted at current visit 03 and choose its cursors; then restore the original saved visit-03 context, with origin 01 and both cursors intact, before testing its original return path.",
+        "Request right member 3's exact unavailable span, cancel, and retry it after a scripted availability change. Keep its ordinal and identity; no visit completes while the target is unresolved.",
+        "Enter a distant resolved cell through a declared temporary neighborhood, then return to origin. Inspect a wrong-version and locked-content variant without silently choosing another occurrence.",
+        "Disable L17's contributing package while it is pinned. Its drawing hides, but the retained inspector explains the disabled layer and offers explicit dismissal or re-enable."
+      ]
+    },
+    {
+      "id": "J25",
+      "title": "Preview and resume branching reader visits",
+      "step_count": 5,
+      "steps": [
+        "Start from the [Walk compass](mockups/spatial-elements-2026-10-13/01-walk-compass.png) with its declared independent five-visit fixture: 01 → 02 → 03 and 01 → 02 → 04 → 05, current 03.",
+        "Preview visit 05 and distinguish current visit 03 from the selected preview. Inspect the saved version, occurrence and playback position before choosing Resume.",
+        "Return to 02 and choose each forward child. Resume 03 and verify that its forward control has no child; its sibling 04 is reachable by returning to the parent, not by inventing 03 → 04.",
+        "Reference one visit, annotate another and continue from an earlier visit. Existing children remain; preview, annotation and restore do not create completed visits.",
+        "Replay a close/reopen card, then an unavailable saved version. Restore named targets and notes before previews, offer retry and retain the original futures."
+      ]
+    },
+    {
+      "id": "J26",
+      "title": "Collect typed evidence without changing what it refers to",
+      "step_count": 6,
+      "steps": [
+        "From the integrated pouch, inspect its passage, whole-cell reference and saved-search recipe. Explain what each preserves and which actions it supports.",
+        "Use the [typed dense pouch](mockups/link-forge-pouches-2026-10-12/01-typed-pouch.png) variant. Save a disjoint span bundle, arbitrary operation, query, reader walk and link draft by visible actions; saving does not move or edit their subjects.",
+        "Filter 146 saved items to 18 with six visible, expand one counted group and find an off-window item through the list. Identify which counts describe saved membership, matches and previews.",
+        "Save an exact duplicate, equal text at different addresses and another occurrence of shared source. Inspect the explicit duplicate/membership policy before merging or replacing anything.",
+        "Dismiss and recover a card, then reopen with previews not held, a locked source and an unresolved authority. Keep descriptors and type-specific inspect/enter/rerun/resume actions.",
+        "Offer the pouch to a forge bay. Choose eligible concrete content spans and review exclusions; neither an op, recipe, walk, draft nor whole-cell label silently becomes a content endpoint."
+      ]
+    },
+    {
+      "id": "J27",
+      "title": "Assemble one ordered Link with an explicit destination",
+      "step_count": 5,
+      "steps": [
+        "Start from the [disjoint forge](mockups/link-forge-pouches-2026-10-12/02-disjoint-link-forge.png). Select two separated source ranges, preserve the unmarked gap, and stage two left and three right content members without creating a Link.",
+        "Inspect, reorder, remove and undo members through pointer and list actions. Distinguish source packs, capture groups, authored member order and occurrence choices.",
+        "Declare receiving store, branch, base state, author identity/status and authoring mode. Browse another document and an older source state without redirecting that pinned destination.",
+        "Preview the relation. Identify one proposed Link, both full endsets, exact anchors, selected relation type and prominence. Selecting an occurrence changes entry context, not source addresses.",
+        "Explicitly forge or discard. The scripted authoring result names one new Link, although its protocol may require multiple operations. Keep draft saving, source edits and destination effects separately declared."
+      ]
+    },
+    {
+      "id": "J28",
+      "title": "Resume a dense draft through unresolved and unknown outcomes",
+      "step_count": 6,
+      "steps": [
+        "Reopen [Draft L7](mockups/link-forge-pouches-2026-10-12/04-reopen-draft.png) with both exact endsets, grouping, relation and pinned destination restored before preview bytes arrive.",
+        "Distinguish optional preview-not-held from required reference-validation pending and destination validation failure. Forge availability follows the declared policy, not thumbnail presence alone.",
+        "In the [40/60 member variant](mockups/link-forge-pouches-2026-10-12/03-dense-endsets.png), find left member 21, inspect its five occurrences, filter/reorder a bay and restore its true ordinal. Both endsets remain complete without drawing 2,400 pair connections.",
+        "Review a preflight failure with a retained draft, then a declared mid-commit failure. Identify what was written, what can be recovered and what may safely be retried.",
+        "Encounter **Commit outcome unknown** after an interruption. Use Check status before retry; resolve to either the existing created Link or a confirmed uncommitted draft under a declared retry protocol. An unknown outcome never becomes permission to forge a duplicate.",
+        "Keep or discard the draft separately, reopen it again, and compare ordered members/destination."
+      ]
+    },
+    {
+      "id": "J29",
+      "title": "Align mixed-media cues without authoring a relation",
+      "step_count": 5,
+      "steps": [
+        "Start from the [media cue bridge](mockups/spatial-elements-2026-10-13/03-media-cue-bridge.png). Identify cached video V9, audio V7, the selected document range and image region.",
+        "Inspect the manual cue joining video 00:38 to audio 02:14–02:18. Explain the separate clocks, derived transcript and exact locators before starting any playback.",
+        "Preview alignment explicitly, adjust its offset, remove a cue and add another through an equivalent list action. Keep each source version and locator independent.",
+        "Save the cue set, clear staging and replay its reopen card. Encounter an unavailable media segment or unsupported seek basis; preserve the cue descriptor and offer a defined correction.",
+        "Open Forge relation from the cue set and review a separate draft's eligible content selections and exclusions. Cancel without treating the view cue as a stored Link."
+      ]
+    },
+    {
+      "id": "J30",
+      "title": "Investigate exact range and topology effects in the Loom",
+      "step_count": 7,
+      "steps": [
+        "Start from the [loom journey study](mockups/hypertime-loom-journeys-2026-10-12/journeys.md). Inspect the declared 100-op trunk/three-branch fixture, then the ten-path variant. Expand one coil and find every branch exit through its counted pack or synchronized list.",
+        "Tug a container into a parallel lens. Keep source operations at their original loom positions; distinguish stored ancestry, same-op correspondence and filtered view order.",
+        "Apply History lens · Touches to exact ABCDEF ranges. Inspect insertion xy, deletion CD from its before-state and the moved fragments; compare Original source with an explicit Evolving passage rule and This occurrence with All uses.",
+        "Exclude an unrelated earlier offset shift, then include it as context. Each affecting result names its owning frame, parent state, reason and before/after footprint.",
+        "Inspect the C24 operation that replaces C17's neighbor C18 with C24 on d.reading while C17 text stays unchanged. Distinguish own edits from affected topology and preserve reciprocal endpoints.",
+        "Capture a page footprint, then view reflow that splits a selected passage across later pages. Preserve the snapshot/layout and exact ranges; page numbers are not permanent object identity.",
+        "Cancel a partial lens, save its recipe/results separately, and inspect a completed-empty scope. Local expansion and tugging create no new source ops."
+      ]
+    },
+    {
+      "id": "J31",
+      "title": "Recover a selected historical passage into a declared new branch",
+      "step_count": 6,
+      "steps": [
+        "Start from the [recovery preview](mockups/hypertime-loom-journeys-2026-10-12/06-branch-recovery.png). Inspect the source passage at Draft A V27, keeping its exact ranges, state and occurrence.",
+        "Choose Draft B V31 as target base separately from the source. Inspect the full target state and existing futures; selecting a recovery source does not choose a writable destination.",
+        "Open the authoring preview and identify proposed inserted/transcluded ranges, destination, branch mode, author verification and which effects would be written. No change is yet saved.",
+        "Cancel and verify that both sources, existing futures and draft choice remain. Repeat with an unavailable source and then a receiving branch whose head advances beyond V31. The immutable pinned base V31 stays fixed until the participant explicitly retains it or chooses a new base; inspect the resulting authoring mode and validation before continuing.",
+        "Explicitly create the separately identified recovery branch only after source/base validation. Inspect its returned branch identity and origin addresses; no existing future is overwritten.",
+        "Reopen its result card and distinguish the new authored branch from the old source and a reader visit. Resolve inconsistent pictured difference counts against the declared fixture first."
+      ]
+    },
+    {
+      "id": "J32",
+      "title": "Resume an interrupted investigation offline with equivalent access",
+      "step_count": 6,
+      "steps": [
+        "At integrated visit 03, keep the query, comparison, L17 cursors, source companions, package preferences, typed pouch and sibling reader route. Save/close through a presented control.",
+        "Replay a reopen card while offline. Restore exact identities before previews. Cached verified Review V4 remains readable; not-held media and incomplete search surfaces retain named statuses.",
+        "Use the proposed keyboard/list path to inspect the historical C17 reference, cycle a Link member and resume the chosen reader visit. Every action has a visible equivalent and named focus target.",
+        "Repeat the relevant inspection in a narrow layout, enlarged text and reduced motion. Access off-window cards, counted branch exits and both full endsets without pointer-only gestures.",
+        "Encounter unreadable saved reader data and a cancelled request. Preserve the data/descriptor and explain repair/retry options rather than regenerating a default session.",
+        "Reconnect, refresh the query and explicitly acquire a missing pinned edition. New results, publication pointers and package updates do not replace saved identities or enable new layers."
+      ]
+    }
+  ],
+  "image_assets": [
+    {
+      "path": "design/mockups/hypertime-loom-2026-10-12/01-suspended-loom.png",
+      "sha256": "b5a0ba5c991f4834bca37de712ae9868d03f08adfb5e3fac7b5b22591d2b2a8f"
+    },
+    {
+      "path": "design/mockups/hypertime-loom-2026-10-12/02-container-thread-tug.png",
+      "sha256": "0e9ffca0c1ebd5b35ba047d9cc7897e2f518e0f58f016a4fb080a981fa6e6a1e"
+    },
+    {
+      "path": "design/mockups/hypertime-loom-2026-10-12/03-parallel-branch-history.png",
+      "sha256": "6ba670ebbb98f3cb3629c5389fd08edca73211962dcdc3186b6a1fb0c20f6f9c"
+    },
+    {
+      "path": "design/mockups/hypertime-loom-2026-10-12/04-dense-overview.png",
+      "sha256": "fb523820e2cee7b22f501c3bc3271a672285f13807dab26d14f2866e371e2d40"
+    },
+    {
+      "path": "design/mockups/hypertime-loom-2026-10-12/05-local-expansion-storyboard.png",
+      "sha256": "2b3a2ddd652d470ce589b933184273fe688c041688c9ac541a3b16b23b424359"
+    },
+    {
+      "path": "design/mockups/hypertime-loom-2026-10-12/06-helical-packing.png",
+      "sha256": "69013fc92258596f74e388c6308c10eca476eceef7e249257ff108fec761ef7f"
+    },
+    {
+      "path": "design/mockups/hypertime-loom-2026-10-12/07-scenario-1-trunk-branches.png",
+      "sha256": "cca0c7df79866eab8471a51cf58f768854e64049a79f598910125d78b4e9c710"
+    },
+    {
+      "path": "design/mockups/hypertime-loom-2026-10-12/08-scenario-2-combined.png",
+      "sha256": "7f8a6b6f0e67d6a1af2737353862083ebe495a26486e9341eaa6acf6af0ea392"
+    },
+    {
+      "path": "design/mockups/hypertime-loom-2026-10-12/09-scenario-2-slice-tug.png",
+      "sha256": "039997fa2b1f18de3545a917549bca8caf0ac4c5d6fb8f7092126737e7cc12a7"
+    },
+    {
+      "path": "design/mockups/hypertime-loom-2026-10-12/10-scenario-3-ten-branches-v2.png",
+      "sha256": "22b9b81cf6d29ad977d0c2af8765781f2b5d0e93d218fa66aedec759b28f0588"
+    },
+    {
+      "path": "design/mockups/hypertime-loom-2026-10-12/10-scenario-3-ten-branches.png",
+      "sha256": "6eb8971bbf316a98d38ed039335d71d16f08e07cc86b906477fb77f710f5ad40"
+    },
+    {
+      "path": "design/mockups/hypertime-loom-journeys-2026-10-12/01-save-and-reopen-op.png",
+      "sha256": "3c2b774efaa456cbcfc75d47e3d4d245fd18efdf2f05a4a3fb9646c547439b75"
+    },
+    {
+      "path": "design/mockups/hypertime-loom-journeys-2026-10-12/02-span-effects.png",
+      "sha256": "e1cbaf1b257db6a2e0ec9f378f8ceb0265e5292966e46e6fb3a82f78ba44c46c"
+    },
+    {
+      "path": "design/mockups/hypertime-loom-journeys-2026-10-12/03-content-search-v2.png",
+      "sha256": "ea23a815700d22ae6e132e2f27cfc25f9813cdbdf7b85c5295353b1f3aa21876"
+    },
+    {
+      "path": "design/mockups/hypertime-loom-journeys-2026-10-12/03-content-search.png",
+      "sha256": "5cc67e6515eb0c5596fa7add9f384542f4487623a9edd57d812d1b250d075ea3"
+    },
+    {
+      "path": "design/mockups/hypertime-loom-journeys-2026-10-12/04-cell-topology.png",
+      "sha256": "2eb2e9465108f92669003cbf2aa02f776e55bb27aab9a059df7577cdcbd535de"
+    },
+    {
+      "path": "design/mockups/hypertime-loom-journeys-2026-10-12/05-page-footprint.png",
+      "sha256": "45fd86464b116b563bc120096b759c8986e0108554c5f66dceb2144aaaee7ec2"
+    },
+    {
+      "path": "design/mockups/hypertime-loom-journeys-2026-10-12/06-branch-recovery.png",
+      "sha256": "890aaa01303ee0e5e7f9c45eaafe48832725cd5770d1edd541cdd4dec0310e00"
+    },
+    {
+      "path": "design/mockups/investigation-workspace-2026-10-13/01-quiet-reading.png",
+      "sha256": "39af657c9b218b9a5562aeafa99f41d14eaeef56993685de9288e483afafb4b4"
+    },
+    {
+      "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+      "sha256": "c30c4c4837322f5a8ed1a86944e6ce59cbec6f97d8b3344db7fdb0265607a11a"
+    },
+    {
+      "path": "design/mockups/link-forge-pouches-2026-10-12/01-typed-pouch.png",
+      "sha256": "60168a537d34137dba0ede52db38e25b8d90ab86844dc53ca8d5f1aae066656f"
+    },
+    {
+      "path": "design/mockups/link-forge-pouches-2026-10-12/02-disjoint-link-forge.png",
+      "sha256": "3df5cf895bc50e3b52957fbeed9cfeb2a4839c6678ababc1d61193294222b50c"
+    },
+    {
+      "path": "design/mockups/link-forge-pouches-2026-10-12/03-dense-endsets.png",
+      "sha256": "11d9d43f3be8940a89e1028e3c3ef1c147390cb53b9156cec739cb190a09dbeb"
+    },
+    {
+      "path": "design/mockups/link-forge-pouches-2026-10-12/04-reopen-draft.png",
+      "sha256": "f9dfc57a3195617d3a2829e5ac56703ce2cab8e8968c727a1a890fc90b9ecc91"
+    },
+    {
+      "path": "design/mockups/omni-search-2026-10-13/01-omni-search.png",
+      "sha256": "446bf3502cec8b347fabb711c496ee9a9051cbf0fece2f1e4339e40ee19e63f6"
+    },
+    {
+      "path": "design/mockups/spatial-elements-2026-10-13/01-walk-compass.png",
+      "sha256": "12454799125d4cce8522ba31070c8861b846d9526e9abde3b18a8c1832e52b2d"
+    },
+    {
+      "path": "design/mockups/spatial-elements-2026-10-13/02-comparison-prism.png",
+      "sha256": "0628382472678ea22dd487bc07e1ab05509372c39abfceb3c48815cd37244d53"
+    },
+    {
+      "path": "design/mockups/spatial-elements-2026-10-13/03-media-cue-bridge.png",
+      "sha256": "140da7782923b2e896cfe43446e41597414c5d2a752e102801aa5d852d5f2132"
+    },
+    {
+      "path": "design/mockups/spatial-elements-2026-10-13/04-layer-console.png",
+      "sha256": "deb05029acc60170c05800dfd78c7fad82cef707cb22247b4ac522a3802810d9"
+    },
+    {
+      "path": "design/mockups/store-telescope-2026-10-13/01-discovery.png",
+      "sha256": "3e068baaa5ce0a11a19bbe32daeb5251bde86589dd939cae6d5f4aa1585a8944"
+    },
+    {
+      "path": "design/mockups/store-telescope-2026-10-13/02-acquisition.png",
+      "sha256": "9b78ef82d3a1b32692f868186d0d2047d6d11a991a8a7cef20d532eaafc0448b"
+    }
+  ],
+  "outcomes": [
+    "Concept supported",
+    "Confusing",
+    "No affordance",
+    "State undefined",
+    "Not represented"
+  ],
+  "cross_checks": [
+    "Pointer and discoverability",
+    "List and keyboard",
+    "Accessibility",
+    "Density and narrow views",
+    "Enlarged text and optics",
+    "Reduced motion",
+    "Lifecycle and unavailable states",
+    "Storage boundaries",
+    "Relation language"
+  ]
+}

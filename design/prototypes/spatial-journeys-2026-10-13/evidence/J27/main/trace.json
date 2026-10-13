@@ -1,0 +1,5058 @@
+{
+  "journey": "J27",
+  "route": "main",
+  "frames": [
+    {
+      "file": "J27/main/before.png",
+      "location": "?journey=J27",
+      "frame": "J27-main-s1-before",
+      "state": {
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes passage",
+          "store": "Lab notes",
+          "version": "V12",
+          "occurrence": "lab-o7",
+          "offset": 3140,
+          "body": [
+            "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes passage",
+            "store": "Lab notes",
+            "version": "V12",
+            "occurrence": "lab-o7",
+            "offset": 3140,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:lab-notes",
+          "state": "Lab notes@V12",
+          "locator": {
+            "ranges": [
+              [
+                3140,
+                3167
+              ],
+              [
+                3200,
+                3228
+              ]
+            ],
+            "occurrence": "lab-o7"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J27-reading-initial",
+            "title": "Reading · visit 01 · Lab notes@V12",
+            "kind": "document",
+            "body": [
+              "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Subject",
+                "value": "Lab notes passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "lab-o7"
+              },
+              {
+                "label": "Offset",
+                "value": 3140
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "f-source",
+            "title": "Selected Lab source ranges",
+            "kind": "document",
+            "body": [
+              "Choose two disjoint ranges; the gap is unmarked."
+            ],
+            "facts": [
+              {
+                "label": "Range 1",
+                "value": "[3140,3167) · lab-o7"
+              },
+              {
+                "label": "Gap",
+                "value": "[3167,3200) unmarked"
+              },
+              {
+                "label": "Range 2",
+                "value": "[3200,3228) · lab-o7"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "f-draft",
+            "title": "Draft L7 · empty endsets",
+            "kind": "list",
+            "body": [],
+            "facts": [
+              {
+                "label": "Left",
+                "value": 0
+              },
+              {
+                "label": "Right",
+                "value": 0
+              },
+              {
+                "label": "State",
+                "value": "No Link authored"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral",
+            "count": {
+              "total": 0,
+              "filtered": 0,
+              "visible": 0
+            }
+          }
+        ],
+        "draft": {
+          "id": "draft:L7",
+          "relation": "Comment",
+          "prominence": "normal",
+          "left": [],
+          "right": [],
+          "leftOrder": [],
+          "rightOrder": [],
+          "sourceGroups": {
+            "capture-alpha": [
+              "L1",
+              "L2"
+            ],
+            "capture-beta": [
+              "R1",
+              "R2"
+            ],
+            "capture-gamma": [
+              "R3"
+            ]
+          },
+          "occurrences": {
+            "L1": "lab-o7",
+            "L2": "lab-o7",
+            "R1": "review-o3",
+            "R2": "rig-o1",
+            "R3": "rig-o4"
+          },
+          "destination": {
+            "store": null,
+            "branch": null,
+            "base": null,
+            "author": null,
+            "signingKey": null,
+            "authorStatus": "not declared",
+            "mode": null
+          },
+          "status": "empty",
+          "attempt": null,
+          "preview": "not requested"
+        },
+        "linkPreview": null,
+        "forgeReceipt": null
+      },
+      "effects": [],
+      "action": "Before",
+      "note": ""
+    },
+    {
+      "file": "J27/main/J27-s1-a1.png",
+      "location": "?journey=J27&task=0&action=1",
+      "frame": "J27-s1-a1",
+      "state": {
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes passage",
+          "store": "Lab notes",
+          "version": "V12",
+          "occurrence": "lab-o7",
+          "offset": 3140,
+          "body": [
+            "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes passage",
+            "store": "Lab notes",
+            "version": "V12",
+            "occurrence": "lab-o7",
+            "offset": 3140,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:lab-notes",
+          "state": "Lab notes@V12",
+          "locator": {
+            "ranges": [
+              [
+                3140,
+                3167
+              ],
+              [
+                3200,
+                3228
+              ]
+            ],
+            "occurrence": "lab-o7"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J27-s1-a1-reading",
+            "title": "Reading · visit 01 · Lab notes@V12",
+            "kind": "document",
+            "body": [
+              "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Subject",
+                "value": "Lab notes passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "lab-o7"
+              },
+              {
+                "label": "Offset",
+                "value": 3140
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "f-source",
+            "title": "Selected Lab source ranges",
+            "kind": "document",
+            "body": [
+              "Two separated passages are staged from Lab notes V12. The interval between them is preserved as a gap."
+            ],
+            "facts": [
+              {
+                "label": "Range 1",
+                "value": "[3140,3167) · lab-o7"
+              },
+              {
+                "label": "Gap",
+                "value": "[3167,3200) unmarked"
+              },
+              {
+                "label": "Range 2",
+                "value": "[3200,3228) · lab-o7"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "f-draft",
+            "title": "Draft L7 · one proposed Comment Link",
+            "kind": "list",
+            "body": [
+              "Staging is private and in memory until an explicit authoring action."
+            ],
+            "facts": [
+              {
+                "label": "Left",
+                "value": 2
+              },
+              {
+                "label": "Right",
+                "value": 3
+              },
+              {
+                "label": "State",
+                "value": "No Link authored"
+              }
+            ],
+            "rows": [
+              {
+                "id": "L1",
+                "label": "Left 1 · Lab notes",
+                "detail": "[3140,3167) · lab-o7",
+                "status": "ready",
+                "ordinal": 1
+              },
+              {
+                "id": "L2",
+                "label": "Left 2 · Lab notes",
+                "detail": "[3200,3228) · lab-o7",
+                "status": "ready",
+                "ordinal": 2
+              },
+              {
+                "id": "R1",
+                "label": "Right 1 · Review",
+                "detail": "[80,115) · review-o3",
+                "status": "ready",
+                "ordinal": 1
+              },
+              {
+                "id": "R2",
+                "label": "Right 2 · C17 V8",
+                "detail": "[0,8) · rig-o1",
+                "status": "ready",
+                "ordinal": 2
+              },
+              {
+                "id": "R3",
+                "label": "Right 3 · C24 V8",
+                "detail": "[0,4) · rig-o4",
+                "status": "ready",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 5,
+              "filtered": 5,
+              "visible": 5
+            }
+          }
+        ],
+        "draft": {
+          "id": "draft:L7",
+          "relation": "Comment",
+          "prominence": "normal",
+          "left": [
+            {
+              "id": "L1",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3140,
+                3167
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Pressure stayed stable over the full duration of the test."
+            },
+            {
+              "id": "L2",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3200,
+                3228
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Temperature was unchanged during the measurement period."
+            }
+          ],
+          "right": [],
+          "leftOrder": [
+            "L1",
+            "L2"
+          ],
+          "rightOrder": [],
+          "sourceGroups": {
+            "capture-alpha": [
+              "L1",
+              "L2"
+            ],
+            "capture-beta": [
+              "R1",
+              "R2"
+            ],
+            "capture-gamma": [
+              "R3"
+            ]
+          },
+          "occurrences": {
+            "L1": "lab-o7",
+            "L2": "lab-o7",
+            "R1": "review-o3",
+            "R2": "rig-o1",
+            "R3": "rig-o4"
+          },
+          "destination": {
+            "store": null,
+            "branch": null,
+            "base": null,
+            "author": null,
+            "signingKey": null,
+            "authorStatus": "not declared",
+            "mode": null
+          },
+          "status": "staging",
+          "attempt": null,
+          "preview": "not requested"
+        },
+        "linkPreview": null,
+        "forgeReceipt": null
+      },
+      "effects": [
+        {
+          "domain": "private staging",
+          "summary": "In-memory draft records L1 and L2; source spans and gap are unchanged.",
+          "identity": "draft:L7; Lab notes@V12; [3140,3167), [3200,3228)"
+        }
+      ],
+      "action": "Stage two separated Lab ranges on the left",
+      "note": "Left bay now contains exactly the two ordered spans; the unmarked gap remains excluded."
+    },
+    {
+      "file": "J27/main/J27-s1-a2.png",
+      "location": "?journey=J27&task=0&action=2",
+      "frame": "J27-s1-a2",
+      "state": {
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes passage",
+          "store": "Lab notes",
+          "version": "V12",
+          "occurrence": "lab-o7",
+          "offset": 3140,
+          "body": [
+            "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes passage",
+            "store": "Lab notes",
+            "version": "V12",
+            "occurrence": "lab-o7",
+            "offset": 3140,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:lab-notes",
+          "state": "Lab notes@V12",
+          "locator": {
+            "ranges": [
+              [
+                3140,
+                3167
+              ],
+              [
+                3200,
+                3228
+              ]
+            ],
+            "occurrence": "lab-o7"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J27-s1-a2-reading",
+            "title": "Reading · visit 01 · Lab notes@V12",
+            "kind": "document",
+            "body": [
+              "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Subject",
+                "value": "Lab notes passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "lab-o7"
+              },
+              {
+                "label": "Offset",
+                "value": 3140
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "f-source",
+            "title": "Selected Lab source ranges",
+            "kind": "document",
+            "body": [
+              "Two separated passages are staged from Lab notes V12. The interval between them is preserved as a gap."
+            ],
+            "facts": [
+              {
+                "label": "Range 1",
+                "value": "[3140,3167) · lab-o7"
+              },
+              {
+                "label": "Gap",
+                "value": "[3167,3200) unmarked"
+              },
+              {
+                "label": "Range 2",
+                "value": "[3200,3228) · lab-o7"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "f-draft",
+            "title": "Draft L7 · right 1 / left 2",
+            "kind": "list",
+            "body": [],
+            "facts": [
+              {
+                "label": "Left",
+                "value": 2
+              },
+              {
+                "label": "Right",
+                "value": 1
+              },
+              {
+                "label": "State",
+                "value": "No Link authored"
+              }
+            ],
+            "rows": [
+              {
+                "id": "R1",
+                "label": "Right 1 · Review V4",
+                "detail": "[80,115) · review-o3",
+                "status": "ready",
+                "ordinal": 1
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "draft": {
+          "id": "draft:L7",
+          "relation": "Comment",
+          "prominence": "normal",
+          "left": [
+            {
+              "id": "L1",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3140,
+                3167
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Pressure stayed stable over the full duration of the test."
+            },
+            {
+              "id": "L2",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3200,
+                3228
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Temperature was unchanged during the measurement period."
+            }
+          ],
+          "right": [
+            {
+              "id": "R1",
+              "source": "Review@V4",
+              "object": "doc:review",
+              "range": [
+                80,
+                115
+              ],
+              "occurrence": "review-o3",
+              "group": "capture-beta",
+              "text": "The results support the test result."
+            }
+          ],
+          "leftOrder": [
+            "L1",
+            "L2"
+          ],
+          "rightOrder": [
+            "R1"
+          ],
+          "sourceGroups": {
+            "capture-alpha": [
+              "L1",
+              "L2"
+            ],
+            "capture-beta": [
+              "R1",
+              "R2"
+            ],
+            "capture-gamma": [
+              "R3"
+            ]
+          },
+          "occurrences": {
+            "L1": "lab-o7",
+            "L2": "lab-o7",
+            "R1": "review-o3",
+            "R2": "rig-o1",
+            "R3": "rig-o4"
+          },
+          "destination": {
+            "store": null,
+            "branch": null,
+            "base": null,
+            "author": null,
+            "signingKey": null,
+            "authorStatus": "not declared",
+            "mode": null
+          },
+          "status": "staging",
+          "attempt": null,
+          "preview": "not requested"
+        },
+        "linkPreview": null,
+        "forgeReceipt": null
+      },
+      "effects": [
+        {
+          "domain": "private staging",
+          "summary": "Append member R1 to the right endset.",
+          "identity": "draft:L7; member:R1; review-o3"
+        }
+      ],
+      "action": "Add Review V4 passage as right member 1",
+      "note": "One right member is staged; no Link or source operation exists."
+    },
+    {
+      "file": "J27/main/J27-s1-a3.png",
+      "location": "?journey=J27&task=0&action=3",
+      "frame": "J27-s1-a3",
+      "state": {
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes passage",
+          "store": "Lab notes",
+          "version": "V12",
+          "occurrence": "lab-o7",
+          "offset": 3140,
+          "body": [
+            "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes passage",
+            "store": "Lab notes",
+            "version": "V12",
+            "occurrence": "lab-o7",
+            "offset": 3140,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:lab-notes",
+          "state": "Lab notes@V12",
+          "locator": {
+            "ranges": [
+              [
+                3140,
+                3167
+              ],
+              [
+                3200,
+                3228
+              ]
+            ],
+            "occurrence": "lab-o7"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J27-s1-a3-reading",
+            "title": "Reading · visit 01 · Lab notes@V12",
+            "kind": "document",
+            "body": [
+              "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Subject",
+                "value": "Lab notes passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "lab-o7"
+              },
+              {
+                "label": "Offset",
+                "value": 3140
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "f-source",
+            "title": "Selected Lab source ranges",
+            "kind": "document",
+            "body": [
+              "Two separated passages are staged from Lab notes V12. The interval between them is preserved as a gap."
+            ],
+            "facts": [
+              {
+                "label": "Range 1",
+                "value": "[3140,3167) · lab-o7"
+              },
+              {
+                "label": "Gap",
+                "value": "[3167,3200) unmarked"
+              },
+              {
+                "label": "Range 2",
+                "value": "[3200,3228) · lab-o7"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "f-draft",
+            "title": "Draft L7 · right 2 / left 2",
+            "kind": "list",
+            "body": [],
+            "facts": [
+              {
+                "label": "Left",
+                "value": 2
+              },
+              {
+                "label": "Right",
+                "value": 2
+              },
+              {
+                "label": "State",
+                "value": "No Link authored"
+              }
+            ],
+            "rows": [
+              {
+                "id": "R1",
+                "label": "Right 1 · Review",
+                "detail": "[80,115)",
+                "status": "ready",
+                "ordinal": 1
+              },
+              {
+                "id": "R2",
+                "label": "Right 2 · C17 V8",
+                "detail": "[0,8)",
+                "status": "ready",
+                "ordinal": 2
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "draft": {
+          "id": "draft:L7",
+          "relation": "Comment",
+          "prominence": "normal",
+          "left": [
+            {
+              "id": "L1",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3140,
+                3167
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Pressure stayed stable over the full duration of the test."
+            },
+            {
+              "id": "L2",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3200,
+                3228
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Temperature was unchanged during the measurement period."
+            }
+          ],
+          "right": [
+            {
+              "id": "R1",
+              "source": "Review@V4",
+              "object": "doc:review",
+              "range": [
+                80,
+                115
+              ],
+              "occurrence": "review-o3",
+              "group": "capture-beta",
+              "text": "The results support the test result."
+            },
+            {
+              "id": "R2",
+              "source": "Rig slice@V8",
+              "object": "cell:C17",
+              "range": [
+                0,
+                8
+              ],
+              "occurrence": "rig-o1",
+              "group": "capture-beta",
+              "text": "3.14 bar"
+            }
+          ],
+          "leftOrder": [
+            "L1",
+            "L2"
+          ],
+          "rightOrder": [
+            "R1",
+            "R2"
+          ],
+          "sourceGroups": {
+            "capture-alpha": [
+              "L1",
+              "L2"
+            ],
+            "capture-beta": [
+              "R1",
+              "R2"
+            ],
+            "capture-gamma": [
+              "R3"
+            ]
+          },
+          "occurrences": {
+            "L1": "lab-o7",
+            "L2": "lab-o7",
+            "R1": "review-o3",
+            "R2": "rig-o1",
+            "R3": "rig-o4"
+          },
+          "destination": {
+            "store": null,
+            "branch": null,
+            "base": null,
+            "author": null,
+            "signingKey": null,
+            "authorStatus": "not declared",
+            "mode": null
+          },
+          "status": "staging",
+          "attempt": null,
+          "preview": "not requested"
+        },
+        "linkPreview": null,
+        "forgeReceipt": null
+      },
+      "effects": [
+        {
+          "domain": "private staging",
+          "summary": "Append exact cell content span R2.",
+          "identity": "draft:L7; member:R2; Rig slice@V8; cell:C17[0,8)"
+        }
+      ],
+      "action": "Add C17 V8 as right member 2",
+      "note": "Right endset has two members with distinct authorities and exact locators."
+    },
+    {
+      "file": "J27/main/J27-s1-a4.png",
+      "location": "?journey=J27&task=0&action=4",
+      "frame": "J27-s1-a4",
+      "state": {
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes passage",
+          "store": "Lab notes",
+          "version": "V12",
+          "occurrence": "lab-o7",
+          "offset": 3140,
+          "body": [
+            "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes passage",
+            "store": "Lab notes",
+            "version": "V12",
+            "occurrence": "lab-o7",
+            "offset": 3140,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:lab-notes",
+          "state": "Lab notes@V12",
+          "locator": {
+            "ranges": [
+              [
+                3140,
+                3167
+              ],
+              [
+                3200,
+                3228
+              ]
+            ],
+            "occurrence": "lab-o7"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J27-s1-a4-reading",
+            "title": "Reading · visit 01 · Lab notes@V12",
+            "kind": "document",
+            "body": [
+              "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Subject",
+                "value": "Lab notes passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "lab-o7"
+              },
+              {
+                "label": "Offset",
+                "value": 3140
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "f-source",
+            "title": "Selected Lab source ranges",
+            "kind": "document",
+            "body": [
+              "Two separated passages are staged from Lab notes V12. The interval between them is preserved as a gap."
+            ],
+            "facts": [
+              {
+                "label": "Range 1",
+                "value": "[3140,3167) · lab-o7"
+              },
+              {
+                "label": "Gap",
+                "value": "[3167,3200) unmarked"
+              },
+              {
+                "label": "Range 2",
+                "value": "[3200,3228) · lab-o7"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "f-draft",
+            "title": "Draft L7 · one proposed Comment Link",
+            "kind": "list",
+            "body": [
+              "Staging is private and in memory until an explicit authoring action."
+            ],
+            "facts": [
+              {
+                "label": "Left",
+                "value": 2
+              },
+              {
+                "label": "Right",
+                "value": 3
+              },
+              {
+                "label": "State",
+                "value": "No Link authored"
+              }
+            ],
+            "rows": [
+              {
+                "id": "L1",
+                "label": "Left 1 · Lab notes",
+                "detail": "[3140,3167) · lab-o7",
+                "status": "ready",
+                "ordinal": 1
+              },
+              {
+                "id": "L2",
+                "label": "Left 2 · Lab notes",
+                "detail": "[3200,3228) · lab-o7",
+                "status": "ready",
+                "ordinal": 2
+              },
+              {
+                "id": "R1",
+                "label": "Right 1 · Review",
+                "detail": "[80,115) · review-o3",
+                "status": "ready",
+                "ordinal": 1
+              },
+              {
+                "id": "R2",
+                "label": "Right 2 · C17 V8",
+                "detail": "[0,8) · rig-o1",
+                "status": "ready",
+                "ordinal": 2
+              },
+              {
+                "id": "R3",
+                "label": "Right 3 · C24 V8",
+                "detail": "[0,4) · rig-o4",
+                "status": "ready",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 5,
+              "filtered": 5,
+              "visible": 5
+            }
+          }
+        ],
+        "draft": {
+          "id": "draft:L7",
+          "relation": "Comment",
+          "prominence": "normal",
+          "left": [
+            {
+              "id": "L1",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3140,
+                3167
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Pressure stayed stable over the full duration of the test."
+            },
+            {
+              "id": "L2",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3200,
+                3228
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Temperature was unchanged during the measurement period."
+            }
+          ],
+          "right": [
+            {
+              "id": "R1",
+              "source": "Review@V4",
+              "object": "doc:review",
+              "range": [
+                80,
+                115
+              ],
+              "occurrence": "review-o3",
+              "group": "capture-beta",
+              "text": "The results support the test result."
+            },
+            {
+              "id": "R2",
+              "source": "Rig slice@V8",
+              "object": "cell:C17",
+              "range": [
+                0,
+                8
+              ],
+              "occurrence": "rig-o1",
+              "group": "capture-beta",
+              "text": "3.14 bar"
+            },
+            {
+              "id": "R3",
+              "source": "Rig slice@V8",
+              "object": "cell:C24",
+              "range": [
+                0,
+                4
+              ],
+              "occurrence": "rig-o4",
+              "group": "capture-gamma",
+              "text": "22 °C"
+            }
+          ],
+          "leftOrder": [
+            "L1",
+            "L2"
+          ],
+          "rightOrder": [
+            "R1",
+            "R2",
+            "R3"
+          ],
+          "sourceGroups": {
+            "capture-alpha": [
+              "L1",
+              "L2"
+            ],
+            "capture-beta": [
+              "R1",
+              "R2"
+            ],
+            "capture-gamma": [
+              "R3"
+            ]
+          },
+          "occurrences": {
+            "L1": "lab-o7",
+            "L2": "lab-o7",
+            "R1": "review-o3",
+            "R2": "rig-o1",
+            "R3": "rig-o4"
+          },
+          "destination": {
+            "store": null,
+            "branch": null,
+            "base": null,
+            "author": null,
+            "signingKey": null,
+            "authorStatus": "not declared",
+            "mode": null
+          },
+          "status": "staging",
+          "attempt": null,
+          "preview": "not requested"
+        },
+        "linkPreview": null,
+        "forgeReceipt": null
+      },
+      "effects": [
+        {
+          "domain": "private staging",
+          "summary": "Complete ordered 2×3 endsets in draft only; no pairwise Link objects are created.",
+          "identity": "draft:L7; left=[L1,L2]; right=[R1,R2,R3]"
+        }
+      ],
+      "action": "Add C24 V8 as right member 3",
+      "note": "The draft contains one relation candidate with two left and three right members, not six Links."
+    },
+    {
+      "file": "J27/main/J27-s2-a1.png",
+      "location": "?journey=J27&task=1&action=1",
+      "frame": "J27-s2-a1",
+      "state": {
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes passage",
+          "store": "Lab notes",
+          "version": "V12",
+          "occurrence": "lab-o7",
+          "offset": 3140,
+          "body": [
+            "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes passage",
+            "store": "Lab notes",
+            "version": "V12",
+            "occurrence": "lab-o7",
+            "offset": 3140,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:lab-notes",
+          "state": "Lab notes@V12",
+          "locator": {
+            "ranges": [
+              [
+                3140,
+                3167
+              ],
+              [
+                3200,
+                3228
+              ]
+            ],
+            "occurrence": "lab-o7"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J27-s2-a1-reading",
+            "title": "Reading · visit 01 · Lab notes@V12",
+            "kind": "document",
+            "body": [
+              "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Subject",
+                "value": "Lab notes passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "lab-o7"
+              },
+              {
+                "label": "Offset",
+                "value": 3140
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "f-order",
+            "title": "Left order · after move",
+            "kind": "list",
+            "body": [],
+            "facts": [],
+            "rows": [
+              {
+                "id": "L2",
+                "label": "Left 1 · Lab notes",
+                "detail": "capture-alpha · [3200,3228)",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "L1",
+                "label": "Left 2 · Lab notes",
+                "detail": "capture-alpha · [3140,3167)",
+                "status": "ready",
+                "ordinal": 2
+              }
+            ],
+            "tone": "neutral"
+          },
+          {
+            "id": "f-source",
+            "title": "Selected Lab source ranges",
+            "kind": "document",
+            "body": [
+              "Two separated passages are staged from Lab notes V12. The interval between them is preserved as a gap."
+            ],
+            "facts": [
+              {
+                "label": "Range 1",
+                "value": "[3140,3167) · lab-o7"
+              },
+              {
+                "label": "Gap",
+                "value": "[3167,3200) unmarked"
+              },
+              {
+                "label": "Range 2",
+                "value": "[3200,3228) · lab-o7"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          }
+        ],
+        "draft": {
+          "id": "draft:L7",
+          "relation": "Comment",
+          "prominence": "normal",
+          "left": [
+            {
+              "id": "L1",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3140,
+                3167
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Pressure stayed stable over the full duration of the test."
+            },
+            {
+              "id": "L2",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3200,
+                3228
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Temperature was unchanged during the measurement period."
+            }
+          ],
+          "right": [
+            {
+              "id": "R1",
+              "source": "Review@V4",
+              "object": "doc:review",
+              "range": [
+                80,
+                115
+              ],
+              "occurrence": "review-o3",
+              "group": "capture-beta",
+              "text": "The results support the test result."
+            },
+            {
+              "id": "R2",
+              "source": "Rig slice@V8",
+              "object": "cell:C17",
+              "range": [
+                0,
+                8
+              ],
+              "occurrence": "rig-o1",
+              "group": "capture-beta",
+              "text": "3.14 bar"
+            },
+            {
+              "id": "R3",
+              "source": "Rig slice@V8",
+              "object": "cell:C24",
+              "range": [
+                0,
+                4
+              ],
+              "occurrence": "rig-o4",
+              "group": "capture-gamma",
+              "text": "22 °C"
+            }
+          ],
+          "leftOrder": [
+            "L2",
+            "L1"
+          ],
+          "rightOrder": [
+            "R1",
+            "R2",
+            "R3"
+          ],
+          "sourceGroups": {
+            "capture-alpha": [
+              "L1",
+              "L2"
+            ],
+            "capture-beta": [
+              "R1",
+              "R2"
+            ],
+            "capture-gamma": [
+              "R3"
+            ]
+          },
+          "occurrences": {
+            "L1": "lab-o7",
+            "L2": "lab-o7",
+            "R1": "review-o3",
+            "R2": "rig-o1",
+            "R3": "rig-o4"
+          },
+          "destination": {
+            "store": null,
+            "branch": null,
+            "base": null,
+            "author": null,
+            "signingKey": null,
+            "authorStatus": "not declared",
+            "mode": null
+          },
+          "status": "staging",
+          "attempt": null,
+          "preview": "not requested"
+        },
+        "linkPreview": null,
+        "forgeReceipt": null
+      },
+      "effects": [
+        {
+          "domain": "private staging",
+          "summary": "Change authored left member order; source groups and source ranges stay fixed.",
+          "identity": "draft:L7; leftOrder=[L2,L1]"
+        }
+      ],
+      "action": "Move L2 above L1",
+      "note": "List order changes; capture group membership does not."
+    },
+    {
+      "file": "J27/main/J27-s2-a2.png",
+      "location": "?journey=J27&task=1&action=2",
+      "frame": "J27-s2-a2",
+      "state": {
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes passage",
+          "store": "Lab notes",
+          "version": "V12",
+          "occurrence": "lab-o7",
+          "offset": 3140,
+          "body": [
+            "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes passage",
+            "store": "Lab notes",
+            "version": "V12",
+            "occurrence": "lab-o7",
+            "offset": 3140,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:lab-notes",
+          "state": "Lab notes@V12",
+          "locator": {
+            "ranges": [
+              [
+                3140,
+                3167
+              ],
+              [
+                3200,
+                3228
+              ]
+            ],
+            "occurrence": "lab-o7"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J27-s2-a2-reading",
+            "title": "Reading · visit 01 · Lab notes@V12",
+            "kind": "document",
+            "body": [
+              "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Subject",
+                "value": "Lab notes passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "lab-o7"
+              },
+              {
+                "label": "Offset",
+                "value": 3140
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "f-source",
+            "title": "Selected Lab source ranges",
+            "kind": "document",
+            "body": [
+              "Two separated passages are staged from Lab notes V12. The interval between them is preserved as a gap."
+            ],
+            "facts": [
+              {
+                "label": "Range 1",
+                "value": "[3140,3167) · lab-o7"
+              },
+              {
+                "label": "Gap",
+                "value": "[3167,3200) unmarked"
+              },
+              {
+                "label": "Range 2",
+                "value": "[3200,3228) · lab-o7"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "f-order",
+            "title": "Left order · restored",
+            "kind": "list",
+            "body": [],
+            "facts": [],
+            "rows": [
+              {
+                "id": "L1",
+                "label": "Left 1 · Lab notes",
+                "detail": "capture-alpha",
+                "status": "ready",
+                "ordinal": 1
+              },
+              {
+                "id": "L2",
+                "label": "Left 2 · Lab notes",
+                "detail": "capture-alpha",
+                "status": "ready",
+                "ordinal": 2
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "draft": {
+          "id": "draft:L7",
+          "relation": "Comment",
+          "prominence": "normal",
+          "left": [
+            {
+              "id": "L1",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3140,
+                3167
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Pressure stayed stable over the full duration of the test."
+            },
+            {
+              "id": "L2",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3200,
+                3228
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Temperature was unchanged during the measurement period."
+            }
+          ],
+          "right": [
+            {
+              "id": "R1",
+              "source": "Review@V4",
+              "object": "doc:review",
+              "range": [
+                80,
+                115
+              ],
+              "occurrence": "review-o3",
+              "group": "capture-beta",
+              "text": "The results support the test result."
+            },
+            {
+              "id": "R2",
+              "source": "Rig slice@V8",
+              "object": "cell:C17",
+              "range": [
+                0,
+                8
+              ],
+              "occurrence": "rig-o1",
+              "group": "capture-beta",
+              "text": "3.14 bar"
+            },
+            {
+              "id": "R3",
+              "source": "Rig slice@V8",
+              "object": "cell:C24",
+              "range": [
+                0,
+                4
+              ],
+              "occurrence": "rig-o4",
+              "group": "capture-gamma",
+              "text": "22 °C"
+            }
+          ],
+          "leftOrder": [
+            "L1",
+            "L2"
+          ],
+          "rightOrder": [
+            "R1",
+            "R2",
+            "R3"
+          ],
+          "sourceGroups": {
+            "capture-alpha": [
+              "L1",
+              "L2"
+            ],
+            "capture-beta": [
+              "R1",
+              "R2"
+            ],
+            "capture-gamma": [
+              "R3"
+            ]
+          },
+          "occurrences": {
+            "L1": "lab-o7",
+            "L2": "lab-o7",
+            "R1": "review-o3",
+            "R2": "rig-o1",
+            "R3": "rig-o4"
+          },
+          "destination": {
+            "store": null,
+            "branch": null,
+            "base": null,
+            "author": null,
+            "signingKey": null,
+            "authorStatus": "not declared",
+            "mode": null
+          },
+          "status": "staging",
+          "attempt": null,
+          "preview": "not requested"
+        },
+        "linkPreview": null,
+        "forgeReceipt": null
+      },
+      "effects": [
+        {
+          "domain": "private staging",
+          "summary": "Restore prior ordered list without altering source anchors.",
+          "identity": "draft:L7; leftOrder=[L1,L2]"
+        }
+      ],
+      "action": "Undo member reorder",
+      "note": "Undo returns the authored order to L1,L2."
+    },
+    {
+      "file": "J27/main/J27-s2-a3.png",
+      "location": "?journey=J27&task=1&action=3",
+      "frame": "J27-s2-a3",
+      "state": {
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes passage",
+          "store": "Lab notes",
+          "version": "V12",
+          "occurrence": "lab-o7",
+          "offset": 3140,
+          "body": [
+            "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes passage",
+            "store": "Lab notes",
+            "version": "V12",
+            "occurrence": "lab-o7",
+            "offset": 3140,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:lab-notes",
+          "state": "Lab notes@V12",
+          "locator": {
+            "ranges": [
+              [
+                3140,
+                3167
+              ],
+              [
+                3200,
+                3228
+              ]
+            ],
+            "occurrence": "lab-o7"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J27-s2-a3-reading",
+            "title": "Reading · visit 01 · Lab notes@V12",
+            "kind": "document",
+            "body": [
+              "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Subject",
+                "value": "Lab notes passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "lab-o7"
+              },
+              {
+                "label": "Offset",
+                "value": 3140
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "f-remove",
+            "title": "Draft member removed",
+            "kind": "list",
+            "body": [],
+            "facts": [],
+            "rows": [
+              {
+                "id": "R1",
+                "label": "Right 1 · Review",
+                "detail": "retained",
+                "status": "ready",
+                "ordinal": 1
+              },
+              {
+                "id": "R2",
+                "label": "Right 2 · C17",
+                "detail": "retained",
+                "status": "ready",
+                "ordinal": 2
+              }
+            ],
+            "tone": "neutral"
+          },
+          {
+            "id": "f-source",
+            "title": "Source remains",
+            "kind": "cell",
+            "body": [],
+            "facts": [
+              {
+                "label": "C24 V8",
+                "value": "unchanged · 22 °C"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "draft": {
+          "id": "draft:L7",
+          "relation": "Comment",
+          "prominence": "normal",
+          "left": [
+            {
+              "id": "L1",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3140,
+                3167
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Pressure stayed stable over the full duration of the test."
+            },
+            {
+              "id": "L2",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3200,
+                3228
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Temperature was unchanged during the measurement period."
+            }
+          ],
+          "right": [
+            {
+              "id": "R1",
+              "source": "Review@V4",
+              "object": "doc:review",
+              "range": [
+                80,
+                115
+              ],
+              "occurrence": "review-o3",
+              "group": "capture-beta",
+              "text": "The results support the test result."
+            },
+            {
+              "id": "R2",
+              "source": "Rig slice@V8",
+              "object": "cell:C17",
+              "range": [
+                0,
+                8
+              ],
+              "occurrence": "rig-o1",
+              "group": "capture-beta",
+              "text": "3.14 bar"
+            }
+          ],
+          "leftOrder": [
+            "L1",
+            "L2"
+          ],
+          "rightOrder": [
+            "R1",
+            "R2"
+          ],
+          "sourceGroups": {
+            "capture-alpha": [
+              "L1",
+              "L2"
+            ],
+            "capture-beta": [
+              "R1",
+              "R2"
+            ],
+            "capture-gamma": [
+              "R3"
+            ]
+          },
+          "occurrences": {
+            "L1": "lab-o7",
+            "L2": "lab-o7",
+            "R1": "review-o3",
+            "R2": "rig-o1",
+            "R3": "rig-o4"
+          },
+          "destination": {
+            "store": null,
+            "branch": null,
+            "base": null,
+            "author": null,
+            "signingKey": null,
+            "authorStatus": "not declared",
+            "mode": null
+          },
+          "status": "staging",
+          "attempt": null,
+          "preview": "not requested"
+        },
+        "linkPreview": null,
+        "forgeReceipt": null
+      },
+      "effects": [
+        {
+          "domain": "private staging",
+          "summary": "Remove only draft membership R3; C24 source content remains untouched.",
+          "identity": "draft:L7; removed:R3"
+        }
+      ],
+      "action": "Remove R3 from the draft",
+      "note": "The draft right endset shrinks to two; no source edit occurs."
+    },
+    {
+      "file": "J27/main/J27-s2-a4.png",
+      "location": "?journey=J27&task=1&action=4",
+      "frame": "J27-s2-a4",
+      "state": {
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes passage",
+          "store": "Lab notes",
+          "version": "V12",
+          "occurrence": "lab-o7",
+          "offset": 3140,
+          "body": [
+            "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes passage",
+            "store": "Lab notes",
+            "version": "V12",
+            "occurrence": "lab-o7",
+            "offset": 3140,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:lab-notes",
+          "state": "Lab notes@V12",
+          "locator": {
+            "ranges": [
+              [
+                3140,
+                3167
+              ],
+              [
+                3200,
+                3228
+              ]
+            ],
+            "occurrence": "lab-o7"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J27-s2-a4-reading",
+            "title": "Reading · visit 01 · Lab notes@V12",
+            "kind": "document",
+            "body": [
+              "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Subject",
+                "value": "Lab notes passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "lab-o7"
+              },
+              {
+                "label": "Offset",
+                "value": 3140
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "f-source",
+            "title": "Selected Lab source ranges",
+            "kind": "document",
+            "body": [
+              "Two separated passages are staged from Lab notes V12. The interval between them is preserved as a gap."
+            ],
+            "facts": [
+              {
+                "label": "Range 1",
+                "value": "[3140,3167) · lab-o7"
+              },
+              {
+                "label": "Gap",
+                "value": "[3167,3200) unmarked"
+              },
+              {
+                "label": "Range 2",
+                "value": "[3200,3228) · lab-o7"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "f-draft",
+            "title": "Draft L7 · one proposed Comment Link",
+            "kind": "list",
+            "body": [
+              "Staging is private and in memory until an explicit authoring action."
+            ],
+            "facts": [
+              {
+                "label": "Left",
+                "value": 2
+              },
+              {
+                "label": "Right",
+                "value": 3
+              },
+              {
+                "label": "State",
+                "value": "No Link authored"
+              }
+            ],
+            "rows": [
+              {
+                "id": "L1",
+                "label": "Left 1 · Lab notes",
+                "detail": "[3140,3167) · lab-o7",
+                "status": "ready",
+                "ordinal": 1
+              },
+              {
+                "id": "L2",
+                "label": "Left 2 · Lab notes",
+                "detail": "[3200,3228) · lab-o7",
+                "status": "ready",
+                "ordinal": 2
+              },
+              {
+                "id": "R1",
+                "label": "Right 1 · Review",
+                "detail": "[80,115) · review-o3",
+                "status": "ready",
+                "ordinal": 1
+              },
+              {
+                "id": "R2",
+                "label": "Right 2 · C17 V8",
+                "detail": "[0,8) · rig-o1",
+                "status": "ready",
+                "ordinal": 2
+              },
+              {
+                "id": "R3",
+                "label": "Right 3 · C24 V8",
+                "detail": "[0,4) · rig-o4",
+                "status": "ready",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 5,
+              "filtered": 5,
+              "visible": 5
+            }
+          }
+        ],
+        "draft": {
+          "id": "draft:L7",
+          "relation": "Comment",
+          "prominence": "normal",
+          "left": [
+            {
+              "id": "L1",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3140,
+                3167
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Pressure stayed stable over the full duration of the test."
+            },
+            {
+              "id": "L2",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3200,
+                3228
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Temperature was unchanged during the measurement period."
+            }
+          ],
+          "right": [
+            {
+              "id": "R1",
+              "source": "Review@V4",
+              "object": "doc:review",
+              "range": [
+                80,
+                115
+              ],
+              "occurrence": "review-o3",
+              "group": "capture-beta",
+              "text": "The results support the test result."
+            },
+            {
+              "id": "R2",
+              "source": "Rig slice@V8",
+              "object": "cell:C17",
+              "range": [
+                0,
+                8
+              ],
+              "occurrence": "rig-o1",
+              "group": "capture-beta",
+              "text": "3.14 bar"
+            },
+            {
+              "id": "R3",
+              "source": "Rig slice@V8",
+              "object": "cell:C24",
+              "range": [
+                0,
+                4
+              ],
+              "occurrence": "rig-o4",
+              "group": "capture-gamma",
+              "text": "22 °C"
+            }
+          ],
+          "leftOrder": [
+            "L1",
+            "L2"
+          ],
+          "rightOrder": [
+            "R1",
+            "R2",
+            "R3"
+          ],
+          "sourceGroups": {
+            "capture-alpha": [
+              "L1",
+              "L2"
+            ],
+            "capture-beta": [
+              "R1",
+              "R2"
+            ],
+            "capture-gamma": [
+              "R3"
+            ]
+          },
+          "occurrences": {
+            "L1": "lab-o7",
+            "L2": "lab-o7",
+            "R1": "review-o3",
+            "R2": "rig-o1",
+            "R3": "rig-o4"
+          },
+          "destination": {
+            "store": null,
+            "branch": null,
+            "base": null,
+            "author": null,
+            "signingKey": null,
+            "authorStatus": "not declared",
+            "mode": null
+          },
+          "status": "staging",
+          "attempt": null,
+          "preview": "not requested"
+        },
+        "linkPreview": null,
+        "forgeReceipt": null
+      },
+      "effects": [
+        {
+          "domain": "private staging",
+          "summary": "Restore R3 membership at its prior ordinal.",
+          "identity": "draft:L7; restored:R3 at right ordinal 3"
+        }
+      ],
+      "action": "Undo removal of R3",
+      "note": "R3 returns as right member 3; its address and occurrence are unchanged."
+    },
+    {
+      "file": "J27/main/J27-s2-a5.png",
+      "location": "?journey=J27&task=1&action=5",
+      "frame": "J27-s2-a5",
+      "state": {
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes passage",
+          "store": "Lab notes",
+          "version": "V12",
+          "occurrence": "lab-o7",
+          "offset": 3140,
+          "body": [
+            "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes passage",
+            "store": "Lab notes",
+            "version": "V12",
+            "occurrence": "lab-o7",
+            "offset": 3140,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:lab-notes",
+          "state": "Lab notes@V12",
+          "locator": {
+            "ranges": [
+              [
+                3140,
+                3167
+              ],
+              [
+                3200,
+                3228
+              ]
+            ],
+            "occurrence": "lab-o7"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J27-s2-a5-reading",
+            "title": "Reading · visit 01 · Lab notes@V12",
+            "kind": "document",
+            "body": [
+              "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Subject",
+                "value": "Lab notes passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "lab-o7"
+              },
+              {
+                "label": "Offset",
+                "value": 3140
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "f-groups",
+            "title": "Groups and authored order",
+            "kind": "inspector",
+            "body": [],
+            "facts": [
+              {
+                "label": "capture-alpha",
+                "value": "L1,L2"
+              },
+              {
+                "label": "capture-beta",
+                "value": "R1,R2"
+              },
+              {
+                "label": "capture-gamma",
+                "value": "R3"
+              },
+              {
+                "label": "Left order",
+                "value": "L1,L2"
+              },
+              {
+                "label": "Right order",
+                "value": "R1,R2,R3"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          },
+          {
+            "id": "f-occ",
+            "title": "Occurrence context",
+            "kind": "list",
+            "body": [],
+            "facts": [],
+            "rows": [
+              {
+                "id": "L1",
+                "label": "lab-o7",
+                "detail": "source [3140,3167)",
+                "status": "ready",
+                "ordinal": 1
+              },
+              {
+                "id": "L2",
+                "label": "lab-o7",
+                "detail": "source [3200,3228)",
+                "status": "ready",
+                "ordinal": 2
+              },
+              {
+                "id": "R2",
+                "label": "rig-o1",
+                "detail": "source C17[0,8)",
+                "status": "ready",
+                "ordinal": 2
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "draft": {
+          "id": "draft:L7",
+          "relation": "Comment",
+          "prominence": "normal",
+          "left": [
+            {
+              "id": "L1",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3140,
+                3167
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Pressure stayed stable over the full duration of the test."
+            },
+            {
+              "id": "L2",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3200,
+                3228
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Temperature was unchanged during the measurement period."
+            }
+          ],
+          "right": [
+            {
+              "id": "R1",
+              "source": "Review@V4",
+              "object": "doc:review",
+              "range": [
+                80,
+                115
+              ],
+              "occurrence": "review-o3",
+              "group": "capture-beta",
+              "text": "The results support the test result."
+            },
+            {
+              "id": "R2",
+              "source": "Rig slice@V8",
+              "object": "cell:C17",
+              "range": [
+                0,
+                8
+              ],
+              "occurrence": "rig-o1",
+              "group": "capture-beta",
+              "text": "3.14 bar"
+            },
+            {
+              "id": "R3",
+              "source": "Rig slice@V8",
+              "object": "cell:C24",
+              "range": [
+                0,
+                4
+              ],
+              "occurrence": "rig-o4",
+              "group": "capture-gamma",
+              "text": "22 °C"
+            }
+          ],
+          "leftOrder": [
+            "L1",
+            "L2"
+          ],
+          "rightOrder": [
+            "R1",
+            "R2",
+            "R3"
+          ],
+          "sourceGroups": {
+            "capture-alpha": [
+              "L1",
+              "L2"
+            ],
+            "capture-beta": [
+              "R1",
+              "R2"
+            ],
+            "capture-gamma": [
+              "R3"
+            ]
+          },
+          "occurrences": {
+            "L1": "lab-o7",
+            "L2": "lab-o7",
+            "R1": "review-o3",
+            "R2": "rig-o1",
+            "R3": "rig-o4"
+          },
+          "destination": {
+            "store": null,
+            "branch": null,
+            "base": null,
+            "author": null,
+            "signingKey": null,
+            "authorStatus": "not declared",
+            "mode": null
+          },
+          "status": "staging",
+          "attempt": null,
+          "preview": "not requested",
+          "inspectedGroups": [
+            "capture-alpha",
+            "capture-beta",
+            "capture-gamma"
+          ],
+          "selectedOccurrences": {
+            "L1": "lab-o7",
+            "L2": "lab-o7",
+            "R1": "review-o3",
+            "R2": "rig-o1",
+            "R3": "rig-o4"
+          }
+        },
+        "linkPreview": null,
+        "forgeReceipt": null
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "Inspection changes no source, draft ordering or completed visit.",
+          "identity": "capture groups and occurrence IDs remain separate metadata"
+        }
+      ],
+      "action": "Inspect capture groups and occurrence choices",
+      "note": "Groups collect captured members; authored order is the ordered endset; occurrence selects entry context and never rewrites a source range."
+    },
+    {
+      "file": "J27/main/J27-s3-a1.png",
+      "location": "?journey=J27&task=2&action=1",
+      "frame": "J27-s3-a1",
+      "state": {
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes passage",
+          "store": "Lab notes",
+          "version": "V12",
+          "occurrence": "lab-o7",
+          "offset": 3140,
+          "body": [
+            "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes passage",
+            "store": "Lab notes",
+            "version": "V12",
+            "occurrence": "lab-o7",
+            "offset": 3140,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:lab-notes",
+          "state": "Lab notes@V12",
+          "locator": {
+            "ranges": [
+              [
+                3140,
+                3167
+              ],
+              [
+                3200,
+                3228
+              ]
+            ],
+            "occurrence": "lab-o7"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J27-s3-a1-reading",
+            "title": "Reading · visit 01 · Lab notes@V12",
+            "kind": "document",
+            "body": [
+              "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Subject",
+                "value": "Lab notes passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "lab-o7"
+              },
+              {
+                "label": "Offset",
+                "value": 3140
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "f-dest",
+            "title": "Pinned destination",
+            "kind": "inspector",
+            "body": [],
+            "facts": [
+              {
+                "label": "Store",
+                "value": "Review store"
+              },
+              {
+                "label": "Branch",
+                "value": "review/main"
+              },
+              {
+                "label": "Base",
+                "value": "Review@V31"
+              },
+              {
+                "label": "Author",
+                "value": "author:ava · verified with key:ava-k2"
+              },
+              {
+                "label": "Mode",
+                "value": "Create child at pinned base"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          },
+          {
+            "id": "f-draft",
+            "title": "Draft L7 · one proposed Comment Link",
+            "kind": "list",
+            "body": [
+              "Staging is private and in memory until an explicit authoring action."
+            ],
+            "facts": [
+              {
+                "label": "Left",
+                "value": 2
+              },
+              {
+                "label": "Right",
+                "value": 3
+              },
+              {
+                "label": "State",
+                "value": "No Link authored"
+              }
+            ],
+            "rows": [
+              {
+                "id": "L1",
+                "label": "Left 1 · Lab notes",
+                "detail": "[3140,3167) · lab-o7",
+                "status": "ready",
+                "ordinal": 1
+              },
+              {
+                "id": "L2",
+                "label": "Left 2 · Lab notes",
+                "detail": "[3200,3228) · lab-o7",
+                "status": "ready",
+                "ordinal": 2
+              },
+              {
+                "id": "R1",
+                "label": "Right 1 · Review",
+                "detail": "[80,115) · review-o3",
+                "status": "ready",
+                "ordinal": 1
+              },
+              {
+                "id": "R2",
+                "label": "Right 2 · C17 V8",
+                "detail": "[0,8) · rig-o1",
+                "status": "ready",
+                "ordinal": 2
+              },
+              {
+                "id": "R3",
+                "label": "Right 3 · C24 V8",
+                "detail": "[0,4) · rig-o4",
+                "status": "ready",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 5,
+              "filtered": 5,
+              "visible": 5
+            }
+          }
+        ],
+        "draft": {
+          "id": "draft:L7",
+          "relation": "Comment",
+          "prominence": "normal",
+          "left": [
+            {
+              "id": "L1",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3140,
+                3167
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Pressure stayed stable over the full duration of the test."
+            },
+            {
+              "id": "L2",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3200,
+                3228
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Temperature was unchanged during the measurement period."
+            }
+          ],
+          "right": [
+            {
+              "id": "R1",
+              "source": "Review@V4",
+              "object": "doc:review",
+              "range": [
+                80,
+                115
+              ],
+              "occurrence": "review-o3",
+              "group": "capture-beta",
+              "text": "The results support the test result."
+            },
+            {
+              "id": "R2",
+              "source": "Rig slice@V8",
+              "object": "cell:C17",
+              "range": [
+                0,
+                8
+              ],
+              "occurrence": "rig-o1",
+              "group": "capture-beta",
+              "text": "3.14 bar"
+            },
+            {
+              "id": "R3",
+              "source": "Rig slice@V8",
+              "object": "cell:C24",
+              "range": [
+                0,
+                4
+              ],
+              "occurrence": "rig-o4",
+              "group": "capture-gamma",
+              "text": "22 °C"
+            }
+          ],
+          "leftOrder": [
+            "L1",
+            "L2"
+          ],
+          "rightOrder": [
+            "R1",
+            "R2",
+            "R3"
+          ],
+          "sourceGroups": {
+            "capture-alpha": [
+              "L1",
+              "L2"
+            ],
+            "capture-beta": [
+              "R1",
+              "R2"
+            ],
+            "capture-gamma": [
+              "R3"
+            ]
+          },
+          "occurrences": {
+            "L1": "lab-o7",
+            "L2": "lab-o7",
+            "R1": "review-o3",
+            "R2": "rig-o1",
+            "R3": "rig-o4"
+          },
+          "destination": {
+            "store": "Review store",
+            "branch": "review/main",
+            "base": "Review@V31",
+            "author": "author:ava",
+            "signingKey": "key:ava-k2",
+            "authorStatus": "verified",
+            "mode": "Create child at pinned base"
+          },
+          "status": "staging",
+          "attempt": null,
+          "preview": "not requested",
+          "inspectedGroups": [
+            "capture-alpha",
+            "capture-beta",
+            "capture-gamma"
+          ],
+          "selectedOccurrences": {
+            "L1": "lab-o7",
+            "L2": "lab-o7",
+            "R1": "review-o3",
+            "R2": "rig-o1",
+            "R3": "rig-o4"
+          }
+        },
+        "linkPreview": null,
+        "forgeReceipt": null
+      },
+      "effects": [
+        {
+          "domain": "private staging",
+          "summary": "Pin destination and mode in draft; no destination write occurs.",
+          "identity": "Review store; review/main; V31; author:ava; key:ava-k2"
+        }
+      ],
+      "action": "Pin Review store, branch/main, base V31 and Create child at pinned base",
+      "note": "This authoring intent is fixed to Review@V31 even when the reader opens another source."
+    },
+    {
+      "file": "J27/main/J27-s3-a2.png",
+      "location": "?journey=J27&task=2&action=2",
+      "frame": "J27-s3-a2",
+      "state": {
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes passage",
+          "store": "Lab notes",
+          "version": "V12",
+          "occurrence": "lab-o7",
+          "offset": 3140,
+          "body": [
+            "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes passage",
+            "store": "Lab notes",
+            "version": "V12",
+            "occurrence": "lab-o7",
+            "offset": 3140,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "cell:C17",
+          "state": "Rig slice@V8",
+          "locator": {
+            "range": [
+              0,
+              8
+            ],
+            "occurrence": "rig-o1"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J27-s3-a2-reading",
+            "title": "Reading · visit 01 · Lab notes@V12",
+            "kind": "document",
+            "body": [
+              "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Subject",
+                "value": "Lab notes passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "lab-o7"
+              },
+              {
+                "label": "Offset",
+                "value": 3140
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "f-source",
+            "title": "Browsing source · C17 V8",
+            "kind": "cell",
+            "body": [],
+            "facts": [
+              {
+                "label": "Source",
+                "value": "Rig slice@V8 · cell:C17"
+              },
+              {
+                "label": "Range",
+                "value": "[0,8) · rig-o1"
+              },
+              {
+                "label": "Reading visit",
+                "value": "01"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          },
+          {
+            "id": "f-dest",
+            "title": "Authoring destination remains pinned",
+            "kind": "inspector",
+            "body": [],
+            "facts": [
+              {
+                "label": "Write in",
+                "value": "Review store"
+              },
+              {
+                "label": "Branch/base",
+                "value": "review/main · V31"
+              },
+              {
+                "label": "Mode",
+                "value": "Create child at pinned base"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "draft": {
+          "id": "draft:L7",
+          "relation": "Comment",
+          "prominence": "normal",
+          "left": [
+            {
+              "id": "L1",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3140,
+                3167
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Pressure stayed stable over the full duration of the test."
+            },
+            {
+              "id": "L2",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3200,
+                3228
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Temperature was unchanged during the measurement period."
+            }
+          ],
+          "right": [
+            {
+              "id": "R1",
+              "source": "Review@V4",
+              "object": "doc:review",
+              "range": [
+                80,
+                115
+              ],
+              "occurrence": "review-o3",
+              "group": "capture-beta",
+              "text": "The results support the test result."
+            },
+            {
+              "id": "R2",
+              "source": "Rig slice@V8",
+              "object": "cell:C17",
+              "range": [
+                0,
+                8
+              ],
+              "occurrence": "rig-o1",
+              "group": "capture-beta",
+              "text": "3.14 bar"
+            },
+            {
+              "id": "R3",
+              "source": "Rig slice@V8",
+              "object": "cell:C24",
+              "range": [
+                0,
+                4
+              ],
+              "occurrence": "rig-o4",
+              "group": "capture-gamma",
+              "text": "22 °C"
+            }
+          ],
+          "leftOrder": [
+            "L1",
+            "L2"
+          ],
+          "rightOrder": [
+            "R1",
+            "R2",
+            "R3"
+          ],
+          "sourceGroups": {
+            "capture-alpha": [
+              "L1",
+              "L2"
+            ],
+            "capture-beta": [
+              "R1",
+              "R2"
+            ],
+            "capture-gamma": [
+              "R3"
+            ]
+          },
+          "occurrences": {
+            "L1": "lab-o7",
+            "L2": "lab-o7",
+            "R1": "review-o3",
+            "R2": "rig-o1",
+            "R3": "rig-o4"
+          },
+          "destination": {
+            "store": "Review store",
+            "branch": "review/main",
+            "base": "Review@V31",
+            "author": "author:ava",
+            "signingKey": "key:ava-k2",
+            "authorStatus": "verified",
+            "mode": "Create child at pinned base"
+          },
+          "status": "staging",
+          "attempt": null,
+          "preview": "not requested",
+          "inspectedGroups": [
+            "capture-alpha",
+            "capture-beta",
+            "capture-gamma"
+          ],
+          "selectedOccurrences": {
+            "L1": "lab-o7",
+            "L2": "lab-o7",
+            "R1": "review-o3",
+            "R2": "rig-o1",
+            "R3": "rig-o4"
+          }
+        },
+        "linkPreview": null,
+        "forgeReceipt": null
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "Source browsing changes view selection only; pinned Review@V31 destination stays fixed.",
+          "identity": "Rig slice@V8; cell:C17[0,8); destination still Review@V31"
+        }
+      ],
+      "action": "Browse C17 at older V8",
+      "note": "The destination panel remains pinned while the source inspector changes."
+    },
+    {
+      "file": "J27/main/J27-s3-a3.png",
+      "location": "?journey=J27&task=2&action=3",
+      "frame": "J27-s3-a3",
+      "state": {
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes passage",
+          "store": "Lab notes",
+          "version": "V12",
+          "occurrence": "lab-o7",
+          "offset": 3140,
+          "body": [
+            "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes passage",
+            "store": "Lab notes",
+            "version": "V12",
+            "occurrence": "lab-o7",
+            "offset": 3140,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:lab-notes",
+          "state": "Lab notes@V12",
+          "locator": {
+            "ranges": [
+              [
+                3140,
+                3167
+              ],
+              [
+                3200,
+                3228
+              ]
+            ],
+            "occurrence": "lab-o7"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J27-s3-a3-reading",
+            "title": "Reading · visit 01 · Lab notes@V12",
+            "kind": "document",
+            "body": [
+              "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Subject",
+                "value": "Lab notes passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "lab-o7"
+              },
+              {
+                "label": "Offset",
+                "value": 3140
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "f-source",
+            "title": "Selected Lab source ranges",
+            "kind": "document",
+            "body": [
+              "Two separated passages are staged from Lab notes V12. The interval between them is preserved as a gap."
+            ],
+            "facts": [
+              {
+                "label": "Range 1",
+                "value": "[3140,3167) · lab-o7"
+              },
+              {
+                "label": "Gap",
+                "value": "[3167,3200) unmarked"
+              },
+              {
+                "label": "Range 2",
+                "value": "[3200,3228) · lab-o7"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "f-dest",
+            "title": "Destination retained",
+            "kind": "inspector",
+            "body": [],
+            "facts": [
+              {
+                "label": "Review store",
+                "value": "review/main · base V31"
+              },
+              {
+                "label": "Mode",
+                "value": "Create child at pinned base"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "draft": {
+          "id": "draft:L7",
+          "relation": "Comment",
+          "prominence": "normal",
+          "left": [
+            {
+              "id": "L1",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3140,
+                3167
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Pressure stayed stable over the full duration of the test."
+            },
+            {
+              "id": "L2",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3200,
+                3228
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Temperature was unchanged during the measurement period."
+            }
+          ],
+          "right": [
+            {
+              "id": "R1",
+              "source": "Review@V4",
+              "object": "doc:review",
+              "range": [
+                80,
+                115
+              ],
+              "occurrence": "review-o3",
+              "group": "capture-beta",
+              "text": "The results support the test result."
+            },
+            {
+              "id": "R2",
+              "source": "Rig slice@V8",
+              "object": "cell:C17",
+              "range": [
+                0,
+                8
+              ],
+              "occurrence": "rig-o1",
+              "group": "capture-beta",
+              "text": "3.14 bar"
+            },
+            {
+              "id": "R3",
+              "source": "Rig slice@V8",
+              "object": "cell:C24",
+              "range": [
+                0,
+                4
+              ],
+              "occurrence": "rig-o4",
+              "group": "capture-gamma",
+              "text": "22 °C"
+            }
+          ],
+          "leftOrder": [
+            "L1",
+            "L2"
+          ],
+          "rightOrder": [
+            "R1",
+            "R2",
+            "R3"
+          ],
+          "sourceGroups": {
+            "capture-alpha": [
+              "L1",
+              "L2"
+            ],
+            "capture-beta": [
+              "R1",
+              "R2"
+            ],
+            "capture-gamma": [
+              "R3"
+            ]
+          },
+          "occurrences": {
+            "L1": "lab-o7",
+            "L2": "lab-o7",
+            "R1": "review-o3",
+            "R2": "rig-o1",
+            "R3": "rig-o4"
+          },
+          "destination": {
+            "store": "Review store",
+            "branch": "review/main",
+            "base": "Review@V31",
+            "author": "author:ava",
+            "signingKey": "key:ava-k2",
+            "authorStatus": "verified",
+            "mode": "Create child at pinned base"
+          },
+          "status": "staging",
+          "attempt": null,
+          "preview": "not requested",
+          "inspectedGroups": [
+            "capture-alpha",
+            "capture-beta",
+            "capture-gamma"
+          ],
+          "selectedOccurrences": {
+            "L1": "lab-o7",
+            "L2": "lab-o7",
+            "R1": "review-o3",
+            "R2": "rig-o1",
+            "R3": "rig-o4"
+          }
+        },
+        "linkPreview": null,
+        "forgeReceipt": null
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "Restore draft context without adding a visit or changing source operations.",
+          "identity": "draft:L7; destination Review@V31"
+        }
+      ],
+      "action": "Return to draft L7 without changing its destination",
+      "note": "The pinned base remains V31; browsing did not redirect it."
+    },
+    {
+      "file": "J27/main/J27-s4-a1.png",
+      "location": "?journey=J27&task=3&action=1",
+      "frame": "J27-s4-a1",
+      "state": {
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes passage",
+          "store": "Lab notes",
+          "version": "V12",
+          "occurrence": "lab-o7",
+          "offset": 3140,
+          "body": [
+            "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes passage",
+            "store": "Lab notes",
+            "version": "V12",
+            "occurrence": "lab-o7",
+            "offset": 3140,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:lab-notes",
+          "state": "Lab notes@V12",
+          "locator": {
+            "ranges": [
+              [
+                3140,
+                3167
+              ],
+              [
+                3200,
+                3228
+              ]
+            ],
+            "occurrence": "lab-o7"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J27-s4-a1-reading",
+            "title": "Reading · visit 01 · Lab notes@V12",
+            "kind": "document",
+            "body": [
+              "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Subject",
+                "value": "Lab notes passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "lab-o7"
+              },
+              {
+                "label": "Offset",
+                "value": 3140
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "f-preview",
+            "title": "Proposed Link preview",
+            "kind": "comparison",
+            "body": [
+              "One relation connects two ordered left members to three ordered right members."
+            ],
+            "facts": [
+              {
+                "label": "Link count",
+                "value": "1 proposed Link"
+              },
+              {
+                "label": "Relation",
+                "value": "Comment"
+              },
+              {
+                "label": "Prominence",
+                "value": "normal"
+              },
+              {
+                "label": "Left",
+                "value": "L1 [3140,3167); L2 [3200,3228)"
+              },
+              {
+                "label": "Right",
+                "value": "R1; R2 C17[0,8); R3 C24[0,4)"
+              }
+            ],
+            "rows": [],
+            "tone": "comment"
+          },
+          {
+            "id": "f-draft",
+            "title": "Draft L7 · one proposed Comment Link",
+            "kind": "list",
+            "body": [
+              "Staging is private and in memory until an explicit authoring action."
+            ],
+            "facts": [
+              {
+                "label": "Left",
+                "value": 2
+              },
+              {
+                "label": "Right",
+                "value": 3
+              },
+              {
+                "label": "State",
+                "value": "No Link authored"
+              }
+            ],
+            "rows": [
+              {
+                "id": "L1",
+                "label": "Left 1 · Lab notes",
+                "detail": "[3140,3167) · lab-o7",
+                "status": "ready",
+                "ordinal": 1
+              },
+              {
+                "id": "L2",
+                "label": "Left 2 · Lab notes",
+                "detail": "[3200,3228) · lab-o7",
+                "status": "ready",
+                "ordinal": 2
+              },
+              {
+                "id": "R1",
+                "label": "Right 1 · Review",
+                "detail": "[80,115) · review-o3",
+                "status": "ready",
+                "ordinal": 1
+              },
+              {
+                "id": "R2",
+                "label": "Right 2 · C17 V8",
+                "detail": "[0,8) · rig-o1",
+                "status": "ready",
+                "ordinal": 2
+              },
+              {
+                "id": "R3",
+                "label": "Right 3 · C24 V8",
+                "detail": "[0,4) · rig-o4",
+                "status": "ready",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 5,
+              "filtered": 5,
+              "visible": 5
+            }
+          }
+        ],
+        "draft": {
+          "id": "draft:L7",
+          "relation": "Comment",
+          "prominence": "normal",
+          "left": [
+            {
+              "id": "L1",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3140,
+                3167
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Pressure stayed stable over the full duration of the test."
+            },
+            {
+              "id": "L2",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3200,
+                3228
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Temperature was unchanged during the measurement period."
+            }
+          ],
+          "right": [
+            {
+              "id": "R1",
+              "source": "Review@V4",
+              "object": "doc:review",
+              "range": [
+                80,
+                115
+              ],
+              "occurrence": "review-o3",
+              "group": "capture-beta",
+              "text": "The results support the test result."
+            },
+            {
+              "id": "R2",
+              "source": "Rig slice@V8",
+              "object": "cell:C17",
+              "range": [
+                0,
+                8
+              ],
+              "occurrence": "rig-o1",
+              "group": "capture-beta",
+              "text": "3.14 bar"
+            },
+            {
+              "id": "R3",
+              "source": "Rig slice@V8",
+              "object": "cell:C24",
+              "range": [
+                0,
+                4
+              ],
+              "occurrence": "rig-o4",
+              "group": "capture-gamma",
+              "text": "22 °C"
+            }
+          ],
+          "leftOrder": [
+            "L1",
+            "L2"
+          ],
+          "rightOrder": [
+            "R1",
+            "R2",
+            "R3"
+          ],
+          "sourceGroups": {
+            "capture-alpha": [
+              "L1",
+              "L2"
+            ],
+            "capture-beta": [
+              "R1",
+              "R2"
+            ],
+            "capture-gamma": [
+              "R3"
+            ]
+          },
+          "occurrences": {
+            "L1": "lab-o7",
+            "L2": "lab-o7",
+            "R1": "review-o3",
+            "R2": "rig-o1",
+            "R3": "rig-o4"
+          },
+          "destination": {
+            "store": "Review store",
+            "branch": "review/main",
+            "base": "Review@V31",
+            "author": "author:ava",
+            "signingKey": "key:ava-k2",
+            "authorStatus": "verified",
+            "mode": "Create child at pinned base"
+          },
+          "status": "staging",
+          "attempt": null,
+          "preview": "not requested",
+          "inspectedGroups": [
+            "capture-alpha",
+            "capture-beta",
+            "capture-gamma"
+          ],
+          "selectedOccurrences": {
+            "L1": "lab-o7",
+            "L2": "lab-o7",
+            "R1": "review-o3",
+            "R2": "rig-o1",
+            "R3": "rig-o4"
+          }
+        },
+        "linkPreview": null,
+        "forgeReceipt": null,
+        "draftPreview": {
+          "linkCount": 1,
+          "relation": "Comment",
+          "prominence": "normal",
+          "leftOrder": [
+            "L1",
+            "L2"
+          ],
+          "rightOrder": [
+            "R1",
+            "R2",
+            "R3"
+          ],
+          "anchors": "exact source ranges",
+          "created": false,
+          "entryContext": "rig-o4",
+          "sourceAnchorsUnchanged": true
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "Preview is view-only and produces no destination operations.",
+          "identity": "preview:draft:L7; one relation; 2 left, 3 right"
+        }
+      ],
+      "action": "Preview one Comment relation with normal prominence",
+      "note": "The result is one proposed Link with complete ordered endsets; no six-pair links are generated."
+    },
+    {
+      "file": "J27/main/J27-s4-a2.png",
+      "location": "?journey=J27&task=3&action=2",
+      "frame": "J27-s4-a2",
+      "state": {
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes passage",
+          "store": "Lab notes",
+          "version": "V12",
+          "occurrence": "lab-o7",
+          "offset": 3140,
+          "body": [
+            "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes passage",
+            "store": "Lab notes",
+            "version": "V12",
+            "occurrence": "lab-o7",
+            "offset": 3140,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:lab-notes",
+          "state": "Lab notes@V12",
+          "locator": {
+            "ranges": [
+              [
+                3140,
+                3167
+              ],
+              [
+                3200,
+                3228
+              ]
+            ],
+            "occurrence": "lab-o7"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J27-s4-a2-reading",
+            "title": "Reading · visit 01 · Lab notes@V12",
+            "kind": "document",
+            "body": [
+              "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Subject",
+                "value": "Lab notes passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "lab-o7"
+              },
+              {
+                "label": "Offset",
+                "value": 3140
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "f-occ",
+            "title": "Selected entry occurrence",
+            "kind": "inspector",
+            "body": [],
+            "facts": [
+              {
+                "label": "Member",
+                "value": "R3 · right ordinal 3"
+              },
+              {
+                "label": "Occurrence",
+                "value": "rig-o4"
+              },
+              {
+                "label": "Source anchor",
+                "value": "C24 V8 [0,4) · unchanged"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          },
+          {
+            "id": "f-preview",
+            "title": "Proposed relation",
+            "kind": "comparison",
+            "body": [],
+            "facts": [
+              {
+                "label": "Relations",
+                "value": "1"
+              },
+              {
+                "label": "Endsets",
+                "value": "L1,L2 → R1,R2,R3"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "draft": {
+          "id": "draft:L7",
+          "relation": "Comment",
+          "prominence": "normal",
+          "left": [
+            {
+              "id": "L1",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3140,
+                3167
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Pressure stayed stable over the full duration of the test."
+            },
+            {
+              "id": "L2",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3200,
+                3228
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Temperature was unchanged during the measurement period."
+            }
+          ],
+          "right": [
+            {
+              "id": "R1",
+              "source": "Review@V4",
+              "object": "doc:review",
+              "range": [
+                80,
+                115
+              ],
+              "occurrence": "review-o3",
+              "group": "capture-beta",
+              "text": "The results support the test result."
+            },
+            {
+              "id": "R2",
+              "source": "Rig slice@V8",
+              "object": "cell:C17",
+              "range": [
+                0,
+                8
+              ],
+              "occurrence": "rig-o1",
+              "group": "capture-beta",
+              "text": "3.14 bar"
+            },
+            {
+              "id": "R3",
+              "source": "Rig slice@V8",
+              "object": "cell:C24",
+              "range": [
+                0,
+                4
+              ],
+              "occurrence": "rig-o4",
+              "group": "capture-gamma",
+              "text": "22 °C"
+            }
+          ],
+          "leftOrder": [
+            "L1",
+            "L2"
+          ],
+          "rightOrder": [
+            "R1",
+            "R2",
+            "R3"
+          ],
+          "sourceGroups": {
+            "capture-alpha": [
+              "L1",
+              "L2"
+            ],
+            "capture-beta": [
+              "R1",
+              "R2"
+            ],
+            "capture-gamma": [
+              "R3"
+            ]
+          },
+          "occurrences": {
+            "L1": "lab-o7",
+            "L2": "lab-o7",
+            "R1": "review-o3",
+            "R2": "rig-o1",
+            "R3": "rig-o4"
+          },
+          "destination": {
+            "store": "Review store",
+            "branch": "review/main",
+            "base": "Review@V31",
+            "author": "author:ava",
+            "signingKey": "key:ava-k2",
+            "authorStatus": "verified",
+            "mode": "Create child at pinned base"
+          },
+          "status": "staging",
+          "attempt": null,
+          "preview": "not requested",
+          "inspectedGroups": [
+            "capture-alpha",
+            "capture-beta",
+            "capture-gamma"
+          ],
+          "selectedOccurrences": {
+            "L1": "lab-o7",
+            "L2": "lab-o7",
+            "R1": "review-o3",
+            "R2": "rig-o1",
+            "R3": "rig-o4"
+          }
+        },
+        "linkPreview": null,
+        "forgeReceipt": null,
+        "draftPreview": {
+          "linkCount": 1,
+          "relation": "Comment",
+          "prominence": "normal",
+          "leftOrder": [
+            "L1",
+            "L2"
+          ],
+          "rightOrder": [
+            "R1",
+            "R2",
+            "R3"
+          ],
+          "anchors": "exact source ranges",
+          "created": false,
+          "entryContext": "rig-o4",
+          "sourceAnchorsUnchanged": true
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "Occurrence selection changes entry context only; source anchor [0,4) remains fixed.",
+          "identity": "R3; C24 V8; occurrence rig-o4; source range [0,4)"
+        }
+      ],
+      "action": "Choose occurrence rig-o4 for entry context",
+      "note": "Preview continues to identify the same source range while entry context is rig-o4."
+    },
+    {
+      "file": "J27/main/J27-s5-a1.png",
+      "location": "?journey=J27&task=4&action=1",
+      "frame": "J27-s5-a1",
+      "state": {
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes passage",
+          "store": "Lab notes",
+          "version": "V12",
+          "occurrence": "lab-o7",
+          "offset": 3140,
+          "body": [
+            "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes passage",
+            "store": "Lab notes",
+            "version": "V12",
+            "occurrence": "lab-o7",
+            "offset": 3140,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:lab-notes",
+          "state": "Lab notes@V12",
+          "locator": {
+            "ranges": [
+              [
+                3140,
+                3167
+              ],
+              [
+                3200,
+                3228
+              ]
+            ],
+            "occurrence": "lab-o7"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J27-s5-a1-reading",
+            "title": "Reading · visit 01 · Lab notes@V12",
+            "kind": "document",
+            "body": [
+              "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Subject",
+                "value": "Lab notes passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "lab-o7"
+              },
+              {
+                "label": "Offset",
+                "value": 3140
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "f-pouch",
+            "title": "Reader pouch",
+            "kind": "list",
+            "body": [],
+            "facts": [],
+            "rows": [
+              {
+                "id": "draft:L7",
+                "label": "Link draft · L7",
+                "detail": "2 left / 3 right · Review@V31",
+                "status": "saved",
+                "ordinal": 1
+              }
+            ],
+            "tone": "neutral"
+          },
+          {
+            "id": "f-draft",
+            "title": "Draft L7 · one proposed Comment Link",
+            "kind": "list",
+            "body": [
+              "Staging is private and in memory until an explicit authoring action."
+            ],
+            "facts": [
+              {
+                "label": "Left",
+                "value": 2
+              },
+              {
+                "label": "Right",
+                "value": 3
+              },
+              {
+                "label": "State",
+                "value": "No Link authored"
+              }
+            ],
+            "rows": [
+              {
+                "id": "L1",
+                "label": "Left 1 · Lab notes",
+                "detail": "[3140,3167) · lab-o7",
+                "status": "ready",
+                "ordinal": 1
+              },
+              {
+                "id": "L2",
+                "label": "Left 2 · Lab notes",
+                "detail": "[3200,3228) · lab-o7",
+                "status": "ready",
+                "ordinal": 2
+              },
+              {
+                "id": "R1",
+                "label": "Right 1 · Review",
+                "detail": "[80,115) · review-o3",
+                "status": "ready",
+                "ordinal": 1
+              },
+              {
+                "id": "R2",
+                "label": "Right 2 · C17 V8",
+                "detail": "[0,8) · rig-o1",
+                "status": "ready",
+                "ordinal": 2
+              },
+              {
+                "id": "R3",
+                "label": "Right 3 · C24 V8",
+                "detail": "[0,4) · rig-o4",
+                "status": "ready",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 5,
+              "filtered": 5,
+              "visible": 5
+            }
+          }
+        ],
+        "draft": {
+          "id": "draft:L7",
+          "relation": "Comment",
+          "prominence": "normal",
+          "left": [
+            {
+              "id": "L1",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3140,
+                3167
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Pressure stayed stable over the full duration of the test."
+            },
+            {
+              "id": "L2",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3200,
+                3228
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Temperature was unchanged during the measurement period."
+            }
+          ],
+          "right": [
+            {
+              "id": "R1",
+              "source": "Review@V4",
+              "object": "doc:review",
+              "range": [
+                80,
+                115
+              ],
+              "occurrence": "review-o3",
+              "group": "capture-beta",
+              "text": "The results support the test result."
+            },
+            {
+              "id": "R2",
+              "source": "Rig slice@V8",
+              "object": "cell:C17",
+              "range": [
+                0,
+                8
+              ],
+              "occurrence": "rig-o1",
+              "group": "capture-beta",
+              "text": "3.14 bar"
+            },
+            {
+              "id": "R3",
+              "source": "Rig slice@V8",
+              "object": "cell:C24",
+              "range": [
+                0,
+                4
+              ],
+              "occurrence": "rig-o4",
+              "group": "capture-gamma",
+              "text": "22 °C"
+            }
+          ],
+          "leftOrder": [
+            "L1",
+            "L2"
+          ],
+          "rightOrder": [
+            "R1",
+            "R2",
+            "R3"
+          ],
+          "sourceGroups": {
+            "capture-alpha": [
+              "L1",
+              "L2"
+            ],
+            "capture-beta": [
+              "R1",
+              "R2"
+            ],
+            "capture-gamma": [
+              "R3"
+            ]
+          },
+          "occurrences": {
+            "L1": "lab-o7",
+            "L2": "lab-o7",
+            "R1": "review-o3",
+            "R2": "rig-o1",
+            "R3": "rig-o4"
+          },
+          "destination": {
+            "store": "Review store",
+            "branch": "review/main",
+            "base": "Review@V31",
+            "author": "author:ava",
+            "signingKey": "key:ava-k2",
+            "authorStatus": "verified",
+            "mode": "Create child at pinned base"
+          },
+          "status": "saved",
+          "attempt": null,
+          "preview": "not requested",
+          "inspectedGroups": [
+            "capture-alpha",
+            "capture-beta",
+            "capture-gamma"
+          ],
+          "selectedOccurrences": {
+            "L1": "lab-o7",
+            "L2": "lab-o7",
+            "R1": "review-o3",
+            "R2": "rig-o1",
+            "R3": "rig-o4"
+          }
+        },
+        "linkPreview": null,
+        "forgeReceipt": null,
+        "draftPreview": {
+          "linkCount": 1,
+          "relation": "Comment",
+          "prominence": "normal",
+          "leftOrder": [
+            "L1",
+            "L2"
+          ],
+          "rightOrder": [
+            "R1",
+            "R2",
+            "R3"
+          ],
+          "anchors": "exact source ranges",
+          "created": false,
+          "entryContext": "rig-o4",
+          "sourceAnchorsUnchanged": true
+        },
+        "pouchDrafts": [
+          "draft:L7"
+        ]
+      },
+      "effects": [
+        {
+          "domain": "reader collection",
+          "summary": "Save one typed draft descriptor in the reader pouch; source stores unchanged.",
+          "identity": "pouch item:draft:L7"
+        }
+      ],
+      "action": "Save draft to reader pouch",
+      "note": "The draft can be reopened with order, anchors and pinned destination intact."
+    },
+    {
+      "file": "J27/main/J27-s5-a2.png",
+      "location": "?journey=J27&task=4&action=2",
+      "frame": "J27-s5-a2",
+      "state": {
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes passage",
+          "store": "Lab notes",
+          "version": "V12",
+          "occurrence": "lab-o7",
+          "offset": 3140,
+          "body": [
+            "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes passage",
+            "store": "Lab notes",
+            "version": "V12",
+            "occurrence": "lab-o7",
+            "offset": 3140,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:lab-notes",
+          "state": "Lab notes@V12",
+          "locator": {
+            "ranges": [
+              [
+                3140,
+                3167
+              ],
+              [
+                3200,
+                3228
+              ]
+            ],
+            "occurrence": "lab-o7"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J27-s5-a2-reading",
+            "title": "Reading · visit 01 · Lab notes@V12",
+            "kind": "document",
+            "body": [
+              "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Subject",
+                "value": "Lab notes passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "lab-o7"
+              },
+              {
+                "label": "Offset",
+                "value": 3140
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "f-preflight",
+            "title": "Forge preflight ready",
+            "kind": "notice",
+            "body": [],
+            "facts": [
+              {
+                "label": "Attempt",
+                "value": "attempt:L7:1"
+              },
+              {
+                "label": "References",
+                "value": "5/5 identities resolved"
+              },
+              {
+                "label": "Permission",
+                "value": "allowed"
+              },
+              {
+                "label": "Signing",
+                "value": "author:ava verified"
+              },
+              {
+                "label": "Destination",
+                "value": "Review/review-main@V31 valid"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "f-draft",
+            "title": "Draft L7 · one proposed Comment Link",
+            "kind": "list",
+            "body": [
+              "Staging is private and in memory until an explicit authoring action."
+            ],
+            "facts": [
+              {
+                "label": "Left",
+                "value": 2
+              },
+              {
+                "label": "Right",
+                "value": 3
+              },
+              {
+                "label": "State",
+                "value": "No Link authored"
+              }
+            ],
+            "rows": [
+              {
+                "id": "L1",
+                "label": "Left 1 · Lab notes",
+                "detail": "[3140,3167) · lab-o7",
+                "status": "ready",
+                "ordinal": 1
+              },
+              {
+                "id": "L2",
+                "label": "Left 2 · Lab notes",
+                "detail": "[3200,3228) · lab-o7",
+                "status": "ready",
+                "ordinal": 2
+              },
+              {
+                "id": "R1",
+                "label": "Right 1 · Review",
+                "detail": "[80,115) · review-o3",
+                "status": "ready",
+                "ordinal": 1
+              },
+              {
+                "id": "R2",
+                "label": "Right 2 · C17 V8",
+                "detail": "[0,8) · rig-o1",
+                "status": "ready",
+                "ordinal": 2
+              },
+              {
+                "id": "R3",
+                "label": "Right 3 · C24 V8",
+                "detail": "[0,4) · rig-o4",
+                "status": "ready",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 5,
+              "filtered": 5,
+              "visible": 5
+            }
+          }
+        ],
+        "draft": {
+          "id": "draft:L7",
+          "relation": "Comment",
+          "prominence": "normal",
+          "left": [
+            {
+              "id": "L1",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3140,
+                3167
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Pressure stayed stable over the full duration of the test."
+            },
+            {
+              "id": "L2",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3200,
+                3228
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Temperature was unchanged during the measurement period."
+            }
+          ],
+          "right": [
+            {
+              "id": "R1",
+              "source": "Review@V4",
+              "object": "doc:review",
+              "range": [
+                80,
+                115
+              ],
+              "occurrence": "review-o3",
+              "group": "capture-beta",
+              "text": "The results support the test result."
+            },
+            {
+              "id": "R2",
+              "source": "Rig slice@V8",
+              "object": "cell:C17",
+              "range": [
+                0,
+                8
+              ],
+              "occurrence": "rig-o1",
+              "group": "capture-beta",
+              "text": "3.14 bar"
+            },
+            {
+              "id": "R3",
+              "source": "Rig slice@V8",
+              "object": "cell:C24",
+              "range": [
+                0,
+                4
+              ],
+              "occurrence": "rig-o4",
+              "group": "capture-gamma",
+              "text": "22 °C"
+            }
+          ],
+          "leftOrder": [
+            "L1",
+            "L2"
+          ],
+          "rightOrder": [
+            "R1",
+            "R2",
+            "R3"
+          ],
+          "sourceGroups": {
+            "capture-alpha": [
+              "L1",
+              "L2"
+            ],
+            "capture-beta": [
+              "R1",
+              "R2"
+            ],
+            "capture-gamma": [
+              "R3"
+            ]
+          },
+          "occurrences": {
+            "L1": "lab-o7",
+            "L2": "lab-o7",
+            "R1": "review-o3",
+            "R2": "rig-o1",
+            "R3": "rig-o4"
+          },
+          "destination": {
+            "store": "Review store",
+            "branch": "review/main",
+            "base": "Review@V31",
+            "author": "author:ava",
+            "signingKey": "key:ava-k2",
+            "authorStatus": "verified",
+            "mode": "Create child at pinned base"
+          },
+          "status": "committing",
+          "attempt": null,
+          "preview": "not requested",
+          "inspectedGroups": [
+            "capture-alpha",
+            "capture-beta",
+            "capture-gamma"
+          ],
+          "selectedOccurrences": {
+            "L1": "lab-o7",
+            "L2": "lab-o7",
+            "R1": "review-o3",
+            "R2": "rig-o1",
+            "R3": "rig-o4"
+          }
+        },
+        "linkPreview": null,
+        "forgeReceipt": null,
+        "draftPreview": {
+          "linkCount": 1,
+          "relation": "Comment",
+          "prominence": "normal",
+          "leftOrder": [
+            "L1",
+            "L2"
+          ],
+          "rightOrder": [
+            "R1",
+            "R2",
+            "R3"
+          ],
+          "anchors": "exact source ranges",
+          "created": false,
+          "entryContext": "rig-o4",
+          "sourceAnchorsUnchanged": true
+        },
+        "pouchDrafts": [
+          "draft:L7"
+        ],
+        "commit": {
+          "attempt": {
+            "token": "attempt:L7:1",
+            "draftId": "draft:L7",
+            "orderedMembers": {
+              "left": [
+                "L1",
+                "L2"
+              ],
+              "right": [
+                "R1",
+                "R2",
+                "R3"
+              ]
+            },
+            "relation": "Comment",
+            "prominence": "normal",
+            "destination": "Review store/review-main@V31",
+            "mode": "Create child at pinned base",
+            "status": "prepared"
+          },
+          "status": "preflight-ready"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "Preflight checks identity, write permission, signing readiness, destination/base and the complete member set; no published destination effect yet.",
+          "identity": "attempt:L7:1; draft:L7"
+        }
+      ],
+      "action": "Forge Link · preflight and pin attempt token",
+      "note": "Stable attempt token binds exact draft payload and pinned destination before prepare."
+    },
+    {
+      "file": "J27/main/J27-s5-a3.png",
+      "location": "?journey=J27&task=4&action=3",
+      "frame": "J27-s5-a3",
+      "state": {
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes passage",
+          "store": "Lab notes",
+          "version": "V12",
+          "occurrence": "lab-o7",
+          "offset": 3140,
+          "body": [
+            "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes passage",
+            "store": "Lab notes",
+            "version": "V12",
+            "occurrence": "lab-o7",
+            "offset": 3140,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:lab-notes",
+          "state": "Lab notes@V12",
+          "locator": {
+            "ranges": [
+              [
+                3140,
+                3167
+              ],
+              [
+                3200,
+                3228
+              ]
+            ],
+            "occurrence": "lab-o7"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {
+          "Review store": {
+            "branch": "review/main",
+            "base": "V31",
+            "newState": "V32",
+            "receipt": "receipt:attempt-L7-1",
+            "createdLinks": [
+              "Link:L18"
+            ],
+            "publishedOperationCount": 1
+          }
+        },
+        "panels": [
+          {
+            "id": "J27-s5-a3-reading",
+            "title": "Reading · visit 01 · Lab notes@V12",
+            "kind": "document",
+            "body": [
+              "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Subject",
+                "value": "Lab notes passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "lab-o7"
+              },
+              {
+                "label": "Offset",
+                "value": 3140
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "f-receipt",
+            "title": "Authored destination receipt",
+            "kind": "notice",
+            "body": [],
+            "facts": [
+              {
+                "label": "Receipt",
+                "value": "receipt:attempt-L7-1"
+              },
+              {
+                "label": "Created Link",
+                "value": "Link:L18 · Comment · normal"
+              },
+              {
+                "label": "Child state",
+                "value": "Review@V32 from pinned V31"
+              },
+              {
+                "label": "Prepared operations",
+                "value": "3 private operations published through one receipt"
+              }
+            ],
+            "rows": [],
+            "tone": "comment"
+          },
+          {
+            "id": "f-effects",
+            "title": "Effect ledger",
+            "kind": "inspector",
+            "body": [],
+            "facts": [
+              {
+                "label": "Source content stores",
+                "value": "no ops added"
+              },
+              {
+                "label": "Reader pouch",
+                "value": "draft descriptor retained"
+              },
+              {
+                "label": "Destination",
+                "value": "one Link, one child state"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "draft": {
+          "id": "draft:L7",
+          "relation": "Comment",
+          "prominence": "normal",
+          "left": [
+            {
+              "id": "L1",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3140,
+                3167
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Pressure stayed stable over the full duration of the test."
+            },
+            {
+              "id": "L2",
+              "source": "Lab notes@V12",
+              "object": "doc:lab-notes",
+              "range": [
+                3200,
+                3228
+              ],
+              "occurrence": "lab-o7",
+              "group": "capture-alpha",
+              "text": "Temperature was unchanged during the measurement period."
+            }
+          ],
+          "right": [
+            {
+              "id": "R1",
+              "source": "Review@V4",
+              "object": "doc:review",
+              "range": [
+                80,
+                115
+              ],
+              "occurrence": "review-o3",
+              "group": "capture-beta",
+              "text": "The results support the test result."
+            },
+            {
+              "id": "R2",
+              "source": "Rig slice@V8",
+              "object": "cell:C17",
+              "range": [
+                0,
+                8
+              ],
+              "occurrence": "rig-o1",
+              "group": "capture-beta",
+              "text": "3.14 bar"
+            },
+            {
+              "id": "R3",
+              "source": "Rig slice@V8",
+              "object": "cell:C24",
+              "range": [
+                0,
+                4
+              ],
+              "occurrence": "rig-o4",
+              "group": "capture-gamma",
+              "text": "22 °C"
+            }
+          ],
+          "leftOrder": [
+            "L1",
+            "L2"
+          ],
+          "rightOrder": [
+            "R1",
+            "R2",
+            "R3"
+          ],
+          "sourceGroups": {
+            "capture-alpha": [
+              "L1",
+              "L2"
+            ],
+            "capture-beta": [
+              "R1",
+              "R2"
+            ],
+            "capture-gamma": [
+              "R3"
+            ]
+          },
+          "occurrences": {
+            "L1": "lab-o7",
+            "L2": "lab-o7",
+            "R1": "review-o3",
+            "R2": "rig-o1",
+            "R3": "rig-o4"
+          },
+          "destination": {
+            "store": "Review store",
+            "branch": "review/main",
+            "base": "Review@V31",
+            "author": "author:ava",
+            "signingKey": "key:ava-k2",
+            "authorStatus": "verified",
+            "mode": "Create child at pinned base"
+          },
+          "status": "committed",
+          "attempt": null,
+          "preview": "not requested",
+          "inspectedGroups": [
+            "capture-alpha",
+            "capture-beta",
+            "capture-gamma"
+          ],
+          "selectedOccurrences": {
+            "L1": "lab-o7",
+            "L2": "lab-o7",
+            "R1": "review-o3",
+            "R2": "rig-o1",
+            "R3": "rig-o4"
+          }
+        },
+        "linkPreview": null,
+        "forgeReceipt": null,
+        "draftPreview": {
+          "linkCount": 1,
+          "relation": "Comment",
+          "prominence": "normal",
+          "leftOrder": [
+            "L1",
+            "L2"
+          ],
+          "rightOrder": [
+            "R1",
+            "R2",
+            "R3"
+          ],
+          "anchors": "exact source ranges",
+          "created": false,
+          "entryContext": "rig-o4",
+          "sourceAnchorsUnchanged": true
+        },
+        "pouchDrafts": [
+          "draft:L7"
+        ],
+        "commit": {
+          "attempt": {
+            "token": "attempt:L7:1",
+            "draftId": "draft:L7",
+            "orderedMembers": {
+              "left": [
+                "L1",
+                "L2"
+              ],
+              "right": [
+                "R1",
+                "R2",
+                "R3"
+              ]
+            },
+            "relation": "Comment",
+            "prominence": "normal",
+            "destination": "Review store/review-main@V31",
+            "mode": "Create child at pinned base",
+            "status": "prepared"
+          },
+          "status": "created",
+          "receipt": {
+            "id": "receipt:attempt-L7-1",
+            "link": "Link:L18",
+            "childState": "Review@V32",
+            "operations": [
+              "prepare:op-81",
+              "prepare:op-82",
+              "prepare:op-83",
+              "publish:receipt-1"
+            ]
+          }
+        }
+      },
+      "effects": [
+        {
+          "domain": "authored destination",
+          "summary": "Protocol prepares destination-private operations, validates the complete set, then publishes one receipt exposing one Link and one child state.",
+          "identity": "receipt:attempt-L7-1; Link:L18; Review@V32"
+        }
+      ],
+      "action": "Publish one Link receipt as a child of V31",
+      "note": "The receipt names one created Link; prepared operations do not appear as completed Links. Source authorities are unchanged."
+    }
+  ]
+}

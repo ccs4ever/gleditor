@@ -1,0 +1,582 @@
+{
+  "journey": "J17",
+  "route": "J17-invalid",
+  "frames": [
+    {
+      "file": "J17/J17-invalid/before.png",
+      "location": "?journey=J17&variant=J17-invalid",
+      "frame": "J17-J17-invalid-s4-before",
+      "state": {
+        "fixture": "pub-acquisition-v12",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Reading place",
+            "kind": "document",
+            "body": [
+              "Current visit 01 · Lab notes · V12.",
+              "The starting caret and occurrence remain pinned while tools open."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Offset",
+                "value": "p.14 · 54.2"
+              },
+              {
+                "label": "Occurrence",
+                "value": "Lab:p14:r54.2"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "transfer",
+            "title": "Transfer interrupted",
+            "kind": "inspector",
+            "body": [
+              "Transfer interrupted · progress retained.",
+              "The interface headline and detail both agree this request is interrupted."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "req-v12-0001"
+              },
+              {
+                "label": "Edition",
+                "value": "V12 · mf-v12-7b31"
+              },
+              {
+                "label": "Verified pieces",
+                "value": "68 / 96"
+              },
+              {
+                "label": "Store validation",
+                "value": "pending"
+              },
+              {
+                "label": "Open",
+                "value": "blocked"
+              }
+            ],
+            "rows": [
+              {
+                "id": "retry",
+                "label": "Retry transfer",
+                "detail": "resumes same request ID",
+                "status": "available"
+              },
+              {
+                "id": "cancel",
+                "label": "Cancel request",
+                "detail": "keeps request receipt",
+                "status": "available"
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "publication": {
+          "publisherKey": "pubkey:7a91c4e2…c42e",
+          "publicationId": "pub:spatial-notebooks-01",
+          "manifestId": "mf-v12-7b31",
+          "pinnedEdition": "V12",
+          "pointer": "V12",
+          "requestId": "req-v12-0001",
+          "verifiedPieces": 68,
+          "totalPieces": 96,
+          "storeValidation": "pending",
+          "authorFollowed": false,
+          "linkPackagesEnabled": [],
+          "cache": [],
+          "requestedEdition": "V12",
+          "requestedManifest": "mf-v12-7b31",
+          "transfer": "interrupted"
+        }
+      },
+      "effects": [],
+      "action": "Before",
+      "note": ""
+    },
+    {
+      "file": "J17/J17-invalid/J17-invalid-a1.png",
+      "location": "?journey=J17&variant=J17-invalid&task=0&action=1",
+      "frame": "J17-invalid-a1",
+      "state": {
+        "fixture": "pub-acquisition-v12",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Reading place",
+            "kind": "document",
+            "body": [
+              "Current visit 01 · Lab notes · V12.",
+              "The starting caret and occurrence remain pinned while tools open."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Offset",
+                "value": "p.14 · 54.2"
+              },
+              {
+                "label": "Occurrence",
+                "value": "Lab:p14:r54.2"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "invalid",
+            "title": "Payload invalid",
+            "kind": "notice",
+            "body": [
+              "Payload hash mismatch · Store validation failed.",
+              "Open is disabled."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "req-v12-0001"
+              },
+              {
+                "label": "Edition",
+                "value": "V12"
+              },
+              {
+                "label": "Pieces",
+                "value": "96 / 96 received"
+              },
+              {
+                "label": "Payload integrity",
+                "value": "invalid"
+              },
+              {
+                "label": "Store validation",
+                "value": "failed"
+              }
+            ],
+            "rows": [
+              {
+                "id": "retry",
+                "label": "Retry verification",
+                "detail": "same manifest / request",
+                "status": "available"
+              },
+              {
+                "id": "cancel",
+                "label": "Cancel request",
+                "detail": "preserve failure receipt",
+                "status": "available"
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "publication": {
+          "publisherKey": "pubkey:7a91c4e2…c42e",
+          "publicationId": "pub:spatial-notebooks-01",
+          "manifestId": "mf-v12-7b31",
+          "pinnedEdition": "V12",
+          "pointer": "V12",
+          "requestId": "req-v12-0001",
+          "verifiedPieces": 96,
+          "totalPieces": 96,
+          "storeValidation": "failed",
+          "authorFollowed": false,
+          "linkPackagesEnabled": [],
+          "cache": [],
+          "requestedEdition": "V12",
+          "requestedManifest": "mf-v12-7b31",
+          "transfer": "failed",
+          "payloadIntegrity": "invalid"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Receive all pieces but detect invalid payload",
+      "note": "All bytes received does not mean valid payload; Open is blocked."
+    },
+    {
+      "file": "J17/J17-invalid/J17-invalid-a2.png",
+      "location": "?journey=J17&variant=J17-invalid&task=0&action=2",
+      "frame": "J17-invalid-a2",
+      "state": {
+        "fixture": "pub-acquisition-v12",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "invalid-retry",
+            "title": "Invalid payload retry",
+            "kind": "inspector",
+            "body": [
+              "Retry rechecks req-v12-0001 against mf-v12-7b31; invalid bytes are quarantined."
+            ],
+            "facts": [
+              {
+                "label": "Open",
+                "value": "blocked"
+              },
+              {
+                "label": "Request",
+                "value": "req-v12-0001"
+              },
+              {
+                "label": "Source ops",
+                "value": "unchanged"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          },
+          {
+            "id": "invalid",
+            "title": "Payload invalid",
+            "kind": "notice",
+            "body": [
+              "Payload hash mismatch · Store validation failed.",
+              "Open is disabled."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "req-v12-0001"
+              },
+              {
+                "label": "Edition",
+                "value": "V12"
+              },
+              {
+                "label": "Pieces",
+                "value": "96 / 96 received"
+              },
+              {
+                "label": "Payload integrity",
+                "value": "invalid"
+              },
+              {
+                "label": "Store validation",
+                "value": "failed"
+              }
+            ],
+            "rows": [
+              {
+                "id": "retry",
+                "label": "Retry verification",
+                "detail": "same manifest / request",
+                "status": "available"
+              },
+              {
+                "id": "cancel",
+                "label": "Cancel request",
+                "detail": "preserve failure receipt",
+                "status": "available"
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "publication": {
+          "publisherKey": "pubkey:7a91c4e2…c42e",
+          "publicationId": "pub:spatial-notebooks-01",
+          "manifestId": "mf-v12-7b31",
+          "pinnedEdition": "V12",
+          "pointer": "V12",
+          "requestId": "req-v12-0001",
+          "verifiedPieces": 96,
+          "totalPieces": 96,
+          "storeValidation": "failed",
+          "authorFollowed": false,
+          "linkPackagesEnabled": [],
+          "cache": [],
+          "requestedEdition": "V12",
+          "requestedManifest": "mf-v12-7b31",
+          "transfer": "failed",
+          "payloadIntegrity": "invalid",
+          "retryMode": "verify-same-request"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Retry validation",
+      "note": "Invalid payload remains blocked pending a declared valid retry result."
+    },
+    {
+      "file": "J17/J17-invalid/J17-invalid-a3.png",
+      "location": "?journey=J17&variant=J17-invalid&task=0&action=3",
+      "frame": "J17-invalid-a3",
+      "state": {
+        "fixture": "pub-acquisition-v12",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Reading place",
+            "kind": "document",
+            "body": [
+              "Current visit 01 · Lab notes · V12.",
+              "The starting caret and occurrence remain pinned while tools open."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Offset",
+                "value": "p.14 · 54.2"
+              },
+              {
+                "label": "Occurrence",
+                "value": "Lab:p14:r54.2"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "invalid-cancel",
+            "title": "Invalid request cancelled",
+            "kind": "notice",
+            "body": [
+              "No unverified store is opened. The invalid receipt remains inspectable; quarantined bytes are not treated as a valid cache."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "req-v12-0001"
+              },
+              {
+                "label": "Edition",
+                "value": "V12 · mf-v12-7b31"
+              },
+              {
+                "label": "Payload",
+                "value": "invalid · quarantined"
+              },
+              {
+                "label": "Open",
+                "value": "blocked"
+              }
+            ],
+            "rows": [
+              {
+                "id": "receipt",
+                "label": "Failure receipt",
+                "detail": "retained for this exact request",
+                "status": "available"
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "publication": {
+          "publisherKey": "pubkey:7a91c4e2…c42e",
+          "publicationId": "pub:spatial-notebooks-01",
+          "manifestId": "mf-v12-7b31",
+          "pinnedEdition": "V12",
+          "pointer": "V12",
+          "requestId": "req-v12-0001",
+          "verifiedPieces": 96,
+          "totalPieces": 96,
+          "storeValidation": "failed",
+          "authorFollowed": false,
+          "linkPackagesEnabled": [],
+          "cache": [],
+          "requestedEdition": "V12",
+          "requestedManifest": "mf-v12-7b31",
+          "transfer": "cancelled",
+          "payloadIntegrity": "invalid",
+          "retryMode": "verify-same-request",
+          "cacheQuarantined": true
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "Cancellation records a reader-visible request status; no source operation or authored destination is written.",
+          "identity": "req-v12-0001"
+        }
+      ],
+      "action": "Cancel invalid request and retain failure receipt",
+      "note": "Cancel closes the invalid transfer while preserving the exact failure receipt; Open remains blocked."
+    }
+  ]
+}

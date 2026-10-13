@@ -1,0 +1,787 @@
+{
+  "reviewScope": "Independent AI expert visual review of scripted concept prototype evidence; not participant or production validation.",
+  "journeys": [
+    {
+      "journeyId": "J22",
+      "step": 1,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J22-s1-a1",
+        "J22-s1-a2"
+      ],
+      "evidenceFrames": [
+        "J22/main/J22-s1-a1.png",
+        "J22/main/J22-s1-a2.png"
+      ],
+      "variantIds": [],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J22",
+      "step": 2,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J22-s2-a1",
+        "J22-s2-a2"
+      ],
+      "evidenceFrames": [
+        "J22/main/J22-s2-a1.png",
+        "J22/main/J22-s2-a2.png"
+      ],
+      "variantIds": [],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J22",
+      "step": 3,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J22-s3-a1",
+        "J22-s3-a2",
+        "J22-s3-a3"
+      ],
+      "evidenceFrames": [
+        "J22/main/J22-s3-a1.png",
+        "J22/main/J22-s3-a2.png",
+        "J22/main/J22-s3-a3.png"
+      ],
+      "variantIds": [
+        "J22-v12-not-hit",
+        "J22-anchor-fold",
+        "J22-partial-cancel"
+      ],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J22",
+      "step": 4,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J22-s4-a1",
+        "J22-s4-a2",
+        "J22-s4-a3",
+        "J22-s4-a4"
+      ],
+      "evidenceFrames": [
+        "J22/main/J22-s4-a1.png",
+        "J22/main/J22-s4-a2.png",
+        "J22/main/J22-s4-a3.png",
+        "J22/main/J22-s4-a4.png"
+      ],
+      "variantIds": [
+        "J22-v12-not-hit",
+        "J22-anchor-fold",
+        "J22-partial-cancel"
+      ],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J22",
+      "step": 5,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J22-s5-a1",
+        "J22-s5-a2",
+        "J22-s5-a3",
+        "J22-s5-a4"
+      ],
+      "evidenceFrames": [
+        "J22/main/J22-s5-a1.png",
+        "J22/main/J22-s5-a2.png",
+        "J22/main/J22-s5-a3.png",
+        "J22/main/J22-s5-a4.png"
+      ],
+      "variantIds": [],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J23",
+      "step": 1,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J23-s1-a1",
+        "J23-s1-a2"
+      ],
+      "evidenceFrames": [
+        "J23/main/J23-s1-a1.png",
+        "J23/main/J23-s1-a2.png"
+      ],
+      "variantIds": [],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J23",
+      "step": 2,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J23-s2-a1",
+        "J23-s2-a2"
+      ],
+      "evidenceFrames": [
+        "J23/main/J23-s2-a1.png",
+        "J23/main/J23-s2-a2.png"
+      ],
+      "variantIds": [
+        "J23-review-only",
+        "J23-retain-only",
+        "J23-invalid-signature"
+      ],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J23",
+      "step": 3,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J23-s3-a1",
+        "J23-s3-a2",
+        "J23-s3-a3"
+      ],
+      "evidenceFrames": [
+        "J23/main/J23-s3-a1.png",
+        "J23/main/J23-s3-a2.png",
+        "J23/main/J23-s3-a3.png"
+      ],
+      "variantIds": [],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J23",
+      "step": 4,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J23-s4-a1",
+        "J23-s4-a2",
+        "J23-s4-a3"
+      ],
+      "evidenceFrames": [
+        "J23/main/J23-s4-a1.png",
+        "J23/main/J23-s4-a2.png",
+        "J23/main/J23-s4-a3.png"
+      ],
+      "variantIds": [
+        "J23-review-only",
+        "J23-retain-only",
+        "J23-invalid-signature"
+      ],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J23",
+      "step": 5,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J23-s5-a1",
+        "J23-s5-a2",
+        "J23-s5-a3"
+      ],
+      "evidenceFrames": [
+        "J23/main/J23-s5-a1.png",
+        "J23/main/J23-s5-a2.png",
+        "J23/main/J23-s5-a3.png"
+      ],
+      "variantIds": [],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J24",
+      "step": 1,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J24-s1-a1",
+        "J24-s1-a2",
+        "J24-s1-a3"
+      ],
+      "evidenceFrames": [
+        "J24/main/J24-s1-a1.png",
+        "J24/main/J24-s1-a2.png",
+        "J24/main/J24-s1-a3.png"
+      ],
+      "variantIds": [],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J24",
+      "step": 2,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J24-s2-a0",
+        "J24-s2-a1",
+        "J24-s2-a2",
+        "J24-s2-a3",
+        "J24-s2-a4",
+        "J24-s2-a5",
+        "J24-s2-a6",
+        "J24-s2-a7"
+      ],
+      "evidenceFrames": [
+        "J24/main/J24-s2-a0.png",
+        "J24/main/J24-s2-a1.png",
+        "J24/main/J24-s2-a2.png",
+        "J24/main/J24-s2-a3.png",
+        "J24/main/J24-s2-a4.png",
+        "J24/main/J24-s2-a5.png",
+        "J24/main/J24-s2-a6.png",
+        "J24/main/J24-s2-a7.png"
+      ],
+      "variantIds": [
+        "J24-cancel-unavailable",
+        "J24-wrong-version",
+        "J24-overlap-link",
+        "J24-reenable-carrier",
+        "J24-dismiss-carrier"
+      ],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J24",
+      "step": 3,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J24-s3-a1",
+        "J24-s3-a2",
+        "J24-s3-a3",
+        "J24-s3-a4",
+        "J24-s3-a5"
+      ],
+      "evidenceFrames": [
+        "J24/main/J24-s3-a1.png",
+        "J24/main/J24-s3-a2.png",
+        "J24/main/J24-s3-a3.png",
+        "J24/main/J24-s3-a4.png",
+        "J24/main/J24-s3-a5.png"
+      ],
+      "variantIds": [
+        "J24-cancel-unavailable",
+        "J24-wrong-version",
+        "J24-overlap-link",
+        "J24-reenable-carrier",
+        "J24-dismiss-carrier"
+      ],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J24",
+      "step": 4,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J24-s4-a1",
+        "J24-s4-a2",
+        "J24-s4-a3",
+        "J24-s4-a4",
+        "J24-s4-a5"
+      ],
+      "evidenceFrames": [
+        "J24/main/J24-s4-a1.png",
+        "J24/main/J24-s4-a2.png",
+        "J24/main/J24-s4-a3.png",
+        "J24/main/J24-s4-a4.png",
+        "J24/main/J24-s4-a5.png"
+      ],
+      "variantIds": [
+        "J24-cancel-unavailable",
+        "J24-wrong-version",
+        "J24-overlap-link",
+        "J24-reenable-carrier",
+        "J24-dismiss-carrier"
+      ],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J24",
+      "step": 5,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J24-s5-a1",
+        "J24-s5-a2"
+      ],
+      "evidenceFrames": [
+        "J24/main/J24-s5-a1.png",
+        "J24/main/J24-s5-a2.png"
+      ],
+      "variantIds": [
+        "J24-cancel-unavailable",
+        "J24-wrong-version",
+        "J24-overlap-link",
+        "J24-reenable-carrier",
+        "J24-dismiss-carrier"
+      ],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J25",
+      "step": 1,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J25-s1-a1"
+      ],
+      "evidenceFrames": [
+        "J25/main/J25-s1-a1.png"
+      ],
+      "variantIds": [],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J25",
+      "step": 2,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J25-s2-a1",
+        "J25-s2-a2",
+        "J25-s2-a3"
+      ],
+      "evidenceFrames": [
+        "J25/main/J25-s2-a1.png",
+        "J25/main/J25-s2-a2.png",
+        "J25/main/J25-s2-a3.png"
+      ],
+      "variantIds": [
+        "J25-preview-no-move",
+        "J25-unavailable"
+      ],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J25",
+      "step": 3,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J25-s3-a1",
+        "J25-s3-a1b",
+        "J25-s3-a2",
+        "J25-s3-a3",
+        "J25-s3-a4",
+        "J25-s3-a4b",
+        "J25-s3-a5",
+        "J25-s3-a6",
+        "J25-s3-a7"
+      ],
+      "evidenceFrames": [
+        "J25/main/J25-s3-a1.png",
+        "J25/main/J25-s3-a1b.png",
+        "J25/main/J25-s3-a2.png",
+        "J25/main/J25-s3-a3.png",
+        "J25/main/J25-s3-a4.png",
+        "J25/main/J25-s3-a4b.png",
+        "J25/main/J25-s3-a5.png",
+        "J25/main/J25-s3-a6.png",
+        "J25/main/J25-s3-a7.png"
+      ],
+      "variantIds": [],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J25",
+      "step": 4,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J25-s4-a1",
+        "J25-s4-a2",
+        "J25-s4-a3",
+        "J25-s4-a4",
+        "J25-s4-a5"
+      ],
+      "evidenceFrames": [
+        "J25/main/J25-s4-a1.png",
+        "J25/main/J25-s4-a2.png",
+        "J25/main/J25-s4-a3.png",
+        "J25/main/J25-s4-a4.png",
+        "J25/main/J25-s4-a5.png"
+      ],
+      "variantIds": [],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J25",
+      "step": 5,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J25-s5-a1",
+        "J25-s5-a2",
+        "J25-s5-a3",
+        "J25-s5-a4",
+        "J25-s5-a5",
+        "J25-s5-a6"
+      ],
+      "evidenceFrames": [
+        "J25/main/J25-s5-a1.png",
+        "J25/main/J25-s5-a2.png",
+        "J25/main/J25-s5-a3.png",
+        "J25/main/J25-s5-a4.png",
+        "J25/main/J25-s5-a5.png",
+        "J25/main/J25-s5-a6.png"
+      ],
+      "variantIds": [
+        "J25-preview-no-move",
+        "J25-unavailable"
+      ],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J26",
+      "step": 1,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J26-s1-a1",
+        "J26-s1-a2",
+        "J26-s1-a3"
+      ],
+      "evidenceFrames": [
+        "J26/main/J26-s1-a1.png",
+        "J26/main/J26-s1-a2.png",
+        "J26/main/J26-s1-a3.png"
+      ],
+      "variantIds": [],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J26",
+      "step": 2,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J26-s2-a1",
+        "J26-s2-a2",
+        "J26-s2-a3",
+        "J26-s2-a4",
+        "J26-s2-a5"
+      ],
+      "evidenceFrames": [
+        "J26/main/J26-s2-a1.png",
+        "J26/main/J26-s2-a2.png",
+        "J26/main/J26-s2-a3.png",
+        "J26/main/J26-s2-a4.png",
+        "J26/main/J26-s2-a5.png"
+      ],
+      "variantIds": [],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J26",
+      "step": 3,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J26-s3-a1",
+        "J26-s3-a2",
+        "J26-s3-a3",
+        "J26-s3-a4"
+      ],
+      "evidenceFrames": [
+        "J26/main/J26-s3-a1.png",
+        "J26/main/J26-s3-a2.png",
+        "J26/main/J26-s3-a3.png",
+        "J26/main/J26-s3-a4.png"
+      ],
+      "variantIds": [],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J26",
+      "step": 4,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J26-s4-a1",
+        "J26-s4-a2",
+        "J26-s4-a3",
+        "J26-s4-a4"
+      ],
+      "evidenceFrames": [
+        "J26/main/J26-s4-a1.png",
+        "J26/main/J26-s4-a2.png",
+        "J26/main/J26-s4-a3.png",
+        "J26/main/J26-s4-a4.png"
+      ],
+      "variantIds": [
+        "J26-exact-duplicate-default",
+        "J26-equal-text",
+        "J26-shared-occurrence",
+        "J26-availability",
+        "J26-whole-cell-excluded"
+      ],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J26",
+      "step": 5,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J26-s5-a1",
+        "J26-s5-a2",
+        "J26-s5-a3",
+        "J26-s5-a4",
+        "J26-s5-a5"
+      ],
+      "evidenceFrames": [
+        "J26/main/J26-s5-a1.png",
+        "J26/main/J26-s5-a2.png",
+        "J26/main/J26-s5-a3.png",
+        "J26/main/J26-s5-a4.png",
+        "J26/main/J26-s5-a5.png"
+      ],
+      "variantIds": [
+        "J26-exact-duplicate-default",
+        "J26-equal-text",
+        "J26-shared-occurrence",
+        "J26-availability",
+        "J26-whole-cell-excluded"
+      ],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J26",
+      "step": 6,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J26-s6-a1",
+        "J26-s6-a2",
+        "J26-s6-a3"
+      ],
+      "evidenceFrames": [
+        "J26/main/J26-s6-a1.png",
+        "J26/main/J26-s6-a2.png",
+        "J26/main/J26-s6-a3.png"
+      ],
+      "variantIds": [
+        "J26-exact-duplicate-default",
+        "J26-equal-text",
+        "J26-shared-occurrence",
+        "J26-availability",
+        "J26-whole-cell-excluded"
+      ],
+      "findingIds": []
+    }
+  ],
+  "variants": [
+    {
+      "journeyId": "J22",
+      "variantId": "J22-v12-not-hit",
+      "status": "Concept supported",
+      "actionCount": 1,
+      "frames": [
+        "J22/J22-v12-not-hit/before.png",
+        "J22/J22-v12-not-hit/J22-v12-not-hit-s3-a1.png"
+      ],
+      "runtimeErrors": []
+    },
+    {
+      "journeyId": "J22",
+      "variantId": "J22-anchor-fold",
+      "status": "Concept supported",
+      "actionCount": 1,
+      "frames": [
+        "J22/J22-anchor-fold/before.png",
+        "J22/J22-anchor-fold/J22-anchor-fold-s4-a1.png"
+      ],
+      "runtimeErrors": []
+    },
+    {
+      "journeyId": "J22",
+      "variantId": "J22-partial-cancel",
+      "status": "Concept supported",
+      "actionCount": 1,
+      "frames": [
+        "J22/J22-partial-cancel/before.png",
+        "J22/J22-partial-cancel/J22-partial-cancel-s4-a1.png"
+      ],
+      "runtimeErrors": []
+    },
+    {
+      "journeyId": "J23",
+      "variantId": "J23-review-only",
+      "status": "Concept supported",
+      "actionCount": 1,
+      "frames": [
+        "J23/J23-review-only/before.png",
+        "J23/J23-review-only/J23-review-only-s4-a1.png"
+      ],
+      "runtimeErrors": []
+    },
+    {
+      "journeyId": "J23",
+      "variantId": "J23-retain-only",
+      "status": "Concept supported",
+      "actionCount": 1,
+      "frames": [
+        "J23/J23-retain-only/before.png",
+        "J23/J23-retain-only/J23-retain-only-s4-a1.png"
+      ],
+      "runtimeErrors": []
+    },
+    {
+      "journeyId": "J23",
+      "variantId": "J23-invalid-signature",
+      "status": "Concept supported",
+      "actionCount": 1,
+      "frames": [
+        "J23/J23-invalid-signature/before.png",
+        "J23/J23-invalid-signature/J23-invalid-signature-s2-a1.png"
+      ],
+      "runtimeErrors": []
+    },
+    {
+      "journeyId": "J24",
+      "variantId": "J24-cancel-unavailable",
+      "status": "Concept supported",
+      "actionCount": 1,
+      "frames": [
+        "J24/J24-cancel-unavailable/before.png",
+        "J24/J24-cancel-unavailable/J24-cancel-unavailable-s3-a1.png"
+      ],
+      "runtimeErrors": []
+    },
+    {
+      "journeyId": "J24",
+      "variantId": "J24-wrong-version",
+      "status": "Concept supported",
+      "actionCount": 1,
+      "frames": [
+        "J24/J24-wrong-version/before.png",
+        "J24/J24-wrong-version/J24-wrong-version-s4-a1.png"
+      ],
+      "runtimeErrors": []
+    },
+    {
+      "journeyId": "J24",
+      "variantId": "J24-overlap-link",
+      "status": "Concept supported",
+      "actionCount": 1,
+      "frames": [
+        "J24/J24-overlap-link/before.png",
+        "J24/J24-overlap-link/J24-overlap-link-s2-a1.png"
+      ],
+      "runtimeErrors": []
+    },
+    {
+      "journeyId": "J24",
+      "variantId": "J24-reenable-carrier",
+      "status": "Concept supported",
+      "actionCount": 1,
+      "frames": [
+        "J24/J24-reenable-carrier/before.png",
+        "J24/J24-reenable-carrier/J24-reenable-carrier-a1.png"
+      ],
+      "runtimeErrors": []
+    },
+    {
+      "journeyId": "J24",
+      "variantId": "J24-dismiss-carrier",
+      "status": "Concept supported",
+      "actionCount": 1,
+      "frames": [
+        "J24/J24-dismiss-carrier/before.png",
+        "J24/J24-dismiss-carrier/J24-dismiss-carrier-a1.png"
+      ],
+      "runtimeErrors": []
+    },
+    {
+      "journeyId": "J25",
+      "variantId": "J25-preview-no-move",
+      "status": "Concept supported",
+      "actionCount": 1,
+      "frames": [
+        "J25/J25-preview-no-move/before.png",
+        "J25/J25-preview-no-move/J25-preview-no-move-s2-a1.png"
+      ],
+      "runtimeErrors": []
+    },
+    {
+      "journeyId": "J25",
+      "variantId": "J25-unavailable",
+      "status": "Concept supported",
+      "actionCount": 1,
+      "frames": [
+        "J25/J25-unavailable/before.png",
+        "J25/J25-unavailable/J25-unavailable-s5-a1.png"
+      ],
+      "runtimeErrors": []
+    },
+    {
+      "journeyId": "J26",
+      "variantId": "J26-exact-duplicate-default",
+      "status": "Concept supported",
+      "actionCount": 1,
+      "frames": [
+        "J26/J26-exact-duplicate-default/before.png",
+        "J26/J26-exact-duplicate-default/J26-exact-duplicate-default-s4-a1.png"
+      ],
+      "runtimeErrors": []
+    },
+    {
+      "journeyId": "J26",
+      "variantId": "J26-equal-text",
+      "status": "Concept supported",
+      "actionCount": 1,
+      "frames": [
+        "J26/J26-equal-text/before.png",
+        "J26/J26-equal-text/J26-equal-text-s4-a1.png"
+      ],
+      "runtimeErrors": []
+    },
+    {
+      "journeyId": "J26",
+      "variantId": "J26-shared-occurrence",
+      "status": "Concept supported",
+      "actionCount": 1,
+      "frames": [
+        "J26/J26-shared-occurrence/before.png",
+        "J26/J26-shared-occurrence/J26-shared-occurrence-s4-a1.png"
+      ],
+      "runtimeErrors": []
+    },
+    {
+      "journeyId": "J26",
+      "variantId": "J26-availability",
+      "status": "Concept supported",
+      "actionCount": 1,
+      "frames": [
+        "J26/J26-availability/before.png",
+        "J26/J26-availability/J26-availability-s5-a1.png"
+      ],
+      "runtimeErrors": []
+    },
+    {
+      "journeyId": "J26",
+      "variantId": "J26-whole-cell-excluded",
+      "status": "Concept supported",
+      "actionCount": 1,
+      "frames": [
+        "J26/J26-whole-cell-excluded/before.png",
+        "J26/J26-whole-cell-excluded/J26-whole-cell-excluded-s6-a1.png"
+      ],
+      "runtimeErrors": []
+    }
+  ],
+  "findings": [
+    {
+      "id": "R1-J22-01",
+      "journeyId": "J22",
+      "steps": [
+        5
+      ],
+      "severity": "Moderate",
+      "summary": "Resolved by final targeted J22 rerender: visit 01, doc:LabNotes V12, occurrence occ:lab-passage-09 and offset 44 now agree in the current-place card, center reader and trace for s5-a3 and s5-a4.",
+      "evidence": [
+        "J22/main/J22-s5-a3.png",
+        "J22/main/J22-s5-a4.png",
+        "J22/main/trace.json"
+      ],
+      "status": "resolved"
+    }
+  ],
+  "crossCheckBoundaries": {
+    "runFailures": [
+      {
+        "journey": "J30",
+        "type": "inventory-navigation",
+        "path": "loom.branchExitRows",
+        "found": false,
+        "stateRetained": true
+      }
+    ],
+    "method": "Headless Chromium native DOM clicks and Tab/Enter with scripted fixture effects.",
+    "keyboard": "Keyboard delivery is recorded for the HTML prototype only; not Xuzz keyboard governance.",
+    "accessibility": "Static browser accessibility tree was captured; assistiveTechnologyTested=false.",
+    "layout": "Narrow viewport, enlarged text, reduced motion, contrast/optics checks concern the HTML prototype only.",
+    "storageNetwork": "Scripted traces are not production persistence, network, cryptographic, media, or storage-diff proof.",
+    "conceptOutcome": "Concept supported denotes coherent visible representation of the task, not human behavior or implementation readiness."
+  }
+}

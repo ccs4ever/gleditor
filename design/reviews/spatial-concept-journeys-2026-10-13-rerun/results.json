@@ -1,0 +1,5654 @@
+{
+  "completedUTC": "2026-10-13T22:07:51.218723+00:00",
+  "mode": "AI concept review of scripted browser states; not participant or production validation",
+  "runnerModel": "gpt-6-luna",
+  "runnerCount": 3,
+  "specSHA256": "4b3e58d4122742d4107bb454301c1d6582981e1c1ce2d1d12a94ef274c9a7167",
+  "summary": {
+    "journeys": 16,
+    "steps": 86,
+    "variants": 49,
+    "actions": 370,
+    "states": 435,
+    "baseOutcomes": {
+      "Concept supported": 86
+    },
+    "variantOutcomes": {
+      "Concept supported": 49
+    },
+    "crossJourneyRepresentations": 144,
+    "endToEndJourneys": 16,
+    "nativeFailures": 0,
+    "transitionFailures": 0,
+    "assistiveTechnologyTested": false,
+    "productionValidated": false
+  },
+  "journeys": [
+    {
+      "id": "J17",
+      "title": "Discover and acquire an exact remote edition",
+      "steps": 5,
+      "variants": 4,
+      "states": 27,
+      "outcome": "Represented end to end",
+      "gallery": "J17/main/index.html"
+    },
+    {
+      "id": "J18",
+      "title": "Find one term across media and store origins",
+      "steps": 5,
+      "variants": 2,
+      "states": 20,
+      "outcome": "Represented end to end",
+      "gallery": "J18/main/index.html"
+    },
+    {
+      "id": "J19",
+      "title": "Filter a running query without losing the selected result",
+      "steps": 5,
+      "variants": 1,
+      "states": 21,
+      "outcome": "Represented end to end",
+      "gallery": "J19/main/index.html"
+    },
+    {
+      "id": "J20",
+      "title": "Search historical occurrences with visible matching rules",
+      "steps": 5,
+      "variants": 4,
+      "states": 28,
+      "outcome": "Represented end to end",
+      "gallery": "J20/main/index.html"
+    },
+    {
+      "id": "J21",
+      "title": "Compare pinned states at text and topology changes",
+      "steps": 5,
+      "variants": 3,
+      "states": 23,
+      "outcome": "Represented end to end",
+      "gallery": "J21/main/index.html"
+    },
+    {
+      "id": "J22",
+      "title": "Investigate around a stable reading place",
+      "steps": 5,
+      "variants": 3,
+      "states": 22,
+      "outcome": "Represented end to end",
+      "gallery": "J22/main/index.html"
+    },
+    {
+      "id": "J23",
+      "title": "Control immutable link packages without editing their relations",
+      "steps": 5,
+      "variants": 3,
+      "states": 20,
+      "outcome": "Represented end to end",
+      "gallery": "J23/main/index.html"
+    },
+    {
+      "id": "J24",
+      "title": "Keep one complete relation through distant and unavailable members",
+      "steps": 5,
+      "variants": 5,
+      "states": 34,
+      "outcome": "Represented end to end",
+      "gallery": "J24/main/index.html"
+    },
+    {
+      "id": "J25",
+      "title": "Preview and resume branching reader visits",
+      "steps": 5,
+      "variants": 2,
+      "states": 29,
+      "outcome": "Represented end to end",
+      "gallery": "J25/main/index.html"
+    },
+    {
+      "id": "J26",
+      "title": "Collect typed evidence without changing what it refers to",
+      "steps": 6,
+      "variants": 5,
+      "states": 35,
+      "outcome": "Represented end to end",
+      "gallery": "J26/main/index.html"
+    },
+    {
+      "id": "J27",
+      "title": "Assemble one ordered Link with an explicit destination",
+      "steps": 5,
+      "variants": 1,
+      "states": 20,
+      "outcome": "Represented end to end",
+      "gallery": "J27/main/index.html"
+    },
+    {
+      "id": "J28",
+      "title": "Resume a dense draft through unresolved and unknown outcomes",
+      "steps": 6,
+      "variants": 5,
+      "states": 37,
+      "outcome": "Represented end to end",
+      "gallery": "J28/main/index.html"
+    },
+    {
+      "id": "J29",
+      "title": "Align mixed-media cues without authoring a relation",
+      "steps": 5,
+      "variants": 2,
+      "states": 22,
+      "outcome": "Represented end to end",
+      "gallery": "J29/main/index.html"
+    },
+    {
+      "id": "J30",
+      "title": "Investigate exact range and topology effects in the Loom",
+      "steps": 7,
+      "variants": 1,
+      "states": 28,
+      "outcome": "Represented end to end",
+      "gallery": "J30/main/index.html"
+    },
+    {
+      "id": "J31",
+      "title": "Recover a selected historical passage into a declared new branch",
+      "steps": 6,
+      "variants": 6,
+      "states": 40,
+      "outcome": "Represented end to end",
+      "gallery": "J31/main/index.html"
+    },
+    {
+      "id": "J32",
+      "title": "Resume an interrupted investigation offline with equivalent access",
+      "steps": 6,
+      "variants": 2,
+      "states": 29,
+      "outcome": "Represented end to end",
+      "gallery": "J32/main/index.html"
+    }
+  ],
+  "steps": [
+    {
+      "journey": "J17",
+      "step": 1,
+      "goal": "Discover by topic, followed-author scope, or supported URI; inspect without moving the reading place.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J17-s1-a1",
+        "J17-s1-a2",
+        "J17-s1-a3",
+        "J17-s1-a4"
+      ],
+      "coverage": [
+        "topic discovery",
+        "followed-author discovery",
+        "publication URI lookup",
+        "reading place retained"
+      ],
+      "frames": [
+        "J17/main/J17-s1-a1.png",
+        "J17/main/J17-s1-a2.png",
+        "J17/main/J17-s1-a3.png",
+        "J17/main/J17-s1-a4.png"
+      ],
+      "trace": "J17/main/trace.json"
+    },
+    {
+      "journey": "J17",
+      "step": 2,
+      "goal": "Identify publisher, publication, pinned edition and independent verification states.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J17-s2-a1",
+        "J17-s2-a2"
+      ],
+      "coverage": [
+        "publisher key",
+        "publication ID",
+        "pinned V12 manifest",
+        "catalog signature",
+        "author trust",
+        "payload integrity",
+        "availability"
+      ],
+      "frames": [
+        "J17/main/J17-s2-a1.png",
+        "J17/main/J17-s2-a2.png"
+      ],
+      "trace": "J17/main/trace.json"
+    },
+    {
+      "journey": "J17",
+      "step": 3,
+      "goal": "Pin V12, advance publisher pointer to V13 while pending, and choose to keep V12 or request V13 separately.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J17-s3-a1",
+        "J17-s3-a2",
+        "J17-s3-a3"
+      ],
+      "coverage": [
+        "immutable request",
+        "pointer advance",
+        "keep V12 path",
+        "separate V13 request alternative"
+      ],
+      "frames": [
+        "J17/main/J17-s3-a1.png",
+        "J17/main/J17-s3-a2.png",
+        "J17/main/J17-s3-a3.png"
+      ],
+      "trace": "J17/main/trace.json"
+    },
+    {
+      "journey": "J17",
+      "step": 4,
+      "goal": "Inspect 68/96 interruption, retry and cancellation; keep invalid payload and unavailable peers as separate variants.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J17-s4-a1",
+        "J17-s4-a2",
+        "J17-s4-a3"
+      ],
+      "coverage": [
+        "68/96 interrupted",
+        "retry same request",
+        "complete verification",
+        "invalid payload variant",
+        "unavailable peers variant",
+        "cancel variant"
+      ],
+      "frames": [
+        "J17/main/J17-s4-a1.png",
+        "J17/main/J17-s4-a2.png",
+        "J17/main/J17-s4-a3.png"
+      ],
+      "trace": "J17/main/trace.json"
+    },
+    {
+      "journey": "J17",
+      "step": 5,
+      "goal": "Open Ready V12, restore origin, reopen exact cached V12 offline, and inspect independent preference effects.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J17-s5-a1",
+        "J17-s5-a2",
+        "J17-s5-a3"
+      ],
+      "coverage": [
+        "ready V12 explicit open",
+        "return origin",
+        "offline reopen",
+        "author follow status",
+        "package enablement"
+      ],
+      "frames": [
+        "J17/main/J17-s5-a1.png",
+        "J17/main/J17-s5-a2.png",
+        "J17/main/J17-s5-a3.png"
+      ],
+      "trace": "J17/main/trace.json"
+    },
+    {
+      "journey": "J18",
+      "step": 1,
+      "goal": "Search pressure across all eight stores and find a native passage, cell, image OCR, audio transcript and video title-only result in one lens.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J18-s1-a1",
+        "J18-s1-a2",
+        "J18-s1-a3"
+      ],
+      "coverage": [
+        "one query",
+        "eight store scope",
+        "native passage",
+        "native cell",
+        "image OCR",
+        "audio transcript",
+        "video title-only",
+        "partial coverage"
+      ],
+      "frames": [
+        "J18/main/J18-s1-a1.png",
+        "J18/main/J18-s1-a2.png",
+        "J18/main/J18-s1-a3.png"
+      ],
+      "trace": "J18/main/trace.json"
+    },
+    {
+      "journey": "J18",
+      "step": 2,
+      "goal": "Inspect each result and explain its media, authority, exact version, matching field and held status.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J18-s2-a1",
+        "J18-s2-a2",
+        "J18-s2-a3",
+        "J18-s2-a4",
+        "J18-s2-a5"
+      ],
+      "coverage": [
+        "five result inspectors",
+        "remote-origin preservation",
+        "version and matching field",
+        "held/not-held status"
+      ],
+      "frames": [
+        "J18/main/J18-s2-a1.png",
+        "J18/main/J18-s2-a2.png",
+        "J18/main/J18-s2-a3.png",
+        "J18/main/J18-s2-a4.png",
+        "J18/main/J18-s2-a5.png"
+      ],
+      "trace": "J18/main/trace.json"
+    },
+    {
+      "journey": "J18",
+      "step": 3,
+      "goal": "Inspect the OCR word region and transcript time range; distinguish derived evidence, authored spans and media bytes.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J18-s3-a1",
+        "J18-s3-a2"
+      ],
+      "coverage": [
+        "OCR rectangle",
+        "audio start/end",
+        "derived-versus-authored distinction",
+        "media bytes status"
+      ],
+      "frames": [
+        "J18/main/J18-s3-a1.png",
+        "J18/main/J18-s3-a2.png"
+      ],
+      "trace": "J18/main/trace.json"
+    },
+    {
+      "journey": "J18",
+      "step": 4,
+      "goal": "Inspect the metadata-only V9 match, then acquire the pinned edition or leave it untouched.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J18-s4-a1",
+        "J18-s4-a2"
+      ],
+      "coverage": [
+        "exact V9 identity",
+        "leave route",
+        "acquire route",
+        "no frame/transcript from title alone"
+      ],
+      "frames": [
+        "J18/main/J18-s4-a1.png",
+        "J18/main/J18-s4-a2.png"
+      ],
+      "trace": "J18/main/trace.json"
+    },
+    {
+      "journey": "J18",
+      "step": 5,
+      "goal": "Enter one exact occurrence, return, and distinguish equal-text independent addresses from a true shared-source occurrence.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J18-s5-a1",
+        "J18-s5-a2",
+        "J18-s5-a3"
+      ],
+      "coverage": [
+        "exact occurrence entry",
+        "return origin",
+        "equal text at different primedia addresses",
+        "shared address different occurrence",
+        "source ops unchanged"
+      ],
+      "frames": [
+        "J18/main/J18-s5-a1.png",
+        "J18/main/J18-s5-a2.png",
+        "J18/main/J18-s5-a3.png"
+      ],
+      "trace": "J18/main/trace.json"
+    },
+    {
+      "journey": "J19",
+      "step": 1,
+      "goal": "Pin C17 V8, narrow to cells/native/historical, restore all media, then apply cached-only subset of stores.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J19-s1-a1",
+        "J19-s1-a2",
+        "J19-s1-a3"
+      ],
+      "coverage": [
+        "media/field/version facets",
+        "restore all media",
+        "cached-only",
+        "store subset",
+        "selection retention"
+      ],
+      "frames": [
+        "J19/main/J19-s1-a1.png",
+        "J19/main/J19-s1-a2.png",
+        "J19/main/J19-s1-a3.png"
+      ],
+      "trace": "J19/main/trace.json"
+    },
+    {
+      "journey": "J19",
+      "step": 2,
+      "goal": "Change grouping/sort, exclude selected C17 and retain its inspector; choose restore or clear explicitly.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J19-s2-a1",
+        "J19-s2-a2",
+        "J19-s2-a3",
+        "J19-s2-a4"
+      ],
+      "coverage": [
+        "group change",
+        "sort change",
+        "excluded selected record",
+        "restore filter",
+        "clear selection"
+      ],
+      "frames": [
+        "J19/main/J19-s2-a1.png",
+        "J19/main/J19-s2-a2.png",
+        "J19/main/J19-s2-a3.png",
+        "J19/main/J19-s2-a4.png"
+      ],
+      "trace": "J19/main/trace.json"
+    },
+    {
+      "journey": "J19",
+      "step": 3,
+      "goal": "Deliver asynchronous Q2 results and late Q1 response; identify the request owning counts and selection.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J19-s3-a1",
+        "J19-s3-a2",
+        "J19-s3-a3"
+      ],
+      "coverage": [
+        "active Q2",
+        "Q2 response",
+        "late Q1 response",
+        "stale-response disposition"
+      ],
+      "frames": [
+        "J19/main/J19-s3-a1.png",
+        "J19/main/J19-s3-a2.png",
+        "J19/main/J19-s3-a3.png"
+      ],
+      "trace": "J19/main/trace.json"
+    },
+    {
+      "journey": "J19",
+      "step": 4,
+      "goal": "Inspect detailed store/media/branch coverage and unsupported OCR; cancel while retaining results; rerun explicitly.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J19-s4-a1",
+        "J19-s4-a2",
+        "J19-s4-a3"
+      ],
+      "coverage": [
+        "coverage details",
+        "unsupported surface",
+        "three pending",
+        "cancel retention",
+        "explicit rerun"
+      ],
+      "frames": [
+        "J19/main/J19-s4-a1.png",
+        "J19/main/J19-s4-a2.png",
+        "J19/main/J19-s4-a3.png"
+      ],
+      "trace": "J19/main/trace.json"
+    },
+    {
+      "journey": "J19",
+      "step": 5,
+      "goal": "Distinguish complete-empty from incomplete-zero; save recipe and result snapshot separately; rerun explicitly.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J19-s5-a1",
+        "J19-s5-a2",
+        "J19-s5-a3",
+        "J19-s5-a4",
+        "J19-s5-a5"
+      ],
+      "coverage": [
+        "completed-empty",
+        "incomplete zero",
+        "save recipe",
+        "capture result snapshot",
+        "rerun new match"
+      ],
+      "frames": [
+        "J19/main/J19-s5-a1.png",
+        "J19/main/J19-s5-a2.png",
+        "J19/main/J19-s5-a3.png",
+        "J19/main/J19-s5-a4.png",
+        "J19/main/J19-s5-a5.png"
+      ],
+      "trace": "J19/main/trace.json"
+    },
+    {
+      "journey": "J20",
+      "step": 1,
+      "goal": "Search 3.14 in math prose and pressure cell across declared branches and historical states.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J20-s1-a1",
+        "J20-s1-a2"
+      ],
+      "coverage": [
+        "math prose",
+        "pressure cell",
+        "all branches/history scope",
+        "occurrence addresses",
+        "partial coverage"
+      ],
+      "frames": [
+        "J20/main/J20-s1-a1.png",
+        "J20/main/J20-s1-a2.png"
+      ],
+      "trace": "J20/main/trace.json"
+    },
+    {
+      "journey": "J20",
+      "step": 2,
+      "goal": "Compare literal, whole-token and numeric matching; inspect units; explicitly expand related ideas without treating pi as equal.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J20-s2-a1",
+        "J20-s2-a2",
+        "J20-s2-a3",
+        "J20-s2-a4",
+        "J20-s2-a5",
+        "J20-s2-a6"
+      ],
+      "coverage": [
+        "literal rule",
+        "whole-token rule",
+        "numeric exact decimal",
+        "unit rules",
+        "explicit related expansion",
+        "pi non-equality"
+      ],
+      "frames": [
+        "J20/main/J20-s2-a1.png",
+        "J20/main/J20-s2-a2.png",
+        "J20/main/J20-s2-a3.png",
+        "J20/main/J20-s2-a4.png",
+        "J20/main/J20-s2-a5.png",
+        "J20/main/J20-s2-a6.png"
+      ],
+      "trace": "J20/main/trace.json"
+    },
+    {
+      "journey": "J20",
+      "step": 3,
+      "goal": "Switch explicitly to literal pressure with case folding; retain and inspect C17 V8 historical match while V12 lacks the word.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J20-s3-a1",
+        "J20-s3-a2",
+        "J20-s3-a3"
+      ],
+      "coverage": [
+        "query change",
+        "literal case fold",
+        "C17 V8 match",
+        "C17 V12 no match",
+        "inspect historical reference",
+        "independent from prism fixture"
+      ],
+      "frames": [
+        "J20/main/J20-s3-a1.png",
+        "J20/main/J20-s3-a2.png",
+        "J20/main/J20-s3-a3.png"
+      ],
+      "trace": "J20/main/trace.json"
+    },
+    {
+      "journey": "J20",
+      "step": 4,
+      "goal": "Expand unchanged state run and repeated source occurrence; distinguish occurrence/state/op counts and equal text at independent addresses.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J20-s4-a1",
+        "J20-s4-a2",
+        "J20-s4-a3"
+      ],
+      "coverage": [
+        "expand run",
+        "state counts",
+        "operation counts",
+        "repeated source uses",
+        "equal text/different address"
+      ],
+      "frames": [
+        "J20/main/J20-s4-a1.png",
+        "J20/main/J20-s4-a2.png",
+        "J20/main/J20-s4-a3.png"
+      ],
+      "trace": "J20/main/trace.json"
+    },
+    {
+      "journey": "J20",
+      "step": 5,
+      "goal": "Show partial coverage, missing historical state and completed-empty branch; save recipe and optional result capture separately.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J20-s5-a1",
+        "J20-s5-a2",
+        "J20-s5-a3",
+        "J20-s5-a4",
+        "J20-s5-a5"
+      ],
+      "coverage": [
+        "partial branch coverage",
+        "missing state",
+        "completed-empty branch",
+        "save recipe",
+        "optional captured results"
+      ],
+      "frames": [
+        "J20/main/J20-s5-a1.png",
+        "J20/main/J20-s5-a2.png",
+        "J20/main/J20-s5-a3.png",
+        "J20/main/J20-s5-a4.png",
+        "J20/main/J20-s5-a5.png"
+      ],
+      "trace": "J20/main/trace.json"
+    },
+    {
+      "journey": "J21",
+      "step": 1,
+      "goal": "Use independent two-state Store A fixture, pin exact C17 V8/V12, inspect text differences and distinguish shared ranges from changed/equal text.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J21-s1-a1",
+        "J21-s1-a2"
+      ],
+      "coverage": [
+        "two-state fixture separate from integrated word-removal",
+        "pinned identities",
+        "shared source range",
+        "changed spans",
+        "independent equal text"
+      ],
+      "frames": [
+        "J21/main/J21-s1-a1.png",
+        "J21/main/J21-s1-a2.png"
+      ],
+      "trace": "J21/main/trace.json"
+    },
+    {
+      "journey": "J21",
+      "step": 2,
+      "goal": "Select an earlier state, LCA and both branch tips; identify actual ancestry from parent IDs.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J21-s2-a1",
+        "J21-s2-a2"
+      ],
+      "coverage": [
+        "before-LCA state",
+        "LCA identity",
+        "two branch tips",
+        "parent edges"
+      ],
+      "frames": [
+        "J21/main/J21-s2-a1.png",
+        "J21/main/J21-s2-a2.png"
+      ],
+      "trace": "J21/main/trace.json"
+    },
+    {
+      "journey": "J21",
+      "step": 3,
+      "goal": "Inspect text, typed value+unit, cell membership and reciprocal dimension topology in context.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J21-s3-a1",
+        "J21-s3-a2"
+      ],
+      "coverage": [
+        "text change",
+        "typed value and unit",
+        "cell membership",
+        "dimension topology",
+        "reciprocal edges",
+        "page/rank neighborhood"
+      ],
+      "frames": [
+        "J21/main/J21-s3-a1.png",
+        "J21/main/J21-s3-a2.png"
+      ],
+      "trace": "J21/main/trace.json"
+    },
+    {
+      "journey": "J21",
+      "step": 4,
+      "goal": "Swap sides and focus another difference without replacing pins; retain and retry an unavailable exact target.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J21-s4-a1",
+        "J21-s4-a2",
+        "J21-s4-a3",
+        "J21-s4-a4"
+      ],
+      "coverage": [
+        "swap sides",
+        "select difference",
+        "unavailable target descriptor",
+        "retry exact target"
+      ],
+      "frames": [
+        "J21/main/J21-s4-a1.png",
+        "J21/main/J21-s4-a2.png",
+        "J21/main/J21-s4-a3.png",
+        "J21/main/J21-s4-a4.png"
+      ],
+      "trace": "J21/main/trace.json"
+    },
+    {
+      "journey": "J21",
+      "step": 5,
+      "goal": "Enter one occurrence, return, save/reopen comparison, and inspect separate noncommitting recovery preview.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J21-s5-a1",
+        "J21-s5-a2",
+        "J21-s5-a3",
+        "J21-s5-a4",
+        "J21-s5-a5",
+        "J21-s5-a6"
+      ],
+      "coverage": [
+        "enter chosen occurrence",
+        "return",
+        "save comparison",
+        "reopen card",
+        "recovery preview",
+        "cancel without commit"
+      ],
+      "frames": [
+        "J21/main/J21-s5-a1.png",
+        "J21/main/J21-s5-a2.png",
+        "J21/main/J21-s5-a3.png",
+        "J21/main/J21-s5-a4.png",
+        "J21/main/J21-s5-a5.png",
+        "J21/main/J21-s5-a6.png"
+      ],
+      "trace": "J21/main/trace.json"
+    },
+    {
+      "journey": "J22",
+      "step": 1,
+      "goal": "Identify current visit 03, Review V4, search scope, selected L17 cursors, origin and saved pouch.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J22-s1-a1",
+        "J22-s1-a2"
+      ],
+      "coverage": [
+        "orientation",
+        "query scope and coverage",
+        "selected relation cursors and origin",
+        "saved collection identity"
+      ],
+      "frames": [
+        "J22/main/J22-s1-a1.png",
+        "J22/main/J22-s1-a2.png"
+      ],
+      "trace": "J22/main/trace.json"
+    },
+    {
+      "journey": "J22",
+      "step": 2,
+      "goal": "Open expanded tools while keeping the reading anchor and visit unchanged.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J22-s2-a1",
+        "J22-s2-a2"
+      ],
+      "coverage": [
+        "fixed reading place",
+        "tool previews distinct from completed visits",
+        "results/comparison/layers/pouch are discoverable"
+      ],
+      "frames": [
+        "J22/main/J22-s2-a1.png",
+        "J22/main/J22-s2-a2.png"
+      ],
+      "trace": "J22/main/trace.json"
+    },
+    {
+      "journey": "J22",
+      "step": 3,
+      "goal": "Inspect C17 V8 and pinned V12; distinguish the V12 non-hit from L17 Right 2 C24 V8.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J22-s3-a1",
+        "J22-s3-a2",
+        "J22-s3-a3"
+      ],
+      "coverage": [
+        "historical selected/pinned states",
+        "no-pressure variant",
+        "independent relation member identity"
+      ],
+      "frames": [
+        "J22/main/J22-s3-a1.png",
+        "J22/main/J22-s3-a2.png",
+        "J22/main/J22-s3-a3.png"
+      ],
+      "trace": "J22/main/trace.json"
+    },
+    {
+      "journey": "J22",
+      "step": 4,
+      "goal": "Fold comparison alone, change package view emphasis, inspect saved evidence, fold all tools, preserving context.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J22-s4-a1",
+        "J22-s4-a2",
+        "J22-s4-a3",
+        "J22-s4-a4"
+      ],
+      "coverage": [
+        "fold comparison only",
+        "view emphasis separate from enabled state",
+        "inspect saved evidence without entry",
+        "fold all with retained state"
+      ],
+      "frames": [
+        "J22/main/J22-s4-a1.png",
+        "J22/main/J22-s4-a2.png",
+        "J22/main/J22-s4-a3.png",
+        "J22/main/J22-s4-a4.png"
+      ],
+      "trace": "J22/main/trace.json"
+    },
+    {
+      "journey": "J22",
+      "step": 5,
+      "goal": "Back to visit 02, return to origin 01, reopen tools and inspect retained sibling 02→04.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J22-s5-a1",
+        "J22-s5-a2",
+        "J22-s5-a3",
+        "J22-s5-a4"
+      ],
+      "coverage": [
+        "Activity Back",
+        "origin return",
+        "reopen tools after return",
+        "retain sibling route"
+      ],
+      "frames": [
+        "J22/main/J22-s5-a1.png",
+        "J22/main/J22-s5-a2.png",
+        "J22/main/J22-s5-a3.png",
+        "J22/main/J22-s5-a4.png"
+      ],
+      "trace": "J22/main/trace.json"
+    },
+    {
+      "journey": "J23",
+      "step": 1,
+      "goal": "Identify the three retained packages, two enabled packages and separate normal/quiet emphasis.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J23-s1-a1",
+        "J23-s1-a2"
+      ],
+      "coverage": [
+        "initial count reconciliation",
+        "emphasis distinction"
+      ],
+      "frames": [
+        "J23/main/J23-s1-a1.png",
+        "J23/main/J23-s1-a2.png"
+      ],
+      "trace": "J23/main/trace.json"
+    },
+    {
+      "journey": "J23",
+      "step": 2,
+      "goal": "Inspect disabled carrier identity, publisher, signature and independent trust; apply unchecked/invalid verification gate.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J23-s2-a1",
+        "J23-s2-a2"
+      ],
+      "coverage": [
+        "immutable carrier identity",
+        "signature/identity distinction",
+        "verification gate"
+      ],
+      "frames": [
+        "J23/main/J23-s2-a1.png",
+        "J23/main/J23-s2-a2.png"
+      ],
+      "trace": "J23/main/trace.json"
+    },
+    {
+      "journey": "J23",
+      "step": 3,
+      "goal": "Quiet Methods separately from disabling it; retain list reachability for quiet enabled links.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J23-s3-a1",
+        "J23-s3-a2",
+        "J23-s3-a3"
+      ],
+      "coverage": [
+        "quiet list reachability",
+        "disable separate from emphasis",
+        "count after choice"
+      ],
+      "frames": [
+        "J23/main/J23-s3-a1.png",
+        "J23/main/J23-s3-a2.png",
+        "J23/main/J23-s3-a3.png"
+      ],
+      "trace": "J23/main/trace.json"
+    },
+    {
+      "journey": "J23",
+      "step": 4,
+      "goal": "Inspect candidate #13, compare it without automatic replacement, explicitly switch while retaining old carrier and exact L17.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J23-s4-a1",
+        "J23-s4-a2",
+        "J23-s4-a3"
+      ],
+      "coverage": [
+        "inspect candidate",
+        "explicit switch choice",
+        "retain old carrier and selected link",
+        "resulting counts"
+      ],
+      "frames": [
+        "J23/main/J23-s4-a1.png",
+        "J23/main/J23-s4-a2.png",
+        "J23/main/J23-s4-a3.png"
+      ],
+      "trace": "J23/main/trace.json"
+    },
+    {
+      "journey": "J23",
+      "step": 5,
+      "goal": "Reopen session and restore carrier-specific preferences; recompute resulting counts.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J23-s5-a1",
+        "J23-s5-a2",
+        "J23-s5-a3"
+      ],
+      "coverage": [
+        "close/reopen preferences",
+        "carrier-specific enable/emphasis",
+        "counts from resulting ledger",
+        "selected Link identity survives"
+      ],
+      "frames": [
+        "J23/main/J23-s5-a1.png",
+        "J23/main/J23-s5-a2.png",
+        "J23/main/J23-s5-a3.png"
+      ],
+      "trace": "J23/main/trace.json"
+    },
+    {
+      "journey": "J24",
+      "step": 1,
+      "goal": "Inspect both ordered endsets/cursors/origin; preview a side, then explicitly Enter an occurrence.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J24-s1-a1",
+        "J24-s1-a2",
+        "J24-s1-a3"
+      ],
+      "coverage": [
+        "complete endsets",
+        "current versus preview",
+        "explicit Enter effect"
+      ],
+      "frames": [
+        "J24/main/J24-s1-a1.png",
+        "J24/main/J24-s1-a2.png",
+        "J24/main/J24-s1-a3.png"
+      ],
+      "trace": "J24/main/trace.json"
+    },
+    {
+      "journey": "J24",
+      "step": 2,
+      "goal": "Cycle side cursors, choose repeated occurrence, inspect overlapping Link independently, reselect L17 as new origin 03, then restore saved origin-01 context.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J24-s2-a0",
+        "J24-s2-a1",
+        "J24-s2-a2",
+        "J24-s2-a3",
+        "J24-s2-a4",
+        "J24-s2-a5",
+        "J24-s2-a6",
+        "J24-s2-a7"
+      ],
+      "coverage": [
+        "independent cursors",
+        "occurrence vs source range",
+        "overlapping link identity",
+        "new origin 03 vs restored origin 01"
+      ],
+      "frames": [
+        "J24/main/J24-s2-a0.png",
+        "J24/main/J24-s2-a1.png",
+        "J24/main/J24-s2-a2.png",
+        "J24/main/J24-s2-a3.png",
+        "J24/main/J24-s2-a4.png",
+        "J24/main/J24-s2-a5.png",
+        "J24/main/J24-s2-a6.png",
+        "J24/main/J24-s2-a7.png"
+      ],
+      "trace": "J24/main/trace.json"
+    },
+    {
+      "journey": "J24",
+      "step": 3,
+      "goal": "Request exact unavailable Right 3, cancel, then retry after availability changes; preserve identity and add no unresolved visit.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J24-s3-a1",
+        "J24-s3-a2",
+        "J24-s3-a3",
+        "J24-s3-a4",
+        "J24-s3-a5"
+      ],
+      "coverage": [
+        "pending",
+        "cancel",
+        "availability change",
+        "retry exact target",
+        "resolved Enter"
+      ],
+      "frames": [
+        "J24/main/J24-s3-a1.png",
+        "J24/main/J24-s3-a2.png",
+        "J24/main/J24-s3-a3.png",
+        "J24/main/J24-s3-a4.png",
+        "J24/main/J24-s3-a5.png"
+      ],
+      "trace": "J24/main/trace.json"
+    },
+    {
+      "journey": "J24",
+      "step": 4,
+      "goal": "Enter a distant resolved cell using a temporary neighborhood, return to origin, and inspect wrong-version/locked variants.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J24-s4-a1",
+        "J24-s4-a2",
+        "J24-s4-a3",
+        "J24-s4-a4",
+        "J24-s4-a5"
+      ],
+      "coverage": [
+        "distant neighborhood",
+        "Enter/return",
+        "wrong version",
+        "locked status"
+      ],
+      "frames": [
+        "J24/main/J24-s4-a1.png",
+        "J24/main/J24-s4-a2.png",
+        "J24/main/J24-s4-a3.png",
+        "J24/main/J24-s4-a4.png",
+        "J24/main/J24-s4-a5.png"
+      ],
+      "trace": "J24/main/trace.json"
+    },
+    {
+      "journey": "J24",
+      "step": 5,
+      "goal": "Disable L17 contributor while pinned; retain explanatory inspector with explicit dismiss/re-enable choices.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J24-s5-a1",
+        "J24-s5-a2"
+      ],
+      "coverage": [
+        "disabled-but-pinned context",
+        "explicit dismiss/re-enable"
+      ],
+      "frames": [
+        "J24/main/J24-s5-a1.png",
+        "J24/main/J24-s5-a2.png"
+      ],
+      "trace": "J24/main/trace.json"
+    },
+    {
+      "journey": "J25",
+      "step": 1,
+      "goal": "Open the independent five-visit compass and identify the two branches and current visit 03.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J25-s1-a1"
+      ],
+      "coverage": [
+        "independent fixture identity",
+        "two branches",
+        "current visit"
+      ],
+      "frames": [
+        "J25/main/J25-s1-a1.png"
+      ],
+      "trace": "J25/main/trace.json"
+    },
+    {
+      "journey": "J25",
+      "step": 2,
+      "goal": "Preview visit 05, inspect exact version/occurrence/playback, then explicitly Resume.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J25-s2-a1",
+        "J25-s2-a2",
+        "J25-s2-a3"
+      ],
+      "coverage": [
+        "preview vs current",
+        "identity and playback descriptor",
+        "Resume effect"
+      ],
+      "frames": [
+        "J25/main/J25-s2-a1.png",
+        "J25/main/J25-s2-a2.png",
+        "J25/main/J25-s2-a3.png"
+      ],
+      "trace": "J25/main/trace.json"
+    },
+    {
+      "journey": "J25",
+      "step": 3,
+      "goal": "Back to 02, choose each forward child, resume 03 and verify leaf behavior and sibling route.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J25-s3-a1",
+        "J25-s3-a1b",
+        "J25-s3-a2",
+        "J25-s3-a3",
+        "J25-s3-a4",
+        "J25-s3-a4b",
+        "J25-s3-a5",
+        "J25-s3-a6",
+        "J25-s3-a7"
+      ],
+      "coverage": [
+        "Activity Back",
+        "choose each child",
+        "leaf behavior",
+        "sibling path"
+      ],
+      "frames": [
+        "J25/main/J25-s3-a1.png",
+        "J25/main/J25-s3-a1b.png",
+        "J25/main/J25-s3-a2.png",
+        "J25/main/J25-s3-a3.png",
+        "J25/main/J25-s3-a4.png",
+        "J25/main/J25-s3-a4b.png",
+        "J25/main/J25-s3-a5.png",
+        "J25/main/J25-s3-a6.png",
+        "J25/main/J25-s3-a7.png"
+      ],
+      "trace": "J25/main/trace.json"
+    },
+    {
+      "journey": "J25",
+      "step": 4,
+      "goal": "Reference one visit, annotate another, then continue from an earlier visit while retaining every prior branch.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J25-s4-a1",
+        "J25-s4-a2",
+        "J25-s4-a3",
+        "J25-s4-a4",
+        "J25-s4-a5"
+      ],
+      "coverage": [
+        "reference visit",
+        "annotation visit",
+        "restore earlier visit",
+        "continue while keeping futures"
+      ],
+      "frames": [
+        "J25/main/J25-s4-a1.png",
+        "J25/main/J25-s4-a2.png",
+        "J25/main/J25-s4-a3.png",
+        "J25/main/J25-s4-a4.png",
+        "J25/main/J25-s4-a5.png"
+      ],
+      "trace": "J25/main/trace.json"
+    },
+    {
+      "journey": "J25",
+      "step": 5,
+      "goal": "Close/reopen activity with exact descriptors, then exercise unavailable-version retry while preserving existing futures.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J25-s5-a1",
+        "J25-s5-a2",
+        "J25-s5-a3",
+        "J25-s5-a4",
+        "J25-s5-a5",
+        "J25-s5-a6"
+      ],
+      "coverage": [
+        "J25-s5-a1..a6",
+        "exact V7 unavailable → availability restored → explicit retry; no visit/arrival"
+      ],
+      "frames": [
+        "J25/main/J25-s5-a1.png",
+        "J25/main/J25-s5-a2.png",
+        "J25/main/J25-s5-a3.png",
+        "J25/main/J25-s5-a4.png",
+        "J25/main/J25-s5-a5.png",
+        "J25/main/J25-s5-a6.png"
+      ],
+      "trace": "J25/main/trace.json"
+    },
+    {
+      "journey": "J26",
+      "step": 1,
+      "goal": "Inspect the integrated passage, whole-cell reference and saved-query recipe, including preserved descriptors and type-specific actions.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J26-s1-a1",
+        "J26-s1-a2",
+        "J26-s1-a3"
+      ],
+      "coverage": [
+        "passage inspector",
+        "whole-cell inspector",
+        "recipe inspector",
+        "reading place unchanged"
+      ],
+      "frames": [
+        "J26/main/J26-s1-a1.png",
+        "J26/main/J26-s1-a2.png",
+        "J26/main/J26-s1-a3.png"
+      ],
+      "trace": "J26/main/trace.json"
+    },
+    {
+      "journey": "J26",
+      "step": 2,
+      "goal": "Save disjoint spans, operation, query, reader walk and Link draft as typed references without changing their subjects.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J26-s2-a1",
+        "J26-s2-a2",
+        "J26-s2-a3",
+        "J26-s2-a4",
+        "J26-s2-a5"
+      ],
+      "coverage": [
+        "typed span bundle",
+        "operation",
+        "query recipe",
+        "reader walk",
+        "link draft",
+        "storage boundary"
+      ],
+      "frames": [
+        "J26/main/J26-s2-a1.png",
+        "J26/main/J26-s2-a2.png",
+        "J26/main/J26-s2-a3.png",
+        "J26/main/J26-s2-a4.png",
+        "J26/main/J26-s2-a5.png"
+      ],
+      "trace": "J26/main/trace.json"
+    },
+    {
+      "journey": "J26",
+      "step": 3,
+      "goal": "Filter the 146-item Pressure review to 18 matches with six visible, expand a counted source group and locate an off-window item through List.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J26-s3-a1",
+        "J26-s3-a2",
+        "J26-s3-a3",
+        "J26-s3-a4"
+      ],
+      "coverage": [
+        "146 item data",
+        "18 filtered",
+        "6 visible",
+        "counted group",
+        "off-window list navigation"
+      ],
+      "frames": [
+        "J26/main/J26-s3-a1.png",
+        "J26/main/J26-s3-a2.png",
+        "J26/main/J26-s3-a3.png",
+        "J26/main/J26-s3-a4.png"
+      ],
+      "trace": "J26/main/trace.json"
+    },
+    {
+      "journey": "J26",
+      "step": 4,
+      "goal": "Save an exact duplicate, equal text at different source addresses and another occurrence of shared source; inspect policy before any merge.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J26-s4-a1",
+        "J26-s4-a2",
+        "J26-s4-a3",
+        "J26-s4-a4"
+      ],
+      "coverage": [
+        "exact duplicate policy",
+        "equal text different addresses",
+        "shared source different occurrence",
+        "explicit membership effects"
+      ],
+      "frames": [
+        "J26/main/J26-s4-a1.png",
+        "J26/main/J26-s4-a2.png",
+        "J26/main/J26-s4-a3.png",
+        "J26/main/J26-s4-a4.png"
+      ],
+      "trace": "J26/main/trace.json"
+    },
+    {
+      "journey": "J26",
+      "step": 5,
+      "goal": "Dismiss and recover a card, reopen while preview bytes are not held and sources are locked or authority unresolved; retain descriptors and type actions.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J26-s5-a1",
+        "J26-s5-a2",
+        "J26-s5-a3",
+        "J26-s5-a4",
+        "J26-s5-a5"
+      ],
+      "coverage": [
+        "dismiss/recover",
+        "reopen offline",
+        "not-held preview",
+        "locked cell",
+        "unresolved authority",
+        "type-specific actions"
+      ],
+      "frames": [
+        "J26/main/J26-s5-a1.png",
+        "J26/main/J26-s5-a2.png",
+        "J26/main/J26-s5-a3.png",
+        "J26/main/J26-s5-a4.png",
+        "J26/main/J26-s5-a5.png"
+      ],
+      "trace": "J26/main/trace.json"
+    },
+    {
+      "journey": "J26",
+      "step": 6,
+      "goal": "Offer pouch to forge, select eligible concrete content spans and review exclusions for whole-cell, op, query, walk and draft.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J26-s6-a1",
+        "J26-s6-a2",
+        "J26-s6-a3"
+      ],
+      "coverage": [
+        "forge bay handoff",
+        "eligible spans",
+        "whole-cell versus contents",
+        "excluded non-content kinds",
+        "source/destination boundary"
+      ],
+      "frames": [
+        "J26/main/J26-s6-a1.png",
+        "J26/main/J26-s6-a2.png",
+        "J26/main/J26-s6-a3.png"
+      ],
+      "trace": "J26/main/trace.json"
+    },
+    {
+      "journey": "J27",
+      "step": 1,
+      "goal": "Stage two disjoint left spans and three right content members while preserving the source gap and creating no Link.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J27-s1-a1",
+        "J27-s1-a2",
+        "J27-s1-a3",
+        "J27-s1-a4"
+      ],
+      "coverage": [
+        "J27-s1-a1..a4"
+      ],
+      "frames": [
+        "J27/main/J27-s1-a1.png",
+        "J27/main/J27-s1-a2.png",
+        "J27/main/J27-s1-a3.png",
+        "J27/main/J27-s1-a4.png"
+      ],
+      "trace": "J27/main/trace.json"
+    },
+    {
+      "journey": "J27",
+      "step": 2,
+      "goal": "Use pointer and synchronized list actions to inspect, reorder, remove and undo; keep source packs, capture groups, order and occurrence choices distinct.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J27-s2-a1",
+        "J27-s2-a2",
+        "J27-s2-a3",
+        "J27-s2-a4",
+        "J27-s2-a5"
+      ],
+      "coverage": [
+        "Inspect; reorder; remove; undo; source packs/capture groups/authored order/occurrence choices"
+      ],
+      "frames": [
+        "J27/main/J27-s2-a1.png",
+        "J27/main/J27-s2-a2.png",
+        "J27/main/J27-s2-a3.png",
+        "J27/main/J27-s2-a4.png",
+        "J27/main/J27-s2-a5.png"
+      ],
+      "trace": "J27/main/trace.json"
+    },
+    {
+      "journey": "J27",
+      "step": 3,
+      "goal": "Declare receiving store, branch, base, author identity/status and mode; browse another document/older source without redirecting destination.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J27-s3-a1",
+        "J27-s3-a2",
+        "J27-s3-a3"
+      ],
+      "coverage": [
+        "J27-s3-a1..a3"
+      ],
+      "frames": [
+        "J27/main/J27-s3-a1.png",
+        "J27/main/J27-s3-a2.png",
+        "J27/main/J27-s3-a3.png"
+      ],
+      "trace": "J27/main/trace.json"
+    },
+    {
+      "journey": "J27",
+      "step": 4,
+      "goal": "Preview and inspect one proposed Link, both ordered endsets, anchors, relation/prominence; occurrence affects entry context only.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J27-s4-a1",
+        "J27-s4-a2"
+      ],
+      "coverage": [
+        "J27-s4-a1..a2"
+      ],
+      "frames": [
+        "J27/main/J27-s4-a1.png",
+        "J27/main/J27-s4-a2.png"
+      ],
+      "trace": "J27/main/trace.json"
+    },
+    {
+      "journey": "J27",
+      "step": 5,
+      "goal": "Choose explicit Forge or Discard; keep draft save, source edits and destination effects separate.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J27-s5-a1",
+        "J27-s5-a2",
+        "J27-s5-a3"
+      ],
+      "coverage": [
+        "J27-s5-a1..a3"
+      ],
+      "frames": [
+        "J27/main/J27-s5-a1.png",
+        "J27/main/J27-s5-a2.png",
+        "J27/main/J27-s5-a3.png"
+      ],
+      "trace": "J27/main/trace.json"
+    },
+    {
+      "journey": "J28",
+      "step": 1,
+      "goal": "Restore exact endsets, groupings, relation and pinned destination before preview bytes arrive.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J28-s1-a1",
+        "J28-s1-a2"
+      ],
+      "coverage": [
+        "J28-s1-a1..a2"
+      ],
+      "frames": [
+        "J28/main/J28-s1-a1.png",
+        "J28/main/J28-s1-a2.png"
+      ],
+      "trace": "J28/main/trace.json"
+    },
+    {
+      "journey": "J28",
+      "step": 2,
+      "goal": "Separate optional preview absence, required identity validation and destination validation failure.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J28-s2-a1",
+        "J28-s2-a2",
+        "J28-s2-a3"
+      ],
+      "coverage": [
+        "J28-s2-a1..a3",
+        "variant J28-destination-failure"
+      ],
+      "frames": [
+        "J28/main/J28-s2-a1.png",
+        "J28/main/J28-s2-a2.png",
+        "J28/main/J28-s2-a3.png"
+      ],
+      "trace": "J28/main/trace.json"
+    },
+    {
+      "journey": "J28",
+      "step": 3,
+      "goal": "Find L21 among 40 left/60 right members, inspect five occurrences, independently filter/reorder a bay and restore the true ordinal without pair fan-out.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J28-s3-a1",
+        "J28-s3-a2",
+        "J28-s3-a3",
+        "J28-s3-a4",
+        "J28-s3-a5"
+      ],
+      "coverage": [
+        "J28-s3-a3..a5: independent left/right filter, left reorder/undo, right unchanged"
+      ],
+      "frames": [
+        "J28/main/J28-s3-a1.png",
+        "J28/main/J28-s3-a2.png",
+        "J28/main/J28-s3-a3.png",
+        "J28/main/J28-s3-a4.png",
+        "J28/main/J28-s3-a5.png"
+      ],
+      "trace": "J28/main/trace.json"
+    },
+    {
+      "journey": "J28",
+      "step": 4,
+      "goal": "Preserve Draft L7 on a preflight failure, then identify recoverable unpublished work after a mid-commit failure.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J28-s4-a1",
+        "J28-s4-a2",
+        "J28-s4-a3",
+        "J28-s4-a4",
+        "J28-s4-a5"
+      ],
+      "coverage": [
+        "J28-s4-a1..a5"
+      ],
+      "frames": [
+        "J28/main/J28-s4-a1.png",
+        "J28/main/J28-s4-a2.png",
+        "J28/main/J28-s4-a3.png",
+        "J28/main/J28-s4-a4.png",
+        "J28/main/J28-s4-a5.png"
+      ],
+      "trace": "J28/main/trace.json"
+    },
+    {
+      "journey": "J28",
+      "step": 5,
+      "goal": "After lost reply, block blind retry, check exact attempt status, and open the existing receipt if already created.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J28-s5-a1",
+        "J28-s5-a2",
+        "J28-s5-a3"
+      ],
+      "coverage": [
+        "J28-s5-a1..a3"
+      ],
+      "frames": [
+        "J28/main/J28-s5-a1.png",
+        "J28/main/J28-s5-a2.png",
+        "J28/main/J28-s5-a3.png"
+      ],
+      "trace": "J28/main/trace.json"
+    },
+    {
+      "journey": "J28",
+      "step": 6,
+      "goal": "Keep or discard draft separately, reopen it and compare exact order/destination; resolve unknown outcomes before discard.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J28-s6-a1",
+        "J28-s6-a2"
+      ],
+      "coverage": [
+        "J28-s6-a1..a2"
+      ],
+      "frames": [
+        "J28/main/J28-s6-a1.png",
+        "J28/main/J28-s6-a2.png"
+      ],
+      "trace": "J28/main/trace.json"
+    },
+    {
+      "journey": "J29",
+      "step": 1,
+      "goal": "Identify all four source identities, versions, origins and selected locators.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J29-s1-a1",
+        "J29-s1-a2"
+      ],
+      "coverage": [
+        "J29-s1-a1..a2"
+      ],
+      "frames": [
+        "J29/main/J29-s1-a1.png",
+        "J29/main/J29-s1-a2.png"
+      ],
+      "trace": "J29/main/trace.json"
+    },
+    {
+      "journey": "J29",
+      "step": 2,
+      "goal": "Inspect manual video-to-audio cue, separate clocks, derived transcript and exact locators; playback is explicit.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J29-s2-a1",
+        "J29-s2-a2",
+        "J29-s2-a3",
+        "J29-s2-a4"
+      ],
+      "coverage": [
+        "J29-s2-a1..a4"
+      ],
+      "frames": [
+        "J29/main/J29-s2-a1.png",
+        "J29/main/J29-s2-a2.png",
+        "J29/main/J29-s2-a3.png",
+        "J29/main/J29-s2-a4.png"
+      ],
+      "trace": "J29/main/trace.json"
+    },
+    {
+      "journey": "J29",
+      "step": 3,
+      "goal": "Preview and adjust independent cue clocks, remove and add through list while retaining exact source versions/locators.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J29-s3-a1",
+        "J29-s3-a2",
+        "J29-s3-a3"
+      ],
+      "coverage": [
+        "J29-s3-a1..a3"
+      ],
+      "frames": [
+        "J29/main/J29-s3-a1.png",
+        "J29/main/J29-s3-a2.png",
+        "J29/main/J29-s3-a3.png"
+      ],
+      "trace": "J29/main/trace.json"
+    },
+    {
+      "journey": "J29",
+      "step": 4,
+      "goal": "Save cue set, clear staging and reopen; preserve cue descriptors for unavailable segment or unsupported seek basis.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J29-s4-a1",
+        "J29-s4-a2",
+        "J29-s4-a3"
+      ],
+      "coverage": [
+        "J29-s4-a1..a3",
+        "variant J29-unsupported-word-seek"
+      ],
+      "frames": [
+        "J29/main/J29-s4-a1.png",
+        "J29/main/J29-s4-a2.png",
+        "J29/main/J29-s4-a3.png"
+      ],
+      "trace": "J29/main/trace.json"
+    },
+    {
+      "journey": "J29",
+      "step": 5,
+      "goal": "Open a separate Forge chooser, offer only validated content spans, show exclusions and cancel without authoring a Link.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J29-s5-a1",
+        "J29-s5-a2",
+        "J29-s5-a3"
+      ],
+      "coverage": [
+        "J29-s5-a1..a3"
+      ],
+      "frames": [
+        "J29/main/J29-s5-a1.png",
+        "J29/main/J29-s5-a2.png",
+        "J29/main/J29-s5-a3.png"
+      ],
+      "trace": "J29/main/trace.json"
+    },
+    {
+      "journey": "J30",
+      "step": 1,
+      "goal": "Inspect the 100-op trunk/three-branch fixture, then separate ten-path variant; expand coil and find all exits.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J30-s1-a1",
+        "J30-s1-a2"
+      ],
+      "coverage": [
+        "J30-s1-a1..a2",
+        "variant J30-ten-paths"
+      ],
+      "frames": [
+        "J30/main/J30-s1-a1.png",
+        "J30/main/J30-s1-a2.png"
+      ],
+      "trace": "J30/main/trace.json"
+    },
+    {
+      "journey": "J30",
+      "step": 2,
+      "goal": "Tug one container into parallel lens while retaining source placement; distinguish ancestry, correspondence and filtered order.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J30-s2-a1",
+        "J30-s2-a2",
+        "J30-s2-a3"
+      ],
+      "coverage": [
+        "J30-s2-a1..a3"
+      ],
+      "frames": [
+        "J30/main/J30-s2-a1.png",
+        "J30/main/J30-s2-a2.png",
+        "J30/main/J30-s2-a3.png"
+      ],
+      "trace": "J30/main/trace.json"
+    },
+    {
+      "journey": "J30",
+      "step": 3,
+      "goal": "Inspect insertion/deletion/move in exact parent frames; compare frozen Original source with explicit Evolving boundary rules and occurrence scopes.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J30-s3-a1",
+        "J30-s3-a2",
+        "J30-s3-a3",
+        "J30-s3-a4",
+        "J30-s3-a5",
+        "J30-s3-a6"
+      ],
+      "coverage": [
+        "J30-s3-a1..a6"
+      ],
+      "frames": [
+        "J30/main/J30-s3-a1.png",
+        "J30/main/J30-s3-a2.png",
+        "J30/main/J30-s3-a3.png",
+        "J30/main/J30-s3-a4.png",
+        "J30/main/J30-s3-a5.png",
+        "J30/main/J30-s3-a6.png"
+      ],
+      "trace": "J30/main/trace.json"
+    },
+    {
+      "journey": "J30",
+      "step": 4,
+      "goal": "Toggle unrelated earlier offset shift as context and show its owner, parent, reason and before/after footprint.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J30-s4-a1",
+        "J30-s4-a2"
+      ],
+      "coverage": [
+        "J30-s4-a1..a2"
+      ],
+      "frames": [
+        "J30/main/J30-s4-a1.png",
+        "J30/main/J30-s4-a2.png"
+      ],
+      "trace": "J30/main/trace.json"
+    },
+    {
+      "journey": "J30",
+      "step": 5,
+      "goal": "Inspect C24 rewiring C17’s d.reading neighbor; separate own edits from affected topology and show reciprocal endpoints.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J30-s5-a1",
+        "J30-s5-a2",
+        "J30-s5-a3"
+      ],
+      "coverage": [
+        "J30-s5-a1..a3"
+      ],
+      "frames": [
+        "J30/main/J30-s5-a1.png",
+        "J30/main/J30-s5-a2.png",
+        "J30/main/J30-s5-a3.png"
+      ],
+      "trace": "J30/main/trace.json"
+    },
+    {
+      "journey": "J30",
+      "step": 6,
+      "goal": "Capture exact page footprint and layout, inspect passage split across later pages, then restore capture.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J30-s6-a1",
+        "J30-s6-a2",
+        "J30-s6-a3"
+      ],
+      "coverage": [
+        "J30-s6-a1..a3"
+      ],
+      "frames": [
+        "J30/main/J30-s6-a1.png",
+        "J30/main/J30-s6-a2.png",
+        "J30/main/J30-s6-a3.png"
+      ],
+      "trace": "J30/main/trace.json"
+    },
+    {
+      "journey": "J30",
+      "step": 7,
+      "goal": "Cancel partial lens, save recipe and result snapshot separately, inspect completed empty, and confirm view expansion adds no ops.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J30-s7-a1",
+        "J30-s7-a2",
+        "J30-s7-a3",
+        "J30-s7-a4",
+        "J30-s7-a5"
+      ],
+      "coverage": [
+        "J30-s7-a1..a5"
+      ],
+      "frames": [
+        "J30/main/J30-s7-a1.png",
+        "J30/main/J30-s7-a2.png",
+        "J30/main/J30-s7-a3.png",
+        "J30/main/J30-s7-a4.png",
+        "J30/main/J30-s7-a5.png"
+      ],
+      "trace": "J30/main/trace.json"
+    },
+    {
+      "journey": "J31",
+      "step": 1,
+      "goal": "Inspect exact selected source passage at Draft A V27 with ranges and occurrence fixed.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J31-s1-a1",
+        "J31-s1-a2"
+      ],
+      "coverage": [
+        "J31-s1-a1..a2"
+      ],
+      "frames": [
+        "J31/main/J31-s1-a1.png",
+        "J31/main/J31-s1-a2.png"
+      ],
+      "trace": "J31/main/trace.json"
+    },
+    {
+      "journey": "J31",
+      "step": 2,
+      "goal": "Select Draft B V31 separately from the source and inspect complete base/future identities.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J31-s2-a1",
+        "J31-s2-a2"
+      ],
+      "coverage": [
+        "J31-s2-a1..a2"
+      ],
+      "frames": [
+        "J31/main/J31-s2-a1.png",
+        "J31/main/J31-s2-a2.png"
+      ],
+      "trace": "J31/main/trace.json"
+    },
+    {
+      "journey": "J31",
+      "step": 3,
+      "goal": "Inspect authoring preview, destination, mode, author verification and proposed effects before commit.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J31-s3-a1",
+        "J31-s3-a2"
+      ],
+      "coverage": [
+        "J31-s3-a1..a2"
+      ],
+      "frames": [
+        "J31/main/J31-s3-a1.png",
+        "J31/main/J31-s3-a2.png"
+      ],
+      "trace": "J31/main/trace.json"
+    },
+    {
+      "journey": "J31",
+      "step": 4,
+      "goal": "Cancel preview, handle unavailable source and advanced head; preserve pinned V31 until explicit keep/new-base choice.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J31-s4-a1",
+        "J31-s4-a2",
+        "J31-s4-a3",
+        "J31-s4-a4",
+        "J31-s4-a5"
+      ],
+      "coverage": [
+        "J31-s4-a1..a5",
+        "variant J31-choose-new-base"
+      ],
+      "frames": [
+        "J31/main/J31-s4-a1.png",
+        "J31/main/J31-s4-a2.png",
+        "J31/main/J31-s4-a3.png",
+        "J31/main/J31-s4-a4.png",
+        "J31/main/J31-s4-a5.png"
+      ],
+      "trace": "J31/main/trace.json"
+    },
+    {
+      "journey": "J31",
+      "step": 5,
+      "goal": "Commit only after validation; inspect new branch receipt and source origin while preserving existing futures.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J31-s5-a1",
+        "J31-s5-a2",
+        "J31-s5-a3"
+      ],
+      "coverage": [
+        "J31-s5-a1..a3"
+      ],
+      "frames": [
+        "J31/main/J31-s5-a1.png",
+        "J31/main/J31-s5-a2.png",
+        "J31/main/J31-s5-a3.png"
+      ],
+      "trace": "J31/main/trace.json"
+    },
+    {
+      "journey": "J31",
+      "step": 6,
+      "goal": "Reopen result, distinguish authored branch from source/reader visit and interpret comparison count scope.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J31-s6-a1",
+        "J31-s6-a2"
+      ],
+      "coverage": [
+        "J31-s6-a1..a2"
+      ],
+      "frames": [
+        "J31/main/J31-s6-a1.png",
+        "J31/main/J31-s6-a2.png"
+      ],
+      "trace": "J31/main/trace.json"
+    },
+    {
+      "journey": "J32",
+      "step": 1,
+      "goal": "Save/close visit 03 with full query, comparison, link, companions, package prefs, typed pouch and sibling route.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J32-s1-a1",
+        "J32-s1-a2"
+      ],
+      "coverage": [
+        "J32-s1-a1..a2"
+      ],
+      "frames": [
+        "J32/main/J32-s1-a1.png",
+        "J32/main/J32-s1-a2.png"
+      ],
+      "trace": "J32/main/trace.json"
+    },
+    {
+      "journey": "J32",
+      "step": 2,
+      "goal": "Offline reopen restores exact identities before previews and preserves cached, absent and incomplete statuses.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J32-s2-a1",
+        "J32-s2-a2",
+        "J32-s2-a3"
+      ],
+      "coverage": [
+        "J32-s2-a1..a3"
+      ],
+      "frames": [
+        "J32/main/J32-s2-a1.png",
+        "J32/main/J32-s2-a2.png",
+        "J32/main/J32-s2-a3.png"
+      ],
+      "trace": "J32/main/trace.json"
+    },
+    {
+      "journey": "J32",
+      "step": 3,
+      "goal": "Use keyboard/list route to inspect historical C17, cycle Link member and resume an existing reader visit with named focus.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J32-s3-a1",
+        "J32-s3-a2",
+        "J32-s3-a3",
+        "J32-s3-a4"
+      ],
+      "coverage": [
+        "J32-s3-a1..a4"
+      ],
+      "frames": [
+        "J32/main/J32-s3-a1.png",
+        "J32/main/J32-s3-a2.png",
+        "J32/main/J32-s3-a3.png",
+        "J32/main/J32-s3-a4.png"
+      ],
+      "trace": "J32/main/trace.json"
+    },
+    {
+      "journey": "J32",
+      "step": 4,
+      "goal": "Inspect narrow, enlarged and reduced-motion representations; access off-window items, branch exits and both complete endsets.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J32-s4-a1",
+        "J32-s4-a2",
+        "J32-s4-a3"
+      ],
+      "coverage": [
+        "J32-s4-a1..a3"
+      ],
+      "frames": [
+        "J32/main/J32-s4-a1.png",
+        "J32/main/J32-s4-a2.png",
+        "J32/main/J32-s4-a3.png"
+      ],
+      "trace": "J32/main/trace.json"
+    },
+    {
+      "journey": "J32",
+      "step": 5,
+      "goal": "Preserve unreadable saved reader data and cancelled query state; offer recoverable copy/repair/cancel paths.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J32-s5-a1",
+        "J32-s5-a2",
+        "J32-s5-a3"
+      ],
+      "coverage": [
+        "J32-s5-a1..a3",
+        "variant J32-repair-session"
+      ],
+      "frames": [
+        "J32/main/J32-s5-a1.png",
+        "J32/main/J32-s5-a2.png",
+        "J32/main/J32-s5-a3.png"
+      ],
+      "trace": "J32/main/trace.json"
+    },
+    {
+      "journey": "J32",
+      "step": 6,
+      "goal": "Reconnect, explicitly rerun query/acquire pinned V12, preserve saved identities and package choices, then explicitly enter verified edition.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J32-s6-a1",
+        "J32-s6-a2",
+        "J32-s6-a3",
+        "J32-s6-a4",
+        "J32-s6-a5",
+        "J32-s6-a6"
+      ],
+      "coverage": [
+        "J32-s6-a1..a6"
+      ],
+      "frames": [
+        "J32/main/J32-s6-a1.png",
+        "J32/main/J32-s6-a2.png",
+        "J32/main/J32-s6-a3.png",
+        "J32/main/J32-s6-a4.png",
+        "J32/main/J32-s6-a5.png",
+        "J32/main/J32-s6-a6.png"
+      ],
+      "trace": "J32/main/trace.json"
+    }
+  ],
+  "variants": [
+    {
+      "journey": "J17",
+      "id": "J17-invalid",
+      "step": 4,
+      "title": "Invalid payload blocks Open",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J17-invalid-a1",
+        "J17-invalid-a2",
+        "J17-invalid-a3"
+      ],
+      "frames": [
+        "J17/J17-invalid/before.png",
+        "J17/J17-invalid/J17-invalid-a1.png",
+        "J17/J17-invalid/J17-invalid-a2.png",
+        "J17/J17-invalid/J17-invalid-a3.png"
+      ],
+      "trace": "J17/J17-invalid/trace.json"
+    },
+    {
+      "journey": "J17",
+      "id": "J17-unavailable",
+      "step": 4,
+      "title": "Unavailable peers and safe cancellation",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J17-unavailable-a1",
+        "J17-unavailable-a2"
+      ],
+      "frames": [
+        "J17/J17-unavailable/before.png",
+        "J17/J17-unavailable/J17-unavailable-a1.png",
+        "J17/J17-unavailable/J17-unavailable-a2.png"
+      ],
+      "trace": "J17/J17-unavailable/trace.json"
+    },
+    {
+      "journey": "J17",
+      "id": "J17-cancel",
+      "step": 4,
+      "title": "Cancel interrupted request",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J17-cancel-a1"
+      ],
+      "frames": [
+        "J17/J17-cancel/before.png",
+        "J17/J17-cancel/J17-cancel-a1.png"
+      ],
+      "trace": "J17/J17-cancel/trace.json"
+    },
+    {
+      "journey": "J17",
+      "id": "J17-s3-v13-route",
+      "step": 3,
+      "title": "Request V13 separately",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J17-s3-v13"
+      ],
+      "frames": [
+        "J17/J17-s3-v13-route/before.png",
+        "J17/J17-s3-v13-route/J17-s3-v13.png"
+      ],
+      "trace": "J17/J17-s3-v13-route/trace.json"
+    },
+    {
+      "journey": "J18",
+      "id": "J18-video-not-held",
+      "step": 4,
+      "title": "Video payload remains not held",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J18-video-not-held-a1"
+      ],
+      "frames": [
+        "J18/J18-video-not-held/before.png",
+        "J18/J18-video-not-held/J18-video-not-held-a1.png"
+      ],
+      "trace": "J18/J18-video-not-held/trace.json"
+    },
+    {
+      "journey": "J18",
+      "id": "J18-s4-acquire-route",
+      "step": 4,
+      "title": "Acquire pinned V9",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J18-s4-acquire"
+      ],
+      "frames": [
+        "J18/J18-s4-acquire-route/before.png",
+        "J18/J18-s4-acquire-route/J18-s4-acquire.png"
+      ],
+      "trace": "J18/J18-s4-acquire-route/trace.json"
+    },
+    {
+      "journey": "J19",
+      "id": "J19-stale",
+      "step": 3,
+      "title": "Superseded query reply arrives after Q2",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J19-stale-a1"
+      ],
+      "frames": [
+        "J19/J19-stale/before.png",
+        "J19/J19-stale/J19-stale-a1.png"
+      ],
+      "trace": "J19/J19-stale/trace.json"
+    },
+    {
+      "journey": "J20",
+      "id": "J20-literal-3140",
+      "step": 2,
+      "title": "Literal substring · 3.140",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J20-literal-3140-a1"
+      ],
+      "frames": [
+        "J20/J20-literal-3140/before.png",
+        "J20/J20-literal-3140/J20-literal-3140-a1.png"
+      ],
+      "trace": "J20/J20-literal-3140/trace.json"
+    },
+    {
+      "journey": "J20",
+      "id": "J20-token-3140",
+      "step": 2,
+      "title": "Whole token · 3.140",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J20-token-3140-a1"
+      ],
+      "frames": [
+        "J20/J20-token-3140/before.png",
+        "J20/J20-token-3140/J20-token-3140-a1.png"
+      ],
+      "trace": "J20/J20-token-3140/trace.json"
+    },
+    {
+      "journey": "J20",
+      "id": "J20-number-units",
+      "step": 2,
+      "title": "Numeric value · 3.14 bar",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J20-number-units-a1"
+      ],
+      "frames": [
+        "J20/J20-number-units/before.png",
+        "J20/J20-number-units/J20-number-units-a1.png"
+      ],
+      "trace": "J20/J20-number-units/trace.json"
+    },
+    {
+      "journey": "J20",
+      "id": "J20-missing-state",
+      "step": 5,
+      "title": "Historical state · Run B / B05",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J20-missing-state-a1"
+      ],
+      "frames": [
+        "J20/J20-missing-state/before.png",
+        "J20/J20-missing-state/J20-missing-state-a1.png"
+      ],
+      "trace": "J20/J20-missing-state/trace.json"
+    },
+    {
+      "journey": "J21",
+      "id": "J21-three-state",
+      "step": 2,
+      "title": "Select V5 before LCA and both branch tips",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J21-three-state-a1"
+      ],
+      "frames": [
+        "J21/J21-three-state/before.png",
+        "J21/J21-three-state/J21-three-state-a1.png"
+      ],
+      "trace": "J21/J21-three-state/trace.json"
+    },
+    {
+      "journey": "J21",
+      "id": "J21-topology",
+      "step": 3,
+      "title": "Reciprocal topology changes",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J21-topology-a1"
+      ],
+      "frames": [
+        "J21/J21-topology/before.png",
+        "J21/J21-topology/J21-topology-a1.png"
+      ],
+      "trace": "J21/J21-topology/trace.json"
+    },
+    {
+      "journey": "J21",
+      "id": "J21-unavailable",
+      "step": 4,
+      "title": "Unavailable comparison region",
+      "outcome": "Concept supported",
+      "reviewer": "luna-3",
+      "actions": [
+        "J21-unavailable-a1"
+      ],
+      "frames": [
+        "J21/J21-unavailable/before.png",
+        "J21/J21-unavailable/J21-unavailable-a1.png"
+      ],
+      "trace": "J21/J21-unavailable/trace.json"
+    },
+    {
+      "journey": "J22",
+      "id": "J22-v12-not-hit",
+      "step": 3,
+      "title": "Pinned V12 remains a comparison, not a pressure match.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J22-v12-not-hit-s3-a1"
+      ],
+      "frames": [
+        "J22/J22-v12-not-hit/before.png",
+        "J22/J22-v12-not-hit/J22-v12-not-hit-s3-a1.png"
+      ],
+      "trace": "J22/J22-v12-not-hit/trace.json"
+    },
+    {
+      "journey": "J22",
+      "id": "J22-anchor-fold",
+      "step": 4,
+      "title": "Fold/expand leaves the exact reading anchor fixed.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J22-anchor-fold-s4-a1"
+      ],
+      "frames": [
+        "J22/J22-anchor-fold/before.png",
+        "J22/J22-anchor-fold/J22-anchor-fold-s4-a1.png"
+      ],
+      "trace": "J22/J22-anchor-fold/trace.json"
+    },
+    {
+      "journey": "J22",
+      "id": "J22-partial-cancel",
+      "step": 4,
+      "title": "Cancel partial query without discarding found results.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J22-partial-cancel-s4-a1"
+      ],
+      "frames": [
+        "J22/J22-partial-cancel/before.png",
+        "J22/J22-partial-cancel/J22-partial-cancel-s4-a1.png"
+      ],
+      "trace": "J22/J22-partial-cancel/trace.json"
+    },
+    {
+      "journey": "J23",
+      "id": "J23-review-only",
+      "step": 4,
+      "title": "Reviewing #13 leaves it unretained and does not change #12.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J23-review-only-s4-a1"
+      ],
+      "frames": [
+        "J23/J23-review-only/before.png",
+        "J23/J23-review-only/J23-review-only-s4-a1.png"
+      ],
+      "trace": "J23/J23-review-only/trace.json"
+    },
+    {
+      "journey": "J23",
+      "id": "J23-retain-only",
+      "step": 4,
+      "title": "Retain #13 without enabling it.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J23-retain-only-s4-a1"
+      ],
+      "frames": [
+        "J23/J23-retain-only/before.png",
+        "J23/J23-retain-only/J23-retain-only-s4-a1.png"
+      ],
+      "trace": "J23/J23-retain-only/trace.json"
+    },
+    {
+      "journey": "J23",
+      "id": "J23-invalid-signature",
+      "step": 2,
+      "title": "Invalid signature blocks enablement but leaves inspection available.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J23-invalid-signature-s2-a1"
+      ],
+      "frames": [
+        "J23/J23-invalid-signature/before.png",
+        "J23/J23-invalid-signature/J23-invalid-signature-s2-a1.png"
+      ],
+      "trace": "J23/J23-invalid-signature/trace.json"
+    },
+    {
+      "journey": "J24",
+      "id": "J24-cancel-unavailable",
+      "step": 3,
+      "title": "Cancel preserves the unresolved exact Right 3 and adds no visit.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J24-cancel-unavailable-s3-a1"
+      ],
+      "frames": [
+        "J24/J24-cancel-unavailable/before.png",
+        "J24/J24-cancel-unavailable/J24-cancel-unavailable-s3-a1.png"
+      ],
+      "trace": "J24/J24-cancel-unavailable/trace.json"
+    },
+    {
+      "journey": "J24",
+      "id": "J24-wrong-version",
+      "step": 4,
+      "title": "V10 cannot stand in for pinned V9.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J24-wrong-version-s4-a1"
+      ],
+      "frames": [
+        "J24/J24-wrong-version/before.png",
+        "J24/J24-wrong-version/J24-wrong-version-s4-a1.png"
+      ],
+      "trace": "J24/J24-wrong-version/trace.json"
+    },
+    {
+      "journey": "J24",
+      "id": "J24-overlap-link",
+      "step": 2,
+      "title": "Inspect overlapping L28 without inheriting L17 cursors.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J24-overlap-link-s2-a1"
+      ],
+      "frames": [
+        "J24/J24-overlap-link/before.png",
+        "J24/J24-overlap-link/J24-overlap-link-s2-a1.png"
+      ],
+      "trace": "J24/J24-overlap-link/trace.json"
+    },
+    {
+      "journey": "J24",
+      "id": "J24-reenable-carrier",
+      "step": 5,
+      "title": "Re-enable the disabled carrier while retaining exact selected Link",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J24-reenable-carrier-a1"
+      ],
+      "frames": [
+        "J24/J24-reenable-carrier/before.png",
+        "J24/J24-reenable-carrier/J24-reenable-carrier-a1.png"
+      ],
+      "trace": "J24/J24-reenable-carrier/trace.json"
+    },
+    {
+      "journey": "J24",
+      "id": "J24-dismiss-carrier",
+      "step": 5,
+      "title": "Dismiss active inspector while preserving Link and carrier choice",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J24-dismiss-carrier-a1"
+      ],
+      "frames": [
+        "J24/J24-dismiss-carrier/before.png",
+        "J24/J24-dismiss-carrier/J24-dismiss-carrier-a1.png"
+      ],
+      "trace": "J24/J24-dismiss-carrier/trace.json"
+    },
+    {
+      "journey": "J25",
+      "id": "J25-preview-no-move",
+      "step": 2,
+      "title": "Preview is not a completed visit or current-place change.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J25-preview-no-move-s2-a1"
+      ],
+      "frames": [
+        "J25/J25-preview-no-move/before.png",
+        "J25/J25-preview-no-move/J25-preview-no-move-s2-a1.png"
+      ],
+      "trace": "J25/J25-preview-no-move/trace.json"
+    },
+    {
+      "journey": "J25",
+      "id": "J25-unavailable",
+      "step": 5,
+      "title": "Unavailable V7 retains its saved identity and original futures.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J25-unavailable-s5-a1"
+      ],
+      "frames": [
+        "J25/J25-unavailable/before.png",
+        "J25/J25-unavailable/J25-unavailable-s5-a1.png"
+      ],
+      "trace": "J25/J25-unavailable/trace.json"
+    },
+    {
+      "journey": "J26",
+      "id": "J26-exact-duplicate-default",
+      "step": 4,
+      "title": "Exact duplicate reveals the existing reference unless Keep separate is explicitly chosen.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J26-exact-duplicate-default-s4-a1"
+      ],
+      "frames": [
+        "J26/J26-exact-duplicate-default/before.png",
+        "J26/J26-exact-duplicate-default/J26-exact-duplicate-default-s4-a1.png"
+      ],
+      "trace": "J26/J26-exact-duplicate-default/trace.json"
+    },
+    {
+      "journey": "J26",
+      "id": "J26-equal-text",
+      "step": 4,
+      "title": "Equal text at a different address remains distinct.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J26-equal-text-s4-a1"
+      ],
+      "frames": [
+        "J26/J26-equal-text/before.png",
+        "J26/J26-equal-text/J26-equal-text-s4-a1.png"
+      ],
+      "trace": "J26/J26-equal-text/trace.json"
+    },
+    {
+      "journey": "J26",
+      "id": "J26-shared-occurrence",
+      "step": 4,
+      "title": "Shared source ranges with different occurrences remain separately selectable.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J26-shared-occurrence-s4-a1"
+      ],
+      "frames": [
+        "J26/J26-shared-occurrence/before.png",
+        "J26/J26-shared-occurrence/J26-shared-occurrence-s4-a1.png"
+      ],
+      "trace": "J26/J26-shared-occurrence/trace.json"
+    },
+    {
+      "journey": "J26",
+      "id": "J26-availability",
+      "step": 5,
+      "title": "Offline reopen retains not-held, locked and unresolved descriptors.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J26-availability-s5-a1"
+      ],
+      "frames": [
+        "J26/J26-availability/before.png",
+        "J26/J26-availability/J26-availability-s5-a1.png"
+      ],
+      "trace": "J26/J26-availability/trace.json"
+    },
+    {
+      "journey": "J26",
+      "id": "J26-whole-cell-excluded",
+      "step": 6,
+      "title": "Whole-cell labels are not eligible until concrete content spans are selected.",
+      "outcome": "Concept supported",
+      "reviewer": "luna-1",
+      "actions": [
+        "J26-whole-cell-excluded-s6-a1"
+      ],
+      "frames": [
+        "J26/J26-whole-cell-excluded/before.png",
+        "J26/J26-whole-cell-excluded/J26-whole-cell-excluded-s6-a1.png"
+      ],
+      "trace": "J26/J26-whole-cell-excluded/trace.json"
+    },
+    {
+      "journey": "J27",
+      "id": "J27-discard-draft",
+      "step": 5,
+      "title": "Discard draft without changing its source material",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J27-discard-draft-a1"
+      ],
+      "frames": [
+        "J27/J27-discard-draft/before.png",
+        "J27/J27-discard-draft/J27-discard-draft-a1.png"
+      ],
+      "trace": "J27/J27-discard-draft/trace.json"
+    },
+    {
+      "journey": "J28",
+      "id": "J28-destination-failure",
+      "step": 2,
+      "title": "Destination/base validation fails while source reference is valid",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J28-destination-failure-a1",
+        "J28-destination-failure-a2"
+      ],
+      "frames": [
+        "J28/J28-destination-failure/before.png",
+        "J28/J28-destination-failure/J28-destination-failure-a1.png",
+        "J28/J28-destination-failure/J28-destination-failure-a2.png"
+      ],
+      "trace": "J28/J28-destination-failure/trace.json"
+    },
+    {
+      "journey": "J28",
+      "id": "J28-unknown-confirmed-uncommitted",
+      "step": 5,
+      "title": "Unknown reply; status confirms uncommitted and same-token retry is safe",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J28-unknown-confirmed-uncommitted-a1",
+        "J28-unknown-confirmed-uncommitted-a2",
+        "J28-unknown-confirmed-uncommitted-a3"
+      ],
+      "frames": [
+        "J28/J28-unknown-confirmed-uncommitted/before.png",
+        "J28/J28-unknown-confirmed-uncommitted/J28-unknown-confirmed-uncommitted-a1.png",
+        "J28/J28-unknown-confirmed-uncommitted/J28-unknown-confirmed-uncommitted-a2.png",
+        "J28/J28-unknown-confirmed-uncommitted/J28-unknown-confirmed-uncommitted-a3.png"
+      ],
+      "trace": "J28/J28-unknown-confirmed-uncommitted/trace.json"
+    },
+    {
+      "journey": "J28",
+      "id": "J28-status-created-existing",
+      "step": 5,
+      "title": "Unknown reply; status finds already-created Link",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J28-status-created-existing-a1",
+        "J28-status-created-existing-a2"
+      ],
+      "frames": [
+        "J28/J28-status-created-existing/before.png",
+        "J28/J28-status-created-existing/J28-status-created-existing-a1.png",
+        "J28/J28-status-created-existing/J28-status-created-existing-a2.png"
+      ],
+      "trace": "J28/J28-status-created-existing/trace.json"
+    },
+    {
+      "journey": "J28",
+      "id": "J28-status-unavailable",
+      "step": 5,
+      "title": "Status service unavailable keeps unknown attempt blocked",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J28-status-unavailable-a1",
+        "J28-status-unavailable-a2"
+      ],
+      "frames": [
+        "J28/J28-status-unavailable/before.png",
+        "J28/J28-status-unavailable/J28-status-unavailable-a1.png",
+        "J28/J28-status-unavailable/J28-status-unavailable-a2.png"
+      ],
+      "trace": "J28/J28-status-unavailable/trace.json"
+    },
+    {
+      "journey": "J28",
+      "id": "J28-discard-confirmed-uncommitted",
+      "step": 6,
+      "title": "Discard only after attempt resolves confirmed uncommitted",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J28-discard-confirmed-uncommitted-a1",
+        "J28-discard-confirmed-uncommitted-a2"
+      ],
+      "frames": [
+        "J28/J28-discard-confirmed-uncommitted/before.png",
+        "J28/J28-discard-confirmed-uncommitted/J28-discard-confirmed-uncommitted-a1.png",
+        "J28/J28-discard-confirmed-uncommitted/J28-discard-confirmed-uncommitted-a2.png"
+      ],
+      "trace": "J28/J28-discard-confirmed-uncommitted/trace.json"
+    },
+    {
+      "journey": "J29",
+      "id": "J29-unsupported-word-seek",
+      "step": 4,
+      "title": "Transcript word lacks supported seek basis",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J29-unsupported-word-seek-a1",
+        "J29-unsupported-word-seek-a2"
+      ],
+      "frames": [
+        "J29/J29-unsupported-word-seek/before.png",
+        "J29/J29-unsupported-word-seek/J29-unsupported-word-seek-a1.png",
+        "J29/J29-unsupported-word-seek/J29-unsupported-word-seek-a2.png"
+      ],
+      "trace": "J29/J29-unsupported-word-seek/trace.json"
+    },
+    {
+      "journey": "J29",
+      "id": "J29-unavailable-segment",
+      "step": 4,
+      "title": "Unavailable media segment and exact retry",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J29-unavailable-segment-a1",
+        "J29-unavailable-segment-a2"
+      ],
+      "frames": [
+        "J29/J29-unavailable-segment/before.png",
+        "J29/J29-unavailable-segment/J29-unavailable-segment-a1.png",
+        "J29/J29-unavailable-segment/J29-unavailable-segment-a2.png"
+      ],
+      "trace": "J29/J29-unavailable-segment/trace.json"
+    },
+    {
+      "journey": "J30",
+      "id": "J30-ten-paths",
+      "step": 1,
+      "title": "Inspect distinct ten-path branch fixture and counted exits",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J30-ten-paths-a1",
+        "J30-ten-paths-a2"
+      ],
+      "frames": [
+        "J30/J30-ten-paths/before.png",
+        "J30/J30-ten-paths/J30-ten-paths-a1.png",
+        "J30/J30-ten-paths/J30-ten-paths-a2.png"
+      ],
+      "trace": "J30/J30-ten-paths/trace.json"
+    },
+    {
+      "journey": "J31",
+      "id": "J31-unavailable-source",
+      "step": 4,
+      "title": "Unavailable historical source and exact retry",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J31-unavailable-source-a1",
+        "J31-unavailable-source-a2"
+      ],
+      "frames": [
+        "J31/J31-unavailable-source/before.png",
+        "J31/J31-unavailable-source/J31-unavailable-source-a1.png",
+        "J31/J31-unavailable-source/J31-unavailable-source-a2.png"
+      ],
+      "trace": "J31/J31-unavailable-source/trace.json"
+    },
+    {
+      "journey": "J31",
+      "id": "J31-choose-new-base",
+      "step": 4,
+      "title": "Head advances; explicitly review a new V41 base",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J31-choose-new-base-a1",
+        "J31-choose-new-base-a2",
+        "J31-choose-new-base-a3"
+      ],
+      "frames": [
+        "J31/J31-choose-new-base/before.png",
+        "J31/J31-choose-new-base/J31-choose-new-base-a1.png",
+        "J31/J31-choose-new-base/J31-choose-new-base-a2.png",
+        "J31/J31-choose-new-base/J31-choose-new-base-a3.png"
+      ],
+      "trace": "J31/J31-choose-new-base/trace.json"
+    },
+    {
+      "journey": "J31",
+      "id": "J31-recovery-unknown-created",
+      "step": 5,
+      "title": "Lost reply reconciles to the existing recovery receipt",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J31-recovery-unknown-created-a1",
+        "J31-recovery-unknown-created-a2"
+      ],
+      "frames": [
+        "J31/J31-recovery-unknown-created/before.png",
+        "J31/J31-recovery-unknown-created/J31-recovery-unknown-created-a1.png",
+        "J31/J31-recovery-unknown-created/J31-recovery-unknown-created-a2.png"
+      ],
+      "trace": "J31/J31-recovery-unknown-created/trace.json"
+    },
+    {
+      "journey": "J31",
+      "id": "J31-invalid-author-destination",
+      "step": 5,
+      "title": "Invalid author and receiving destination block commit",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J31-invalid-author-destination-a1",
+        "J31-invalid-author-destination-a2",
+        "J31-invalid-author-destination-a3",
+        "J31-invalid-author-destination-a4"
+      ],
+      "frames": [
+        "J31/J31-invalid-author-destination/before.png",
+        "J31/J31-invalid-author-destination/J31-invalid-author-destination-a1.png",
+        "J31/J31-invalid-author-destination/J31-invalid-author-destination-a2.png",
+        "J31/J31-invalid-author-destination/J31-invalid-author-destination-a3.png",
+        "J31/J31-invalid-author-destination/J31-invalid-author-destination-a4.png"
+      ],
+      "trace": "J31/J31-invalid-author-destination/trace.json"
+    },
+    {
+      "journey": "J31",
+      "id": "J31-recovery-confirmed-uncommitted",
+      "step": 5,
+      "title": "Unknown recovery attempt resolves uncommitted and retries safely",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J31-recovery-confirmed-uncommitted-a1",
+        "J31-recovery-confirmed-uncommitted-a2",
+        "J31-recovery-confirmed-uncommitted-a3",
+        "J31-recovery-confirmed-uncommitted-a4"
+      ],
+      "frames": [
+        "J31/J31-recovery-confirmed-uncommitted/before.png",
+        "J31/J31-recovery-confirmed-uncommitted/J31-recovery-confirmed-uncommitted-a1.png",
+        "J31/J31-recovery-confirmed-uncommitted/J31-recovery-confirmed-uncommitted-a2.png",
+        "J31/J31-recovery-confirmed-uncommitted/J31-recovery-confirmed-uncommitted-a3.png",
+        "J31/J31-recovery-confirmed-uncommitted/J31-recovery-confirmed-uncommitted-a4.png"
+      ],
+      "trace": "J31/J31-recovery-confirmed-uncommitted/trace.json"
+    },
+    {
+      "journey": "J31",
+      "id": "J31-recovery-status-unavailable",
+      "step": 5,
+      "title": "Unavailable status keeps recovery attempt blocked",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J31-recovery-status-unavailable-a1",
+        "J31-recovery-status-unavailable-a2"
+      ],
+      "frames": [
+        "J31/J31-recovery-status-unavailable/before.png",
+        "J31/J31-recovery-status-unavailable/J31-recovery-status-unavailable-a1.png",
+        "J31/J31-recovery-status-unavailable/J31-recovery-status-unavailable-a2.png"
+      ],
+      "trace": "J31/J31-recovery-status-unavailable/trace.json"
+    },
+    {
+      "journey": "J32",
+      "id": "J32-repair-session",
+      "step": 5,
+      "title": "Preserve and repair unreadable reader session from exact copy",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J32-repair-session-a1",
+        "J32-repair-session-a2",
+        "J32-repair-session-a3"
+      ],
+      "frames": [
+        "J32/J32-repair-session/before.png",
+        "J32/J32-repair-session/J32-repair-session-a1.png",
+        "J32/J32-repair-session/J32-repair-session-a2.png",
+        "J32/J32-repair-session/J32-repair-session-a3.png"
+      ],
+      "trace": "J32/J32-repair-session/trace.json"
+    },
+    {
+      "journey": "J32",
+      "id": "J32-cancel-request",
+      "step": 5,
+      "title": "Cancelled request remains partial and separately saveable",
+      "outcome": "Concept supported",
+      "reviewer": "luna-2",
+      "actions": [
+        "J32-cancel-request-a1",
+        "J32-cancel-request-a2"
+      ],
+      "frames": [
+        "J32/J32-cancel-request/before.png",
+        "J32/J32-cancel-request/J32-cancel-request-a1.png",
+        "J32/J32-cancel-request/J32-cancel-request-a2.png"
+      ],
+      "trace": "J32/J32-cancel-request/trace.json"
+    }
+  ],
+  "crossChecks": [
+    {
+      "journey": "J17",
+      "check": "Pointer and discoverability",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "pointer": {
+          "nativeNamedActions": 15,
+          "delivery": "DOM pointer click",
+          "gesturePicking": "Not implemented in the Xuzz engine"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J17",
+      "check": "List and keyboard",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "list": {
+          "selected": "true",
+          "sameFrame": true
+        },
+        "keyboard": {
+          "tabs": 17,
+          "expected": "J17-s1-a1",
+          "delivered": true,
+          "focusAfter": "<button class=\"action  pending\" data-action=\"J17-s1-a2\" aria-label=\"Browse followed author Mira Chen\">Browse followed author Mira Chen</button>"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J17",
+      "check": "Accessibility",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "accessibility": {
+          "lang": "en",
+          "liveRegions": 1,
+          "unlabelledButtons": 0,
+          "semanticMain": 1,
+          "colorIndependent": true,
+          "nativeTreeNodes": 262,
+          "assistiveTechnologyTested": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J17",
+      "check": "Density and narrow views",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "narrow": {
+          "scrollWidth": 390,
+          "viewport": 390,
+          "text": 20,
+          "reading": {
+            "visit": "01",
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "occ-1",
+            "offset": "p.14 · 54.2",
+            "body": [
+              "Pressure stayed stable. Calibration remains under review."
+            ]
+          }
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J17",
+      "check": "Enlarged text and optics",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "optics": {
+          "bodyText": "rgb(220, 224, 240)",
+          "backing": "rgb(23, 27, 43)",
+          "readingText": "rgb(27, 35, 61)",
+          "readingBacking": "rgb(237, 240, 248)",
+          "panelContrast": 13,
+          "readerContrast": 13.6
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J17",
+      "check": "Reduced motion",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "reducedMotion": {
+          "enabled": "true",
+          "frame": "J17-s1-a1",
+          "reading": {
+            "visit": "01",
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "occ-1",
+            "offset": "p.14 · 54.2",
+            "body": [
+              "Pressure stayed stable. Calibration remains under review."
+            ]
+          }
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J17",
+      "check": "Lifecycle and unavailable states",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "lifecycle": {
+          "routes": [
+            "J17-invalid",
+            "J17-unavailable",
+            "J17-cancel",
+            "J17-s3-v13-route"
+          ],
+          "evidence": "Base and alternate snapshots and receipts in traces; scripted lifecycle only"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J17",
+      "check": "Storage boundaries",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "storage": {
+          "enforced": "All transitions guard immutable sourceOps; Enter adds exactly one reader visit; restore adds none.",
+          "evidence": "Full state/effect trace per route",
+          "productionProof": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J17",
+      "check": "Relation language",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "relations": {
+          "evidence": "Exact descriptors, source occurrences, ancestry and typed records visible in route states",
+          "productionProof": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J18",
+      "check": "Pointer and discoverability",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "pointer": {
+          "nativeNamedActions": 15,
+          "delivery": "DOM pointer click",
+          "gesturePicking": "Not implemented in the Xuzz engine"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J18",
+      "check": "List and keyboard",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "list": {
+          "selected": "true",
+          "sameFrame": true
+        },
+        "keyboard": {
+          "tabs": 15,
+          "expected": "J18-s1-a1",
+          "delivered": true,
+          "focusAfter": "<button class=\"action  pending\" data-action=\"J18-s1-a2\" aria-label=\"Show passage and cell matches\">Show passage and cell matches</button>"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J18",
+      "check": "Accessibility",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "accessibility": {
+          "lang": "en",
+          "liveRegions": 1,
+          "unlabelledButtons": 0,
+          "semanticMain": 1,
+          "colorIndependent": true,
+          "nativeTreeNodes": 351,
+          "assistiveTechnologyTested": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J18",
+      "check": "Density and narrow views",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "narrow": {
+          "scrollWidth": 390,
+          "viewport": 390,
+          "text": 20,
+          "reading": {
+            "visit": "01",
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "occ-1",
+            "offset": "p.14 · 54.2",
+            "body": [
+              "Pressure stayed stable. Calibration remains under review."
+            ]
+          }
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J18",
+      "check": "Enlarged text and optics",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "optics": {
+          "bodyText": "rgb(220, 224, 240)",
+          "backing": "rgb(23, 27, 43)",
+          "readingText": "rgb(27, 35, 61)",
+          "readingBacking": "rgb(237, 240, 248)",
+          "panelContrast": 13,
+          "readerContrast": 13.6
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J18",
+      "check": "Reduced motion",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "reducedMotion": {
+          "enabled": "true",
+          "frame": "J18-s1-a1",
+          "reading": {
+            "visit": "01",
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "occ-1",
+            "offset": "p.14 · 54.2",
+            "body": [
+              "Pressure stayed stable. Calibration remains under review."
+            ]
+          }
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J18",
+      "check": "Lifecycle and unavailable states",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "lifecycle": {
+          "routes": [
+            "J18-video-not-held",
+            "J18-s4-acquire-route"
+          ],
+          "evidence": "Base and alternate snapshots and receipts in traces; scripted lifecycle only"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J18",
+      "check": "Storage boundaries",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "storage": {
+          "enforced": "All transitions guard immutable sourceOps; Enter adds exactly one reader visit; restore adds none.",
+          "evidence": "Full state/effect trace per route",
+          "productionProof": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J18",
+      "check": "Relation language",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "relations": {
+          "evidence": "Exact descriptors, source occurrences, ancestry and typed records visible in route states",
+          "productionProof": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J19",
+      "check": "Pointer and discoverability",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "pointer": {
+          "nativeNamedActions": 18,
+          "delivery": "DOM pointer click",
+          "gesturePicking": "Not implemented in the Xuzz engine"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J19",
+      "check": "List and keyboard",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "list": {
+          "selected": "true",
+          "sameFrame": true
+        },
+        "keyboard": {
+          "tabs": 15,
+          "expected": "J19-s1-a1",
+          "delivered": true,
+          "focusAfter": "<button class=\"action  pending\" data-action=\"J19-s1-a2\" aria-label=\"Apply All media restored\">Apply All media restored</button>"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J19",
+      "check": "Accessibility",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "accessibility": {
+          "lang": "en",
+          "liveRegions": 1,
+          "unlabelledButtons": 0,
+          "semanticMain": 1,
+          "colorIndependent": true,
+          "nativeTreeNodes": 345,
+          "assistiveTechnologyTested": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J19",
+      "check": "Density and narrow views",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "narrow": {
+          "scrollWidth": 390,
+          "viewport": 390,
+          "text": 20,
+          "reading": {
+            "visit": "01",
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "occ-1",
+            "offset": "p.14 · 54.2",
+            "body": [
+              "Pressure stayed stable. Calibration remains under review."
+            ]
+          }
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J19",
+      "check": "Enlarged text and optics",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "optics": {
+          "bodyText": "rgb(220, 224, 240)",
+          "backing": "rgb(23, 27, 43)",
+          "readingText": "rgb(27, 35, 61)",
+          "readingBacking": "rgb(237, 240, 248)",
+          "panelContrast": 13,
+          "readerContrast": 13.6
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J19",
+      "check": "Reduced motion",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "reducedMotion": {
+          "enabled": "true",
+          "frame": "J19-s1-a1",
+          "reading": {
+            "visit": "01",
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "occ-1",
+            "offset": "p.14 · 54.2",
+            "body": [
+              "Pressure stayed stable. Calibration remains under review."
+            ]
+          }
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J19",
+      "check": "Lifecycle and unavailable states",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "lifecycle": {
+          "routes": [
+            "J19-stale"
+          ],
+          "evidence": "Base and alternate snapshots and receipts in traces; scripted lifecycle only"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J19",
+      "check": "Storage boundaries",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "storage": {
+          "enforced": "All transitions guard immutable sourceOps; Enter adds exactly one reader visit; restore adds none.",
+          "evidence": "Full state/effect trace per route",
+          "productionProof": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J19",
+      "check": "Relation language",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "relations": {
+          "evidence": "Exact descriptors, source occurrences, ancestry and typed records visible in route states",
+          "productionProof": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J20",
+      "check": "Pointer and discoverability",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "pointer": {
+          "nativeNamedActions": 19,
+          "delivery": "DOM pointer click",
+          "gesturePicking": "Not implemented in the Xuzz engine"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J20",
+      "check": "List and keyboard",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "list": {
+          "selected": "true",
+          "sameFrame": true
+        },
+        "keyboard": {
+          "tabs": 15,
+          "expected": "J20-s1-a1",
+          "delivered": true,
+          "focusAfter": "<button class=\"action  pending\" data-action=\"J20-s1-a2\" aria-label=\"Inspect math and pressure matches\">Inspect math and pressure matches</button>"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J20",
+      "check": "Accessibility",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "accessibility": {
+          "lang": "en",
+          "liveRegions": 1,
+          "unlabelledButtons": 0,
+          "semanticMain": 1,
+          "colorIndependent": true,
+          "nativeTreeNodes": 332,
+          "assistiveTechnologyTested": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J20",
+      "check": "Density and narrow views",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "narrow": {
+          "scrollWidth": 390,
+          "viewport": 390,
+          "text": 20,
+          "reading": {
+            "visit": "01",
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "occ-1",
+            "offset": "p.14 · 54.2",
+            "body": [
+              "Pressure stayed stable. Calibration remains under review."
+            ]
+          }
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J20",
+      "check": "Enlarged text and optics",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "optics": {
+          "bodyText": "rgb(220, 224, 240)",
+          "backing": "rgb(23, 27, 43)",
+          "readingText": "rgb(27, 35, 61)",
+          "readingBacking": "rgb(237, 240, 248)",
+          "panelContrast": 13,
+          "readerContrast": 13.6
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J20",
+      "check": "Reduced motion",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "reducedMotion": {
+          "enabled": "true",
+          "frame": "J20-s1-a1",
+          "reading": {
+            "visit": "01",
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "occ-1",
+            "offset": "p.14 · 54.2",
+            "body": [
+              "Pressure stayed stable. Calibration remains under review."
+            ]
+          }
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J20",
+      "check": "Lifecycle and unavailable states",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "lifecycle": {
+          "routes": [
+            "J20-literal-3140",
+            "J20-token-3140",
+            "J20-number-units",
+            "J20-missing-state"
+          ],
+          "evidence": "Base and alternate snapshots and receipts in traces; scripted lifecycle only"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J20",
+      "check": "Storage boundaries",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "storage": {
+          "enforced": "All transitions guard immutable sourceOps; Enter adds exactly one reader visit; restore adds none.",
+          "evidence": "Full state/effect trace per route",
+          "productionProof": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J20",
+      "check": "Relation language",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "relations": {
+          "evidence": "Exact descriptors, source occurrences, ancestry and typed records visible in route states",
+          "productionProof": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J21",
+      "check": "Pointer and discoverability",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "pointer": {
+          "nativeNamedActions": 16,
+          "delivery": "DOM pointer click",
+          "gesturePicking": "Not implemented in the Xuzz engine"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J21",
+      "check": "List and keyboard",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "list": {
+          "selected": "true",
+          "sameFrame": true
+        },
+        "keyboard": {
+          "tabs": 14,
+          "expected": "J21-s1-a1",
+          "delivered": true,
+          "focusAfter": "<button class=\"action  pending\" data-action=\"J21-s1-a2\" aria-label=\"Inspect shared and changed source ranges\">Inspect shared and changed source ranges</button>"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J21",
+      "check": "Accessibility",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "accessibility": {
+          "lang": "en",
+          "liveRegions": 1,
+          "unlabelledButtons": 0,
+          "semanticMain": 1,
+          "colorIndependent": true,
+          "nativeTreeNodes": 251,
+          "assistiveTechnologyTested": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J21",
+      "check": "Density and narrow views",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "narrow": {
+          "scrollWidth": 390,
+          "viewport": 390,
+          "text": 20,
+          "reading": {
+            "visit": "01",
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "occ-1",
+            "offset": "p.14 · 54.2",
+            "body": [
+              "Pressure stayed stable. Calibration remains under review."
+            ]
+          }
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J21",
+      "check": "Enlarged text and optics",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "optics": {
+          "bodyText": "rgb(220, 224, 240)",
+          "backing": "rgb(23, 27, 43)",
+          "readingText": "rgb(27, 35, 61)",
+          "readingBacking": "rgb(237, 240, 248)",
+          "panelContrast": 13,
+          "readerContrast": 13.6
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J21",
+      "check": "Reduced motion",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "reducedMotion": {
+          "enabled": "true",
+          "frame": "J21-s1-a1",
+          "reading": {
+            "visit": "01",
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "occ-1",
+            "offset": "p.14 · 54.2",
+            "body": [
+              "Pressure stayed stable. Calibration remains under review."
+            ]
+          }
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J21",
+      "check": "Lifecycle and unavailable states",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "lifecycle": {
+          "routes": [
+            "J21-three-state",
+            "J21-topology",
+            "J21-unavailable"
+          ],
+          "evidence": "Base and alternate snapshots and receipts in traces; scripted lifecycle only"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J21",
+      "check": "Storage boundaries",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "storage": {
+          "enforced": "All transitions guard immutable sourceOps; Enter adds exactly one reader visit; restore adds none.",
+          "evidence": "Full state/effect trace per route",
+          "productionProof": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J21",
+      "check": "Relation language",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "relations": {
+          "evidence": "Exact descriptors, source occurrences, ancestry and typed records visible in route states",
+          "productionProof": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J22",
+      "check": "Pointer and discoverability",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "pointer": {
+          "nativeNamedActions": 15,
+          "delivery": "DOM pointer click",
+          "gesturePicking": "Not implemented in the Xuzz engine"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J22",
+      "check": "List and keyboard",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "list": {
+          "selected": "true",
+          "sameFrame": true
+        },
+        "keyboard": {
+          "tabs": 23,
+          "expected": "J22-s1-a1",
+          "delivered": true,
+          "focusAfter": "<button class=\"action  pending\" data-action=\"J22-s1-a2\" aria-label=\"Inspect saved pouch summary\">Inspect saved pouch summary</button>"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J22",
+      "check": "Accessibility",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "accessibility": {
+          "lang": "en",
+          "liveRegions": 1,
+          "unlabelledButtons": 0,
+          "semanticMain": 1,
+          "colorIndependent": true,
+          "nativeTreeNodes": 440,
+          "assistiveTechnologyTested": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J22",
+      "check": "Density and narrow views",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "narrow": {
+          "scrollWidth": 390,
+          "viewport": 390,
+          "text": 20,
+          "reading": {
+            "visit": "03",
+            "subject": "doc:Review",
+            "store": "store:orion-pub-17",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02",
+            "offset": 1184,
+            "body": [
+              "Review of the pressure test.",
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ]
+          }
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J22",
+      "check": "Enlarged text and optics",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "optics": {
+          "bodyText": "rgb(220, 224, 240)",
+          "backing": "rgb(23, 27, 43)",
+          "readingText": "rgb(27, 35, 61)",
+          "readingBacking": "rgb(237, 240, 248)",
+          "panelContrast": 13,
+          "readerContrast": 13.6
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J22",
+      "check": "Reduced motion",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "reducedMotion": {
+          "enabled": "true",
+          "frame": "J22-s1-a1",
+          "reading": {
+            "visit": "03",
+            "subject": "doc:Review",
+            "store": "store:orion-pub-17",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02",
+            "offset": 1184,
+            "body": [
+              "Review of the pressure test.",
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ]
+          }
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J22",
+      "check": "Lifecycle and unavailable states",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "lifecycle": {
+          "routes": [
+            "J22-v12-not-hit",
+            "J22-anchor-fold",
+            "J22-partial-cancel"
+          ],
+          "evidence": "Base and alternate snapshots and receipts in traces; scripted lifecycle only"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J22",
+      "check": "Storage boundaries",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "storage": {
+          "enforced": "All transitions guard immutable sourceOps; Enter adds exactly one reader visit; restore adds none.",
+          "evidence": "Full state/effect trace per route",
+          "productionProof": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J22",
+      "check": "Relation language",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "relations": {
+          "evidence": "Exact descriptors, source occurrences, ancestry and typed records visible in route states",
+          "productionProof": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J23",
+      "check": "Pointer and discoverability",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "pointer": {
+          "nativeNamedActions": 13,
+          "delivery": "DOM pointer click",
+          "gesturePicking": "Not implemented in the Xuzz engine"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J23",
+      "check": "List and keyboard",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "list": {
+          "selected": "true",
+          "sameFrame": true
+        },
+        "keyboard": {
+          "tabs": 17,
+          "expected": "J23-s1-a1",
+          "delivered": true,
+          "focusAfter": "<button class=\"action  pending\" data-action=\"J23-s1-a2\" aria-label=\"Inspect package counts\">Inspect package counts</button>"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J23",
+      "check": "Accessibility",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "accessibility": {
+          "lang": "en",
+          "liveRegions": 1,
+          "unlabelledButtons": 0,
+          "semanticMain": 1,
+          "colorIndependent": true,
+          "nativeTreeNodes": 359,
+          "assistiveTechnologyTested": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J23",
+      "check": "Density and narrow views",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "narrow": {
+          "scrollWidth": 390,
+          "viewport": 390,
+          "text": 20,
+          "reading": {
+            "visit": "03",
+            "subject": "doc:Review",
+            "store": "store:orion-pub-17",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02",
+            "offset": 1184,
+            "body": [
+              "Review of the pressure test.",
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar."
+            ]
+          }
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J23",
+      "check": "Enlarged text and optics",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "optics": {
+          "bodyText": "rgb(220, 224, 240)",
+          "backing": "rgb(23, 27, 43)",
+          "readingText": "rgb(27, 35, 61)",
+          "readingBacking": "rgb(237, 240, 248)",
+          "panelContrast": 13,
+          "readerContrast": 13.6
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J23",
+      "check": "Reduced motion",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "reducedMotion": {
+          "enabled": "true",
+          "frame": "J23-s1-a1",
+          "reading": {
+            "visit": "03",
+            "subject": "doc:Review",
+            "store": "store:orion-pub-17",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02",
+            "offset": 1184,
+            "body": [
+              "Review of the pressure test.",
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar."
+            ]
+          }
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J23",
+      "check": "Lifecycle and unavailable states",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "lifecycle": {
+          "routes": [
+            "J23-review-only",
+            "J23-retain-only",
+            "J23-invalid-signature"
+          ],
+          "evidence": "Base and alternate snapshots and receipts in traces; scripted lifecycle only"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J23",
+      "check": "Storage boundaries",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "storage": {
+          "enforced": "All transitions guard immutable sourceOps; Enter adds exactly one reader visit; restore adds none.",
+          "evidence": "Full state/effect trace per route",
+          "productionProof": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J23",
+      "check": "Relation language",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "relations": {
+          "evidence": "Exact descriptors, source occurrences, ancestry and typed records visible in route states",
+          "productionProof": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J24",
+      "check": "Pointer and discoverability",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "pointer": {
+          "nativeNamedActions": 23,
+          "delivery": "DOM pointer click",
+          "gesturePicking": "Not implemented in the Xuzz engine"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J24",
+      "check": "List and keyboard",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "list": {
+          "selected": "true",
+          "sameFrame": true
+        },
+        "keyboard": {
+          "tabs": 20,
+          "expected": "J24-s1-a1",
+          "delivered": true,
+          "focusAfter": "<button class=\"action  pending\" data-action=\"J24-s1-a2\" aria-label=\"Cross · preview Right 2 C24\">Cross · preview Right 2 C24</button>"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J24",
+      "check": "Accessibility",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "accessibility": {
+          "lang": "en",
+          "liveRegions": 1,
+          "unlabelledButtons": 0,
+          "semanticMain": 1,
+          "colorIndependent": true,
+          "nativeTreeNodes": 398,
+          "assistiveTechnologyTested": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J24",
+      "check": "Density and narrow views",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "narrow": {
+          "scrollWidth": 390,
+          "viewport": 390,
+          "text": 20,
+          "reading": {
+            "visit": "03",
+            "subject": "doc:Review",
+            "store": "store:orion-pub-17",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02",
+            "offset": 1184,
+            "body": [
+              "Review of the pressure test.",
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ]
+          }
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J24",
+      "check": "Enlarged text and optics",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "optics": {
+          "bodyText": "rgb(220, 224, 240)",
+          "backing": "rgb(23, 27, 43)",
+          "readingText": "rgb(27, 35, 61)",
+          "readingBacking": "rgb(237, 240, 248)",
+          "panelContrast": 13,
+          "readerContrast": 13.6
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J24",
+      "check": "Reduced motion",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "reducedMotion": {
+          "enabled": "true",
+          "frame": "J24-s1-a1",
+          "reading": {
+            "visit": "03",
+            "subject": "doc:Review",
+            "store": "store:orion-pub-17",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02",
+            "offset": 1184,
+            "body": [
+              "Review of the pressure test.",
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ]
+          }
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J24",
+      "check": "Lifecycle and unavailable states",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "lifecycle": {
+          "routes": [
+            "J24-cancel-unavailable",
+            "J24-wrong-version",
+            "J24-overlap-link",
+            "J24-reenable-carrier",
+            "J24-dismiss-carrier"
+          ],
+          "evidence": "Base and alternate snapshots and receipts in traces; scripted lifecycle only"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J24",
+      "check": "Storage boundaries",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "storage": {
+          "enforced": "All transitions guard immutable sourceOps; Enter adds exactly one reader visit; restore adds none.",
+          "evidence": "Full state/effect trace per route",
+          "productionProof": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J24",
+      "check": "Relation language",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "relations": {
+          "evidence": "Exact descriptors, source occurrences, ancestry and typed records visible in route states",
+          "productionProof": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J25",
+      "check": "Pointer and discoverability",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "pointer": {
+          "nativeNamedActions": 24,
+          "delivery": "DOM pointer click",
+          "gesturePicking": "Not implemented in the Xuzz engine"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J25",
+      "check": "List and keyboard",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "list": {
+          "selected": "true",
+          "sameFrame": true
+        },
+        "keyboard": {
+          "tabs": 18,
+          "expected": "J25-s1-a1",
+          "delivered": true,
+          "focusAfter": "<button id=\"next-step\">Next task</button>"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J25",
+      "check": "Accessibility",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "accessibility": {
+          "lang": "en",
+          "liveRegions": 1,
+          "unlabelledButtons": 0,
+          "semanticMain": 1,
+          "colorIndependent": true,
+          "nativeTreeNodes": 345,
+          "assistiveTechnologyTested": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J25",
+      "check": "Density and narrow views",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "narrow": {
+          "scrollWidth": 390,
+          "viewport": 390,
+          "text": 20,
+          "reading": {
+            "visit": "03",
+            "subject": "cell:Calibration",
+            "store": "store:local-lab",
+            "version": "V5",
+            "occurrence": "occ:calibration-plate-01",
+            "offset": 0,
+            "body": [
+              "System check complete.",
+              "Pressure stayed stable."
+            ]
+          }
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J25",
+      "check": "Enlarged text and optics",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "optics": {
+          "bodyText": "rgb(220, 224, 240)",
+          "backing": "rgb(23, 27, 43)",
+          "readingText": "rgb(27, 35, 61)",
+          "readingBacking": "rgb(237, 240, 248)",
+          "panelContrast": 13,
+          "readerContrast": 13.6
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J25",
+      "check": "Reduced motion",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "reducedMotion": {
+          "enabled": "true",
+          "frame": "J25-s1-a1",
+          "reading": {
+            "visit": "03",
+            "subject": "cell:Calibration",
+            "store": "store:local-lab",
+            "version": "V5",
+            "occurrence": "occ:calibration-plate-01",
+            "offset": 0,
+            "body": [
+              "System check complete.",
+              "Pressure stayed stable."
+            ]
+          }
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J25",
+      "check": "Lifecycle and unavailable states",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "lifecycle": {
+          "routes": [
+            "J25-preview-no-move",
+            "J25-unavailable"
+          ],
+          "evidence": "Base and alternate snapshots and receipts in traces; scripted lifecycle only"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J25",
+      "check": "Storage boundaries",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "storage": {
+          "enforced": "All transitions guard immutable sourceOps; Enter adds exactly one reader visit; restore adds none.",
+          "evidence": "Full state/effect trace per route",
+          "productionProof": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J25",
+      "check": "Relation language",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "relations": {
+          "evidence": "Exact descriptors, source occurrences, ancestry and typed records visible in route states",
+          "productionProof": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J26",
+      "check": "Pointer and discoverability",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "pointer": {
+          "nativeNamedActions": 24,
+          "delivery": "DOM pointer click",
+          "gesturePicking": "Not implemented in the Xuzz engine"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J26",
+      "check": "List and keyboard",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "list": {
+          "selected": "true",
+          "sameFrame": true
+        },
+        "keyboard": {
+          "tabs": 23,
+          "expected": "J26-s1-a1",
+          "delivered": true,
+          "focusAfter": "<button class=\"action  pending\" data-action=\"J26-s1-a2\" aria-label=\"Inspect whole-cell C17 reference\">Inspect whole-cell C17 reference</button>"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J26",
+      "check": "Accessibility",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "accessibility": {
+          "lang": "en",
+          "liveRegions": 1,
+          "unlabelledButtons": 0,
+          "semanticMain": 1,
+          "colorIndependent": true,
+          "nativeTreeNodes": 414,
+          "assistiveTechnologyTested": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J26",
+      "check": "Density and narrow views",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "narrow": {
+          "scrollWidth": 390,
+          "viewport": 390,
+          "text": 20,
+          "reading": {
+            "visit": "03",
+            "subject": "doc:Review",
+            "store": "store:orion-pub-17",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02",
+            "offset": 1184,
+            "body": [
+              "Review of the pressure test.",
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar."
+            ]
+          }
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J26",
+      "check": "Enlarged text and optics",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "optics": {
+          "bodyText": "rgb(220, 224, 240)",
+          "backing": "rgb(23, 27, 43)",
+          "readingText": "rgb(27, 35, 61)",
+          "readingBacking": "rgb(237, 240, 248)",
+          "panelContrast": 13,
+          "readerContrast": 13.6
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J26",
+      "check": "Reduced motion",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "reducedMotion": {
+          "enabled": "true",
+          "frame": "J26-s1-a1",
+          "reading": {
+            "visit": "03",
+            "subject": "doc:Review",
+            "store": "store:orion-pub-17",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02",
+            "offset": 1184,
+            "body": [
+              "Review of the pressure test.",
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar."
+            ]
+          }
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J26",
+      "check": "Lifecycle and unavailable states",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "lifecycle": {
+          "routes": [
+            "J26-exact-duplicate-default",
+            "J26-equal-text",
+            "J26-shared-occurrence",
+            "J26-availability",
+            "J26-whole-cell-excluded"
+          ],
+          "evidence": "Base and alternate snapshots and receipts in traces; scripted lifecycle only"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J26",
+      "check": "Storage boundaries",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "storage": {
+          "enforced": "All transitions guard immutable sourceOps; Enter adds exactly one reader visit; restore adds none.",
+          "evidence": "Full state/effect trace per route",
+          "productionProof": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J26",
+      "check": "Relation language",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "relations": {
+          "evidence": "Exact descriptors, source occurrences, ancestry and typed records visible in route states",
+          "productionProof": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J27",
+      "check": "Pointer and discoverability",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "pointer": {
+          "nativeNamedActions": 17,
+          "delivery": "DOM pointer click",
+          "gesturePicking": "Not implemented in the Xuzz engine"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J27",
+      "check": "List and keyboard",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "list": {
+          "selected": "true",
+          "sameFrame": true
+        },
+        "keyboard": {
+          "tabs": 13,
+          "expected": "J27-s1-a1",
+          "delivered": true,
+          "focusAfter": "<button class=\"action  pending\" data-action=\"J27-s1-a2\" aria-label=\"Add Review V4 passage as right member 1\">Add Review V4 passage as right member 1</button>"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J27",
+      "check": "Accessibility",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "accessibility": {
+          "lang": "en",
+          "liveRegions": 1,
+          "unlabelledButtons": 0,
+          "semanticMain": 1,
+          "colorIndependent": true,
+          "nativeTreeNodes": 335,
+          "assistiveTechnologyTested": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J27",
+      "check": "Density and narrow views",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "narrow": {
+          "scrollWidth": 390,
+          "viewport": 390,
+          "text": 20,
+          "reading": {
+            "visit": "01",
+            "subject": "Lab notes passage",
+            "store": "Lab notes",
+            "version": "V12",
+            "occurrence": "lab-o7",
+            "offset": 3140,
+            "body": [
+              "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+            ]
+          }
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J27",
+      "check": "Enlarged text and optics",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "optics": {
+          "bodyText": "rgb(220, 224, 240)",
+          "backing": "rgb(23, 27, 43)",
+          "readingText": "rgb(27, 35, 61)",
+          "readingBacking": "rgb(237, 240, 248)",
+          "panelContrast": 13,
+          "readerContrast": 13.6
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J27",
+      "check": "Reduced motion",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "reducedMotion": {
+          "enabled": "true",
+          "frame": "J27-s1-a1",
+          "reading": {
+            "visit": "01",
+            "subject": "Lab notes passage",
+            "store": "Lab notes",
+            "version": "V12",
+            "occurrence": "lab-o7",
+            "offset": 3140,
+            "body": [
+              "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+            ]
+          }
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J27",
+      "check": "Lifecycle and unavailable states",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "lifecycle": {
+          "routes": [
+            "J27-discard-draft"
+          ],
+          "evidence": "Base and alternate snapshots and receipts in traces; scripted lifecycle only"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J27",
+      "check": "Storage boundaries",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "storage": {
+          "enforced": "All transitions guard immutable sourceOps; Enter adds exactly one reader visit; restore adds none.",
+          "evidence": "Full state/effect trace per route",
+          "productionProof": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J27",
+      "check": "Relation language",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "relations": {
+          "evidence": "Exact descriptors, source occurrences, ancestry and typed records visible in route states",
+          "productionProof": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J28",
+      "check": "Pointer and discoverability",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "pointer": {
+          "nativeNamedActions": 20,
+          "delivery": "DOM pointer click",
+          "gesturePicking": "Not implemented in the Xuzz engine"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J28",
+      "check": "List and keyboard",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "list": {
+          "selected": "true",
+          "sameFrame": true
+        },
+        "keyboard": {
+          "tabs": 18,
+          "expected": "J28-s1-a1",
+          "delivered": true,
+          "focusAfter": "<button class=\"action  pending\" data-action=\"J28-s1-a2\" aria-label=\"Inspect grouping and destination before preview resolution\">Inspect grouping and destination before preview resolution</button>"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J28",
+      "check": "Accessibility",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "accessibility": {
+          "lang": "en",
+          "liveRegions": 1,
+          "unlabelledButtons": 0,
+          "semanticMain": 1,
+          "colorIndependent": true,
+          "nativeTreeNodes": 319,
+          "assistiveTechnologyTested": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J28",
+      "check": "Density and narrow views",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "narrow": {
+          "scrollWidth": 390,
+          "viewport": 390,
+          "text": 20,
+          "reading": {
+            "visit": "03",
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "body": [
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ]
+          }
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J28",
+      "check": "Enlarged text and optics",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "optics": {
+          "bodyText": "rgb(220, 224, 240)",
+          "backing": "rgb(23, 27, 43)",
+          "readingText": "rgb(27, 35, 61)",
+          "readingBacking": "rgb(237, 240, 248)",
+          "panelContrast": 13,
+          "readerContrast": 13.6
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J28",
+      "check": "Reduced motion",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "reducedMotion": {
+          "enabled": "true",
+          "frame": "J28-s1-a1",
+          "reading": {
+            "visit": "03",
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "body": [
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ]
+          }
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J28",
+      "check": "Lifecycle and unavailable states",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "lifecycle": {
+          "routes": [
+            "J28-destination-failure",
+            "J28-unknown-confirmed-uncommitted",
+            "J28-status-created-existing",
+            "J28-status-unavailable",
+            "J28-discard-confirmed-uncommitted"
+          ],
+          "evidence": "Base and alternate snapshots and receipts in traces; scripted lifecycle only"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J28",
+      "check": "Storage boundaries",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "storage": {
+          "enforced": "All transitions guard immutable sourceOps; Enter adds exactly one reader visit; restore adds none.",
+          "evidence": "Full state/effect trace per route",
+          "productionProof": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J28",
+      "check": "Relation language",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "relations": {
+          "evidence": "Exact descriptors, source occurrences, ancestry and typed records visible in route states",
+          "productionProof": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J29",
+      "check": "Pointer and discoverability",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "pointer": {
+          "nativeNamedActions": 15,
+          "delivery": "DOM pointer click",
+          "gesturePicking": "Not implemented in the Xuzz engine"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J29",
+      "check": "List and keyboard",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "list": {
+          "selected": "true",
+          "sameFrame": true
+        },
+        "keyboard": {
+          "tabs": 17,
+          "expected": "J29-s1-a1",
+          "delivered": true,
+          "focusAfter": "<button class=\"action  pending\" data-action=\"J29-s1-a2\" aria-label=\"Expand source identity and locator details\">Expand source identity and locator details</button>"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J29",
+      "check": "Accessibility",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "accessibility": {
+          "lang": "en",
+          "liveRegions": 1,
+          "unlabelledButtons": 0,
+          "semanticMain": 1,
+          "colorIndependent": true,
+          "nativeTreeNodes": 307,
+          "assistiveTechnologyTested": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J29",
+      "check": "Density and narrow views",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "narrow": {
+          "scrollWidth": 390,
+          "viewport": 390,
+          "text": 20,
+          "reading": {
+            "visit": "03",
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "body": [
+              "The recorded pressure remained stable during the run."
+            ]
+          }
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J29",
+      "check": "Enlarged text and optics",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "optics": {
+          "bodyText": "rgb(220, 224, 240)",
+          "backing": "rgb(23, 27, 43)",
+          "readingText": "rgb(27, 35, 61)",
+          "readingBacking": "rgb(237, 240, 248)",
+          "panelContrast": 13,
+          "readerContrast": 13.6
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J29",
+      "check": "Reduced motion",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "reducedMotion": {
+          "enabled": "true",
+          "frame": "J29-s1-a1",
+          "reading": {
+            "visit": "03",
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "body": [
+              "The recorded pressure remained stable during the run."
+            ]
+          }
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J29",
+      "check": "Lifecycle and unavailable states",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "lifecycle": {
+          "routes": [
+            "J29-unsupported-word-seek",
+            "J29-unavailable-segment"
+          ],
+          "evidence": "Base and alternate snapshots and receipts in traces; scripted lifecycle only"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J29",
+      "check": "Storage boundaries",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "storage": {
+          "enforced": "All transitions guard immutable sourceOps; Enter adds exactly one reader visit; restore adds none.",
+          "evidence": "Full state/effect trace per route",
+          "productionProof": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J29",
+      "check": "Relation language",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "relations": {
+          "evidence": "Exact descriptors, source occurrences, ancestry and typed records visible in route states",
+          "productionProof": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J30",
+      "check": "Pointer and discoverability",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "pointer": {
+          "nativeNamedActions": 24,
+          "delivery": "DOM pointer click",
+          "gesturePicking": "Not implemented in the Xuzz engine"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J30",
+      "check": "List and keyboard",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "list": {
+          "selected": "true",
+          "sameFrame": true
+        },
+        "keyboard": {
+          "tabs": 24,
+          "expected": "J30-s1-a1",
+          "delivered": true,
+          "focusAfter": "<button class=\"action  pending\" data-action=\"J30-s1-a2\" aria-label=\"Expand the counted branch-exit coil\">Expand the counted branch-exit coil</button>"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J30",
+      "check": "Accessibility",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "accessibility": {
+          "lang": "en",
+          "liveRegions": 1,
+          "unlabelledButtons": 0,
+          "semanticMain": 1,
+          "colorIndependent": true,
+          "nativeTreeNodes": 334,
+          "assistiveTechnologyTested": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J30",
+      "check": "Density and narrow views",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "narrow": {
+          "scrollWidth": 390,
+          "viewport": 390,
+          "text": 20,
+          "reading": {
+            "visit": "03",
+            "subject": "Lab notebook passage ABCDEF",
+            "store": "Lab notebook",
+            "version": "V12",
+            "occurrence": "occ-abc-1",
+            "offset": 200,
+            "body": [
+              "A B C D E F as a minimal unit for analysis."
+            ]
+          }
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J30",
+      "check": "Enlarged text and optics",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "optics": {
+          "bodyText": "rgb(220, 224, 240)",
+          "backing": "rgb(23, 27, 43)",
+          "readingText": "rgb(27, 35, 61)",
+          "readingBacking": "rgb(237, 240, 248)",
+          "panelContrast": 13,
+          "readerContrast": 13.6
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J30",
+      "check": "Reduced motion",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "reducedMotion": {
+          "enabled": "true",
+          "frame": "J30-s1-a1",
+          "reading": {
+            "visit": "03",
+            "subject": "Lab notebook passage ABCDEF",
+            "store": "Lab notebook",
+            "version": "V12",
+            "occurrence": "occ-abc-1",
+            "offset": 200,
+            "body": [
+              "A B C D E F as a minimal unit for analysis."
+            ]
+          }
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J30",
+      "check": "Lifecycle and unavailable states",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "lifecycle": {
+          "routes": [
+            "J30-ten-paths"
+          ],
+          "evidence": "Base and alternate snapshots and receipts in traces; scripted lifecycle only"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J30",
+      "check": "Storage boundaries",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "storage": {
+          "enforced": "All transitions guard immutable sourceOps; Enter adds exactly one reader visit; restore adds none.",
+          "evidence": "Full state/effect trace per route",
+          "productionProof": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J30",
+      "check": "Relation language",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "relations": {
+          "evidence": "Exact descriptors, source occurrences, ancestry and typed records visible in route states",
+          "productionProof": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J31",
+      "check": "Pointer and discoverability",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "pointer": {
+          "nativeNamedActions": 16,
+          "delivery": "DOM pointer click",
+          "gesturePicking": "Not implemented in the Xuzz engine"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J31",
+      "check": "List and keyboard",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "list": {
+          "selected": "true",
+          "sameFrame": true
+        },
+        "keyboard": {
+          "tabs": 15,
+          "expected": "J31-s1-a1",
+          "delivered": true,
+          "focusAfter": "<button class=\"action  pending\" data-action=\"J31-s1-a2\" aria-label=\"Expand source range and occurrence descriptor\">Expand source range and occurrence descriptor</button>"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J31",
+      "check": "Accessibility",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "accessibility": {
+          "lang": "en",
+          "liveRegions": 1,
+          "unlabelledButtons": 0,
+          "semanticMain": 1,
+          "colorIndependent": true,
+          "nativeTreeNodes": 291,
+          "assistiveTechnologyTested": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J31",
+      "check": "Density and narrow views",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "narrow": {
+          "scrollWidth": 390,
+          "viewport": 390,
+          "text": 20,
+          "reading": {
+            "visit": "03",
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "body": [
+              "The recorded pressure remained stable during the run."
+            ]
+          }
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J31",
+      "check": "Enlarged text and optics",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "optics": {
+          "bodyText": "rgb(220, 224, 240)",
+          "backing": "rgb(23, 27, 43)",
+          "readingText": "rgb(27, 35, 61)",
+          "readingBacking": "rgb(237, 240, 248)",
+          "panelContrast": 13,
+          "readerContrast": 13.6
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J31",
+      "check": "Reduced motion",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "reducedMotion": {
+          "enabled": "true",
+          "frame": "J31-s1-a1",
+          "reading": {
+            "visit": "03",
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "body": [
+              "The recorded pressure remained stable during the run."
+            ]
+          }
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J31",
+      "check": "Lifecycle and unavailable states",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "lifecycle": {
+          "routes": [
+            "J31-unavailable-source",
+            "J31-choose-new-base",
+            "J31-recovery-unknown-created",
+            "J31-invalid-author-destination",
+            "J31-recovery-confirmed-uncommitted",
+            "J31-recovery-status-unavailable"
+          ],
+          "evidence": "Base and alternate snapshots and receipts in traces; scripted lifecycle only"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J31",
+      "check": "Storage boundaries",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "storage": {
+          "enforced": "All transitions guard immutable sourceOps; Enter adds exactly one reader visit; restore adds none.",
+          "evidence": "Full state/effect trace per route",
+          "productionProof": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J31",
+      "check": "Relation language",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "relations": {
+          "evidence": "Exact descriptors, source occurrences, ancestry and typed records visible in route states",
+          "productionProof": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J32",
+      "check": "Pointer and discoverability",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "pointer": {
+          "nativeNamedActions": 21,
+          "delivery": "DOM pointer click",
+          "gesturePicking": "Not implemented in the Xuzz engine"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J32",
+      "check": "List and keyboard",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "list": {
+          "selected": "true",
+          "sameFrame": true
+        },
+        "keyboard": {
+          "tabs": 17,
+          "expected": "J32-s1-a1",
+          "delivered": true,
+          "focusAfter": "<button class=\"action  pending\" data-action=\"J32-s1-a2\" aria-label=\"Close investigation session\">Close investigation session</button>"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J32",
+      "check": "Accessibility",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "accessibility": {
+          "lang": "en",
+          "liveRegions": 1,
+          "unlabelledButtons": 0,
+          "semanticMain": 1,
+          "colorIndependent": true,
+          "nativeTreeNodes": 280,
+          "assistiveTechnologyTested": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J32",
+      "check": "Density and narrow views",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "narrow": {
+          "scrollWidth": 390,
+          "viewport": 390,
+          "text": 20,
+          "reading": {
+            "visit": "03",
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "body": [
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ]
+          }
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J32",
+      "check": "Enlarged text and optics",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "optics": {
+          "bodyText": "rgb(220, 224, 240)",
+          "backing": "rgb(23, 27, 43)",
+          "readingText": "rgb(27, 35, 61)",
+          "readingBacking": "rgb(237, 240, 248)",
+          "panelContrast": 13,
+          "readerContrast": 13.6
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J32",
+      "check": "Reduced motion",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "reducedMotion": {
+          "enabled": "true",
+          "frame": "J32-s1-a1",
+          "reading": {
+            "visit": "03",
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "body": [
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ]
+          }
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J32",
+      "check": "Lifecycle and unavailable states",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "lifecycle": {
+          "routes": [
+            "J32-repair-session",
+            "J32-cancel-request"
+          ],
+          "evidence": "Base and alternate snapshots and receipts in traces; scripted lifecycle only"
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J32",
+      "check": "Storage boundaries",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "storage": {
+          "enforced": "All transitions guard immutable sourceOps; Enter adds exactly one reader visit; restore adds none.",
+          "evidence": "Full state/effect trace per route",
+          "productionProof": false
+        }
+      },
+      "productionValidated": false
+    },
+    {
+      "journey": "J32",
+      "check": "Relation language",
+      "representation": "Concept supported",
+      "prototypeEvidence": {
+        "relations": {
+          "evidence": "Exact descriptors, source occurrences, ancestry and typed records visible in route states",
+          "productionProof": false
+        }
+      },
+      "productionValidated": false
+    }
+  ],
+  "reviewFindings": [
+    {
+      "reviewer": "luna-1",
+      "id": "R1-J22-01",
+      "journeyId": "J22",
+      "steps": [
+        5
+      ],
+      "severity": "Moderate",
+      "summary": "Resolved by final targeted J22 rerender: visit 01, doc:LabNotes V12, occurrence occ:lab-passage-09 and offset 44 now agree in the current-place card, center reader and trace for s5-a3 and s5-a4.",
+      "evidence": [
+        "J22/main/J22-s5-a3.png",
+        "J22/main/J22-s5-a4.png",
+        "J22/main/trace.json"
+      ],
+      "status": "resolved"
+    },
+    {
+      "reviewer": "luna-3",
+      "id": "L3-01",
+      "severity": "major",
+      "references": [
+        "J19/2",
+        "J19-s2-a2"
+      ],
+      "attempted": "Apply a Review-only store filter to the retained C17 selection and inspect the excluded status.",
+      "visible_result_or_gap": "J19-s2-a2 now shows Current filter: Review only in both result and excluded inspector. The screenshot and trace agree.",
+      "evidence": [
+        {
+          "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J19/main/J19-s2-a2.png",
+          "region": "corrected final rendered state and trace"
+        }
+      ],
+      "proposed_design_change": "Resolved in the authored concept state pack and verified in the synchronized native browser capture.",
+      "readiness_implication": "Closed for this AI visual-support run; does not establish production behavior or human usability.",
+      "status": "resolved",
+      "outcome": "Concept supported"
+    },
+    {
+      "reviewer": "luna-3",
+      "id": "L3-02",
+      "severity": "major",
+      "references": [
+        "J19/3",
+        "J19-s3-a2"
+      ],
+      "attempted": "Deliver Q2 results after Q1 has been superseded.",
+      "visible_result_or_gap": "J19-s3-a2 labels the retained panel Prior query Q1 snapshot · pressure; Q2 owns displayed counts, and the subsequent late-Q1 card records ignored disposition.",
+      "evidence": [
+        {
+          "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J19/main/J19-s3-a2.png",
+          "region": "corrected final rendered state and trace"
+        }
+      ],
+      "proposed_design_change": "Resolved in the authored concept state pack and verified in the synchronized native browser capture.",
+      "readiness_implication": "Closed for this AI visual-support run; does not establish production behavior or human usability.",
+      "status": "resolved",
+      "outcome": "Concept supported"
+    },
+    {
+      "reviewer": "luna-3",
+      "id": "L3-03",
+      "severity": "minor",
+      "references": [
+        "J20/2",
+        "J20-s2-a2"
+      ],
+      "attempted": "Switch the matching rule from literal to whole-token.",
+      "visible_result_or_gap": "J20-s2-a2 labels H1 as a prior snapshot and displays Whole-token matching in the active panel.",
+      "evidence": [
+        {
+          "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/main/J20-s2-a2.png",
+          "region": "corrected final rendered state and trace"
+        }
+      ],
+      "proposed_design_change": "Resolved in the authored concept state pack and verified in the synchronized native browser capture.",
+      "readiness_implication": "Closed for this AI visual-support run; does not establish production behavior or human usability.",
+      "status": "resolved",
+      "outcome": "Concept supported"
+    },
+    {
+      "reviewer": "luna-3",
+      "id": "L3-04",
+      "severity": "minor",
+      "references": [
+        "J21/4",
+        "J21-s4-a2"
+      ],
+      "attempted": "Select a different comparison item after inspecting topology changes.",
+      "visible_result_or_gap": "J21-s4-a2 now shows Selected difference · text, before/after range and neighborhood beside the other distinct changes.",
+      "evidence": [
+        {
+          "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/main/J21-s4-a2.png",
+          "region": "corrected final rendered state and trace"
+        }
+      ],
+      "proposed_design_change": "Resolved in the authored concept state pack and verified in the synchronized native browser capture.",
+      "readiness_implication": "Closed for this AI visual-support run; does not establish production behavior or human usability.",
+      "status": "resolved",
+      "outcome": "Concept supported"
+    },
+    {
+      "reviewer": "luna-3",
+      "id": "L3-05",
+      "severity": "major",
+      "references": [
+        "J17/3",
+        "J17/4",
+        "J17/5",
+        "J18/5",
+        "J21/5"
+      ],
+      "attempted": "Review exact transitions and assess supporting results in the latest authored state pack.",
+      "visible_result_or_gap": "The synchronized targeted render covers all 83 base action frames and 14 alternate routes with zero browser/transition failures. Earlier status described a pre-fix run and is closed.",
+      "evidence": [
+        {
+          "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/run.json",
+          "region": "corrected final rendered state and trace"
+        }
+      ],
+      "proposed_design_change": "Resolved in the authored concept state pack and verified in the synchronized native browser capture.",
+      "readiness_implication": "Closed for this AI visual-support run; does not establish production behavior or human usability.",
+      "status": "resolved",
+      "outcome": "Concept supported"
+    }
+  ]
+}

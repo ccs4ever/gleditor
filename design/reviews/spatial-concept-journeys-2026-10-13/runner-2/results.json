@@ -1,0 +1,1427 @@
+{
+  "runner": "runner-2",
+  "model": "gpt-6-luna",
+  "mode": "AI reviewer concept walkthrough using static final assets; no human participant session or live implementation validation.",
+  "journeys": [
+    "J22",
+    "J23",
+    "J24",
+    "J25",
+    "J26"
+  ],
+  "inspected_assets": [
+    {
+      "path": "design/mockups/investigation-workspace-2026-10-13/01-quiet-reading.png",
+      "sha256": "39af657c9b218b9a5562aeafa99f41d14eaeef56993685de9288e483afafb4b4",
+      "inspection": "Viewed the final PNG directly with image tool; region described in step/cross-check evidence."
+    },
+    {
+      "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+      "sha256": "c30c4c4837322f5a8ed1a86944e6ce59cbec6f97d8b3344db7fdb0265607a11a",
+      "inspection": "Viewed the final PNG directly with image tool; region described in step/cross-check evidence."
+    },
+    {
+      "path": "design/mockups/spatial-elements-2026-10-13/04-layer-console.png",
+      "sha256": "deb05029acc60170c05800dfd78c7fad82cef707cb22247b4ac522a3802810d9",
+      "inspection": "Viewed the final PNG directly with image tool; region described in step/cross-check evidence."
+    },
+    {
+      "path": "design/mockups/spatial-elements-2026-10-13/01-walk-compass.png",
+      "sha256": "12454799125d4cce8522ba31070c8861b846d9526e9abde3b18a8c1832e52b2d",
+      "inspection": "Viewed the final PNG directly with image tool; region described in step/cross-check evidence."
+    },
+    {
+      "path": "design/mockups/link-forge-pouches-2026-10-12/01-typed-pouch.png",
+      "sha256": "60168a537d34137dba0ede52db38e25b8d90ab86844dc53ca8d5f1aae066656f",
+      "inspection": "Viewed the final PNG directly with image tool; region described in step/cross-check evidence."
+    }
+  ],
+  "steps": [
+    {
+      "journey": "J22",
+      "step": 1,
+      "outcome": "Concept supported",
+      "affordance": "Quiet-reading frame; visible reading place, search field, Link card and pouch dock.",
+      "prediction": "Reader can orient to current visit/version, query scope, L17 selection and origin, and saved collection.",
+      "observed": "The frame labels CURRENT VISIT 03 / Review · V4; pressure; literal/case-folded local+remote scope; 24 found / 3 stores pending; L17 active right, Left 2/2, Right 1/3, origin Visit 01; pouch Pressure review · 3 saved.",
+      "missing": "The image does not show a prior action sequence or verify that these are persisted reader state.",
+      "represented_observations": "All requested identity/context fields are simultaneously legible in quiet mode.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/01-quiet-reading.png",
+          "region": "Top bar and center page identify pressure query, current visit 03 / Review V4; right Link card shows L17 active right, Left 2/2, Right 1/3, origin 01 and ordered members; lower dock shows source companions, Layers, saved pouch, and visit rail."
+        }
+      ]
+    },
+    {
+      "journey": "J22",
+      "step": 2,
+      "outcome": "Concept supported",
+      "affordance": "Expanded-investigation control is visible in the quiet frame; expanded frame has Fold tools.",
+      "prediction": "Opening tools should keep Review readable and leave visit 03 current.",
+      "observed": "Expanded frame keeps the same Review V4 text and current-visit label while placing results, comparison, layers and pouch around it; visit rail says inspection keeps visit 03.",
+      "missing": "Pixel-stable page bounds and transition are not represented; the two rasters show slight page-size/position drift.",
+      "represented_observations": "The tool preview is labeled Inspect C17 / reading place unchanged; L17 remains in an inspector and Review remains current.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/01-quiet-reading.png",
+          "region": "Top-right Expand investigation and center Review V4."
+        },
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Left results and C17 comparison; center current Review V4; right L17 summary, layers, three typed saved cards; bottom rail preserves current visit and sibling route 02→04."
+        }
+      ]
+    },
+    {
+      "journey": "J22",
+      "step": 3,
+      "outcome": "Concept supported",
+      "affordance": "Expanded comparison cards and the quiet-frame complete L17 endset.",
+      "prediction": "Reader can distinguish C17 V8 hit from pinned V12 comparison and from L17 right member C24.",
+      "observed": "C17 V8 is labeled pressure: 3.14 bar / Historical match; pinned V12 is 3.16 bar / No pressure match. The quiet frame’s full L17 endset identifies Right 2 as C24 contents V8.",
+      "missing": "The expanded view only summarizes L17 cursors and does not unfold the full endset there; query engine behavior and exact source-address identity are not run.",
+      "represented_observations": "Across the two frames, C17 V8 as a search hit, pinned V12 as a non-hit, and C24 V8 as L17 Right 2 have distinct roles.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Left upper results and C17 V8/V12 comparison cards; right L17 compact cursor summary."
+        },
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/01-quiet-reading.png",
+          "region": "Right L17 card expanded to show all members, including Right 2 C24 contents · V8."
+        }
+      ]
+    },
+    {
+      "journey": "J22",
+      "step": 4,
+      "outcome": "Not represented",
+      "affordance": "Visible Fold comparison, layer emphasis selector, Inspect saved, Fold tools controls.",
+      "prediction": "Fold comparison alone, change emphasis and inspect evidence, then fold tools while preserving query, cursors, reading offset/version and return route.",
+      "observed": "Controls and initial values exist; expanded frame shows L17 cursor summary, query, current Review V4, source companions and route. No post-action frame or ledger is provided.",
+      "missing": "Effects of each fold/emphasis action and preservation across all requested state are unspecified visually; no resulting state is captured.",
+      "represented_observations": "The frame distinguishes layer emphasis from enablement and leaves a persistent visit rail.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Center bottom Fold comparison; right layer Emphasis dropdowns and Inspect saved; top Fold tools; Link cursor header."
+        }
+      ]
+    },
+    {
+      "journey": "J22",
+      "step": 5,
+      "outcome": "Not represented",
+      "affordance": "Activity Back, Return to origin 01 and Walks controls are visible.",
+      "prediction": "Back should restore visit 02, origin should restore visit 01, and reopening tools should retain sibling 02→04.",
+      "observed": "The frame offers Back to 02, Return to origin 01, and labels Other route: 02→04 Calibration.",
+      "missing": "No after-return state, reopening state, caret/offset or simulated activity ledger is shown.",
+      "represented_observations": "The controls name their targets and the sibling route is explicitly retained in the displayed overview.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/01-quiet-reading.png",
+          "region": "Bottom visit rail and buttons."
+        },
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Bottom visit rail: other route 02→04; Back to 02; Return to origin 01."
+        }
+      ]
+    },
+    {
+      "journey": "J23",
+      "step": 1,
+      "outcome": "Concept supported",
+      "affordance": "Layer console package checkboxes and emphasis sliders.",
+      "prediction": "Reader can identify retained/enabled counts and normal versus quiet package emphasis.",
+      "observed": "Three packages are listed; Lab review #12 and Methods annotations #4 are checked, Open discussion #7 unchecked; Lab is normal and Methods quiet. Footer says 22 enabled, 85 retained, 6 visible.",
+      "missing": "These are illustrative fixture counts and no live ledger is evaluated.",
+      "represented_observations": "Enablement and emphasis have separate controls and counts.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/04-layer-console.png",
+          "region": "Right Link layers panel lists Lab review #12 enabled, Methods annotations #4 enabled/quiet, Open discussion #7 disabled/signature unchecked, candidate #13; bottom states 22 enabled links / 85 retained / 6 visible."
+        }
+      ]
+    },
+    {
+      "journey": "J23",
+      "step": 2,
+      "outcome": "Not represented",
+      "affordance": "Inspect package controls; disabled Open discussion row.",
+      "prediction": "Inspect a disabled package and learn immutable carrier, publisher, signature and independent trust; encounter unchecked/invalid policy.",
+      "observed": "Open discussion #7 is visibly unchecked and signature unchecked; the other two show valid signatures and identity unverified.",
+      "missing": "No disabled-package inspector state, immutable carrier ID, publisher, independent trust field or declared policy for unchecked/invalid signatures is shown.",
+      "represented_observations": "The frame keeps signature state and identity verification visibly separate for two packages.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/04-layer-console.png",
+          "region": "Right package rows and verification lines."
+        }
+      ]
+    },
+    {
+      "journey": "J23",
+      "step": 3,
+      "outcome": "No affordance",
+      "affordance": "Separate Methods emphasis dropdown/slider and enable checkbox; List layers button is present in integrated frame only.",
+      "prediction": "Quiet Methods without disabling it, then disable separately; establish quiet links remain available by list.",
+      "observed": "The console shows Methods checked and quiet, distinct from Open discussion unchecked; no action-result state is depicted.",
+      "missing": "No list result for quiet links and no post-disable state establish reachability or whether disabled items intercept input.",
+      "represented_observations": "The control separation makes quiet emphasis different from package enablement.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/04-layer-console.png",
+          "region": "Methods annotations #4 checkbox and Emphasis: quiet slider; Open discussion checkbox."
+        }
+      ]
+    },
+    {
+      "journey": "J23",
+      "step": 4,
+      "outcome": "Not represented",
+      "affordance": "Compare update and Review version buttons on Lab review package.",
+      "prediction": "Inspect candidate #13 while #12 remains enabled, make explicit switch decision, and preserve old carrier and selected Link identity.",
+      "observed": "Candidate #13 is labeled available/new version/not enabled; #12 remains checked; one Link L17 is shown.",
+      "missing": "No candidate inspector, carrier identity, switch choice, or after-choice selected-Link descriptor is shown.",
+      "represented_observations": "The update is not auto-enabled in the pictured state.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/04-layer-console.png",
+          "region": "Lab review #12 card and Lab review #13 available row; central Link L17."
+        }
+      ]
+    },
+    {
+      "journey": "J23",
+      "step": 5,
+      "outcome": "Not represented",
+      "affordance": "No reopen or preference-ledger control/frame in this concept.",
+      "prediction": "Reopen scripted session and restore carrier-specific choices; recompute counts after retaining #13 or disabling packages.",
+      "observed": "Only the initial 22/85 counts are printed.",
+      "missing": "No resulting preference ledger, session reopen state, or updated counts are represented; #13’s nine links are not in shown retained total.",
+      "represented_observations": "Initial counts are labeled separately as enabled, retained and visible.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/04-layer-console.png",
+          "region": "Footer count 22 enabled links · 85 retained · In selected scene · 6 visible."
+        }
+      ]
+    },
+    {
+      "journey": "J24",
+      "step": 1,
+      "outcome": "Concept supported",
+      "affordance": "Expanded integrated workspace L17 inspector; Enter selected occurrence button.",
+      "prediction": "Inspect the already-pinned integrated L17 session and distinguish Cross preview from Enter transition.",
+      "observed": "The quiet frame displays both complete ordered endsets: left 1 Lab notes V12, 2 C17 V8; right 1 Review V4, 2 C24 contents V8, 3 unavailable Remote span V9. It labels active right, Left 2/2, Right 1/3, origin Visit 01. The expanded frame retains the cursor/origin summary and offers Inspect all members.",
+      "missing": "No input is delivered and Enter’s completed-visit effect is not captured; the expanded frame itself does not unfold all member rows.",
+      "represented_observations": "The integrated fixture’s full 2×3 relation, unavailable member count, cursor and origin are inspectable in quiet mode; Cross/preview and Enter are visibly distinct actions.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/01-quiet-reading.png",
+          "region": "Right L17 card, ordered member rows 1–2 left and 1–3 right, active side, cursors and origin."
+        },
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Right L17 compact cursor/origin summary, Inspect all members and Enter selected occurrence controls."
+        }
+      ]
+    },
+    {
+      "journey": "J24",
+      "step": 2,
+      "outcome": "Not represented",
+      "affordance": "Inspect all members and member/list affordances are visible.",
+      "prediction": "Cycle both cursors, select exact repeated occurrence, inspect overlapping Link, deliberately reselect as session rooted at 03, then restore saved 03 context.",
+      "observed": "Only one selected Link and cursor state are shown; no overlapping Link or repeated occurrence choices are pictured.",
+      "missing": "Independent cursor changes, Link identity switching, new-session origin and restore of original context/return path have no states.",
+      "represented_observations": "The initial integrated L17 cursors and origin are clear and separate from source companions.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "L17 header and member rows; Review current visit 03; source companions."
+        }
+      ]
+    },
+    {
+      "journey": "J24",
+      "step": 3,
+      "outcome": "Not represented",
+      "affordance": "Unavailable member row and selected-occurrence entry control.",
+      "prediction": "Request exact right member 3, cancel, retry after availability changes while retaining ordinal and identity.",
+      "observed": "Right member 3 is labeled Remote span · V9 / unavailable.",
+      "missing": "Pending request, cancel, changed-availability retry and no-visit ledger are absent.",
+      "represented_observations": "Unavailable member remains visible as ordinal 3 of 3.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Right L17 row 3 Remote span · V9, unavailable."
+        }
+      ]
+    },
+    {
+      "journey": "J24",
+      "step": 4,
+      "outcome": "Not represented",
+      "affordance": "No declared temporary neighborhood control or availability-state card.",
+      "prediction": "Enter distant resolved cell and return; inspect wrong-version and locked-content variants without substitution.",
+      "observed": "The integrated frame names C17 V8 and C24 V8 members.",
+      "missing": "Distant-cell neighborhood, return result, wrong version and locked content states are not represented.",
+      "represented_observations": "Exact member versions are named in the inspector.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "L17 rows 2 and 3."
+        }
+      ]
+    },
+    {
+      "journey": "J24",
+      "step": 5,
+      "outcome": "Not represented",
+      "affordance": "Layer list shows enabled packages; no disable-while-pinned state.",
+      "prediction": "Disable L17’s contributing package while selected; retain inspector with explicit dismiss or re-enable.",
+      "observed": "Integrated frame shows Lab review #12 enabled and L17 selected.",
+      "missing": "No disabled-contributor state or retained inspector/dismiss/re-enable choices.",
+      "represented_observations": "Package enablement and selected Link have distinct visible surfaces.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Link L17 inspector and Link layers panel Lab review #12 checked."
+        }
+      ]
+    },
+    {
+      "journey": "J25",
+      "step": 1,
+      "outcome": "Concept supported",
+      "affordance": "Walk compass visualization and List view/Close controls.",
+      "prediction": "Read the independent five-visit fixture and current visit without borrowing the integrated workspace route.",
+      "observed": "Current 03 is Calibration plate V5; graph is 01→02→03 and 01→02→04→05, with visit 05 child of 04.",
+      "missing": "The image does not establish how activity was stored or validate ancestry against a store.",
+      "represented_observations": "Both required branches, five nodes and current 03 are explicitly labeled. This is the independent five-visit Walk fixture, not integrated J22/J24’s current 03 Review fixture.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/01-walk-compass.png",
+          "region": "Current visit 03 on left; previewing visit 05 on right with V7, cached status and playback 02:14; route cards show 01→02→03 and 01→02→04→05; controls show Activity Back, disabled forward from 03, Return to origin."
+        }
+      ]
+    },
+    {
+      "journey": "J25",
+      "step": 2,
+      "outcome": "Concept supported",
+      "affordance": "Preview visit 05 card; Resume visit 05 action.",
+      "prediction": "Preview without moving current 03 and inspect saved version, occurrence and audio playback before resuming.",
+      "observed": "Current 03 and PREVIEWING VISIT 05 are separately labeled; Debrief V7 cached, waveform 02:14 and saved playback position 02:14 appear beside Resume.",
+      "missing": "Exact occurrence and persisted Link context are not shown; resuming is not executed.",
+      "represented_observations": "Preview and current place are visually distinct; explicit Resume is labeled.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/01-walk-compass.png",
+          "region": "Left CURRENT VISIT 03 panel; right PREVIEWING VISIT 05 / Debrief V7 and 02:14 playback."
+        }
+      ]
+    },
+    {
+      "journey": "J25",
+      "step": 3,
+      "outcome": "Not represented",
+      "affordance": "Activity Back and Choose forward route controls.",
+      "prediction": "Return to 02, choose each child; resume 03 and ensure it has no child, with 04 accessible from 02.",
+      "observed": "Current 03’s forward control states No forward visits from 03 and is disabled; graph labels 02→04 and 04→05; Activity Back names visit 02.",
+      "missing": "No post-navigation states show returning to 02, choosing each child, resuming 03, or confirming the forward control remains empty after resume.",
+      "represented_observations": "Static graph and labels establish that 04 is a sibling reached from 02, not a child of 03; the current-03 forward control says No forward visits from 03 and is disabled; Activity Back names 02.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/01-walk-compass.png",
+          "region": "Bottom five-visit graph plus Activity Back / Visit 02 and disabled Choose forward route / No forward visits from 03."
+        }
+      ]
+    },
+    {
+      "journey": "J25",
+      "step": 4,
+      "outcome": "State undefined",
+      "affordance": "Save reference and Add note controls.",
+      "prediction": "Reference a visit, annotate another and continue from earlier visit without erasing children or adding visits for preview/annotation/restore.",
+      "observed": "Save reference and Add note are visible on preview; graph presents both futures.",
+      "missing": "No reference/annotation result, continuation state or activity record shows whether children persist or operations add visits.",
+      "represented_observations": "The design notes declare these as non-visit actions, but no result card proves their visible outcome.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/01-walk-compass.png",
+          "region": "Preview panel buttons; five-node route graph."
+        }
+      ]
+    },
+    {
+      "journey": "J25",
+      "step": 5,
+      "outcome": "Not represented",
+      "affordance": "Close button is shown; no reopen or unavailable-version card.",
+      "prediction": "Reopen and restore named targets/notes before preview; handle unavailable saved version with retry and preserve futures.",
+      "observed": "A close affordance exists.",
+      "missing": "Reopen flow, unavailable version identity/status, retry and preserved-futures result are not shown.",
+      "represented_observations": "The original graph is visible in the present frame.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/01-walk-compass.png",
+          "region": "Header Close and route graph."
+        }
+      ]
+    },
+    {
+      "journey": "J26",
+      "step": 1,
+      "outcome": "Not represented",
+      "affordance": "Integrated pouch rows in expanded workspace.",
+      "prediction": "Inspect passage, whole-cell reference and recipe, preserving different subjects and actions.",
+      "observed": "Pressure review lists PASSAGE Lab notes V12, CELL C17 V8 Whole-cell reference, and SEARCH pressure Saved recipe · rerun explicitly.",
+      "missing": "None of the passage, whole-cell or saved-query inspectors is open; their preserved descriptors and type-specific actions therefore cannot be inspected in this frame.",
+      "represented_observations": "The pouch rows distinguish PASSAGE Lab notes V12, CELL C17 V8 Whole-cell reference, and SEARCH pressure Saved recipe · rerun explicitly. This whole-cell identity remains separate from L17’s C24 contents span; recipe remains separate from a captured result snapshot.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Lower-right Pressure review / 3 saved rows labeled PASSAGE, CELL and SEARCH with source and recipe descriptions."
+        },
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/01-quiet-reading.png",
+          "region": "Pouch dock identifies Pressure review · 3 saved; the integrated frame has no selected pouch inspector."
+        }
+      ]
+    },
+    {
+      "journey": "J26",
+      "step": 2,
+      "outcome": "Not represented",
+      "affordance": "Save selection button is visible in typed pouch; type tabs/cards display six kinds.",
+      "prediction": "Save disjoint span, op, query, walk and draft through visible actions without moving/editing subjects.",
+      "observed": "The pouch depicts span bundle, operation, query, walk and link draft as distinct typed cards; Save selection is visible.",
+      "missing": "No action/result states demonstrate saving each type, preserving exact source descriptors, or no subject movement/edit. Composite typed persistence is described as extension in concept notes.",
+      "represented_observations": "The op remains an op card with its own Inspect op / Enter state actions; query rerun is separate.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/01-typed-pouch.png",
+          "region": "Pressure review header: 146 saved, 18 filtered, 6 visible; type tabs and cards for span bundle, cell, op, query, walk and link draft; selected op inspector; dismissed-items count 12."
+        }
+      ]
+    },
+    {
+      "journey": "J26",
+      "step": 3,
+      "outcome": "No affordance",
+      "affordance": "Filter count and category tabs are visible; no list/off-window control.",
+      "prediction": "Filter 146 to 18, expand counted group and locate off-window item through list.",
+      "observed": "Counts are distinct: 146 saved, 18 filtered, 6 visible.",
+      "missing": "No list action, counted group expansion, off-window navigation or selected descriptor is shown; category tabs do not establish that path.",
+      "represented_observations": "Membership, filter and visible-window counts are legible.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/01-typed-pouch.png",
+          "region": "Header counts and tabs; six visible stacked cards."
+        }
+      ]
+    },
+    {
+      "journey": "J26",
+      "step": 4,
+      "outcome": "State undefined",
+      "affordance": "Save selection and card overflow menus are visible.",
+      "prediction": "Save duplicate/equal-text/different-address/shared-source occurrence and inspect explicit duplicate/membership policy.",
+      "observed": "No duplicate chooser or membership identity is shown.",
+      "missing": "Policy and choice outcome remain undecided; there is no evidence of address-level distinctions.",
+      "represented_observations": "The image provides card-level overflow controls only.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/01-typed-pouch.png",
+          "region": "Card overflow menus; no chooser is present."
+        }
+      ]
+    },
+    {
+      "journey": "J26",
+      "step": 5,
+      "outcome": "Not represented",
+      "affordance": "Dismissed items · 12 disclosure at bottom.",
+      "prediction": "Dismiss/recover and reopen with preview-not-held, locked and unresolved-authority states while preserving descriptors and type actions.",
+      "observed": "Dismissed-items count is visible; selected operation inspector has Inspect op, Enter state and Open source.",
+      "missing": "Recovery UI, reopen frame, availability distinctions, retry, and retained descriptor cards are absent.",
+      "represented_observations": "Operation-specific actions show a useful typed-inspector direction.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/01-typed-pouch.png",
+          "region": "Selected OP · O42 inspector; Dismissed items · 12 row."
+        }
+      ]
+    },
+    {
+      "journey": "J26",
+      "step": 6,
+      "outcome": "Not represented",
+      "affordance": "No forge bay or pouch-to-forge chooser shown.",
+      "prediction": "Offer collection to forge, select eligible concrete content spans and review exclusions for op/recipe/walk/draft/whole-cell.",
+      "observed": "Typed card categories reveal content and non-content types.",
+      "missing": "No eligibility chooser or excluded-item list/result exists, so no endpoint conversion policy is visually confirmed.",
+      "represented_observations": "The labels make a later eligibility distinction possible.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/01-typed-pouch.png",
+          "region": "Card type labels CELL, OP, QUERY, WALK and LINK DRAFT."
+        }
+      ]
+    }
+  ],
+  "variants": [
+    {
+      "journey": "J22",
+      "step": 4,
+      "variant": "Expanded frame has 3 pending remote stores while 24 matches are found so far.",
+      "outcome": "State undefined",
+      "affordance": "Cancel search button is visible.",
+      "prediction": "Cancel should stop current request while retaining collected results and reading context.",
+      "observed": "Partial coverage and Cancel search are shown, but no cancelled state.",
+      "missing": "Post-cancel retained-results state and distinction from completed empty are absent.",
+      "represented_observations": "Counts differentiate found-so-far from pending stores.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Search footer: Local 3/3, Remote 2/5 complete, 3 pending, Cancel search."
+        }
+      ]
+    },
+    {
+      "journey": "J22",
+      "step": 2,
+      "variant": "Expanded layout versus quiet layout page anchoring.",
+      "outcome": "Not represented",
+      "affordance": "Expand investigation / Fold tools.",
+      "prediction": "Tools should preserve the same readable bounds and text position.",
+      "observed": "Review content and version are retained, but the raster page is slightly shifted/resized.",
+      "missing": "Stable exact bounds and transition/motion evidence.",
+      "represented_observations": "Reading content and visit identity stay the same in both static frames.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/01-quiet-reading.png",
+          "region": "Center Review page."
+        },
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Center Review page; compared visually with quiet frame."
+        }
+      ]
+    },
+    {
+      "journey": "J23",
+      "step": 2,
+      "variant": "Unchecked package with signature unchecked versus enabled packages with valid signatures and unverified identity.",
+      "outcome": "State undefined",
+      "affordance": "Inspect package is visible.",
+      "prediction": "Policy should state whether unchecked signature blocks inspection or activation and distinguish identity trust.",
+      "observed": "Signature and identity verification appear as separate labels for verified packages; Open discussion has red Signature unchecked.",
+      "missing": "Policy state and independent trust for unchecked package.",
+      "represented_observations": "No conflation of signature with identity verification on the other rows.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/04-layer-console.png",
+          "region": "Open discussion #7 Signature unchecked; Lab/Methods Signature valid and Identity unverified."
+        }
+      ]
+    },
+    {
+      "journey": "J23",
+      "step": 5,
+      "variant": "Conditional package count arithmetic for Lab review #13 and Methods annotations #4.",
+      "outcome": "Concept supported",
+      "affordance": "Package checkboxes and candidate #13 row.",
+      "prediction": "Review-only leaves the initial ledger at 22 enabled / 85 retained; retaining #13 without enabling adds nine retained links (22/94); disabling Methods removes its 14 from enabled (8/85) while retaining all 85; disabling Methods and retaining #13 without enabling yields 8/94. Enabling #13 alongside the two initial packages would yield 31/94 if all are retained/enabled together.",
+      "observed": "The image shows initial 22 enabled / 85 retained, Methods contributes 14, candidate #13 is a distinct nine-link candidate per the declared fixture, and #12 is enabled.",
+      "missing": "No resulting choice ledger is pictured; these are conditional fixture arithmetic, not observed user choices or persistence.",
+      "represented_observations": "The ingredients and separate enabled/retained totals are visible or declared; candidate identity remains carrier-specific.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/04-layer-console.png",
+          "region": "Methods annotations #4, Lab review #12, candidate #13 and footer count."
+        }
+      ]
+    },
+    {
+      "journey": "J23",
+      "step": 5,
+      "variant": "Retain candidate #13 adds nine links, while mere review does not; disabling preserves retained inventory.",
+      "outcome": "Not represented",
+      "affordance": "Compare update / Review version / package checkboxes.",
+      "prediction": "After explicit choice, ledger reports enabled and retained counts separately.",
+      "observed": "Only initial 22/85 totals appear; candidate is available and not enabled.",
+      "missing": "Post-choice count cards and durable carrier-specific preference state.",
+      "represented_observations": "Initial enabled and retained totals are distinct.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/04-layer-console.png",
+          "region": "Candidate #13 row and count footer."
+        }
+      ]
+    },
+    {
+      "journey": "J24",
+      "step": 3,
+      "variant": "Right member 3 exact unavailable remote span, cancellation and retry after availability changes.",
+      "outcome": "Not represented",
+      "affordance": "Unavailable row is visible; no request/cancel/retry control.",
+      "prediction": "Keep member ordinal/identity stable and do not complete a visit until target resolves.",
+      "observed": "Right 3/3 is an unavailable Remote span V9.",
+      "missing": "Pending, cancel, changed availability, retry and visit ledger.",
+      "represented_observations": "Unavailable item remains a named member in complete endset.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "L17 right member 3 row."
+        }
+      ]
+    },
+    {
+      "journey": "J24",
+      "step": 4,
+      "variant": "Wrong-version and locked-content exact occurrence.",
+      "outcome": "Not represented",
+      "affordance": "No unavailable-status detail control.",
+      "prediction": "Retain requested descriptor and offer explicit retry/access state without selecting a near match.",
+      "observed": "Only unavailable is shown for remote span; no wrong-version or locked variants.",
+      "missing": "Separate wrong-version/locked status cards and no-substitution choice.",
+      "represented_observations": "The remote member's exact V9 version is named.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "L17 right member 3 row, Remote span · V9 unavailable."
+        }
+      ]
+    },
+    {
+      "journey": "J24",
+      "step": 5,
+      "variant": "Disable L17 contributing Lab review #12 while L17 is selected.",
+      "outcome": "Not represented",
+      "affordance": "Checkbox is visible in current integrated frame but remains checked.",
+      "prediction": "Pinned inspector remains available with disabled-layer explanation and explicit dismiss/re-enable.",
+      "observed": "Lab review #12 is checked; selected L17 inspector remains shown.",
+      "missing": "Disabled-but-pinned state and actions.",
+      "represented_observations": "Selection and package enablement are separate regions.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Right Link layers and L17 inspector."
+        }
+      ]
+    },
+    {
+      "journey": "J25",
+      "step": 1,
+      "variant": "Do not conflate this five-visit compass with the integrated workspace’s route.",
+      "outcome": "Concept supported",
+      "affordance": "Walk compass graph.",
+      "prediction": "Compass fixture has current Calibration V5 at 03; integrated fixture has current Review V4 at 03 and sibling 02→04.",
+      "observed": "Compass explicitly shows 01→02→03 and 01→02→04→05, while integrated frame shows current Review and other route 02→04.",
+      "missing": "No live activity data; static-fixture comparison only.",
+      "represented_observations": "The two fixtures have different subject/version identity and scope.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/01-walk-compass.png",
+          "region": "Current 03 Calibration plate V5 and five-visit graph."
+        },
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Current 03 Review V4 and other route 02→04."
+        }
+      ]
+    },
+    {
+      "journey": "J25",
+      "step": 2,
+      "variant": "Saved playback position 02:14 and cached remote availability.",
+      "outcome": "Concept supported",
+      "affordance": "Resume visit 05.",
+      "prediction": "Resume should restore the saved target and media position if cached version is available.",
+      "observed": "Preview card labels Debrief V7 Remote · cached and Saved playback position · 02:14.",
+      "missing": "Actual playback restoration and exact occurrence identity.",
+      "represented_observations": "Target version, cached status and playback position are visible.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/01-walk-compass.png",
+          "region": "Right preview panel media controls and labels."
+        }
+      ]
+    },
+    {
+      "journey": "J25",
+      "step": 5,
+      "variant": "Unavailable saved version after reopen.",
+      "outcome": "Not represented",
+      "affordance": "No unavailable target or retry control in frame.",
+      "prediction": "Retain saved visit descriptor/futures and offer retry rather than substituting.",
+      "observed": "Current and preview targets are available in shown frame.",
+      "missing": "Unavailable-version and reopen states.",
+      "represented_observations": "Preview preserves an explicitly labeled target in available state.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/01-walk-compass.png",
+          "region": "Right panel preview and route graph."
+        }
+      ]
+    },
+    {
+      "journey": "J26",
+      "step": 1,
+      "variant": "Whole-cell C17 pouch reference versus L17 C24 content-span member.",
+      "outcome": "Concept supported",
+      "affordance": "CELL card inspector in integrated pouch; L17 member descriptor.",
+      "prediction": "Whole cell is a captured cell/slice identity; L17’s member is a selected content span in C24.",
+      "observed": "Pouch says CELL C17 V8 / Whole-cell reference; L17 says C24 contents V8 / contents.",
+      "missing": "Exact range descriptors are not visible.",
+      "represented_observations": "Card type and subject cell identity remain distinct from endpoint member identity.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Pouch CELL C17 V8 card and L17 Right 2 C24 contents V8 row."
+        }
+      ]
+    },
+    {
+      "journey": "J26",
+      "step": 1,
+      "variant": "Saved query recipe versus captured result snapshot.",
+      "outcome": "Concept supported",
+      "affordance": "SEARCH pressure card.",
+      "prediction": "Rerun evaluates saved recipe; snapshot/results should be a separately typed record.",
+      "observed": "Card is SEARCH pressure / Saved recipe · rerun explicitly; no captured-results card appears.",
+      "missing": "Separate snapshot card is not represented in this integrated pouch.",
+      "represented_observations": "Recipe rerun does not imply automatic membership refresh.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Pouch SEARCH pressure row."
+        }
+      ]
+    },
+    {
+      "journey": "J26",
+      "step": 4,
+      "variant": "Equal text at different addresses and another occurrence of shared source.",
+      "outcome": "State undefined",
+      "affordance": "Save selection / card menus.",
+      "prediction": "Duplicate policy must distinguish same exact reference from equal text and source-shared occurrence.",
+      "observed": "Cards display excerpts and subjects without address/occurrence labels or chooser.",
+      "missing": "The policy and address-level decision state.",
+      "represented_observations": "Span bundle card lists two ranges and source edition, but exact addresses are not visible.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/01-typed-pouch.png",
+          "region": "Span bundle and cell cards, with card menus."
+        }
+      ]
+    },
+    {
+      "journey": "J26",
+      "step": 6,
+      "variant": "Eligible endpoint filtering excludes operation, recipe, walk, draft, and whole-cell label.",
+      "outcome": "Not represented",
+      "affordance": "No forge bay or eligibility chooser.",
+      "prediction": "Only explicit concrete content spans may enter content endsets; report each excluded type.",
+      "observed": "Typed list distinguishes OP, QUERY, WALK, LINK DRAFT and CELL from span bundle.",
+      "missing": "No eligibility decision or exclusion explanation.",
+      "represented_observations": "Distinct type badges give the UI enough vocabulary to explain exclusions.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/01-typed-pouch.png",
+          "region": "Typed card stack and selected OP inspector."
+        }
+      ]
+    }
+  ],
+  "cross_checks": [
+    {
+      "journey": "J22",
+      "check": "Pointer and discoverability",
+      "outcome": "Concept supported",
+      "observation": "Named action/identity is visible in the static frame; no pointer execution or discoverability observation is established.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Left results and C17 comparison; center current Review V4; right L17 summary, layers, three typed saved cards; bottom rail preserves current visit and sibling route 02→04."
+        }
+      ]
+    },
+    {
+      "journey": "J22",
+      "check": "List and keyboard",
+      "outcome": "Not represented",
+      "observation": "No keyboard/list-only, accessibility-tree, narrow-layout, enlarged-text, or reduced-motion frame is supplied for this concept.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Left results and C17 comparison; center current Review V4; right L17 summary, layers, three typed saved cards; bottom rail preserves current visit and sibling route 02→04."
+        }
+      ]
+    },
+    {
+      "journey": "J22",
+      "check": "Accessibility",
+      "outcome": "Not represented",
+      "observation": "No keyboard/list-only, accessibility-tree, narrow-layout, enlarged-text, or reduced-motion frame is supplied for this concept.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Left results and C17 comparison; center current Review V4; right L17 summary, layers, three typed saved cards; bottom rail preserves current visit and sibling route 02→04."
+        }
+      ]
+    },
+    {
+      "journey": "J22",
+      "check": "Density and narrow views",
+      "outcome": "Not represented",
+      "observation": "No keyboard/list-only, accessibility-tree, narrow-layout, enlarged-text, or reduced-motion frame is supplied for this concept.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Left results and C17 comparison; center current Review V4; right L17 summary, layers, three typed saved cards; bottom rail preserves current visit and sibling route 02→04."
+        }
+      ]
+    },
+    {
+      "journey": "J22",
+      "check": "Enlarged text and optics",
+      "outcome": "Not represented",
+      "observation": "No keyboard/list-only, accessibility-tree, narrow-layout, enlarged-text, or reduced-motion frame is supplied for this concept.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Left results and C17 comparison; center current Review V4; right L17 summary, layers, three typed saved cards; bottom rail preserves current visit and sibling route 02→04."
+        }
+      ]
+    },
+    {
+      "journey": "J22",
+      "check": "Reduced motion",
+      "outcome": "Not represented",
+      "observation": "No keyboard/list-only, accessibility-tree, narrow-layout, enlarged-text, or reduced-motion frame is supplied for this concept.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Left results and C17 comparison; center current Review V4; right L17 summary, layers, three typed saved cards; bottom rail preserves current visit and sibling route 02→04."
+        }
+      ]
+    },
+    {
+      "journey": "J22",
+      "check": "Lifecycle and unavailable states",
+      "outcome": "Not represented",
+      "observation": "Static available-state imagery does not show the requested cancel/reopen/locked/wrong-version transitions.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Left results and C17 comparison; center current Review V4; right L17 summary, layers, three typed saved cards; bottom rail preserves current visit and sibling route 02→04."
+        }
+      ]
+    },
+    {
+      "journey": "J22",
+      "check": "Storage boundaries",
+      "outcome": "State undefined",
+      "observation": "Concept notes state intended reader-owned versus source boundaries, but no storage operations or before/after records are shown.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Left results and C17 comparison; center current Review V4; right L17 summary, layers, three typed saved cards; bottom rail preserves current visit and sibling route 02→04."
+        }
+      ]
+    },
+    {
+      "journey": "J22",
+      "check": "Relation language",
+      "outcome": "Concept supported",
+      "observation": "Named action/identity is visible in the static frame; no pointer execution or discoverability observation is established.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Left results and C17 comparison; center current Review V4; right L17 summary, layers, three typed saved cards; bottom rail preserves current visit and sibling route 02→04."
+        }
+      ]
+    },
+    {
+      "journey": "J23",
+      "check": "Pointer and discoverability",
+      "outcome": "Concept supported",
+      "observation": "Named action/identity is visible in the static frame; no pointer execution or discoverability observation is established.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/04-layer-console.png",
+          "region": "Right Link layers panel lists Lab review #12 enabled, Methods annotations #4 enabled/quiet, Open discussion #7 disabled/signature unchecked, candidate #13; bottom states 22 enabled links / 85 retained / 6 visible."
+        }
+      ]
+    },
+    {
+      "journey": "J23",
+      "check": "List and keyboard",
+      "outcome": "Not represented",
+      "observation": "No keyboard/list-only, accessibility-tree, narrow-layout, enlarged-text, or reduced-motion frame is supplied for this concept.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/04-layer-console.png",
+          "region": "Right Link layers panel lists Lab review #12 enabled, Methods annotations #4 enabled/quiet, Open discussion #7 disabled/signature unchecked, candidate #13; bottom states 22 enabled links / 85 retained / 6 visible."
+        }
+      ]
+    },
+    {
+      "journey": "J23",
+      "check": "Accessibility",
+      "outcome": "Not represented",
+      "observation": "No keyboard/list-only, accessibility-tree, narrow-layout, enlarged-text, or reduced-motion frame is supplied for this concept.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/04-layer-console.png",
+          "region": "Right Link layers panel lists Lab review #12 enabled, Methods annotations #4 enabled/quiet, Open discussion #7 disabled/signature unchecked, candidate #13; bottom states 22 enabled links / 85 retained / 6 visible."
+        }
+      ]
+    },
+    {
+      "journey": "J23",
+      "check": "Density and narrow views",
+      "outcome": "Not represented",
+      "observation": "No keyboard/list-only, accessibility-tree, narrow-layout, enlarged-text, or reduced-motion frame is supplied for this concept.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/04-layer-console.png",
+          "region": "Right Link layers panel lists Lab review #12 enabled, Methods annotations #4 enabled/quiet, Open discussion #7 disabled/signature unchecked, candidate #13; bottom states 22 enabled links / 85 retained / 6 visible."
+        }
+      ]
+    },
+    {
+      "journey": "J23",
+      "check": "Enlarged text and optics",
+      "outcome": "Not represented",
+      "observation": "No keyboard/list-only, accessibility-tree, narrow-layout, enlarged-text, or reduced-motion frame is supplied for this concept.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/04-layer-console.png",
+          "region": "Right Link layers panel lists Lab review #12 enabled, Methods annotations #4 enabled/quiet, Open discussion #7 disabled/signature unchecked, candidate #13; bottom states 22 enabled links / 85 retained / 6 visible."
+        }
+      ]
+    },
+    {
+      "journey": "J23",
+      "check": "Reduced motion",
+      "outcome": "Not represented",
+      "observation": "No keyboard/list-only, accessibility-tree, narrow-layout, enlarged-text, or reduced-motion frame is supplied for this concept.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/04-layer-console.png",
+          "region": "Right Link layers panel lists Lab review #12 enabled, Methods annotations #4 enabled/quiet, Open discussion #7 disabled/signature unchecked, candidate #13; bottom states 22 enabled links / 85 retained / 6 visible."
+        }
+      ]
+    },
+    {
+      "journey": "J23",
+      "check": "Lifecycle and unavailable states",
+      "outcome": "Not represented",
+      "observation": "Static available-state imagery does not show the requested cancel/reopen/locked/wrong-version transitions.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/04-layer-console.png",
+          "region": "Right Link layers panel lists Lab review #12 enabled, Methods annotations #4 enabled/quiet, Open discussion #7 disabled/signature unchecked, candidate #13; bottom states 22 enabled links / 85 retained / 6 visible."
+        }
+      ]
+    },
+    {
+      "journey": "J23",
+      "check": "Storage boundaries",
+      "outcome": "State undefined",
+      "observation": "Concept notes state intended reader-owned versus source boundaries, but no storage operations or before/after records are shown.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/04-layer-console.png",
+          "region": "Right Link layers panel lists Lab review #12 enabled, Methods annotations #4 enabled/quiet, Open discussion #7 disabled/signature unchecked, candidate #13; bottom states 22 enabled links / 85 retained / 6 visible."
+        }
+      ]
+    },
+    {
+      "journey": "J23",
+      "check": "Relation language",
+      "outcome": "Concept supported",
+      "observation": "Named action/identity is visible in the static frame; no pointer execution or discoverability observation is established.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/04-layer-console.png",
+          "region": "Right Link layers panel lists Lab review #12 enabled, Methods annotations #4 enabled/quiet, Open discussion #7 disabled/signature unchecked, candidate #13; bottom states 22 enabled links / 85 retained / 6 visible."
+        }
+      ]
+    },
+    {
+      "journey": "J24",
+      "check": "Pointer and discoverability",
+      "outcome": "Concept supported",
+      "observation": "Named action/identity is visible in the static frame; no pointer execution or discoverability observation is established.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Left results and C17 comparison; center current Review V4; right L17 summary, layers, three typed saved cards; bottom rail preserves current visit and sibling route 02→04."
+        }
+      ]
+    },
+    {
+      "journey": "J24",
+      "check": "List and keyboard",
+      "outcome": "Not represented",
+      "observation": "No keyboard/list-only, accessibility-tree, narrow-layout, enlarged-text, or reduced-motion frame is supplied for this concept.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Left results and C17 comparison; center current Review V4; right L17 summary, layers, three typed saved cards; bottom rail preserves current visit and sibling route 02→04."
+        }
+      ]
+    },
+    {
+      "journey": "J24",
+      "check": "Accessibility",
+      "outcome": "Not represented",
+      "observation": "No keyboard/list-only, accessibility-tree, narrow-layout, enlarged-text, or reduced-motion frame is supplied for this concept.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Left results and C17 comparison; center current Review V4; right L17 summary, layers, three typed saved cards; bottom rail preserves current visit and sibling route 02→04."
+        }
+      ]
+    },
+    {
+      "journey": "J24",
+      "check": "Density and narrow views",
+      "outcome": "Not represented",
+      "observation": "No keyboard/list-only, accessibility-tree, narrow-layout, enlarged-text, or reduced-motion frame is supplied for this concept.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Left results and C17 comparison; center current Review V4; right L17 summary, layers, three typed saved cards; bottom rail preserves current visit and sibling route 02→04."
+        }
+      ]
+    },
+    {
+      "journey": "J24",
+      "check": "Enlarged text and optics",
+      "outcome": "Not represented",
+      "observation": "No keyboard/list-only, accessibility-tree, narrow-layout, enlarged-text, or reduced-motion frame is supplied for this concept.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Left results and C17 comparison; center current Review V4; right L17 summary, layers, three typed saved cards; bottom rail preserves current visit and sibling route 02→04."
+        }
+      ]
+    },
+    {
+      "journey": "J24",
+      "check": "Reduced motion",
+      "outcome": "Not represented",
+      "observation": "No keyboard/list-only, accessibility-tree, narrow-layout, enlarged-text, or reduced-motion frame is supplied for this concept.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Left results and C17 comparison; center current Review V4; right L17 summary, layers, three typed saved cards; bottom rail preserves current visit and sibling route 02→04."
+        }
+      ]
+    },
+    {
+      "journey": "J24",
+      "check": "Lifecycle and unavailable states",
+      "outcome": "Not represented",
+      "observation": "Static available-state imagery does not show the requested cancel/reopen/locked/wrong-version transitions.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Left results and C17 comparison; center current Review V4; right L17 summary, layers, three typed saved cards; bottom rail preserves current visit and sibling route 02→04."
+        }
+      ]
+    },
+    {
+      "journey": "J24",
+      "check": "Storage boundaries",
+      "outcome": "State undefined",
+      "observation": "Concept notes state intended reader-owned versus source boundaries, but no storage operations or before/after records are shown.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Left results and C17 comparison; center current Review V4; right L17 summary, layers, three typed saved cards; bottom rail preserves current visit and sibling route 02→04."
+        }
+      ]
+    },
+    {
+      "journey": "J24",
+      "check": "Relation language",
+      "outcome": "Concept supported",
+      "observation": "Named action/identity is visible in the static frame; no pointer execution or discoverability observation is established.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Left results and C17 comparison; center current Review V4; right L17 summary, layers, three typed saved cards; bottom rail preserves current visit and sibling route 02→04."
+        }
+      ]
+    },
+    {
+      "journey": "J25",
+      "check": "Pointer and discoverability",
+      "outcome": "Concept supported",
+      "observation": "Named action/identity is visible in the static frame; no pointer execution or discoverability observation is established.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/01-walk-compass.png",
+          "region": "Current visit 03 on left; previewing visit 05 on right with V7, cached status and playback 02:14; route cards show 01→02→03 and 01→02→04→05; controls show Activity Back, disabled forward from 03, Return to origin."
+        }
+      ]
+    },
+    {
+      "journey": "J25",
+      "check": "List and keyboard",
+      "outcome": "Not represented",
+      "observation": "No keyboard/list-only, accessibility-tree, narrow-layout, enlarged-text, or reduced-motion frame is supplied for this concept.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/01-walk-compass.png",
+          "region": "Current visit 03 on left; previewing visit 05 on right with V7, cached status and playback 02:14; route cards show 01→02→03 and 01→02→04→05; controls show Activity Back, disabled forward from 03, Return to origin."
+        }
+      ]
+    },
+    {
+      "journey": "J25",
+      "check": "Accessibility",
+      "outcome": "Not represented",
+      "observation": "No keyboard/list-only, accessibility-tree, narrow-layout, enlarged-text, or reduced-motion frame is supplied for this concept.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/01-walk-compass.png",
+          "region": "Current visit 03 on left; previewing visit 05 on right with V7, cached status and playback 02:14; route cards show 01→02→03 and 01→02→04→05; controls show Activity Back, disabled forward from 03, Return to origin."
+        }
+      ]
+    },
+    {
+      "journey": "J25",
+      "check": "Density and narrow views",
+      "outcome": "Not represented",
+      "observation": "No keyboard/list-only, accessibility-tree, narrow-layout, enlarged-text, or reduced-motion frame is supplied for this concept.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/01-walk-compass.png",
+          "region": "Current visit 03 on left; previewing visit 05 on right with V7, cached status and playback 02:14; route cards show 01→02→03 and 01→02→04→05; controls show Activity Back, disabled forward from 03, Return to origin."
+        }
+      ]
+    },
+    {
+      "journey": "J25",
+      "check": "Enlarged text and optics",
+      "outcome": "Not represented",
+      "observation": "No keyboard/list-only, accessibility-tree, narrow-layout, enlarged-text, or reduced-motion frame is supplied for this concept.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/01-walk-compass.png",
+          "region": "Current visit 03 on left; previewing visit 05 on right with V7, cached status and playback 02:14; route cards show 01→02→03 and 01→02→04→05; controls show Activity Back, disabled forward from 03, Return to origin."
+        }
+      ]
+    },
+    {
+      "journey": "J25",
+      "check": "Reduced motion",
+      "outcome": "Not represented",
+      "observation": "No keyboard/list-only, accessibility-tree, narrow-layout, enlarged-text, or reduced-motion frame is supplied for this concept.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/01-walk-compass.png",
+          "region": "Current visit 03 on left; previewing visit 05 on right with V7, cached status and playback 02:14; route cards show 01→02→03 and 01→02→04→05; controls show Activity Back, disabled forward from 03, Return to origin."
+        }
+      ]
+    },
+    {
+      "journey": "J25",
+      "check": "Lifecycle and unavailable states",
+      "outcome": "Not represented",
+      "observation": "Static available-state imagery does not show the requested cancel/reopen/locked/wrong-version transitions.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/01-walk-compass.png",
+          "region": "Current visit 03 on left; previewing visit 05 on right with V7, cached status and playback 02:14; route cards show 01→02→03 and 01→02→04→05; controls show Activity Back, disabled forward from 03, Return to origin."
+        }
+      ]
+    },
+    {
+      "journey": "J25",
+      "check": "Storage boundaries",
+      "outcome": "State undefined",
+      "observation": "Concept notes state intended reader-owned versus source boundaries, but no storage operations or before/after records are shown.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/01-walk-compass.png",
+          "region": "Current visit 03 on left; previewing visit 05 on right with V7, cached status and playback 02:14; route cards show 01→02→03 and 01→02→04→05; controls show Activity Back, disabled forward from 03, Return to origin."
+        }
+      ]
+    },
+    {
+      "journey": "J25",
+      "check": "Relation language",
+      "outcome": "Concept supported",
+      "observation": "Named action/identity is visible in the static frame; no pointer execution or discoverability observation is established.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/01-walk-compass.png",
+          "region": "Current visit 03 on left; previewing visit 05 on right with V7, cached status and playback 02:14; route cards show 01→02→03 and 01→02→04→05; controls show Activity Back, disabled forward from 03, Return to origin."
+        }
+      ]
+    },
+    {
+      "journey": "J26",
+      "check": "Pointer and discoverability",
+      "outcome": "Concept supported",
+      "observation": "Named action/identity is visible in the static frame; no pointer execution or discoverability observation is established.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/01-typed-pouch.png",
+          "region": "Pressure review header: 146 saved, 18 filtered, 6 visible; type tabs and cards for span bundle, cell, op, query, walk and link draft; selected op inspector; dismissed-items count 12."
+        }
+      ]
+    },
+    {
+      "journey": "J26",
+      "check": "List and keyboard",
+      "outcome": "Not represented",
+      "observation": "No keyboard/list-only, accessibility-tree, narrow-layout, enlarged-text, or reduced-motion frame is supplied for this concept.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/01-typed-pouch.png",
+          "region": "Pressure review header: 146 saved, 18 filtered, 6 visible; type tabs and cards for span bundle, cell, op, query, walk and link draft; selected op inspector; dismissed-items count 12."
+        }
+      ]
+    },
+    {
+      "journey": "J26",
+      "check": "Accessibility",
+      "outcome": "Not represented",
+      "observation": "No keyboard/list-only, accessibility-tree, narrow-layout, enlarged-text, or reduced-motion frame is supplied for this concept.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/01-typed-pouch.png",
+          "region": "Pressure review header: 146 saved, 18 filtered, 6 visible; type tabs and cards for span bundle, cell, op, query, walk and link draft; selected op inspector; dismissed-items count 12."
+        }
+      ]
+    },
+    {
+      "journey": "J26",
+      "check": "Density and narrow views",
+      "outcome": "Not represented",
+      "observation": "No keyboard/list-only, accessibility-tree, narrow-layout, enlarged-text, or reduced-motion frame is supplied for this concept.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/01-typed-pouch.png",
+          "region": "Pressure review header: 146 saved, 18 filtered, 6 visible; type tabs and cards for span bundle, cell, op, query, walk and link draft; selected op inspector; dismissed-items count 12."
+        }
+      ]
+    },
+    {
+      "journey": "J26",
+      "check": "Enlarged text and optics",
+      "outcome": "Not represented",
+      "observation": "No keyboard/list-only, accessibility-tree, narrow-layout, enlarged-text, or reduced-motion frame is supplied for this concept.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/01-typed-pouch.png",
+          "region": "Pressure review header: 146 saved, 18 filtered, 6 visible; type tabs and cards for span bundle, cell, op, query, walk and link draft; selected op inspector; dismissed-items count 12."
+        }
+      ]
+    },
+    {
+      "journey": "J26",
+      "check": "Reduced motion",
+      "outcome": "Not represented",
+      "observation": "No keyboard/list-only, accessibility-tree, narrow-layout, enlarged-text, or reduced-motion frame is supplied for this concept.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/01-typed-pouch.png",
+          "region": "Pressure review header: 146 saved, 18 filtered, 6 visible; type tabs and cards for span bundle, cell, op, query, walk and link draft; selected op inspector; dismissed-items count 12."
+        }
+      ]
+    },
+    {
+      "journey": "J26",
+      "check": "Lifecycle and unavailable states",
+      "outcome": "Not represented",
+      "observation": "Static available-state imagery does not show the requested cancel/reopen/locked/wrong-version transitions.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/01-typed-pouch.png",
+          "region": "Pressure review header: 146 saved, 18 filtered, 6 visible; type tabs and cards for span bundle, cell, op, query, walk and link draft; selected op inspector; dismissed-items count 12."
+        }
+      ]
+    },
+    {
+      "journey": "J26",
+      "check": "Storage boundaries",
+      "outcome": "State undefined",
+      "observation": "Concept notes state intended reader-owned versus source boundaries, but no storage operations or before/after records are shown.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/01-typed-pouch.png",
+          "region": "Pressure review header: 146 saved, 18 filtered, 6 visible; type tabs and cards for span bundle, cell, op, query, walk and link draft; selected op inspector; dismissed-items count 12."
+        }
+      ]
+    },
+    {
+      "journey": "J26",
+      "check": "Relation language",
+      "outcome": "Concept supported",
+      "observation": "Named action/identity is visible in the static frame; no pointer execution or discoverability observation is established.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/01-typed-pouch.png",
+          "region": "Pressure review header: 146 saved, 18 filtered, 6 visible; type tabs and cards for span bundle, cell, op, query, walk and link draft; selected op inspector; dismissed-items count 12."
+        }
+      ]
+    }
+  ],
+  "findings": [
+    {
+      "id": "R2-01",
+      "severity": "major",
+      "references": [
+        "J22.4",
+        "J22.5",
+        "J23.5",
+        "J24.2",
+        "J25.4",
+        "J25.5"
+      ],
+      "attempted": "Preserve workspace/Walk state across fold, return, reopen and continuation actions.",
+      "visible_result_or_gap": "Frames show controls and initial state only; no post-action state or persistence ledger demonstrates preservation.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Left results and C17 comparison; center current Review V4; right L17 summary, layers, three typed saved cards; bottom rail preserves current visit and sibling route 02→04."
+        },
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/01-walk-compass.png",
+          "region": "Current visit 03 on left; previewing visit 05 on right with V7, cached status and playback 02:14; route cards show 01→02→03 and 01→02→04→05; controls show Activity Back, disabled forward from 03, Return to origin."
+        },
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/04-layer-console.png",
+          "region": "Right Link layers panel lists Lab review #12 enabled, Methods annotations #4 enabled/quiet, Open discussion #7 disabled/signature unchecked, candidate #13; bottom states 22 enabled links / 85 retained / 6 visible."
+        }
+      ],
+      "proposed_design_change": "Add paired before/after cards for fold-only, back/origin return, reopen, and continue-from-earlier actions. Show visit identity, cursor pair, query, reading offset/version, pouch/package preferences and retained sibling edges in each resulting state. Include a named reopen card and unavailable target with retry.",
+      "readiness_implication": "State transitions and lifecycle persistence need design resolution before implementation claims can be made."
+    },
+    {
+      "id": "R2-02",
+      "severity": "major",
+      "references": [
+        "J23.2",
+        "J23.4",
+        "J23.5",
+        "J24.5"
+      ],
+      "attempted": "Inspect, compare or disable immutable package carriers while preserving selected Link identity.",
+      "visible_result_or_gap": "Current frame shows independent signature and identity labels and distinct candidate, but omits disabled-package inspector, full immutable carrier identity, candidate decision/result, updated counts, and disabled-but-pinned L17 state.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/04-layer-console.png",
+          "region": "Right Link layers panel lists Lab review #12 enabled, Methods annotations #4 enabled/quiet, Open discussion #7 disabled/signature unchecked, candidate #13; bottom states 22 enabled links / 85 retained / 6 visible."
+        },
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Left results and C17 comparison; center current Review V4; right L17 summary, layers, three typed saved cards; bottom rail preserves current visit and sibling route 02→04."
+        }
+      ],
+      "proposed_design_change": "Add package inspector states showing immutable carrier ID, publisher, signature, independent trust, and unchecked/invalid policy; add explicit keep/switch choice for #13 with selected Link ID preserved; add post-choice retained/enabled count reconciliation and disabled-but-pinned inspector actions.",
+      "readiness_implication": "Package trust, update choice and retained selection behavior remain unresolved."
+    },
+    {
+      "id": "R2-03",
+      "severity": "major",
+      "references": [
+        "J24.2",
+        "J24.3",
+        "J24.4"
+      ],
+      "attempted": "Cycle member/occurrence selection and request distant or unavailable relation targets.",
+      "visible_result_or_gap": "The full initial 2×3 ordered endsets and cursor are legible, including unavailable Right 3, but no cursor mutation, overlapping-Link switch, new-session reselect/restore, pending/cancel/retry, temporary neighborhood, wrong-version or locked state is shown.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "L17 inspector and member rows."
+        }
+      ],
+      "proposed_design_change": "Add state cards for independent cursor changes and repeated occurrence selection; show Link ID on switch, new session origin 03 versus restored origin 01 context, pending/cancel/retry on exact right member 3, distant neighborhood return, and wrong-version/locked status without substitution.",
+      "readiness_implication": "The relation overview is clear, while traversal and failure transitions are not yet specified visually."
+    },
+    {
+      "id": "R2-04",
+      "severity": "major",
+      "references": [
+        "J26.1",
+        "J26.2",
+        "J26.3",
+        "J26.4",
+        "J26.5",
+        "J26.6"
+      ],
+      "attempted": "Save, filter, deduplicate, recover and offer typed pouch items to the forge.",
+      "visible_result_or_gap": "Typed cards and 146/18/6 counts are clear, but the passage, whole-cell and recipe inspectors are absent; save results, list-only off-window access, duplicate policy, recovery/unavailable states and endpoint eligibility chooser are also absent.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/01-typed-pouch.png",
+          "region": "Pressure review header: 146 saved, 18 filtered, 6 visible; type tabs and cards for span bundle, cell, op, query, walk and link draft; selected op inspector; dismissed-items count 12."
+        }
+      ],
+      "proposed_design_change": "Add type-specific inspectors for passage, whole-cell and recipe that show preserved descriptors and supported actions; add a typed save receipt preserving source address/state/occurrence; a searchable list with counted-group expansion; a duplicate chooser keyed by exact identity versus same text/shared source; dismissal recovery and availability cards; and a forge eligibility review that enumerates accepted spans and excluded cell/op/query/walk/draft types. Keep recipe and optional captured results as distinct records.",
+      "readiness_implication": "Pouch semantics are promising but composite typed persistence and forge handoff need explicit design states."
+    },
+    {
+      "id": "R2-05",
+      "severity": "minor",
+      "references": [
+        "J22.2",
+        "J22.4"
+      ],
+      "attempted": "Expand and fold investigation tools while keeping reading geometry stable.",
+      "visible_result_or_gap": "The central passage and edition remain the same, but the final raster pair changes page size/position slightly; exact anchor bounds and transition are not demonstrated.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/01-quiet-reading.png",
+          "region": "Center Review page."
+        },
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Center Review page."
+        }
+      ],
+      "proposed_design_change": "Use a shared host-bound composition in the before/after states and show stable reading bounds or clearly describe the accepted reflow; include reduced-motion cut state.",
+      "readiness_implication": "The visual proposal communicates retained reading context, but pixel-stable geometry and motion remain unassessed."
+    },
+    {
+      "id": "R2-06",
+      "severity": "minor",
+      "references": [
+        "J25.2",
+        "J25.4",
+        "J25.5",
+        "J26.5"
+      ],
+      "attempted": "Restore visit target/media, add notes/references and recover pouch items.",
+      "visible_result_or_gap": "The compass gives a useful preview/resume distinction and saved playback time, while note/reference results and unavailable/reopen/recovery states are absent.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/01-walk-compass.png",
+          "region": "Current visit 03 on left; previewing visit 05 on right with V7, cached status and playback 02:14; route cards show 01→02→03 and 01→02→04→05; controls show Activity Back, disabled forward from 03, Return to origin."
+        },
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/01-typed-pouch.png",
+          "region": "Pressure review header: 146 saved, 18 filtered, 6 visible; type tabs and cards for span bundle, cell, op, query, walk and link draft; selected op inspector; dismissed-items count 12."
+        }
+      ],
+      "proposed_design_change": "Provide result states for note/reference actions and reopen with unavailable targets, preserved futures and explicit retry; offer pouch recovery with descriptor-retention evidence.",
+      "readiness_implication": "Walk geometry is ready for further concept review; activity lifecycle and media restoration still need explicit state designs."
+    }
+  ]
+}

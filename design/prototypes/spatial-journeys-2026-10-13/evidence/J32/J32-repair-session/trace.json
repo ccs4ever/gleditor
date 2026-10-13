@@ -1,0 +1,2362 @@
+{
+  "journey": "J32",
+  "route": "J32-repair-session",
+  "frames": [
+    {
+      "file": "J32/J32-repair-session/before.png",
+      "location": "?journey=J32&variant=J32-repair-session",
+      "frame": "J32-J32-repair-session-s5-before",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run.",
+            "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "state": "Lab notes@V12",
+            "occurrence": "lab-o7",
+            "offset": 3140,
+            "kind": "reader"
+          },
+          {
+            "id": "02",
+            "parent": "01",
+            "subject": "C17 historical cell",
+            "state": "Rig slice@V8",
+            "occurrence": "rig-o1",
+            "offset": 0,
+            "kind": "reader"
+          },
+          {
+            "id": "03",
+            "parent": "02",
+            "subject": "Review passage",
+            "state": "Review@V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          },
+          {
+            "id": "04",
+            "parent": "02",
+            "subject": "Calibration plate",
+            "state": "Calibration plate@V5",
+            "occurrence": "cal-o1",
+            "offset": 0,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "Calibration plate": 17,
+          "Debrief": 21,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 4,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "s-reading",
+            "title": "Current reading · visit 03",
+            "kind": "document",
+            "body": [
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03 · child of 02"
+              },
+              {
+                "label": "Source",
+                "value": "Review@V4 · remote cached verified"
+              },
+              {
+                "label": "Occurrence",
+                "value": "review-o3 · [80,115)"
+              },
+              {
+                "label": "Return target",
+                "value": "reading:Review:V4:line-9"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "s-link",
+            "title": "L17 · Comment · active right",
+            "kind": "inspector",
+            "body": [],
+            "facts": [
+              {
+                "label": "Origin visit",
+                "value": "01"
+              },
+              {
+                "label": "Left cursor",
+                "value": "member 2/2 · C17 V8 · rig-o1"
+              },
+              {
+                "label": "Right cursor",
+                "value": "member 3/3 · unavailable span V9"
+              },
+              {
+                "label": "Package",
+                "value": "Lab review #12 · enabled normal"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          },
+          {
+            "id": "s-query",
+            "title": "Pressure investigation",
+            "kind": "list",
+            "body": [],
+            "facts": [
+              {
+                "label": "Found",
+                "value": 24
+              },
+              {
+                "label": "Visible",
+                "value": 3
+              },
+              {
+                "label": "Coverage",
+                "value": "local 3/3 complete · remote 2/5 · 3 pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "q1",
+                "label": "C17 V8",
+                "detail": "pressure 3.14 bar · historical · local",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "q2",
+                "label": "Calibration plate V5",
+                "detail": "OCR region · cached remote",
+                "status": "ready",
+                "ordinal": 2
+              },
+              {
+                "id": "q3",
+                "label": "Debrief V7",
+                "detail": "transcript 02:14 · cached remote",
+                "status": "ready",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 24,
+              "filtered": 24,
+              "visible": 3
+            }
+          }
+        ],
+        "query": {
+          "id": "Q-pressure-17",
+          "generation": 4,
+          "recipe": {
+            "literal": "pressure",
+            "caseFold": true,
+            "scope": [
+              "local-1",
+              "local-2",
+              "local-3",
+              "remote-1",
+              "remote-2",
+              "remote-3",
+              "remote-4",
+              "remote-5"
+            ]
+          },
+          "found": 24,
+          "visible": 3,
+          "coverage": {
+            "local": "3/3 complete",
+            "remote": "2/5 complete",
+            "pending": [
+              "remote-3",
+              "remote-4",
+              "remote-5"
+            ]
+          },
+          "selected": "Rig slice@V8:C17 occurrence rig-o1 · historical match",
+          "requestStatus": "incomplete"
+        },
+        "comparison": {
+          "left": "Rig slice@V8:C17",
+          "right": "Rig slice@V12:C17",
+          "fixture": "integrated-pressure",
+          "saved": true
+        },
+        "link": {
+          "id": "L17",
+          "authority": "Lab review #12",
+          "relation": "Comment",
+          "leftOrder": [
+            "left-lab-1",
+            "left-c17-1",
+            "left-c17-2"
+          ],
+          "rightOrder": [
+            "review-1",
+            "C24-1",
+            "remote-span-9"
+          ],
+          "activeSide": "right",
+          "cursors": {
+            "left": {
+              "member": "left-c17-2",
+              "ordinal": 2,
+              "total": 2,
+              "occurrence": "rig-o1"
+            },
+            "right": {
+              "member": "remote-span-9",
+              "ordinal": 3,
+              "total": 3,
+              "occurrence": "remote-o9"
+            }
+          },
+          "originVisit": "01",
+          "pinnedRefs": [
+            "Rig slice@V8:C17[0,8)",
+            "Review@V4:doc[80,115)",
+            "remote span@V9:unavailable"
+          ]
+        },
+        "companions": [
+          {
+            "store": "Lab notes",
+            "version": "V12",
+            "occurrence": "lab-o7"
+          },
+          {
+            "store": "Rig slice",
+            "version": "V8",
+            "occurrence": "rig-o1"
+          }
+        ],
+        "packages": {
+          "Lab review #12": {
+            "carrier": "carrier:lab-review-12",
+            "links": 8,
+            "retained": true,
+            "enabled": true,
+            "emphasis": "normal",
+            "signature": "valid"
+          },
+          "Methods annotations #4": {
+            "carrier": "carrier:methods-4",
+            "links": 14,
+            "retained": true,
+            "enabled": true,
+            "emphasis": "quiet",
+            "signature": "valid"
+          },
+          "Open discussion #7": {
+            "carrier": "carrier:open-discussion-7",
+            "links": 63,
+            "retained": true,
+            "enabled": false,
+            "emphasis": "normal",
+            "signature": "valid"
+          },
+          "Lab review #13": {
+            "carrier": "carrier:lab-review-13",
+            "links": 9,
+            "retained": false,
+            "enabled": false,
+            "candidate": true
+          }
+        },
+        "pouch": [
+          {
+            "id": "pouch-passage-1",
+            "type": "content span",
+            "source": "Lab notes@V12 [12,35) · lab-o7",
+            "status": "held"
+          },
+          {
+            "id": "pouch-cell-1",
+            "type": "whole-cell reference",
+            "source": "Rig slice@V8 cell:C17",
+            "status": "held"
+          },
+          {
+            "id": "pouch-query-1",
+            "type": "saved recipe",
+            "source": "Q-pressure recipe",
+            "status": "saved"
+          }
+        ],
+        "siblingRoutes": [
+          [
+            "01",
+            "02",
+            "03"
+          ],
+          [
+            "01",
+            "02",
+            "04"
+          ]
+        ],
+        "session": {
+          "id": "session:investigation-03",
+          "schema": 1,
+          "savedAt": "fixture:2026-10-13T18:00Z",
+          "reading": {
+            "visit": "03",
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "body": [
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ]
+          },
+          "comparison": {
+            "left": "Rig slice@V8:C17",
+            "right": "Rig slice@V12:C17",
+            "independentTwoStateFixture": false,
+            "integratedPressureFixture": true
+          },
+          "link": {
+            "id": "L17",
+            "authority": "Lab review #12",
+            "relation": "Comment",
+            "leftOrder": [
+              "left-lab-1",
+              "left-c17-1",
+              "left-c17-2"
+            ],
+            "rightOrder": [
+              "review-1",
+              "C24-1",
+              "remote-span-9"
+            ],
+            "activeSide": "right",
+            "cursors": {
+              "left": {
+                "member": "left-c17-2",
+                "ordinal": 2,
+                "total": 2,
+                "occurrence": "rig-o1"
+              },
+              "right": {
+                "member": "remote-span-9",
+                "ordinal": 3,
+                "total": 3,
+                "occurrence": "remote-o9"
+              }
+            },
+            "originVisit": "01",
+            "pinnedRefs": [
+              "Rig slice@V8:C17[0,8)",
+              "Review@V4:doc[80,115)",
+              "remote span@V9:unavailable"
+            ]
+          },
+          "companions": [
+            {
+              "store": "Lab notes",
+              "version": "V12",
+              "occurrence": "lab-o7"
+            },
+            {
+              "store": "Rig slice",
+              "version": "V8",
+              "occurrence": "rig-o1"
+            }
+          ],
+          "packages": {
+            "Lab review #12": {
+              "carrier": "carrier:lab-review-12",
+              "links": 8,
+              "retained": true,
+              "enabled": true,
+              "emphasis": "normal",
+              "signature": "valid"
+            },
+            "Methods annotations #4": {
+              "carrier": "carrier:methods-4",
+              "links": 14,
+              "retained": true,
+              "enabled": true,
+              "emphasis": "quiet",
+              "signature": "valid"
+            },
+            "Open discussion #7": {
+              "carrier": "carrier:open-discussion-7",
+              "links": 63,
+              "retained": true,
+              "enabled": false,
+              "emphasis": "normal",
+              "signature": "valid"
+            },
+            "Lab review #13": {
+              "carrier": "carrier:lab-review-13",
+              "links": 9,
+              "retained": false,
+              "enabled": false,
+              "candidate": true
+            }
+          },
+          "pouch": [
+            {
+              "id": "pouch-passage-1",
+              "type": "content span",
+              "source": "Lab notes@V12 [12,35) · lab-o7",
+              "status": "held"
+            },
+            {
+              "id": "pouch-cell-1",
+              "type": "whole-cell reference",
+              "source": "Rig slice@V8 cell:C17",
+              "status": "held"
+            },
+            {
+              "id": "pouch-query-1",
+              "type": "saved recipe",
+              "source": "Q-pressure recipe",
+              "status": "saved"
+            }
+          ],
+          "query": {
+            "id": "Q-pressure-17",
+            "generation": 4,
+            "recipe": {
+              "literal": "pressure",
+              "caseFold": true,
+              "scope": [
+                "local-1",
+                "local-2",
+                "local-3",
+                "remote-1",
+                "remote-2",
+                "remote-3",
+                "remote-4",
+                "remote-5"
+              ]
+            },
+            "found": 24,
+            "visible": 3,
+            "coverage": {
+              "local": "3/3 complete",
+              "remote": "2/5 complete",
+              "pending": [
+                "remote-3",
+                "remote-4",
+                "remote-5"
+              ]
+            },
+            "selected": "Rig slice@V8:C17 occurrence rig-o1 · historical match",
+            "requestStatus": "incomplete"
+          },
+          "visits": [
+            {
+              "id": "01",
+              "parent": null,
+              "subject": "Lab notes",
+              "state": "Lab notes@V12",
+              "occurrence": "lab-o7",
+              "offset": 3140,
+              "kind": "reader"
+            },
+            {
+              "id": "02",
+              "parent": "01",
+              "subject": "C17 historical cell",
+              "state": "Rig slice@V8",
+              "occurrence": "rig-o1",
+              "offset": 0,
+              "kind": "reader"
+            },
+            {
+              "id": "03",
+              "parent": "02",
+              "subject": "Review passage",
+              "state": "Review@V4",
+              "occurrence": "review-o3",
+              "offset": 80,
+              "kind": "reader"
+            },
+            {
+              "id": "04",
+              "parent": "02",
+              "subject": "Calibration plate",
+              "state": "Calibration plate@V5",
+              "occurrence": "cal-o1",
+              "offset": 0,
+              "kind": "reader"
+            }
+          ],
+          "currentVisit": "03",
+          "siblingRoute": [
+            "02",
+            "04"
+          ],
+          "focusTarget": "reading:Review:V4:line-9",
+          "captureStates": "preview bytes optional; identities authoritative"
+        },
+        "connection": "online",
+        "presentation": {
+          "layout": "wide",
+          "textScale": 1,
+          "motion": "normal",
+          "inputMode": "pointer"
+        },
+        "acquisition": {
+          "pinnedEdition": {
+            "publisher": "publisher:lab",
+            "publication": "pub:lab-review",
+            "manifest": "manifest:review",
+            "edition": "V12"
+          },
+          "pointer": "V13",
+          "status": "not requested"
+        }
+      },
+      "effects": [],
+      "action": "Before",
+      "note": ""
+    },
+    {
+      "file": "J32/J32-repair-session/J32-repair-session-a1.png",
+      "location": "?journey=J32&variant=J32-repair-session&task=0&action=1",
+      "frame": "J32-repair-session-a1",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run.",
+            "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "state": "Lab notes@V12",
+            "occurrence": "lab-o7",
+            "offset": 3140,
+            "kind": "reader"
+          },
+          {
+            "id": "02",
+            "parent": "01",
+            "subject": "C17 historical cell",
+            "state": "Rig slice@V8",
+            "occurrence": "rig-o1",
+            "offset": 0,
+            "kind": "reader"
+          },
+          {
+            "id": "03",
+            "parent": "02",
+            "subject": "Review passage",
+            "state": "Review@V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          },
+          {
+            "id": "04",
+            "parent": "02",
+            "subject": "Calibration plate",
+            "state": "Calibration plate@V5",
+            "occurrence": "cal-o1",
+            "offset": 0,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "Calibration plate": 17,
+          "Debrief": 21,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 4,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J32-repair-session-a1-reading",
+            "title": "Reading · visit 03 · Review@V4",
+            "kind": "document",
+            "body": [
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03"
+              },
+              {
+                "label": "Subject",
+                "value": "Review passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "review-o3"
+              },
+              {
+                "label": "Offset",
+                "value": 80
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "v-corrupt",
+            "title": "Unreadable session record",
+            "kind": "notice",
+            "body": [],
+            "facts": [
+              {
+                "label": "Checksum",
+                "value": "sha256:session-03-original"
+              },
+              {
+                "label": "Original bytes",
+                "value": "read-only preserved"
+              },
+              {
+                "label": "Restore defaults",
+                "value": "not offered"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "Q-pressure-17",
+          "generation": 4,
+          "recipe": {
+            "literal": "pressure",
+            "caseFold": true,
+            "scope": [
+              "local-1",
+              "local-2",
+              "local-3",
+              "remote-1",
+              "remote-2",
+              "remote-3",
+              "remote-4",
+              "remote-5"
+            ]
+          },
+          "found": 24,
+          "visible": 3,
+          "coverage": {
+            "local": "3/3 complete",
+            "remote": "2/5 complete",
+            "pending": [
+              "remote-3",
+              "remote-4",
+              "remote-5"
+            ]
+          },
+          "selected": "Rig slice@V8:C17 occurrence rig-o1 · historical match",
+          "requestStatus": "incomplete"
+        },
+        "comparison": {
+          "left": "Rig slice@V8:C17",
+          "right": "Rig slice@V12:C17",
+          "fixture": "integrated-pressure",
+          "saved": true
+        },
+        "link": {
+          "id": "L17",
+          "authority": "Lab review #12",
+          "relation": "Comment",
+          "leftOrder": [
+            "left-lab-1",
+            "left-c17-1",
+            "left-c17-2"
+          ],
+          "rightOrder": [
+            "review-1",
+            "C24-1",
+            "remote-span-9"
+          ],
+          "activeSide": "right",
+          "cursors": {
+            "left": {
+              "member": "left-c17-2",
+              "ordinal": 2,
+              "total": 2,
+              "occurrence": "rig-o1"
+            },
+            "right": {
+              "member": "remote-span-9",
+              "ordinal": 3,
+              "total": 3,
+              "occurrence": "remote-o9"
+            }
+          },
+          "originVisit": "01",
+          "pinnedRefs": [
+            "Rig slice@V8:C17[0,8)",
+            "Review@V4:doc[80,115)",
+            "remote span@V9:unavailable"
+          ]
+        },
+        "companions": [
+          {
+            "store": "Lab notes",
+            "version": "V12",
+            "occurrence": "lab-o7"
+          },
+          {
+            "store": "Rig slice",
+            "version": "V8",
+            "occurrence": "rig-o1"
+          }
+        ],
+        "packages": {
+          "Lab review #12": {
+            "carrier": "carrier:lab-review-12",
+            "links": 8,
+            "retained": true,
+            "enabled": true,
+            "emphasis": "normal",
+            "signature": "valid"
+          },
+          "Methods annotations #4": {
+            "carrier": "carrier:methods-4",
+            "links": 14,
+            "retained": true,
+            "enabled": true,
+            "emphasis": "quiet",
+            "signature": "valid"
+          },
+          "Open discussion #7": {
+            "carrier": "carrier:open-discussion-7",
+            "links": 63,
+            "retained": true,
+            "enabled": false,
+            "emphasis": "normal",
+            "signature": "valid"
+          },
+          "Lab review #13": {
+            "carrier": "carrier:lab-review-13",
+            "links": 9,
+            "retained": false,
+            "enabled": false,
+            "candidate": true
+          }
+        },
+        "pouch": [
+          {
+            "id": "pouch-passage-1",
+            "type": "content span",
+            "source": "Lab notes@V12 [12,35) · lab-o7",
+            "status": "held"
+          },
+          {
+            "id": "pouch-cell-1",
+            "type": "whole-cell reference",
+            "source": "Rig slice@V8 cell:C17",
+            "status": "held"
+          },
+          {
+            "id": "pouch-query-1",
+            "type": "saved recipe",
+            "source": "Q-pressure recipe",
+            "status": "saved"
+          }
+        ],
+        "siblingRoutes": [
+          [
+            "01",
+            "02",
+            "03"
+          ],
+          [
+            "01",
+            "02",
+            "04"
+          ]
+        ],
+        "session": {
+          "id": "session:investigation-03",
+          "schema": 1,
+          "savedAt": "fixture:2026-10-13T18:00Z",
+          "reading": {
+            "visit": "03",
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "body": [
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ]
+          },
+          "comparison": {
+            "left": "Rig slice@V8:C17",
+            "right": "Rig slice@V12:C17",
+            "independentTwoStateFixture": false,
+            "integratedPressureFixture": true
+          },
+          "link": {
+            "id": "L17",
+            "authority": "Lab review #12",
+            "relation": "Comment",
+            "leftOrder": [
+              "left-lab-1",
+              "left-c17-1",
+              "left-c17-2"
+            ],
+            "rightOrder": [
+              "review-1",
+              "C24-1",
+              "remote-span-9"
+            ],
+            "activeSide": "right",
+            "cursors": {
+              "left": {
+                "member": "left-c17-2",
+                "ordinal": 2,
+                "total": 2,
+                "occurrence": "rig-o1"
+              },
+              "right": {
+                "member": "remote-span-9",
+                "ordinal": 3,
+                "total": 3,
+                "occurrence": "remote-o9"
+              }
+            },
+            "originVisit": "01",
+            "pinnedRefs": [
+              "Rig slice@V8:C17[0,8)",
+              "Review@V4:doc[80,115)",
+              "remote span@V9:unavailable"
+            ]
+          },
+          "companions": [
+            {
+              "store": "Lab notes",
+              "version": "V12",
+              "occurrence": "lab-o7"
+            },
+            {
+              "store": "Rig slice",
+              "version": "V8",
+              "occurrence": "rig-o1"
+            }
+          ],
+          "packages": {
+            "Lab review #12": {
+              "carrier": "carrier:lab-review-12",
+              "links": 8,
+              "retained": true,
+              "enabled": true,
+              "emphasis": "normal",
+              "signature": "valid"
+            },
+            "Methods annotations #4": {
+              "carrier": "carrier:methods-4",
+              "links": 14,
+              "retained": true,
+              "enabled": true,
+              "emphasis": "quiet",
+              "signature": "valid"
+            },
+            "Open discussion #7": {
+              "carrier": "carrier:open-discussion-7",
+              "links": 63,
+              "retained": true,
+              "enabled": false,
+              "emphasis": "normal",
+              "signature": "valid"
+            },
+            "Lab review #13": {
+              "carrier": "carrier:lab-review-13",
+              "links": 9,
+              "retained": false,
+              "enabled": false,
+              "candidate": true
+            }
+          },
+          "pouch": [
+            {
+              "id": "pouch-passage-1",
+              "type": "content span",
+              "source": "Lab notes@V12 [12,35) · lab-o7",
+              "status": "held"
+            },
+            {
+              "id": "pouch-cell-1",
+              "type": "whole-cell reference",
+              "source": "Rig slice@V8 cell:C17",
+              "status": "held"
+            },
+            {
+              "id": "pouch-query-1",
+              "type": "saved recipe",
+              "source": "Q-pressure recipe",
+              "status": "saved"
+            }
+          ],
+          "query": {
+            "id": "Q-pressure-17",
+            "generation": 4,
+            "recipe": {
+              "literal": "pressure",
+              "caseFold": true,
+              "scope": [
+                "local-1",
+                "local-2",
+                "local-3",
+                "remote-1",
+                "remote-2",
+                "remote-3",
+                "remote-4",
+                "remote-5"
+              ]
+            },
+            "found": 24,
+            "visible": 3,
+            "coverage": {
+              "local": "3/3 complete",
+              "remote": "2/5 complete",
+              "pending": [
+                "remote-3",
+                "remote-4",
+                "remote-5"
+              ]
+            },
+            "selected": "Rig slice@V8:C17 occurrence rig-o1 · historical match",
+            "requestStatus": "incomplete"
+          },
+          "visits": [
+            {
+              "id": "01",
+              "parent": null,
+              "subject": "Lab notes",
+              "state": "Lab notes@V12",
+              "occurrence": "lab-o7",
+              "offset": 3140,
+              "kind": "reader"
+            },
+            {
+              "id": "02",
+              "parent": "01",
+              "subject": "C17 historical cell",
+              "state": "Rig slice@V8",
+              "occurrence": "rig-o1",
+              "offset": 0,
+              "kind": "reader"
+            },
+            {
+              "id": "03",
+              "parent": "02",
+              "subject": "Review passage",
+              "state": "Review@V4",
+              "occurrence": "review-o3",
+              "offset": 80,
+              "kind": "reader"
+            },
+            {
+              "id": "04",
+              "parent": "02",
+              "subject": "Calibration plate",
+              "state": "Calibration plate@V5",
+              "occurrence": "cal-o1",
+              "offset": 0,
+              "kind": "reader"
+            }
+          ],
+          "currentVisit": "03",
+          "siblingRoute": [
+            "02",
+            "04"
+          ],
+          "focusTarget": "reading:Review:V4:line-9",
+          "captureStates": "preview bytes optional; identities authoritative",
+          "status": "unreadable",
+          "bytes": {
+            "id": "session:investigation-03",
+            "checksum": "sha256:session-03-original",
+            "preserveOriginal": true
+          }
+        },
+        "connection": "online",
+        "presentation": {
+          "layout": "wide",
+          "textScale": 1,
+          "motion": "normal",
+          "inputMode": "pointer"
+        },
+        "acquisition": {
+          "pinnedEdition": {
+            "publisher": "publisher:lab",
+            "publication": "pub:lab-review",
+            "manifest": "manifest:review",
+            "edition": "V12"
+          },
+          "pointer": "V13",
+          "status": "not requested"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "Unreadable event preserves original bytes; it does not regenerate a default session.",
+          "identity": "session:investigation-03"
+        }
+      ],
+      "action": "Fixture supplies unreadable descriptor checksum",
+      "note": "Repair controls require a recoverable copy first."
+    },
+    {
+      "file": "J32/J32-repair-session/J32-repair-session-a2.png",
+      "location": "?journey=J32&variant=J32-repair-session&task=0&action=2",
+      "frame": "J32-repair-session-a2",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run.",
+            "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "state": "Lab notes@V12",
+            "occurrence": "lab-o7",
+            "offset": 3140,
+            "kind": "reader"
+          },
+          {
+            "id": "02",
+            "parent": "01",
+            "subject": "C17 historical cell",
+            "state": "Rig slice@V8",
+            "occurrence": "rig-o1",
+            "offset": 0,
+            "kind": "reader"
+          },
+          {
+            "id": "03",
+            "parent": "02",
+            "subject": "Review passage",
+            "state": "Review@V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          },
+          {
+            "id": "04",
+            "parent": "02",
+            "subject": "Calibration plate",
+            "state": "Calibration plate@V5",
+            "occurrence": "cal-o1",
+            "offset": 0,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "Calibration plate": 17,
+          "Debrief": 21,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 4,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J32-repair-session-a2-reading",
+            "title": "Reading · visit 03 · Review@V4",
+            "kind": "document",
+            "body": [
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03"
+              },
+              {
+                "label": "Subject",
+                "value": "Review passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "review-o3"
+              },
+              {
+                "label": "Offset",
+                "value": 80
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "v-backup",
+            "title": "Backup verified",
+            "kind": "notice",
+            "body": [],
+            "facts": [
+              {
+                "label": "Backup ID",
+                "value": "backup:session-03"
+              },
+              {
+                "label": "Checksum",
+                "value": "sha256:session-03-original"
+              },
+              {
+                "label": "Original",
+                "value": "preserved"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "Q-pressure-17",
+          "generation": 4,
+          "recipe": {
+            "literal": "pressure",
+            "caseFold": true,
+            "scope": [
+              "local-1",
+              "local-2",
+              "local-3",
+              "remote-1",
+              "remote-2",
+              "remote-3",
+              "remote-4",
+              "remote-5"
+            ]
+          },
+          "found": 24,
+          "visible": 3,
+          "coverage": {
+            "local": "3/3 complete",
+            "remote": "2/5 complete",
+            "pending": [
+              "remote-3",
+              "remote-4",
+              "remote-5"
+            ]
+          },
+          "selected": "Rig slice@V8:C17 occurrence rig-o1 · historical match",
+          "requestStatus": "incomplete"
+        },
+        "comparison": {
+          "left": "Rig slice@V8:C17",
+          "right": "Rig slice@V12:C17",
+          "fixture": "integrated-pressure",
+          "saved": true
+        },
+        "link": {
+          "id": "L17",
+          "authority": "Lab review #12",
+          "relation": "Comment",
+          "leftOrder": [
+            "left-lab-1",
+            "left-c17-1",
+            "left-c17-2"
+          ],
+          "rightOrder": [
+            "review-1",
+            "C24-1",
+            "remote-span-9"
+          ],
+          "activeSide": "right",
+          "cursors": {
+            "left": {
+              "member": "left-c17-2",
+              "ordinal": 2,
+              "total": 2,
+              "occurrence": "rig-o1"
+            },
+            "right": {
+              "member": "remote-span-9",
+              "ordinal": 3,
+              "total": 3,
+              "occurrence": "remote-o9"
+            }
+          },
+          "originVisit": "01",
+          "pinnedRefs": [
+            "Rig slice@V8:C17[0,8)",
+            "Review@V4:doc[80,115)",
+            "remote span@V9:unavailable"
+          ]
+        },
+        "companions": [
+          {
+            "store": "Lab notes",
+            "version": "V12",
+            "occurrence": "lab-o7"
+          },
+          {
+            "store": "Rig slice",
+            "version": "V8",
+            "occurrence": "rig-o1"
+          }
+        ],
+        "packages": {
+          "Lab review #12": {
+            "carrier": "carrier:lab-review-12",
+            "links": 8,
+            "retained": true,
+            "enabled": true,
+            "emphasis": "normal",
+            "signature": "valid"
+          },
+          "Methods annotations #4": {
+            "carrier": "carrier:methods-4",
+            "links": 14,
+            "retained": true,
+            "enabled": true,
+            "emphasis": "quiet",
+            "signature": "valid"
+          },
+          "Open discussion #7": {
+            "carrier": "carrier:open-discussion-7",
+            "links": 63,
+            "retained": true,
+            "enabled": false,
+            "emphasis": "normal",
+            "signature": "valid"
+          },
+          "Lab review #13": {
+            "carrier": "carrier:lab-review-13",
+            "links": 9,
+            "retained": false,
+            "enabled": false,
+            "candidate": true
+          }
+        },
+        "pouch": [
+          {
+            "id": "pouch-passage-1",
+            "type": "content span",
+            "source": "Lab notes@V12 [12,35) · lab-o7",
+            "status": "held"
+          },
+          {
+            "id": "pouch-cell-1",
+            "type": "whole-cell reference",
+            "source": "Rig slice@V8 cell:C17",
+            "status": "held"
+          },
+          {
+            "id": "pouch-query-1",
+            "type": "saved recipe",
+            "source": "Q-pressure recipe",
+            "status": "saved"
+          }
+        ],
+        "siblingRoutes": [
+          [
+            "01",
+            "02",
+            "03"
+          ],
+          [
+            "01",
+            "02",
+            "04"
+          ]
+        ],
+        "session": {
+          "id": "session:investigation-03",
+          "schema": 1,
+          "savedAt": "fixture:2026-10-13T18:00Z",
+          "reading": {
+            "visit": "03",
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "body": [
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ]
+          },
+          "comparison": {
+            "left": "Rig slice@V8:C17",
+            "right": "Rig slice@V12:C17",
+            "independentTwoStateFixture": false,
+            "integratedPressureFixture": true
+          },
+          "link": {
+            "id": "L17",
+            "authority": "Lab review #12",
+            "relation": "Comment",
+            "leftOrder": [
+              "left-lab-1",
+              "left-c17-1",
+              "left-c17-2"
+            ],
+            "rightOrder": [
+              "review-1",
+              "C24-1",
+              "remote-span-9"
+            ],
+            "activeSide": "right",
+            "cursors": {
+              "left": {
+                "member": "left-c17-2",
+                "ordinal": 2,
+                "total": 2,
+                "occurrence": "rig-o1"
+              },
+              "right": {
+                "member": "remote-span-9",
+                "ordinal": 3,
+                "total": 3,
+                "occurrence": "remote-o9"
+              }
+            },
+            "originVisit": "01",
+            "pinnedRefs": [
+              "Rig slice@V8:C17[0,8)",
+              "Review@V4:doc[80,115)",
+              "remote span@V9:unavailable"
+            ]
+          },
+          "companions": [
+            {
+              "store": "Lab notes",
+              "version": "V12",
+              "occurrence": "lab-o7"
+            },
+            {
+              "store": "Rig slice",
+              "version": "V8",
+              "occurrence": "rig-o1"
+            }
+          ],
+          "packages": {
+            "Lab review #12": {
+              "carrier": "carrier:lab-review-12",
+              "links": 8,
+              "retained": true,
+              "enabled": true,
+              "emphasis": "normal",
+              "signature": "valid"
+            },
+            "Methods annotations #4": {
+              "carrier": "carrier:methods-4",
+              "links": 14,
+              "retained": true,
+              "enabled": true,
+              "emphasis": "quiet",
+              "signature": "valid"
+            },
+            "Open discussion #7": {
+              "carrier": "carrier:open-discussion-7",
+              "links": 63,
+              "retained": true,
+              "enabled": false,
+              "emphasis": "normal",
+              "signature": "valid"
+            },
+            "Lab review #13": {
+              "carrier": "carrier:lab-review-13",
+              "links": 9,
+              "retained": false,
+              "enabled": false,
+              "candidate": true
+            }
+          },
+          "pouch": [
+            {
+              "id": "pouch-passage-1",
+              "type": "content span",
+              "source": "Lab notes@V12 [12,35) · lab-o7",
+              "status": "held"
+            },
+            {
+              "id": "pouch-cell-1",
+              "type": "whole-cell reference",
+              "source": "Rig slice@V8 cell:C17",
+              "status": "held"
+            },
+            {
+              "id": "pouch-query-1",
+              "type": "saved recipe",
+              "source": "Q-pressure recipe",
+              "status": "saved"
+            }
+          ],
+          "query": {
+            "id": "Q-pressure-17",
+            "generation": 4,
+            "recipe": {
+              "literal": "pressure",
+              "caseFold": true,
+              "scope": [
+                "local-1",
+                "local-2",
+                "local-3",
+                "remote-1",
+                "remote-2",
+                "remote-3",
+                "remote-4",
+                "remote-5"
+              ]
+            },
+            "found": 24,
+            "visible": 3,
+            "coverage": {
+              "local": "3/3 complete",
+              "remote": "2/5 complete",
+              "pending": [
+                "remote-3",
+                "remote-4",
+                "remote-5"
+              ]
+            },
+            "selected": "Rig slice@V8:C17 occurrence rig-o1 · historical match",
+            "requestStatus": "incomplete"
+          },
+          "visits": [
+            {
+              "id": "01",
+              "parent": null,
+              "subject": "Lab notes",
+              "state": "Lab notes@V12",
+              "occurrence": "lab-o7",
+              "offset": 3140,
+              "kind": "reader"
+            },
+            {
+              "id": "02",
+              "parent": "01",
+              "subject": "C17 historical cell",
+              "state": "Rig slice@V8",
+              "occurrence": "rig-o1",
+              "offset": 0,
+              "kind": "reader"
+            },
+            {
+              "id": "03",
+              "parent": "02",
+              "subject": "Review passage",
+              "state": "Review@V4",
+              "occurrence": "review-o3",
+              "offset": 80,
+              "kind": "reader"
+            },
+            {
+              "id": "04",
+              "parent": "02",
+              "subject": "Calibration plate",
+              "state": "Calibration plate@V5",
+              "occurrence": "cal-o1",
+              "offset": 0,
+              "kind": "reader"
+            }
+          ],
+          "currentVisit": "03",
+          "siblingRoute": [
+            "02",
+            "04"
+          ],
+          "focusTarget": "reading:Review:V4:line-9",
+          "captureStates": "preview bytes optional; identities authoritative",
+          "status": "unreadable",
+          "bytes": {
+            "id": "session:investigation-03",
+            "checksum": "sha256:session-03-original",
+            "preserveOriginal": true
+          },
+          "backup": {
+            "id": "backup:session-03",
+            "source": "session:investigation-03",
+            "checksum": "sha256:session-03-original",
+            "bytesPreserved": true
+          }
+        },
+        "connection": "online",
+        "presentation": {
+          "layout": "wide",
+          "textScale": 1,
+          "motion": "normal",
+          "inputMode": "pointer"
+        },
+        "acquisition": {
+          "pinnedEdition": {
+            "publisher": "publisher:lab",
+            "publication": "pub:lab-review",
+            "manifest": "manifest:review",
+            "edition": "V12"
+          },
+          "pointer": "V13",
+          "status": "not requested"
+        }
+      },
+      "effects": [
+        {
+          "domain": "reader collection",
+          "summary": "Copy original bytes into recovery slot; keep original immutable.",
+          "identity": "backup:session-03"
+        }
+      ],
+      "action": "Create exact backup copy",
+      "note": "The backup has matching checksum and is available for repair."
+    },
+    {
+      "file": "J32/J32-repair-session/J32-repair-session-a3.png",
+      "location": "?journey=J32&variant=J32-repair-session&task=0&action=3",
+      "frame": "J32-repair-session-a3",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run.",
+            "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "state": "Lab notes@V12",
+            "occurrence": "lab-o7",
+            "offset": 3140,
+            "kind": "reader"
+          },
+          {
+            "id": "02",
+            "parent": "01",
+            "subject": "C17 historical cell",
+            "state": "Rig slice@V8",
+            "occurrence": "rig-o1",
+            "offset": 0,
+            "kind": "reader"
+          },
+          {
+            "id": "03",
+            "parent": "02",
+            "subject": "Review passage",
+            "state": "Review@V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          },
+          {
+            "id": "04",
+            "parent": "02",
+            "subject": "Calibration plate",
+            "state": "Calibration plate@V5",
+            "occurrence": "cal-o1",
+            "offset": 0,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "Calibration plate": 17,
+          "Debrief": 21,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 4,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J32-repair-session-a3-reading",
+            "title": "Reading · visit 03 · Review@V4",
+            "kind": "document",
+            "body": [
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03"
+              },
+              {
+                "label": "Subject",
+                "value": "Review passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "review-o3"
+              },
+              {
+                "label": "Offset",
+                "value": 80
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "v-repaired",
+            "title": "Session restored from backup copy",
+            "kind": "notice",
+            "body": [],
+            "facts": [
+              {
+                "label": "Restore source",
+                "value": "backup:session-03"
+              },
+              {
+                "label": "Visit",
+                "value": "03 Review V4"
+              },
+              {
+                "label": "Original unreadable bytes",
+                "value": "preserved"
+              },
+              {
+                "label": "Source ops",
+                "value": "unchanged"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          },
+          {
+            "id": "s-reading",
+            "title": "Current reading · visit 03",
+            "kind": "document",
+            "body": [
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03 · child of 02"
+              },
+              {
+                "label": "Source",
+                "value": "Review@V4 · remote cached verified"
+              },
+              {
+                "label": "Occurrence",
+                "value": "review-o3 · [80,115)"
+              },
+              {
+                "label": "Return target",
+                "value": "reading:Review:V4:line-9"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          }
+        ],
+        "query": {
+          "id": "Q-pressure-17",
+          "generation": 4,
+          "recipe": {
+            "literal": "pressure",
+            "caseFold": true,
+            "scope": [
+              "local-1",
+              "local-2",
+              "local-3",
+              "remote-1",
+              "remote-2",
+              "remote-3",
+              "remote-4",
+              "remote-5"
+            ]
+          },
+          "found": 24,
+          "visible": 3,
+          "coverage": {
+            "local": "3/3 complete",
+            "remote": "2/5 complete",
+            "pending": [
+              "remote-3",
+              "remote-4",
+              "remote-5"
+            ]
+          },
+          "selected": "Rig slice@V8:C17 occurrence rig-o1 · historical match",
+          "requestStatus": "incomplete"
+        },
+        "comparison": {
+          "left": "Rig slice@V8:C17",
+          "right": "Rig slice@V12:C17",
+          "fixture": "integrated-pressure",
+          "saved": true
+        },
+        "link": {
+          "id": "L17",
+          "authority": "Lab review #12",
+          "relation": "Comment",
+          "leftOrder": [
+            "left-lab-1",
+            "left-c17-1",
+            "left-c17-2"
+          ],
+          "rightOrder": [
+            "review-1",
+            "C24-1",
+            "remote-span-9"
+          ],
+          "activeSide": "right",
+          "cursors": {
+            "left": {
+              "member": "left-c17-2",
+              "ordinal": 2,
+              "total": 2,
+              "occurrence": "rig-o1"
+            },
+            "right": {
+              "member": "remote-span-9",
+              "ordinal": 3,
+              "total": 3,
+              "occurrence": "remote-o9"
+            }
+          },
+          "originVisit": "01",
+          "pinnedRefs": [
+            "Rig slice@V8:C17[0,8)",
+            "Review@V4:doc[80,115)",
+            "remote span@V9:unavailable"
+          ]
+        },
+        "companions": [
+          {
+            "store": "Lab notes",
+            "version": "V12",
+            "occurrence": "lab-o7"
+          },
+          {
+            "store": "Rig slice",
+            "version": "V8",
+            "occurrence": "rig-o1"
+          }
+        ],
+        "packages": {
+          "Lab review #12": {
+            "carrier": "carrier:lab-review-12",
+            "links": 8,
+            "retained": true,
+            "enabled": true,
+            "emphasis": "normal",
+            "signature": "valid"
+          },
+          "Methods annotations #4": {
+            "carrier": "carrier:methods-4",
+            "links": 14,
+            "retained": true,
+            "enabled": true,
+            "emphasis": "quiet",
+            "signature": "valid"
+          },
+          "Open discussion #7": {
+            "carrier": "carrier:open-discussion-7",
+            "links": 63,
+            "retained": true,
+            "enabled": false,
+            "emphasis": "normal",
+            "signature": "valid"
+          },
+          "Lab review #13": {
+            "carrier": "carrier:lab-review-13",
+            "links": 9,
+            "retained": false,
+            "enabled": false,
+            "candidate": true
+          }
+        },
+        "pouch": [
+          {
+            "id": "pouch-passage-1",
+            "type": "content span",
+            "source": "Lab notes@V12 [12,35) · lab-o7",
+            "status": "held"
+          },
+          {
+            "id": "pouch-cell-1",
+            "type": "whole-cell reference",
+            "source": "Rig slice@V8 cell:C17",
+            "status": "held"
+          },
+          {
+            "id": "pouch-query-1",
+            "type": "saved recipe",
+            "source": "Q-pressure recipe",
+            "status": "saved"
+          }
+        ],
+        "siblingRoutes": [
+          [
+            "01",
+            "02",
+            "03"
+          ],
+          [
+            "01",
+            "02",
+            "04"
+          ]
+        ],
+        "session": {
+          "id": "session:investigation-03",
+          "schema": 1,
+          "savedAt": "fixture:2026-10-13T18:00Z",
+          "reading": {
+            "visit": "03",
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "body": [
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ]
+          },
+          "comparison": {
+            "left": "Rig slice@V8:C17",
+            "right": "Rig slice@V12:C17",
+            "independentTwoStateFixture": false,
+            "integratedPressureFixture": true
+          },
+          "link": {
+            "id": "L17",
+            "authority": "Lab review #12",
+            "relation": "Comment",
+            "leftOrder": [
+              "left-lab-1",
+              "left-c17-1",
+              "left-c17-2"
+            ],
+            "rightOrder": [
+              "review-1",
+              "C24-1",
+              "remote-span-9"
+            ],
+            "activeSide": "right",
+            "cursors": {
+              "left": {
+                "member": "left-c17-2",
+                "ordinal": 2,
+                "total": 2,
+                "occurrence": "rig-o1"
+              },
+              "right": {
+                "member": "remote-span-9",
+                "ordinal": 3,
+                "total": 3,
+                "occurrence": "remote-o9"
+              }
+            },
+            "originVisit": "01",
+            "pinnedRefs": [
+              "Rig slice@V8:C17[0,8)",
+              "Review@V4:doc[80,115)",
+              "remote span@V9:unavailable"
+            ]
+          },
+          "companions": [
+            {
+              "store": "Lab notes",
+              "version": "V12",
+              "occurrence": "lab-o7"
+            },
+            {
+              "store": "Rig slice",
+              "version": "V8",
+              "occurrence": "rig-o1"
+            }
+          ],
+          "packages": {
+            "Lab review #12": {
+              "carrier": "carrier:lab-review-12",
+              "links": 8,
+              "retained": true,
+              "enabled": true,
+              "emphasis": "normal",
+              "signature": "valid"
+            },
+            "Methods annotations #4": {
+              "carrier": "carrier:methods-4",
+              "links": 14,
+              "retained": true,
+              "enabled": true,
+              "emphasis": "quiet",
+              "signature": "valid"
+            },
+            "Open discussion #7": {
+              "carrier": "carrier:open-discussion-7",
+              "links": 63,
+              "retained": true,
+              "enabled": false,
+              "emphasis": "normal",
+              "signature": "valid"
+            },
+            "Lab review #13": {
+              "carrier": "carrier:lab-review-13",
+              "links": 9,
+              "retained": false,
+              "enabled": false,
+              "candidate": true
+            }
+          },
+          "pouch": [
+            {
+              "id": "pouch-passage-1",
+              "type": "content span",
+              "source": "Lab notes@V12 [12,35) · lab-o7",
+              "status": "held"
+            },
+            {
+              "id": "pouch-cell-1",
+              "type": "whole-cell reference",
+              "source": "Rig slice@V8 cell:C17",
+              "status": "held"
+            },
+            {
+              "id": "pouch-query-1",
+              "type": "saved recipe",
+              "source": "Q-pressure recipe",
+              "status": "saved"
+            }
+          ],
+          "query": {
+            "id": "Q-pressure-17",
+            "generation": 4,
+            "recipe": {
+              "literal": "pressure",
+              "caseFold": true,
+              "scope": [
+                "local-1",
+                "local-2",
+                "local-3",
+                "remote-1",
+                "remote-2",
+                "remote-3",
+                "remote-4",
+                "remote-5"
+              ]
+            },
+            "found": 24,
+            "visible": 3,
+            "coverage": {
+              "local": "3/3 complete",
+              "remote": "2/5 complete",
+              "pending": [
+                "remote-3",
+                "remote-4",
+                "remote-5"
+              ]
+            },
+            "selected": "Rig slice@V8:C17 occurrence rig-o1 · historical match",
+            "requestStatus": "incomplete"
+          },
+          "visits": [
+            {
+              "id": "01",
+              "parent": null,
+              "subject": "Lab notes",
+              "state": "Lab notes@V12",
+              "occurrence": "lab-o7",
+              "offset": 3140,
+              "kind": "reader"
+            },
+            {
+              "id": "02",
+              "parent": "01",
+              "subject": "C17 historical cell",
+              "state": "Rig slice@V8",
+              "occurrence": "rig-o1",
+              "offset": 0,
+              "kind": "reader"
+            },
+            {
+              "id": "03",
+              "parent": "02",
+              "subject": "Review passage",
+              "state": "Review@V4",
+              "occurrence": "review-o3",
+              "offset": 80,
+              "kind": "reader"
+            },
+            {
+              "id": "04",
+              "parent": "02",
+              "subject": "Calibration plate",
+              "state": "Calibration plate@V5",
+              "occurrence": "cal-o1",
+              "offset": 0,
+              "kind": "reader"
+            }
+          ],
+          "currentVisit": "03",
+          "siblingRoute": [
+            "02",
+            "04"
+          ],
+          "focusTarget": "reading:Review:V4:line-9",
+          "captureStates": "preview bytes optional; identities authoritative",
+          "status": "repaired-copy",
+          "bytes": {
+            "id": "session:investigation-03",
+            "checksum": "sha256:session-03-original",
+            "preserveOriginal": true
+          },
+          "backup": {
+            "id": "backup:session-03",
+            "source": "session:investigation-03",
+            "checksum": "sha256:session-03-original",
+            "bytesPreserved": true
+          },
+          "restoreSource": "backup:session-03",
+          "descriptor": {
+            "id": "session:investigation-03",
+            "schema": 1,
+            "savedAt": "fixture:2026-10-13T18:00Z",
+            "reading": {
+              "visit": "03",
+              "subject": "Review passage",
+              "store": "Review",
+              "version": "V4",
+              "occurrence": "review-o3",
+              "offset": 80,
+              "body": [
+                "The recorded pressure remained stable during the run.",
+                "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+              ]
+            },
+            "comparison": {
+              "left": "Rig slice@V8:C17",
+              "right": "Rig slice@V12:C17",
+              "independentTwoStateFixture": false,
+              "integratedPressureFixture": true
+            },
+            "link": {
+              "id": "L17",
+              "authority": "Lab review #12",
+              "relation": "Comment",
+              "leftOrder": [
+                "left-lab-1",
+                "left-c17-1",
+                "left-c17-2"
+              ],
+              "rightOrder": [
+                "review-1",
+                "C24-1",
+                "remote-span-9"
+              ],
+              "activeSide": "right",
+              "cursors": {
+                "left": {
+                  "member": "left-c17-2",
+                  "ordinal": 2,
+                  "total": 2,
+                  "occurrence": "rig-o1"
+                },
+                "right": {
+                  "member": "remote-span-9",
+                  "ordinal": 3,
+                  "total": 3,
+                  "occurrence": "remote-o9"
+                }
+              },
+              "originVisit": "01",
+              "pinnedRefs": [
+                "Rig slice@V8:C17[0,8)",
+                "Review@V4:doc[80,115)",
+                "remote span@V9:unavailable"
+              ]
+            },
+            "companions": [
+              {
+                "store": "Lab notes",
+                "version": "V12",
+                "occurrence": "lab-o7"
+              },
+              {
+                "store": "Rig slice",
+                "version": "V8",
+                "occurrence": "rig-o1"
+              }
+            ],
+            "packages": {
+              "Lab review #12": {
+                "carrier": "carrier:lab-review-12",
+                "links": 8,
+                "retained": true,
+                "enabled": true,
+                "emphasis": "normal",
+                "signature": "valid"
+              },
+              "Methods annotations #4": {
+                "carrier": "carrier:methods-4",
+                "links": 14,
+                "retained": true,
+                "enabled": true,
+                "emphasis": "quiet",
+                "signature": "valid"
+              },
+              "Open discussion #7": {
+                "carrier": "carrier:open-discussion-7",
+                "links": 63,
+                "retained": true,
+                "enabled": false,
+                "emphasis": "normal",
+                "signature": "valid"
+              },
+              "Lab review #13": {
+                "carrier": "carrier:lab-review-13",
+                "links": 9,
+                "retained": false,
+                "enabled": false,
+                "candidate": true
+              }
+            },
+            "pouch": [
+              {
+                "id": "pouch-passage-1",
+                "type": "content span",
+                "source": "Lab notes@V12 [12,35) · lab-o7",
+                "status": "held"
+              },
+              {
+                "id": "pouch-cell-1",
+                "type": "whole-cell reference",
+                "source": "Rig slice@V8 cell:C17",
+                "status": "held"
+              },
+              {
+                "id": "pouch-query-1",
+                "type": "saved recipe",
+                "source": "Q-pressure recipe",
+                "status": "saved"
+              }
+            ],
+            "query": {
+              "id": "Q-pressure-17",
+              "generation": 4,
+              "recipe": {
+                "literal": "pressure",
+                "caseFold": true,
+                "scope": [
+                  "local-1",
+                  "local-2",
+                  "local-3",
+                  "remote-1",
+                  "remote-2",
+                  "remote-3",
+                  "remote-4",
+                  "remote-5"
+                ]
+              },
+              "found": 24,
+              "visible": 3,
+              "coverage": {
+                "local": "3/3 complete",
+                "remote": "2/5 complete",
+                "pending": [
+                  "remote-3",
+                  "remote-4",
+                  "remote-5"
+                ]
+              },
+              "selected": "Rig slice@V8:C17 occurrence rig-o1 · historical match",
+              "requestStatus": "incomplete"
+            },
+            "visits": [
+              {
+                "id": "01",
+                "parent": null,
+                "subject": "Lab notes",
+                "state": "Lab notes@V12",
+                "occurrence": "lab-o7",
+                "offset": 3140,
+                "kind": "reader"
+              },
+              {
+                "id": "02",
+                "parent": "01",
+                "subject": "C17 historical cell",
+                "state": "Rig slice@V8",
+                "occurrence": "rig-o1",
+                "offset": 0,
+                "kind": "reader"
+              },
+              {
+                "id": "03",
+                "parent": "02",
+                "subject": "Review passage",
+                "state": "Review@V4",
+                "occurrence": "review-o3",
+                "offset": 80,
+                "kind": "reader"
+              },
+              {
+                "id": "04",
+                "parent": "02",
+                "subject": "Calibration plate",
+                "state": "Calibration plate@V5",
+                "occurrence": "cal-o1",
+                "offset": 0,
+                "kind": "reader"
+              }
+            ],
+            "currentVisit": "03",
+            "siblingRoute": [
+              "02",
+              "04"
+            ],
+            "focusTarget": "reading:Review:V4:line-9",
+            "captureStates": "preview bytes optional; identities authoritative"
+          },
+          "open": true
+        },
+        "connection": "online",
+        "presentation": {
+          "layout": "wide",
+          "textScale": 1,
+          "motion": "normal",
+          "inputMode": "pointer"
+        },
+        "acquisition": {
+          "pinnedEdition": {
+            "publisher": "publisher:lab",
+            "publication": "pub:lab-review",
+            "manifest": "manifest:review",
+            "edition": "V12"
+          },
+          "pointer": "V13",
+          "status": "not requested"
+        }
+      },
+      "effects": [
+        {
+          "domain": "reader collection",
+          "summary": "Create repaired reader-state copy from backup and restore exact identities; original unreadable bytes remain preserved.",
+          "identity": "backup:session-03 → repaired session copy"
+        }
+      ],
+      "action": "Repair reader descriptor from validated backup",
+      "note": "Repair does not replace source documents or silently fall back to current versions."
+    }
+  ]
+}

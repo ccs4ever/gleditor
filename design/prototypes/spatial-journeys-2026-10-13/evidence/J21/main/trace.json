@@ -1,0 +1,3194 @@
+{
+  "journey": "J21",
+  "route": "main",
+  "frames": [
+    {
+      "file": "J21/main/before.png",
+      "location": "?journey=J21",
+      "frame": "J21-main-s1-before",
+      "state": {
+        "fixture": "prism-store-a-independent-two-state",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "store-A://rig": 56
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Reading place",
+            "kind": "document",
+            "body": [
+              "Current visit 01 · Lab notes · V12.",
+              "The starting caret and occurrence remain pinned while tools open."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Offset",
+                "value": "p.14 · 54.2"
+              },
+              {
+                "label": "Occurrence",
+                "value": "Lab:p14:r54.2"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "prism",
+            "title": "Comparison prism · Store A",
+            "kind": "comparison",
+            "body": [
+              "Independent two-state fixture. Gold marks only the shared original prefix; changed value spans are violet."
+            ],
+            "facts": [
+              {
+                "label": "Left",
+                "value": "store-A://rig · C17 V8 · pinned"
+              },
+              {
+                "label": "Right",
+                "value": "store-A://rig · C17 V12 · pinned"
+              },
+              {
+                "label": "Shared source",
+                "value": "primedia-A17[0,8] · “pressure:”"
+              },
+              {
+                "label": "Changed value",
+                "value": "3.14 bar → 3.16 bar"
+              },
+              {
+                "label": "Source op delta",
+                "value": "0"
+              }
+            ],
+            "rows": [
+              {
+                "id": "left",
+                "label": "Before V8",
+                "detail": "pressure: 3.14 bar",
+                "status": "pinned",
+                "ordinal": 1
+              },
+              {
+                "id": "right",
+                "label": "After V12",
+                "detail": "pressure: 3.16 bar",
+                "status": "pinned",
+                "ordinal": 2
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "comparison": {
+          "fixture": "Store A · prism independent fixture",
+          "left": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V8",
+            "occurrence": "A-C17-V8",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A17-value[9,16]"
+            ]
+          },
+          "right": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V12",
+            "occurrence": "A-C17-V12",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A12-value[9,16]"
+            ]
+          },
+          "shared": [
+            "primedia-A17[0,8]"
+          ],
+          "changes": [
+            "value 3.14 bar → 3.16 bar"
+          ],
+          "sourceOps": {
+            "store-A://rig": 56
+          }
+        }
+      },
+      "effects": [],
+      "action": "Before",
+      "note": ""
+    },
+    {
+      "file": "J21/main/J21-s1-a1.png",
+      "location": "?journey=J21&task=0&action=1",
+      "frame": "J21-s1-a1",
+      "state": {
+        "fixture": "prism-store-a-independent-two-state",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "store-A://rig": 56
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Reading place",
+            "kind": "document",
+            "body": [
+              "Current visit 01 · Lab notes · V12.",
+              "The starting caret and occurrence remain pinned while tools open."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Offset",
+                "value": "p.14 · 54.2"
+              },
+              {
+                "label": "Occurrence",
+                "value": "Lab:p14:r54.2"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "two-state",
+            "title": "Pinned two-state comparison",
+            "kind": "comparison",
+            "body": [
+              "Gold port touches only the shared pressure: source range. Value ranges are distinct violet spans."
+            ],
+            "facts": [
+              {
+                "label": "Fixture",
+                "value": "Store A · independent comparison"
+              },
+              {
+                "label": "Left",
+                "value": "store-A://rig · C17 · V8 · occ A-C17-V8"
+              },
+              {
+                "label": "Right",
+                "value": "store-A://rig · C17 · V12 · occ A-C17-V12"
+              },
+              {
+                "label": "Shared address",
+                "value": "primedia-A17[0,8]"
+              },
+              {
+                "label": "Left changed range",
+                "value": "primedia-A17[9,16] · 3.14 bar"
+              },
+              {
+                "label": "Right changed range",
+                "value": "primedia-A12[9,16] · 3.16 bar"
+              },
+              {
+                "label": "Equal text elsewhere",
+                "value": "primedia-A88[10,20] · distinct address"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "comparison": {
+          "fixture": "Store A · prism independent fixture",
+          "left": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V8",
+            "occurrence": "A-C17-V8",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A17-value[9,16]"
+            ]
+          },
+          "right": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V12",
+            "occurrence": "A-C17-V12",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A12-value[9,16]"
+            ]
+          },
+          "shared": [
+            "primedia-A17[0,8]"
+          ],
+          "changes": [
+            "value 3.14 bar → 3.16 bar"
+          ],
+          "sourceOps": {
+            "store-A://rig": 56
+          }
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Pin exact V8 and V12 states",
+      "note": "Pins two independent exact states; inspection creates no source operations."
+    },
+    {
+      "file": "J21/main/J21-s1-a2.png",
+      "location": "?journey=J21&task=0&action=2",
+      "frame": "J21-s1-a2",
+      "state": {
+        "fixture": "prism-store-a-independent-two-state",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "store-A://rig": 56
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "two-state",
+            "title": "Pinned two-state comparison",
+            "kind": "comparison",
+            "body": [
+              "Gold port touches only the shared pressure: source range. Value ranges are distinct violet spans."
+            ],
+            "facts": [
+              {
+                "label": "Fixture",
+                "value": "Store A · independent comparison"
+              },
+              {
+                "label": "Left",
+                "value": "store-A://rig · C17 · V8 · occ A-C17-V8"
+              },
+              {
+                "label": "Right",
+                "value": "store-A://rig · C17 · V12 · occ A-C17-V12"
+              },
+              {
+                "label": "Shared address",
+                "value": "primedia-A17[0,8]"
+              },
+              {
+                "label": "Left changed range",
+                "value": "primedia-A17[9,16] · 3.14 bar"
+              },
+              {
+                "label": "Right changed range",
+                "value": "primedia-A12[9,16] · 3.16 bar"
+              },
+              {
+                "label": "Equal text elsewhere",
+                "value": "primedia-A88[10,20] · distinct address"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          },
+          {
+            "id": "source-identity",
+            "title": "Range identity",
+            "kind": "inspector",
+            "body": [
+              "The prefix is the only shared range; numeric spans are not shared."
+            ],
+            "facts": [
+              {
+                "label": "Shared",
+                "value": "primedia-A17[0,8] in both states"
+              },
+              {
+                "label": "Left value",
+                "value": "primedia-A17[9,16] · occurrence A-C17-V8"
+              },
+              {
+                "label": "Right value",
+                "value": "primedia-A12[9,16] · occurrence A-C17-V12"
+              },
+              {
+                "label": "Equal text",
+                "value": "primedia-A88[10,20] · independent"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "comparison": {
+          "fixture": "Store A · prism independent fixture",
+          "left": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V8",
+            "occurrence": "A-C17-V8",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A17-value[9,16]"
+            ]
+          },
+          "right": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V12",
+            "occurrence": "A-C17-V12",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A12-value[9,16]"
+            ]
+          },
+          "shared": [
+            "primedia-A17[0,8]"
+          ],
+          "changes": [
+            "value 3.14 bar → 3.16 bar"
+          ],
+          "sourceOps": {
+            "store-A://rig": 56
+          },
+          "inspected": "shared-prefix-and-values"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Inspect shared and changed source ranges",
+      "note": "Shared addresses and equal words are distinct relations."
+    },
+    {
+      "file": "J21/main/J21-s2-a1.png",
+      "location": "?journey=J21&task=1&action=1",
+      "frame": "J21-s2-a1",
+      "state": {
+        "fixture": "prism-store-a-independent-two-state",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "store-A://rig": 56
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "ancestry",
+            "title": "Ancestry selection",
+            "kind": "comparison",
+            "body": [
+              "Branch edges show explicit parent IDs; side position does not imply ancestry."
+            ],
+            "facts": [
+              {
+                "label": "Root",
+                "value": "state-A-V4"
+              },
+              {
+                "label": "Lowest common ancestor",
+                "value": "state-A-V6 · parent V5"
+              },
+              {
+                "label": "Earlier comparison state",
+                "value": "state-A-V5 · before LCA"
+              },
+              {
+                "label": "Left tip",
+                "value": "state-A-V8 · parent V7"
+              },
+              {
+                "label": "Right tip",
+                "value": "state-A-V12 · parent V11"
+              },
+              {
+                "label": "Ancestry",
+                "value": "V4→V5→V6→V7→V8; V6→V9→V11→V12"
+              }
+            ],
+            "rows": [
+              {
+                "id": "v5",
+                "label": "Before LCA",
+                "detail": "A V5 · parent V4",
+                "status": "available",
+                "ordinal": 1
+              },
+              {
+                "id": "lca",
+                "label": "LCA",
+                "detail": "A V6 · parent V5",
+                "status": "ancestor",
+                "ordinal": 2
+              },
+              {
+                "id": "left",
+                "label": "Left branch tip",
+                "detail": "A V8 · parent V7",
+                "status": "tip",
+                "ordinal": 3
+              },
+              {
+                "id": "right",
+                "label": "Right branch tip",
+                "detail": "A V12 · parent V11",
+                "status": "tip",
+                "ordinal": 4
+              }
+            ],
+            "tone": "neutral"
+          },
+          {
+            "id": "two-state",
+            "title": "Pinned two-state comparison",
+            "kind": "comparison",
+            "body": [
+              "Gold port touches only the shared pressure: source range. Value ranges are distinct violet spans."
+            ],
+            "facts": [
+              {
+                "label": "Fixture",
+                "value": "Store A · independent comparison"
+              },
+              {
+                "label": "Left",
+                "value": "store-A://rig · C17 · V8 · occ A-C17-V8"
+              },
+              {
+                "label": "Right",
+                "value": "store-A://rig · C17 · V12 · occ A-C17-V12"
+              },
+              {
+                "label": "Shared address",
+                "value": "primedia-A17[0,8]"
+              },
+              {
+                "label": "Left changed range",
+                "value": "primedia-A17[9,16] · 3.14 bar"
+              },
+              {
+                "label": "Right changed range",
+                "value": "primedia-A12[9,16] · 3.16 bar"
+              },
+              {
+                "label": "Equal text elsewhere",
+                "value": "primedia-A88[10,20] · distinct address"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "comparison": {
+          "fixture": "Store A · prism independent fixture",
+          "left": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V8",
+            "occurrence": "A-C17-V8",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A17-value[9,16]"
+            ]
+          },
+          "right": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V12",
+            "occurrence": "A-C17-V12",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A12-value[9,16]"
+            ]
+          },
+          "shared": [
+            "primedia-A17[0,8]"
+          ],
+          "changes": [
+            "value 3.14 bar → 3.16 bar"
+          ],
+          "sourceOps": {
+            "store-A://rig": 56
+          },
+          "inspected": "shared-prefix-and-values",
+          "ancestrySelection": "A-V5"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Select earlier state before LCA",
+      "note": "V5 is explicitly before LCA V6; ancestry comes from parent IDs."
+    },
+    {
+      "file": "J21/main/J21-s2-a2.png",
+      "location": "?journey=J21&task=1&action=2",
+      "frame": "J21-s2-a2",
+      "state": {
+        "fixture": "prism-store-a-independent-two-state",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "store-A://rig": 56
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "ancestry",
+            "title": "Ancestry selection",
+            "kind": "comparison",
+            "body": [
+              "Branch edges show explicit parent IDs; side position does not imply ancestry."
+            ],
+            "facts": [
+              {
+                "label": "Root",
+                "value": "state-A-V4"
+              },
+              {
+                "label": "Lowest common ancestor",
+                "value": "state-A-V6 · parent V5"
+              },
+              {
+                "label": "Earlier comparison state",
+                "value": "state-A-V5 · before LCA"
+              },
+              {
+                "label": "Left tip",
+                "value": "state-A-V8 · parent V7"
+              },
+              {
+                "label": "Right tip",
+                "value": "state-A-V12 · parent V11"
+              },
+              {
+                "label": "Ancestry",
+                "value": "V4→V5→V6→V7→V8; V6→V9→V11→V12"
+              }
+            ],
+            "rows": [
+              {
+                "id": "v5",
+                "label": "Before LCA",
+                "detail": "A V5 · parent V4",
+                "status": "available",
+                "ordinal": 1
+              },
+              {
+                "id": "lca",
+                "label": "LCA",
+                "detail": "A V6 · parent V5",
+                "status": "ancestor",
+                "ordinal": 2
+              },
+              {
+                "id": "left",
+                "label": "Left branch tip",
+                "detail": "A V8 · parent V7",
+                "status": "tip",
+                "ordinal": 3
+              },
+              {
+                "id": "right",
+                "label": "Right branch tip",
+                "detail": "A V12 · parent V11",
+                "status": "tip",
+                "ordinal": 4
+              }
+            ],
+            "tone": "neutral"
+          },
+          {
+            "id": "three-state",
+            "title": "Three-state ancestry comparison",
+            "kind": "comparison",
+            "body": [
+              "Three exact states are compared with parent edges, not inferred from left/right order."
+            ],
+            "facts": [
+              {
+                "label": "Earlier",
+                "value": "A V5"
+              },
+              {
+                "label": "LCA",
+                "value": "A V6"
+              },
+              {
+                "label": "Left tip",
+                "value": "A V8"
+              },
+              {
+                "label": "Right tip",
+                "value": "A V12"
+              },
+              {
+                "label": "Selected states",
+                "value": "A V5 · A V8 · A V12"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "comparison": {
+          "fixture": "Store A · prism independent fixture",
+          "left": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V8",
+            "occurrence": "A-C17-V8",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A17-value[9,16]"
+            ]
+          },
+          "right": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V12",
+            "occurrence": "A-C17-V12",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A12-value[9,16]"
+            ]
+          },
+          "shared": [
+            "primedia-A17[0,8]"
+          ],
+          "changes": [
+            "value 3.14 bar → 3.16 bar"
+          ],
+          "sourceOps": {
+            "store-A://rig": 56
+          },
+          "inspected": "shared-prefix-and-values",
+          "ancestrySelection": "A-V5",
+          "states": [
+            "A-V5",
+            "A-V8",
+            "A-V12"
+          ]
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Pin LCA and both branch tips",
+      "note": "Selected state set retains ancestry identity."
+    },
+    {
+      "file": "J21/main/J21-s3-a1.png",
+      "location": "?journey=J21&task=2&action=1",
+      "frame": "J21-s3-a1",
+      "state": {
+        "fixture": "prism-store-a-independent-two-state",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "store-A://rig": 56
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "changes",
+            "title": "Text, typed value and topology changes",
+            "kind": "comparison",
+            "body": [
+              "Each diff site has a local page/rank neighborhood. Cell membership and reciprocal dimension links are separate changes."
+            ],
+            "facts": [
+              {
+                "label": "Text",
+                "value": "“return” → “release” · range R-text[11,17]"
+              },
+              {
+                "label": "Typed value",
+                "value": "3.14 bar → 3.16 bar · decimal+unit"
+              },
+              {
+                "label": "Cell membership",
+                "value": "C17: d.reading rank 2 → rank 3"
+              },
+              {
+                "label": "Reciprocal connection",
+                "value": "d.reading↔d.calibration: C17—C24 removed; C17—C31 added"
+              },
+              {
+                "label": "Neighborhood",
+                "value": "rank 2–4 · cells C17,C24,C31"
+              },
+              {
+                "label": "Source ranges",
+                "value": "left A17[9,16], right A12[9,16]"
+              }
+            ],
+            "rows": [
+              {
+                "id": "text",
+                "label": "Text site",
+                "detail": "page paragraph 4 · neighboring sentences shown",
+                "status": "changed",
+                "ordinal": 1
+              },
+              {
+                "id": "value",
+                "label": "Typed value",
+                "detail": "C17 cell row17 · bar unit shown",
+                "status": "changed",
+                "ordinal": 2
+              },
+              {
+                "id": "topology",
+                "label": "Dimension link",
+                "detail": "C17/C24/C31 reciprocal graph",
+                "status": "changed",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral"
+          },
+          {
+            "id": "two-state",
+            "title": "Pinned two-state comparison",
+            "kind": "comparison",
+            "body": [
+              "Gold port touches only the shared pressure: source range. Value ranges are distinct violet spans."
+            ],
+            "facts": [
+              {
+                "label": "Fixture",
+                "value": "Store A · independent comparison"
+              },
+              {
+                "label": "Left",
+                "value": "store-A://rig · C17 · V8 · occ A-C17-V8"
+              },
+              {
+                "label": "Right",
+                "value": "store-A://rig · C17 · V12 · occ A-C17-V12"
+              },
+              {
+                "label": "Shared address",
+                "value": "primedia-A17[0,8]"
+              },
+              {
+                "label": "Left changed range",
+                "value": "primedia-A17[9,16] · 3.14 bar"
+              },
+              {
+                "label": "Right changed range",
+                "value": "primedia-A12[9,16] · 3.16 bar"
+              },
+              {
+                "label": "Equal text elsewhere",
+                "value": "primedia-A88[10,20] · distinct address"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "comparison": {
+          "fixture": "Store A · prism independent fixture",
+          "left": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V8",
+            "occurrence": "A-C17-V8",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A17-value[9,16]"
+            ]
+          },
+          "right": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V12",
+            "occurrence": "A-C17-V12",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A12-value[9,16]"
+            ]
+          },
+          "shared": [
+            "primedia-A17[0,8]"
+          ],
+          "changes": [
+            "value 3.14 bar → 3.16 bar"
+          ],
+          "sourceOps": {
+            "store-A://rig": 56
+          },
+          "inspected": "shared-prefix-and-values",
+          "ancestrySelection": "A-V5",
+          "states": [
+            "A-V5",
+            "A-V8",
+            "A-V12"
+          ],
+          "changeFocus": "text-value"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Inspect changed text and typed value",
+      "note": "Text ranges and typed value include their surrounding content and unit."
+    },
+    {
+      "file": "J21/main/J21-s3-a2.png",
+      "location": "?journey=J21&task=2&action=2",
+      "frame": "J21-s3-a2",
+      "state": {
+        "fixture": "prism-store-a-independent-two-state",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "store-A://rig": 56
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "changes",
+            "title": "Text, typed value and topology changes",
+            "kind": "comparison",
+            "body": [
+              "Each diff site has a local page/rank neighborhood. Cell membership and reciprocal dimension links are separate changes."
+            ],
+            "facts": [
+              {
+                "label": "Text",
+                "value": "“return” → “release” · range R-text[11,17]"
+              },
+              {
+                "label": "Typed value",
+                "value": "3.14 bar → 3.16 bar · decimal+unit"
+              },
+              {
+                "label": "Cell membership",
+                "value": "C17: d.reading rank 2 → rank 3"
+              },
+              {
+                "label": "Reciprocal connection",
+                "value": "d.reading↔d.calibration: C17—C24 removed; C17—C31 added"
+              },
+              {
+                "label": "Neighborhood",
+                "value": "rank 2–4 · cells C17,C24,C31"
+              },
+              {
+                "label": "Source ranges",
+                "value": "left A17[9,16], right A12[9,16]"
+              }
+            ],
+            "rows": [
+              {
+                "id": "text",
+                "label": "Text site",
+                "detail": "page paragraph 4 · neighboring sentences shown",
+                "status": "changed",
+                "ordinal": 1
+              },
+              {
+                "id": "value",
+                "label": "Typed value",
+                "detail": "C17 cell row17 · bar unit shown",
+                "status": "changed",
+                "ordinal": 2
+              },
+              {
+                "id": "topology",
+                "label": "Dimension link",
+                "detail": "C17/C24/C31 reciprocal graph",
+                "status": "changed",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral"
+          },
+          {
+            "id": "topology",
+            "title": "Reciprocal dimension connection diff",
+            "kind": "comparison",
+            "body": [
+              "Both ends of each changed edge are shown; graph is reciprocal."
+            ],
+            "facts": [
+              {
+                "label": "Dimension",
+                "value": "d.reading ↔ d.calibration"
+              },
+              {
+                "label": "Removed",
+                "value": "C17—C24 at ranks 2/4"
+              },
+              {
+                "label": "Added",
+                "value": "C17—C31 at ranks 3/1"
+              },
+              {
+                "label": "Membership",
+                "value": "C17 moves rank 2 → 3"
+              },
+              {
+                "label": "Neighborhood",
+                "value": "C17,C24,C31 plus adjacent ranks"
+              }
+            ],
+            "rows": [
+              {
+                "id": "edge1",
+                "label": "Removed edge",
+                "detail": "C17↔C24",
+                "status": "removed",
+                "ordinal": 1
+              },
+              {
+                "id": "edge2",
+                "label": "Added edge",
+                "detail": "C17↔C31",
+                "status": "added",
+                "ordinal": 2
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "comparison": {
+          "fixture": "Store A · prism independent fixture",
+          "left": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V8",
+            "occurrence": "A-C17-V8",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A17-value[9,16]"
+            ]
+          },
+          "right": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V12",
+            "occurrence": "A-C17-V12",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A12-value[9,16]"
+            ]
+          },
+          "shared": [
+            "primedia-A17[0,8]"
+          ],
+          "changes": [
+            "value 3.14 bar → 3.16 bar"
+          ],
+          "sourceOps": {
+            "store-A://rig": 56
+          },
+          "inspected": "shared-prefix-and-values",
+          "ancestrySelection": "A-V5",
+          "states": [
+            "A-V5",
+            "A-V8",
+            "A-V12"
+          ],
+          "changeFocus": "topology"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Inspect cell membership and reciprocal dimension links",
+      "note": "Topology differences are first-class and not omitted behind text rendering."
+    },
+    {
+      "file": "J21/main/J21-s4-a1.png",
+      "location": "?journey=J21&task=3&action=1",
+      "frame": "J21-s4-a1",
+      "state": {
+        "fixture": "prism-store-a-independent-two-state",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "store-A://rig": 56
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Reading place",
+            "kind": "document",
+            "body": [
+              "Current visit 01 · Lab notes · V12.",
+              "The starting caret and occurrence remain pinned while tools open."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Offset",
+                "value": "p.14 · 54.2"
+              },
+              {
+                "label": "Occurrence",
+                "value": "Lab:p14:r54.2"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "swapped",
+            "title": "Sides swapped",
+            "kind": "comparison",
+            "body": [
+              "Side arrangement changed; each pinned state and its ranges are unchanged."
+            ],
+            "facts": [
+              {
+                "label": "Left",
+                "value": "store-A://rig · C17 V12 · A-C17-V12"
+              },
+              {
+                "label": "Right",
+                "value": "store-A://rig · C17 V8 · A-C17-V8"
+              },
+              {
+                "label": "Pinned states",
+                "value": "same V8 and V12"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "comparison": {
+          "fixture": "Store A · prism independent fixture",
+          "left": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V8",
+            "occurrence": "A-C17-V8",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A17-value[9,16]"
+            ]
+          },
+          "right": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V12",
+            "occurrence": "A-C17-V12",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A12-value[9,16]"
+            ]
+          },
+          "shared": [
+            "primedia-A17[0,8]"
+          ],
+          "changes": [
+            "value 3.14 bar → 3.16 bar"
+          ],
+          "sourceOps": {
+            "store-A://rig": 56
+          },
+          "inspected": "shared-prefix-and-values",
+          "ancestrySelection": "A-V5",
+          "states": [
+            "A-V5",
+            "A-V8",
+            "A-V12"
+          ],
+          "changeFocus": "topology",
+          "sideOrder": [
+            "A-V12",
+            "A-V8"
+          ]
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Swap comparison sides",
+      "note": "Swap affects view order only; pinned descriptors remain exact."
+    },
+    {
+      "file": "J21/main/J21-s4-a2.png",
+      "location": "?journey=J21&task=3&action=2",
+      "frame": "J21-s4-a2",
+      "state": {
+        "fixture": "prism-store-a-independent-two-state",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "store-A://rig": 56
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Reading place",
+            "kind": "document",
+            "body": [
+              "Current visit 01 · Lab notes · V12.",
+              "The starting caret and occurrence remain pinned while tools open."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Offset",
+                "value": "p.14 · 54.2"
+              },
+              {
+                "label": "Occurrence",
+                "value": "Lab:p14:r54.2"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "changes",
+            "title": "Text, typed value and topology changes",
+            "kind": "comparison",
+            "body": [
+              "Each diff site has a local page/rank neighborhood. Cell membership and reciprocal dimension links are separate changes."
+            ],
+            "facts": [
+              {
+                "label": "Text",
+                "value": "“return” → “release” · range R-text[11,17]"
+              },
+              {
+                "label": "Typed value",
+                "value": "3.14 bar → 3.16 bar · decimal+unit"
+              },
+              {
+                "label": "Cell membership",
+                "value": "C17: d.reading rank 2 → rank 3"
+              },
+              {
+                "label": "Reciprocal connection",
+                "value": "d.reading↔d.calibration: C17—C24 removed; C17—C31 added"
+              },
+              {
+                "label": "Neighborhood",
+                "value": "rank 2–4 · cells C17,C24,C31"
+              },
+              {
+                "label": "Source ranges",
+                "value": "left A17[9,16], right A12[9,16]"
+              }
+            ],
+            "rows": [
+              {
+                "id": "text",
+                "label": "Text site",
+                "detail": "page paragraph 4 · neighboring sentences shown",
+                "status": "changed",
+                "ordinal": 1
+              },
+              {
+                "id": "value",
+                "label": "Typed value",
+                "detail": "C17 cell row17 · bar unit shown",
+                "status": "changed",
+                "ordinal": 2
+              },
+              {
+                "id": "topology",
+                "label": "Dimension link",
+                "detail": "C17/C24/C31 reciprocal graph",
+                "status": "changed",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral"
+          },
+          {
+            "id": "selected-difference",
+            "title": "Selected difference · text",
+            "kind": "comparison",
+            "body": [
+              "Focused view for the selected text delta; other typed-value and topology changes remain separately listed."
+            ],
+            "facts": [
+              {
+                "label": "Selected difference",
+                "value": "text"
+              },
+              {
+                "label": "Before",
+                "value": "“return” · range R-text[11,17]"
+              },
+              {
+                "label": "After",
+                "value": "“release” · range R-text[11,17]"
+              },
+              {
+                "label": "Neighborhood",
+                "value": "page paragraph 4 · neighboring sentences shown"
+              },
+              {
+                "label": "Other changes",
+                "value": "typed value · membership · reciprocal connection"
+              }
+            ],
+            "rows": [
+              {
+                "id": "text-before",
+                "label": "Before · V8",
+                "detail": "“return” in paragraph 4",
+                "status": "historical",
+                "ordinal": 1
+              },
+              {
+                "id": "text-after",
+                "label": "After · V12",
+                "detail": "“release” in paragraph 4",
+                "status": "selected",
+                "ordinal": 2
+              }
+            ],
+            "tone": "selected"
+          }
+        ],
+        "comparison": {
+          "fixture": "Store A · prism independent fixture",
+          "left": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V8",
+            "occurrence": "A-C17-V8",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A17-value[9,16]"
+            ]
+          },
+          "right": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V12",
+            "occurrence": "A-C17-V12",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A12-value[9,16]"
+            ]
+          },
+          "shared": [
+            "primedia-A17[0,8]"
+          ],
+          "changes": [
+            "value 3.14 bar → 3.16 bar"
+          ],
+          "sourceOps": {
+            "store-A://rig": 56
+          },
+          "inspected": "shared-prefix-and-values",
+          "ancestrySelection": "A-V5",
+          "states": [
+            "A-V5",
+            "A-V8",
+            "A-V12"
+          ],
+          "changeFocus": "topology",
+          "sideOrder": [
+            "A-V12",
+            "A-V8"
+          ],
+          "selectedDifference": "text"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Choose another difference",
+      "note": "Difference focus changes without replacing either version."
+    },
+    {
+      "file": "J21/main/J21-s4-a3.png",
+      "location": "?journey=J21&task=3&action=3",
+      "frame": "J21-s4-a3",
+      "state": {
+        "fixture": "prism-store-a-independent-two-state",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "store-A://rig": 56
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Reading place",
+            "kind": "document",
+            "body": [
+              "Current visit 01 · Lab notes · V12.",
+              "The starting caret and occurrence remain pinned while tools open."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Offset",
+                "value": "p.14 · 54.2"
+              },
+              {
+                "label": "Occurrence",
+                "value": "Lab:p14:r54.2"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "unavailable",
+            "title": "Region unavailable · target retained",
+            "kind": "inspector",
+            "body": [
+              "No substitute preview is selected. The target identity remains available for retry."
+            ],
+            "facts": [
+              {
+                "label": "Target store",
+                "value": "store-A://rig"
+              },
+              {
+                "label": "Object",
+                "value": "C17"
+              },
+              {
+                "label": "Version",
+                "value": "V12"
+              },
+              {
+                "label": "Occurrence",
+                "value": "A-C17-V12"
+              },
+              {
+                "label": "Range",
+                "value": "primedia-A12[9,16]"
+              },
+              {
+                "label": "Status",
+                "value": "unavailable · exact region"
+              },
+              {
+                "label": "Fallback",
+                "value": "none"
+              }
+            ],
+            "rows": [
+              {
+                "id": "retry",
+                "label": "Retry exact target",
+                "detail": "same identity",
+                "status": "available"
+              },
+              {
+                "id": "keep",
+                "label": "Keep unavailable descriptor",
+                "detail": "no substitute",
+                "status": "available"
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "comparison": {
+          "fixture": "Store A · prism independent fixture",
+          "left": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V8",
+            "occurrence": "A-C17-V8",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A17-value[9,16]"
+            ]
+          },
+          "right": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V12",
+            "occurrence": "A-C17-V12",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A12-value[9,16]"
+            ]
+          },
+          "shared": [
+            "primedia-A17[0,8]"
+          ],
+          "changes": [
+            "value 3.14 bar → 3.16 bar"
+          ],
+          "sourceOps": {
+            "store-A://rig": 56
+          },
+          "inspected": "shared-prefix-and-values",
+          "ancestrySelection": "A-V5",
+          "states": [
+            "A-V5",
+            "A-V8",
+            "A-V12"
+          ],
+          "changeFocus": "topology",
+          "sideOrder": [
+            "A-V12",
+            "A-V8"
+          ],
+          "selectedDifference": "text",
+          "unavailableTarget": "store-A://rig/C17/V12/primedia-A12[9,16]"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Inspect unavailable exact region",
+      "note": "Unavailable status retains target; no near match is substituted."
+    },
+    {
+      "file": "J21/main/J21-s4-a4.png",
+      "location": "?journey=J21&task=3&action=4",
+      "frame": "J21-s4-a4",
+      "state": {
+        "fixture": "prism-store-a-independent-two-state",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "store-A://rig": 56
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "unavailable",
+            "title": "Region unavailable · target retained",
+            "kind": "inspector",
+            "body": [
+              "No substitute preview is selected. The target identity remains available for retry."
+            ],
+            "facts": [
+              {
+                "label": "Target store",
+                "value": "store-A://rig"
+              },
+              {
+                "label": "Object",
+                "value": "C17"
+              },
+              {
+                "label": "Version",
+                "value": "V12"
+              },
+              {
+                "label": "Occurrence",
+                "value": "A-C17-V12"
+              },
+              {
+                "label": "Range",
+                "value": "primedia-A12[9,16]"
+              },
+              {
+                "label": "Status",
+                "value": "unavailable · exact region"
+              },
+              {
+                "label": "Fallback",
+                "value": "none"
+              }
+            ],
+            "rows": [
+              {
+                "id": "retry",
+                "label": "Retry exact target",
+                "detail": "same identity",
+                "status": "available"
+              },
+              {
+                "id": "keep",
+                "label": "Keep unavailable descriptor",
+                "detail": "no substitute",
+                "status": "available"
+              }
+            ],
+            "tone": "neutral"
+          },
+          {
+            "id": "retry-target",
+            "title": "Exact target retry",
+            "kind": "notice",
+            "body": [
+              "Retry reuses the retained state and range identity."
+            ],
+            "facts": [
+              {
+                "label": "Target",
+                "value": "store-A://rig · C17 V12 · A-C17-V12"
+              },
+              {
+                "label": "Range",
+                "value": "primedia-A12[9,16]"
+              },
+              {
+                "label": "Substitute",
+                "value": "none"
+              },
+              {
+                "label": "Result",
+                "value": "still unavailable · retry remains available"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "comparison": {
+          "fixture": "Store A · prism independent fixture",
+          "left": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V8",
+            "occurrence": "A-C17-V8",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A17-value[9,16]"
+            ]
+          },
+          "right": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V12",
+            "occurrence": "A-C17-V12",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A12-value[9,16]"
+            ]
+          },
+          "shared": [
+            "primedia-A17[0,8]"
+          ],
+          "changes": [
+            "value 3.14 bar → 3.16 bar"
+          ],
+          "sourceOps": {
+            "store-A://rig": 56
+          },
+          "inspected": "shared-prefix-and-values",
+          "ancestrySelection": "A-V5",
+          "states": [
+            "A-V5",
+            "A-V8",
+            "A-V12"
+          ],
+          "changeFocus": "topology",
+          "sideOrder": [
+            "A-V12",
+            "A-V8"
+          ],
+          "selectedDifference": "text",
+          "unavailableTarget": "store-A://rig/C17/V12/primedia-A12[9,16]",
+          "retryTarget": "same-target"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Retry same unavailable target",
+      "note": "Retry does not silently select another occurrence."
+    },
+    {
+      "file": "J21/main/J21-s5-a1.png",
+      "location": "?journey=J21&task=4&action=1",
+      "frame": "J21-s5-a1",
+      "state": {
+        "fixture": "prism-store-a-independent-two-state",
+        "reading": {
+          "visit": "02",
+          "subject": "C17",
+          "store": "store-A://rig",
+          "version": "V8",
+          "occurrence": "A-C17-V8",
+          "offset": "primedia-A17[9,16]",
+          "body": [
+            "pressure: 3.14 bar"
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          },
+          {
+            "id": "02",
+            "parent": "01",
+            "subject": "C17",
+            "store": "store-A://rig",
+            "version": "V8",
+            "occurrence": "A-C17-V8"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "store-A://rig": 56
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "entered",
+            "title": "Entered chosen V8 occurrence",
+            "kind": "document",
+            "body": [
+              "Explicit entry creates one reader visit to the selected occurrence."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "02"
+              },
+              {
+                "label": "Subject",
+                "value": "C17"
+              },
+              {
+                "label": "Store",
+                "value": "store-A://rig"
+              },
+              {
+                "label": "Version",
+                "value": "V8"
+              },
+              {
+                "label": "Occurrence",
+                "value": "A-C17-V8"
+              },
+              {
+                "label": "Range",
+                "value": "primedia-A17[9,16]"
+              },
+              {
+                "label": "Return target",
+                "value": "01 · Lab notes"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          },
+          {
+            "id": "two-state",
+            "title": "Pinned two-state comparison",
+            "kind": "comparison",
+            "body": [
+              "Gold port touches only the shared pressure: source range. Value ranges are distinct violet spans."
+            ],
+            "facts": [
+              {
+                "label": "Fixture",
+                "value": "Store A · independent comparison"
+              },
+              {
+                "label": "Left",
+                "value": "store-A://rig · C17 · V8 · occ A-C17-V8"
+              },
+              {
+                "label": "Right",
+                "value": "store-A://rig · C17 · V12 · occ A-C17-V12"
+              },
+              {
+                "label": "Shared address",
+                "value": "primedia-A17[0,8]"
+              },
+              {
+                "label": "Left changed range",
+                "value": "primedia-A17[9,16] · 3.14 bar"
+              },
+              {
+                "label": "Right changed range",
+                "value": "primedia-A12[9,16] · 3.16 bar"
+              },
+              {
+                "label": "Equal text elsewhere",
+                "value": "primedia-A88[10,20] · distinct address"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "comparison": {
+          "fixture": "Store A · prism independent fixture",
+          "left": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V8",
+            "occurrence": "A-C17-V8",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A17-value[9,16]"
+            ]
+          },
+          "right": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V12",
+            "occurrence": "A-C17-V12",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A12-value[9,16]"
+            ]
+          },
+          "shared": [
+            "primedia-A17[0,8]"
+          ],
+          "changes": [
+            "value 3.14 bar → 3.16 bar"
+          ],
+          "sourceOps": {
+            "store-A://rig": 56
+          },
+          "inspected": "shared-prefix-and-values",
+          "ancestrySelection": "A-V5",
+          "states": [
+            "A-V5",
+            "A-V8",
+            "A-V12"
+          ],
+          "changeFocus": "topology",
+          "sideOrder": [
+            "A-V12",
+            "A-V8"
+          ],
+          "selectedDifference": "text",
+          "unavailableTarget": "store-A://rig/C17/V12/primedia-A12[9,16]",
+          "retryTarget": "same-target"
+        }
+      },
+      "effects": [
+        {
+          "domain": "reader activity",
+          "summary": "One visit 01→02 to exact V8 range.",
+          "identity": "visit:02"
+        }
+      ],
+      "action": "Enter chosen V8 occurrence",
+      "note": "Explicit Enter adds visit 02; comparison pins remain V8/V12."
+    },
+    {
+      "file": "J21/main/J21-s5-a2.png",
+      "location": "?journey=J21&task=4&action=2",
+      "frame": "J21-s5-a2",
+      "state": {
+        "fixture": "prism-store-a-independent-two-state",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "Lab:p14:r54.2",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          },
+          {
+            "id": "02",
+            "parent": "01",
+            "subject": "C17",
+            "store": "store-A://rig",
+            "version": "V8",
+            "occurrence": "A-C17-V8"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "store-A://rig": 56
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Reading place",
+            "kind": "document",
+            "body": [
+              "Current visit 01 · Lab notes · V12.",
+              "The starting caret and occurrence remain pinned while tools open."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Offset",
+                "value": "p.14 · 54.2"
+              },
+              {
+                "label": "Occurrence",
+                "value": "Lab:p14:r54.2"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "two-state",
+            "title": "Pinned two-state comparison",
+            "kind": "comparison",
+            "body": [
+              "Gold port touches only the shared pressure: source range. Value ranges are distinct violet spans."
+            ],
+            "facts": [
+              {
+                "label": "Fixture",
+                "value": "Store A · independent comparison"
+              },
+              {
+                "label": "Left",
+                "value": "store-A://rig · C17 · V8 · occ A-C17-V8"
+              },
+              {
+                "label": "Right",
+                "value": "store-A://rig · C17 · V12 · occ A-C17-V12"
+              },
+              {
+                "label": "Shared address",
+                "value": "primedia-A17[0,8]"
+              },
+              {
+                "label": "Left changed range",
+                "value": "primedia-A17[9,16] · 3.14 bar"
+              },
+              {
+                "label": "Right changed range",
+                "value": "primedia-A12[9,16] · 3.16 bar"
+              },
+              {
+                "label": "Equal text elsewhere",
+                "value": "primedia-A88[10,20] · distinct address"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "comparison": {
+          "fixture": "Store A · prism independent fixture",
+          "left": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V8",
+            "occurrence": "A-C17-V8",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A17-value[9,16]"
+            ]
+          },
+          "right": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V12",
+            "occurrence": "A-C17-V12",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A12-value[9,16]"
+            ]
+          },
+          "shared": [
+            "primedia-A17[0,8]"
+          ],
+          "changes": [
+            "value 3.14 bar → 3.16 bar"
+          ],
+          "sourceOps": {
+            "store-A://rig": 56
+          },
+          "inspected": "shared-prefix-and-values",
+          "ancestrySelection": "A-V5",
+          "states": [
+            "A-V5",
+            "A-V8",
+            "A-V12"
+          ],
+          "changeFocus": "topology",
+          "sideOrder": [
+            "A-V12",
+            "A-V8"
+          ],
+          "selectedDifference": "text",
+          "unavailableTarget": "store-A://rig/C17/V12/primedia-A12[9,16]",
+          "retryTarget": "same-target"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Return to origin",
+      "note": "Restore does not append a visit."
+    },
+    {
+      "file": "J21/main/J21-s5-a3.png",
+      "location": "?journey=J21&task=4&action=3",
+      "frame": "J21-s5-a3",
+      "state": {
+        "fixture": "prism-store-a-independent-two-state",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "Lab:p14:r54.2",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          },
+          {
+            "id": "02",
+            "parent": "01",
+            "subject": "C17",
+            "store": "store-A://rig",
+            "version": "V8",
+            "occurrence": "A-C17-V8"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "store-A://rig": 56
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": [
+            {
+              "id": "comparison-A-C17-08-12",
+              "type": "comparison",
+              "left": "A-C17-V8",
+              "right": "A-C17-V12",
+              "ranges": [
+                "A17[0,8]",
+                "A17[9,16]",
+                "A12[9,16]"
+              ]
+            }
+          ],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Reading place",
+            "kind": "document",
+            "body": [
+              "Current visit 01 · Lab notes · V12.",
+              "The starting caret and occurrence remain pinned while tools open."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Offset",
+                "value": "p.14 · 54.2"
+              },
+              {
+                "label": "Occurrence",
+                "value": "Lab:p14:r54.2"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "saved",
+            "title": "Saved comparison",
+            "kind": "inspector",
+            "body": [
+              "Reader collection stores exact pinned pair and selected ranges."
+            ],
+            "facts": [
+              {
+                "label": "Comparison ID",
+                "value": "comparison-A-C17-08-12"
+              },
+              {
+                "label": "Left",
+                "value": "store-A://rig/C17/V8 · A-C17-V8"
+              },
+              {
+                "label": "Right",
+                "value": "store-A://rig/C17/V12 · A-C17-V12"
+              },
+              {
+                "label": "Shared range",
+                "value": "primedia-A17[0,8]"
+              },
+              {
+                "label": "Changed ranges",
+                "value": "A17[9,16] / A12[9,16]"
+              },
+              {
+                "label": "Recovery",
+                "value": "separate authoring preview only"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "comparison": {
+          "fixture": "Store A · prism independent fixture",
+          "left": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V8",
+            "occurrence": "A-C17-V8",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A17-value[9,16]"
+            ]
+          },
+          "right": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V12",
+            "occurrence": "A-C17-V12",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A12-value[9,16]"
+            ]
+          },
+          "shared": [
+            "primedia-A17[0,8]"
+          ],
+          "changes": [
+            "value 3.14 bar → 3.16 bar"
+          ],
+          "sourceOps": {
+            "store-A://rig": 56
+          },
+          "inspected": "shared-prefix-and-values",
+          "ancestrySelection": "A-V5",
+          "states": [
+            "A-V5",
+            "A-V8",
+            "A-V12"
+          ],
+          "changeFocus": "topology",
+          "sideOrder": [
+            "A-V12",
+            "A-V8"
+          ],
+          "selectedDifference": "text",
+          "unavailableTarget": "store-A://rig/C17/V12/primedia-A12[9,16]",
+          "retryTarget": "same-target"
+        }
+      },
+      "effects": [
+        {
+          "domain": "reader collection",
+          "summary": "Saved comparison descriptor comparison-A-C17-08-12.",
+          "identity": "comparison-A-C17-08-12"
+        }
+      ],
+      "action": "Save comparison",
+      "note": "Save writes reader collection metadata only."
+    },
+    {
+      "file": "J21/main/J21-s5-a4.png",
+      "location": "?journey=J21&task=4&action=4",
+      "frame": "J21-s5-a4",
+      "state": {
+        "fixture": "prism-store-a-independent-two-state",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "Lab:p14:r54.2",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          },
+          {
+            "id": "02",
+            "parent": "01",
+            "subject": "C17",
+            "store": "store-A://rig",
+            "version": "V8",
+            "occurrence": "A-C17-V8"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "store-A://rig": 56
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": [
+            {
+              "id": "comparison-A-C17-08-12",
+              "type": "comparison",
+              "left": "A-C17-V8",
+              "right": "A-C17-V12",
+              "ranges": [
+                "A17[0,8]",
+                "A17[9,16]",
+                "A12[9,16]"
+              ]
+            }
+          ],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "two-state",
+            "title": "Pinned two-state comparison",
+            "kind": "comparison",
+            "body": [
+              "Gold port touches only the shared pressure: source range. Value ranges are distinct violet spans."
+            ],
+            "facts": [
+              {
+                "label": "Fixture",
+                "value": "Store A · independent comparison"
+              },
+              {
+                "label": "Left",
+                "value": "store-A://rig · C17 · V8 · occ A-C17-V8"
+              },
+              {
+                "label": "Right",
+                "value": "store-A://rig · C17 · V12 · occ A-C17-V12"
+              },
+              {
+                "label": "Shared address",
+                "value": "primedia-A17[0,8]"
+              },
+              {
+                "label": "Left changed range",
+                "value": "primedia-A17[9,16] · 3.14 bar"
+              },
+              {
+                "label": "Right changed range",
+                "value": "primedia-A12[9,16] · 3.16 bar"
+              },
+              {
+                "label": "Equal text elsewhere",
+                "value": "primedia-A88[10,20] · distinct address"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          },
+          {
+            "id": "saved",
+            "title": "Saved comparison",
+            "kind": "inspector",
+            "body": [
+              "Reader collection stores exact pinned pair and selected ranges."
+            ],
+            "facts": [
+              {
+                "label": "Comparison ID",
+                "value": "comparison-A-C17-08-12"
+              },
+              {
+                "label": "Left",
+                "value": "store-A://rig/C17/V8 · A-C17-V8"
+              },
+              {
+                "label": "Right",
+                "value": "store-A://rig/C17/V12 · A-C17-V12"
+              },
+              {
+                "label": "Shared range",
+                "value": "primedia-A17[0,8]"
+              },
+              {
+                "label": "Changed ranges",
+                "value": "A17[9,16] / A12[9,16]"
+              },
+              {
+                "label": "Recovery",
+                "value": "separate authoring preview only"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "comparison": {
+          "fixture": "Store A · prism independent fixture",
+          "left": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V8",
+            "occurrence": "A-C17-V8",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A17-value[9,16]"
+            ]
+          },
+          "right": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V12",
+            "occurrence": "A-C17-V12",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A12-value[9,16]"
+            ]
+          },
+          "shared": [
+            "primedia-A17[0,8]"
+          ],
+          "changes": [
+            "value 3.14 bar → 3.16 bar"
+          ],
+          "sourceOps": {
+            "store-A://rig": 56
+          },
+          "inspected": "shared-prefix-and-values",
+          "ancestrySelection": "A-V5",
+          "states": [
+            "A-V5",
+            "A-V8",
+            "A-V12"
+          ],
+          "changeFocus": "topology",
+          "sideOrder": [
+            "A-V12",
+            "A-V8"
+          ],
+          "selectedDifference": "text",
+          "unavailableTarget": "store-A://rig/C17/V12/primedia-A12[9,16]",
+          "retryTarget": "same-target",
+          "reopened": "comparison-A-C17-08-12"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Reopen saved comparison",
+      "note": "Reopen restores both exact states and ranges."
+    },
+    {
+      "file": "J21/main/J21-s5-a5.png",
+      "location": "?journey=J21&task=4&action=5",
+      "frame": "J21-s5-a5",
+      "state": {
+        "fixture": "prism-store-a-independent-two-state",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "Lab:p14:r54.2",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          },
+          {
+            "id": "02",
+            "parent": "01",
+            "subject": "C17",
+            "store": "store-A://rig",
+            "version": "V8",
+            "occurrence": "A-C17-V8"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "store-A://rig": 56
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": [
+            {
+              "id": "comparison-A-C17-08-12",
+              "type": "comparison",
+              "left": "A-C17-V8",
+              "right": "A-C17-V12",
+              "ranges": [
+                "A17[0,8]",
+                "A17[9,16]",
+                "A12[9,16]"
+              ]
+            }
+          ],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "recovery-preview",
+            "title": "Recovery preview · uncommitted",
+            "kind": "comparison",
+            "body": [
+              "Recovery opens an authoring preview; no source or destination write occurs."
+            ],
+            "facts": [
+              {
+                "label": "Source",
+                "value": "store-A://rig · C17 V8 · A-C17-V8"
+              },
+              {
+                "label": "Target base",
+                "value": "store-A://rig · C17 V12 · pinned"
+              },
+              {
+                "label": "Proposed effect",
+                "value": "none · preview only"
+              },
+              {
+                "label": "Destination effects",
+                "value": "none"
+              },
+              {
+                "label": "Actions",
+                "value": "Cancel preview · retain comparison"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          },
+          {
+            "id": "saved",
+            "title": "Saved comparison",
+            "kind": "inspector",
+            "body": [
+              "Reader collection stores exact pinned pair and selected ranges."
+            ],
+            "facts": [
+              {
+                "label": "Comparison ID",
+                "value": "comparison-A-C17-08-12"
+              },
+              {
+                "label": "Left",
+                "value": "store-A://rig/C17/V8 · A-C17-V8"
+              },
+              {
+                "label": "Right",
+                "value": "store-A://rig/C17/V12 · A-C17-V12"
+              },
+              {
+                "label": "Shared range",
+                "value": "primedia-A17[0,8]"
+              },
+              {
+                "label": "Changed ranges",
+                "value": "A17[9,16] / A12[9,16]"
+              },
+              {
+                "label": "Recovery",
+                "value": "separate authoring preview only"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "comparison": {
+          "fixture": "Store A · prism independent fixture",
+          "left": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V8",
+            "occurrence": "A-C17-V8",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A17-value[9,16]"
+            ]
+          },
+          "right": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V12",
+            "occurrence": "A-C17-V12",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A12-value[9,16]"
+            ]
+          },
+          "shared": [
+            "primedia-A17[0,8]"
+          ],
+          "changes": [
+            "value 3.14 bar → 3.16 bar"
+          ],
+          "sourceOps": {
+            "store-A://rig": 56
+          },
+          "inspected": "shared-prefix-and-values",
+          "ancestrySelection": "A-V5",
+          "states": [
+            "A-V5",
+            "A-V8",
+            "A-V12"
+          ],
+          "changeFocus": "topology",
+          "sideOrder": [
+            "A-V12",
+            "A-V8"
+          ],
+          "selectedDifference": "text",
+          "unavailableTarget": "store-A://rig/C17/V12/primedia-A12[9,16]",
+          "retryTarget": "same-target",
+          "reopened": "comparison-A-C17-08-12",
+          "recoveryPreview": "preview-rec-A17"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Open recovery authoring preview",
+      "note": "Recovery preview is separate and uncommitted; no source operations change."
+    },
+    {
+      "file": "J21/main/J21-s5-a6.png",
+      "location": "?journey=J21&task=4&action=6",
+      "frame": "J21-s5-a6",
+      "state": {
+        "fixture": "prism-store-a-independent-two-state",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "Lab:p14:r54.2",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          },
+          {
+            "id": "02",
+            "parent": "01",
+            "subject": "C17",
+            "store": "store-A://rig",
+            "version": "V8",
+            "occurrence": "A-C17-V8"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0,
+          "store-A://rig": 56
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": [
+            {
+              "id": "comparison-A-C17-08-12",
+              "type": "comparison",
+              "left": "A-C17-V8",
+              "right": "A-C17-V12",
+              "ranges": [
+                "A17[0,8]",
+                "A17[9,16]",
+                "A12[9,16]"
+              ]
+            }
+          ],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Reading place",
+            "kind": "document",
+            "body": [
+              "Current visit 01 · Lab notes · V12.",
+              "The starting caret and occurrence remain pinned while tools open."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Offset",
+                "value": "p.14 · 54.2"
+              },
+              {
+                "label": "Occurrence",
+                "value": "Lab:p14:r54.2"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "saved",
+            "title": "Saved comparison",
+            "kind": "inspector",
+            "body": [
+              "Reader collection stores exact pinned pair and selected ranges."
+            ],
+            "facts": [
+              {
+                "label": "Comparison ID",
+                "value": "comparison-A-C17-08-12"
+              },
+              {
+                "label": "Left",
+                "value": "store-A://rig/C17/V8 · A-C17-V8"
+              },
+              {
+                "label": "Right",
+                "value": "store-A://rig/C17/V12 · A-C17-V12"
+              },
+              {
+                "label": "Shared range",
+                "value": "primedia-A17[0,8]"
+              },
+              {
+                "label": "Changed ranges",
+                "value": "A17[9,16] / A12[9,16]"
+              },
+              {
+                "label": "Recovery",
+                "value": "separate authoring preview only"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "comparison": {
+          "fixture": "Store A · prism independent fixture",
+          "left": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V8",
+            "occurrence": "A-C17-V8",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A17-value[9,16]"
+            ]
+          },
+          "right": {
+            "store": "store-A://rig",
+            "object": "C17",
+            "version": "V12",
+            "occurrence": "A-C17-V12",
+            "ranges": [
+              "A17-prefix[0,8]",
+              "A12-value[9,16]"
+            ]
+          },
+          "shared": [
+            "primedia-A17[0,8]"
+          ],
+          "changes": [
+            "value 3.14 bar → 3.16 bar"
+          ],
+          "sourceOps": {
+            "store-A://rig": 56
+          },
+          "inspected": "shared-prefix-and-values",
+          "ancestrySelection": "A-V5",
+          "states": [
+            "A-V5",
+            "A-V8",
+            "A-V12"
+          ],
+          "changeFocus": "topology",
+          "sideOrder": [
+            "A-V12",
+            "A-V8"
+          ],
+          "selectedDifference": "text",
+          "unavailableTarget": "store-A://rig/C17/V12/primedia-A12[9,16]",
+          "retryTarget": "same-target",
+          "reopened": "comparison-A-C17-08-12",
+          "recoveryPreview": null
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Cancel recovery preview",
+      "note": "Cancel preserves the saved comparison and authored destination unchanged."
+    }
+  ]
+}

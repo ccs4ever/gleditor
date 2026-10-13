@@ -1,0 +1,3371 @@
+{
+  "renderedStateFrames": 435,
+  "frozenSpecSHA256": "4b3e58d4122742d4107bb454301c1d6582981e1c1ce2d1d12a94ef274c9a7167",
+  "assets": [
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/.gitignore",
+      "bytes": 19,
+      "sha256": "29dac85a09bc24f1f4bdbde6a3616e09bd6b457ae054dcade1f9349936d8ed89"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/README.md",
+      "bytes": 4144,
+      "sha256": "e0ac80726e6b8ff721486d72793eb3f6d26e38d372a7d8440df56f744f7c893b"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/contracts.md",
+      "bytes": 7722,
+      "sha256": "b702908fac10929d00ef7864e2636fa7cfbd6696770f6aba94b66c9e87c129a8"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/J17-cancel/J17-cancel-a1.png",
+      "bytes": 399563,
+      "sha256": "d0266b4af5f636e343ff62bcf7526860794c881a66e62dfc97c21d19be95f3f5"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/J17-cancel/before.png",
+      "bytes": 438955,
+      "sha256": "d62bff3253524f01a1bedff664b3a83608e1962e676cd72336917d20be9eef8e"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/J17-cancel/index.html",
+      "bytes": 1064,
+      "sha256": "d7c5e268b73db3fcd2a3f83e4ecd5714836371efdffbb8ef534bd145e287ab50"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/J17-cancel/trace.json",
+      "bytes": 8016,
+      "sha256": "f3211dc9a338f39d6d54ce1deb08aec1b7be8c5d96da9e8018042075c9283bd4"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/J17-invalid/J17-invalid-a1.png",
+      "bytes": 439789,
+      "sha256": "9e16ccd40827e7b654b813277dcb951ee8c67c2357cf4bfe644074ecbb1c46ba"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/J17-invalid/J17-invalid-a2.png",
+      "bytes": 446247,
+      "sha256": "d2f541f0c9a33bb58fdd2068cc5204a23d3dfe22ca572d8d0859faf3d9330db0"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/J17-invalid/J17-invalid-a3.png",
+      "bytes": 394867,
+      "sha256": "a40756847ce21eea28e743d3be6569a44685e668b3c4df8c7313d04656acde02"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/J17-invalid/before.png",
+      "bytes": 449439,
+      "sha256": "8c1df140e6b3da92ed61052517def516d94de0190aaa3f252cf5969853500406"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/J17-invalid/index.html",
+      "bytes": 1842,
+      "sha256": "08c677245340e4c6e5f4d90ea28d219a6d28be3a94f8084134531085a3d156fb"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/J17-invalid/trace.json",
+      "bytes": 17062,
+      "sha256": "6a69360528f9a1cf7fbdbd0ae8f2da7ac458b86b1a9dd3f157dcf920bef1aefc"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/J17-s3-v13-route/J17-s3-v13.png",
+      "bytes": 376079,
+      "sha256": "915d632d00ac4561caa44acc2023112d0d1dc6efc205a96807716ecbc82fbfca"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/J17-s3-v13-route/before.png",
+      "bytes": 397392,
+      "sha256": "0d7ad621117c0beb357b939e40626e54228d9afde5835dd5b200f5decc44c795"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/J17-s3-v13-route/index.html",
+      "bytes": 1059,
+      "sha256": "661927917d5c1882d62a19c25db8d2d6b8e29f7f61f912706ed083ceaedff8b1"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/J17-s3-v13-route/trace.json",
+      "bytes": 8202,
+      "sha256": "ad61bc329dea180e95efa9a21d2cfcc361fd62d85caeb9e3a138afb5d1e4208a"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/J17-unavailable/J17-unavailable-a1.png",
+      "bytes": 429736,
+      "sha256": "5d1ba64ed397b3f2ffc922144d3d6da851425bae4bcbd2c84437445b391e3274"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/J17-unavailable/J17-unavailable-a2.png",
+      "bytes": 404289,
+      "sha256": "d9a571f8d6d354679465253deab61f3c2527dd5aa4058ef2238a57d6676c397e"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/J17-unavailable/before.png",
+      "bytes": 444861,
+      "sha256": "4ea2f0045db59f545522d1c6fa22543a236a37732ac48c1085f6008634af875c"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/J17-unavailable/index.html",
+      "bytes": 1433,
+      "sha256": "aaeedd84ff6a0b1ebf3b279e78528c22d72acc87b02eb23965a07282171065ec"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/J17-unavailable/trace.json",
+      "bytes": 12381,
+      "sha256": "a131c6070e5b0598f4c294885a43af5882d80d29e92d177e963b4bfe79574e3f"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/accessibility-tree.json",
+      "bytes": 202599,
+      "sha256": "c3e7dd8b82d345d6c2118b6804bab384fe985fb6c5f8aef958caef5e19f2814c"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/keyboard.png",
+      "bytes": 436459,
+      "sha256": "e1ba6a5bce269f8c1741fa268346fba7e0558f2d32b42495d8e2b5df8f162d5b"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/list.png",
+      "bytes": 439084,
+      "sha256": "0a4560c1815da604ac7290140e6a15fa69b48506fb9dfe45ef17063cc85afb87"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/main/J17-s1-a1.png",
+      "bytes": 436145,
+      "sha256": "ef959aeb40f1ddd62624967c55f9a7068618c3fec4e29065f0d7be048bba3f32"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/main/J17-s1-a2.png",
+      "bytes": 397814,
+      "sha256": "18204ce330c6a4140b227dc20711cdff1f55b8d02b19cf9e3c7c9219253a3251"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/main/J17-s1-a3.png",
+      "bytes": 420902,
+      "sha256": "657f8f07bd68dfa285bb1aaae8a31eab83c54fdc8cd1398d57a8f7b293b4640d"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/main/J17-s1-a4.png",
+      "bytes": 399246,
+      "sha256": "277a283d44d6dfa03e86cc5840b4cc80cf4dff8420a405d1bd568b06a095fc64"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/main/J17-s2-a1.png",
+      "bytes": 399901,
+      "sha256": "ac788df38ab1d468ac24e589d7d30b9f19248a9f37cb5d5b9b298887bf02f2d3"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/main/J17-s2-a2.png",
+      "bytes": 391908,
+      "sha256": "7d8bf8f2a8b4af698a0f7f6e9565fd742cced21fee902c734a38518a626b9b2c"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/main/J17-s3-a1.png",
+      "bytes": 368996,
+      "sha256": "59102ccd1f9b7cae85f53d7aab03a075463c91135e519637a508f3cb7440677c"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/main/J17-s3-a2.png",
+      "bytes": 427209,
+      "sha256": "7cb9a9bd8b2cea579d3c376127cd16e1337bf593be8fc5b5cf1a7efc671e41e3"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/main/J17-s3-a3.png",
+      "bytes": 408555,
+      "sha256": "fd4941760e4e5b40f31603acb4e4766c6add0605232dbdcf95dbbf392d1046a6"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/main/J17-s4-a1.png",
+      "bytes": 454316,
+      "sha256": "9a550b52ada99b882d071ddf58fc606783f861699aa144649a52327eba6668d0"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/main/J17-s4-a2.png",
+      "bytes": 412573,
+      "sha256": "b0f4555c2f0d728cc00fd92953c17b4b984c7c4cac46cb0a1b76d306fb79a39d"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/main/J17-s4-a3.png",
+      "bytes": 472115,
+      "sha256": "b0d6bb44c90b2ae951e93d851132d0deb3a638361035a5336107af4649e38e6e"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/main/J17-s5-a1.png",
+      "bytes": 410810,
+      "sha256": "88d14b1fa2e85663fc2cbb6c1186d40579540bd2713c805f7e0a70b5891c988f"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/main/J17-s5-a2.png",
+      "bytes": 408641,
+      "sha256": "2241316117750032b0cc5d54ac9123613c7c64ff51b4b2ac1e127633d4778257"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/main/J17-s5-a3.png",
+      "bytes": 410501,
+      "sha256": "9713b0982fde5a2287dffceaadd53358a58966a88f6dfb839f6381bfaa1dfeb2"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/main/before.png",
+      "bytes": 569795,
+      "sha256": "c48dd836802a3d76a356abb9e5f0da265ac8b0bed66e10c29f253f5b19a8f5ce"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/main/index.html",
+      "bytes": 5412,
+      "sha256": "3922153ddcbade4acd2f4f636a9c8ff38f817d7a40e71e776a17b999c37d3087"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/main/trace.json",
+      "bytes": 75771,
+      "sha256": "950f0195df92846b2ea7a30acc442066915401d49686eff923707b75df3b6687"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/narrow-large.png",
+      "bytes": 317246,
+      "sha256": "b18a3e115c47568e5a6e407a5542c84ef0c642c859fc87cb66771fc1f564ec13"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J17/reduced-motion.png",
+      "bytes": 317235,
+      "sha256": "873d06480ee78ef9781bf3c7cf3845d9c15673d84e9f4f8feef792c3b220dbdf"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J18/J18-s4-acquire-route/J18-s4-acquire.png",
+      "bytes": 446393,
+      "sha256": "206a4b7371a55d575f83885c76642f48b8b883176700e93b472e7026342d3dba"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J18/J18-s4-acquire-route/before.png",
+      "bytes": 440192,
+      "sha256": "a0fc00bc769b663b8bafddabe45ba92e21634720ad7bdc9e59e4d78d8fccddde"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J18/J18-s4-acquire-route/index.html",
+      "bytes": 1096,
+      "sha256": "1f50396d9096260753d35b684842488222c8b0efd114cfd2d887b291348d0419"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J18/J18-s4-acquire-route/trace.json",
+      "bytes": 12971,
+      "sha256": "8a239ea6c3eac115860b7dbc1f248f4ef908f0e36b0a7084ba52e2b87f4c51f1"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J18/J18-video-not-held/J18-video-not-held-a1.png",
+      "bytes": 424658,
+      "sha256": "347a51be964c8a4fb4fcc2c0bfd32762b560c696f583546d274dedb07f3b5e25"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J18/J18-video-not-held/before.png",
+      "bytes": 428941,
+      "sha256": "580a0cdd83ff775c237eee948f4eba89efef7d2a6f2fa6474d45130c2d640445"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J18/J18-video-not-held/index.html",
+      "bytes": 1112,
+      "sha256": "a8e3fc76336c01c534b086ae22a6e387def9d9d611a94580e79fa044fa47be03"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J18/J18-video-not-held/trace.json",
+      "bytes": 11761,
+      "sha256": "866552c2ec43fa55f35c2290b0f5f8b324581820eab78f3f612eb18f855aafff"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J18/accessibility-tree.json",
+      "bytes": 258432,
+      "sha256": "e842062aa33bea98c08d0136f35617839f4a1bca2f9166a96c1503d72b23251f"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J18/keyboard.png",
+      "bytes": 457904,
+      "sha256": "837ac3148ad4bf88913cacc31c434bcfefa123a4cabf118158bf0a4871b70c28"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J18/list.png",
+      "bytes": 447810,
+      "sha256": "c5b17b4c73506f562eb689e60e5891db714d1759ff4c112d2957e569a6d2e1f0"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J18/main/J18-s1-a1.png",
+      "bytes": 456092,
+      "sha256": "7e8407c6baf0ac6c6acdc7b4903341f6127769eaca1c3aaf124cfe66f5bef2b4"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J18/main/J18-s1-a2.png",
+      "bytes": 458151,
+      "sha256": "bf01bb0dbd36f839600f5cb813661e21713134e9234eeecccbd9ac3ce666b86d"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J18/main/J18-s1-a3.png",
+      "bytes": 456243,
+      "sha256": "eb09198a451f185926f8be5371542268b47240ecdd14ea3f02c1e2e996a3ed84"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J18/main/J18-s2-a1.png",
+      "bytes": 431354,
+      "sha256": "fd2fd94687948f9efb0233a681ba3f5c79d5db0d0a3a813e7815ab90bfa0bd76"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J18/main/J18-s2-a2.png",
+      "bytes": 430218,
+      "sha256": "08c9ff3c1fb20041045c6d24667f7c83b21c5553148680338dd6c1b298477df2"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J18/main/J18-s2-a3.png",
+      "bytes": 435690,
+      "sha256": "f75ded044b3e97af765b07e25d8cac7cc7931f84d08e714217a769dd16c1e9ef"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J18/main/J18-s2-a4.png",
+      "bytes": 434127,
+      "sha256": "173b6e49bf1530c4e180996a00fcea7bb046a4996e10372fcbabafdfab81e4d1"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J18/main/J18-s2-a5.png",
+      "bytes": 431330,
+      "sha256": "a2f4e5a75cc4851ef33f0f4b074600e33fd833481b0051687ac00a3d533e5acd"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J18/main/J18-s3-a1.png",
+      "bytes": 427554,
+      "sha256": "f9d2556b6692db7009d2488334ce100b4d0344894817e5a82239506dff3df5c1"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J18/main/J18-s3-a2.png",
+      "bytes": 427366,
+      "sha256": "b54d49bda5656da95101ee0810766f685a35cf4fa05d0284ca9537e80b24312c"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J18/main/J18-s4-a1.png",
+      "bytes": 419260,
+      "sha256": "ab2ba7814eda3b0a3e2b4c1df227b038670ddea6b81499b3c1bbc8a1ff7e60d7"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J18/main/J18-s4-a2.png",
+      "bytes": 440133,
+      "sha256": "d20a739a18edf46648c8844ba43f02dbbb09cf68a7cec4bcb8c1484be5aa8071"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J18/main/J18-s5-a1.png",
+      "bytes": 510381,
+      "sha256": "9aa30961aa2d945194a103d6051d34cb4ce323f4d2f2a6880cd509635bd89e4e"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J18/main/J18-s5-a2.png",
+      "bytes": 473543,
+      "sha256": "299fa5b52f6ea0bb5ab584d724fb3f49d1041ea9c84aa374b34888bf3148dc8f"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J18/main/J18-s5-a3.png",
+      "bytes": 471313,
+      "sha256": "182c4aab71d137adf201d4f451ed7cc27c9362e6919f2031379d8748e47f8ae3"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J18/main/before.png",
+      "bytes": 476463,
+      "sha256": "2e141cf59ee76a1d2760b9a378a8c8ec33c7553bdc0e03fb8b60fa7f15d1ae96"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J18/main/index.html",
+      "bytes": 5588,
+      "sha256": "f07579e48af5492cf5c4cc2c2eba7941b5e7c3451657408410236cb53ed362ea"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J18/main/trace.json",
+      "bytes": 114864,
+      "sha256": "36b22d591a1140b2d2fdffd93fe2ecd132d9afff32b996c050a2e4517c38da35"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J18/narrow-large.png",
+      "bytes": 352031,
+      "sha256": "56cb4c9a29c4f26f76a0c57f17fbb4ce955e6f9a07a879f670ad8ea84a0b0e74"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J18/reduced-motion.png",
+      "bytes": 352029,
+      "sha256": "2b1a973b76d4303fdba55c117dadce343989664fdaee8b0ca388c6ab8c81349b"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J19/J19-stale/J19-stale-a1.png",
+      "bytes": 442005,
+      "sha256": "0a5ddbcb1e04baffa45262d77106774bbd390cfca49477adb4ddde6c22c909fa"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J19/J19-stale/before.png",
+      "bytes": 455834,
+      "sha256": "b2bedbd113c28d58199efd85342d62eaeb2c369cad5aa83e5388c5663f9ecb23"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J19/J19-stale/index.html",
+      "bytes": 1070,
+      "sha256": "4cc647995aefa549fbfce34864870f46512c798ec4187d218f0b4b424d821b3b"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J19/J19-stale/trace.json",
+      "bytes": 11169,
+      "sha256": "42d756d99ae4a6d8dce651819f6fa61f99b7ce41267f0bf2eb5c524b6a89b675"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J19/accessibility-tree.json",
+      "bytes": 253873,
+      "sha256": "9b758437929156712fa4502e53b777963f2c862b7f4a8ad0e7cea2ac76ee186e"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J19/keyboard.png",
+      "bytes": 577628,
+      "sha256": "0ad06587e5eed3f7dc5b759fbf40d128ed46ebb7cafb7042263cce8b30fbdf4f"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J19/list.png",
+      "bytes": 563485,
+      "sha256": "a851ff634bef32960720c5b3cb02a0b72cc65ad7ddd68958418a1453a586459e"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J19/main/J19-s1-a1.png",
+      "bytes": 576495,
+      "sha256": "5221e9f024449f02b07b56fadb9e8f7445cd914ff6ede8b54b60181a5fb51d95"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J19/main/J19-s1-a2.png",
+      "bytes": 581885,
+      "sha256": "a481cac3e731cfc17ca53ea65d0d955fd47a5e4c09235070406593eba4699fb7"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J19/main/J19-s1-a3.png",
+      "bytes": 605210,
+      "sha256": "aa68d3b241d932c321c1cd08a3ea4a30dd2adafdfd7777182cfd18fbc8f44a50"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J19/main/J19-s2-a1.png",
+      "bytes": 409931,
+      "sha256": "68abf64e1eac018cc55574b22e99ce0ecdf863c70485fa257b8e50e2822d192d"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J19/main/J19-s2-a2.png",
+      "bytes": 378760,
+      "sha256": "5a62eb6c4fc7cad56bdd95bc4b9a7dd5321e42a02ecd5c8df93716c89663d38c"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J19/main/J19-s2-a3.png",
+      "bytes": 427853,
+      "sha256": "2ff3f4d794b665b738a28f79d877b84ec8e52de777c67c01504be9b24b7d4d53"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J19/main/J19-s2-a4.png",
+      "bytes": 438685,
+      "sha256": "da3f1d6f80f419732ea457473e328a3e292d4fcdde56830049eb25f31d6b8a27"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J19/main/J19-s3-a1.png",
+      "bytes": 441955,
+      "sha256": "8de227a2d6585467d2680476b12f102a97706fe341fda531132aafdc6e8b4d81"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J19/main/J19-s3-a2.png",
+      "bytes": 460922,
+      "sha256": "f92b2ff208f6eeb86bfd438ba666d3bb532ff520ad9d9435ce2bff5249a4cf55"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J19/main/J19-s3-a3.png",
+      "bytes": 641281,
+      "sha256": "2c99f0999190188e235a5f3843dbeff20028f8f4a78768fd8adba141f365aa42"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J19/main/J19-s4-a1.png",
+      "bytes": 449868,
+      "sha256": "2972a74cdd72a3fb2addbb5d6f499df15b45ab026aeb2aa42f3f69d118461412"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J19/main/J19-s4-a2.png",
+      "bytes": 431993,
+      "sha256": "d78e3e68c5966c5befdbb1cb3de33ea53c4eae7140f667c331a6b2436630d800"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J19/main/J19-s4-a3.png",
+      "bytes": 444815,
+      "sha256": "e179ded1b09882ba7ec46fad058cefdf5a7202ef471d67b2078fa37e5e9a0c5e"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J19/main/J19-s5-a1.png",
+      "bytes": 452869,
+      "sha256": "6b8660d0c36c87c80540c76e9e0de16cf0f50fd4088f2248055ecae0b4c6f549"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J19/main/J19-s5-a2.png",
+      "bytes": 453490,
+      "sha256": "4c9197426f7dba44eba3a3e9815d054a80622af8e9f679ca3a3882862ac893ca"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J19/main/J19-s5-a3.png",
+      "bytes": 449489,
+      "sha256": "70b9e5a00e160ebb6d72e857d5392aa06643a23a5d2c1931173698e6e076d530"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J19/main/J19-s5-a4.png",
+      "bytes": 455029,
+      "sha256": "5a218e0661b8443b37d42d8adc3edb573c3d327207ee9f7910b46e0509586ed2"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J19/main/J19-s5-a5.png",
+      "bytes": 555765,
+      "sha256": "ef99857aec73e8572f0927f264412d4e0990c4640c301ca4ee45a9416aad99d6"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J19/main/before.png",
+      "bytes": 435393,
+      "sha256": "ca2b1f82ba9750fbd5a429ba73a9d8c784d8ad788b0eff7c54e555c08d1acfdf"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J19/main/index.html",
+      "bytes": 6199,
+      "sha256": "703c986bc0c64b6d2690ded4f140b6ce3c802ca7b61978699737035169b10000"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J19/main/trace.json",
+      "bytes": 116982,
+      "sha256": "7b07f8999b06a1a50d533738bd6c0f681e7dd93ee9b1823a3c60a0ef98c2d7b8"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J19/narrow-large.png",
+      "bytes": 369292,
+      "sha256": "2bcfe223cec903d827b6cfda9b298e541c762e32cb5c095d888ab16b7aeb3823"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J19/reduced-motion.png",
+      "bytes": 369282,
+      "sha256": "bdecd621bf9f45316a967657e8fde7cfdac8e022a11997491c8acd63437f635b"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/J20-literal-3140/J20-literal-3140-a1.png",
+      "bytes": 450602,
+      "sha256": "6e234b551566500eed6a1fe9a60ffcb137f0c34223d841c4248414cd47b6ab7f"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/J20-literal-3140/before.png",
+      "bytes": 443379,
+      "sha256": "9e300d05aeafad883a3655d1a303d7173c601e3c57086e96aced727f8fcd5bc1"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/J20-literal-3140/index.html",
+      "bytes": 1117,
+      "sha256": "fbc3923a780b39287375ac0a8eb9433ea4cecfe7fd365983f0407a78df37ffa6"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/J20-literal-3140/trace.json",
+      "bytes": 12517,
+      "sha256": "c8571ea96954a0647715e26b5e9dd2a35a931fce39538c83360f610c2f0c05fb"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/J20-missing-state/J20-missing-state-a1.png",
+      "bytes": 468152,
+      "sha256": "8ff82eedcd99de2dfae4841d141893a6a01e3b5f0dfe6fbb8b26309943a8e3db"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/J20-missing-state/before.png",
+      "bytes": 779010,
+      "sha256": "e436e8c279e232573d71940494906853d173d5f649d6b2140bdaf487190eba78"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/J20-missing-state/index.html",
+      "bytes": 1145,
+      "sha256": "fb52fcb6d2178bbee0d6fa5c7ad78fcc7cc163425f2e59829ab04053df9ea2b0"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/J20-missing-state/trace.json",
+      "bytes": 12816,
+      "sha256": "c0e8c06c053c228f609d93d890e6a32bf8fd5c439c6be9e9e31d7525c4697e38"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/J20-number-units/J20-number-units-a1.png",
+      "bytes": 456795,
+      "sha256": "1ab8f68ed2997fb993c5b88c4be13701857c2ebf4ae144c52e2f367212c19cb8"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/J20-number-units/before.png",
+      "bytes": 447502,
+      "sha256": "09a86d3e11d2672d7488c1520a2060ec53a5fea43c06491cd02a04b1de3cf3e6"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/J20-number-units/index.html",
+      "bytes": 1156,
+      "sha256": "8a98392316029e0f530f2caad7b46a26d7f3a9f3b0e7a302363379f28520bc3a"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/J20-number-units/trace.json",
+      "bytes": 12652,
+      "sha256": "ad23386522f1b9c64c5da78f2c38e9eace14570182ff2cf1c1bf4be16385769c"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/J20-token-3140/J20-token-3140-a1.png",
+      "bytes": 465713,
+      "sha256": "2b24b138c612c13728f8ea411962193725d680844cf4b021659035e5891075f9"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/J20-token-3140/before.png",
+      "bytes": 458153,
+      "sha256": "f941a93e99d9aac0936da8e7883f543cac37685d5a177cd91dbf753a7b26438f"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/J20-token-3140/index.html",
+      "bytes": 1107,
+      "sha256": "fd72c5a510b0ac002eeebc8d0f7953fe6bbe64f1e773762996965a83a26f09c5"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/J20-token-3140/trace.json",
+      "bytes": 11884,
+      "sha256": "5b7af50cfe09a3b32e7840b53ec3ef2e8ef7ee1fb60c18f7235c2c30c1a90213"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/accessibility-tree.json",
+      "bytes": 246747,
+      "sha256": "6d7a5cff6bce92f17c879d6d2d46fd472bc7b0ee18349c8c30941995e0734f30"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/keyboard.png",
+      "bytes": 453980,
+      "sha256": "ca50fdbefab92545e7c937829378dff6d9ce02e304f42b97e5232907bf975d48"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/list.png",
+      "bytes": 445864,
+      "sha256": "0a1e88af7f18ed932eba447b7d8620b51390a9b0f3e5f7a1a180c7614456e931"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/main/J20-s1-a1.png",
+      "bytes": 452371,
+      "sha256": "2f6ed60bf5fc87bd2f942286e4bc595b9a0bedb91eb706f3f8bbb493c68d7cac"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/main/J20-s1-a2.png",
+      "bytes": 461770,
+      "sha256": "0bde2ed9110b8c68de490bea010b1c061346f7c7e23361c2d58c86298062d92d"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/main/J20-s2-a1.png",
+      "bytes": 484238,
+      "sha256": "7330478ff7b5e252e3dd493b60f7c42e1de6b9cc22032def659324c415240c87"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/main/J20-s2-a2.png",
+      "bytes": 489136,
+      "sha256": "17a4875a3868f003e1300fbe1079ae91d0b79f3e3986206a2de1cb807dfc27c6"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/main/J20-s2-a3.png",
+      "bytes": 503205,
+      "sha256": "48c644a1c719c0ef65b5e53dc46652a7e431fea876bb18014b16af85c8670dd0"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/main/J20-s2-a4.png",
+      "bytes": 408261,
+      "sha256": "fce08ce84f24cf7e16a00a33adcdb85f27fc11b526d04a4edc24ced892e9cd32"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/main/J20-s2-a5.png",
+      "bytes": 462263,
+      "sha256": "503cf823b7722c75c27555c2ae5ffed0cf99ff1d7a8e86aed301b1b9565993b4"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/main/J20-s2-a6.png",
+      "bytes": 431973,
+      "sha256": "e5117c27350ab53b559a3490d35e5d026711c9742857cc62d5c1a546846f7f08"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/main/J20-s3-a1.png",
+      "bytes": 502176,
+      "sha256": "9ffea0d63857dd1855d8997c897882d0d4fb296327c61297410b0636c022160d"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/main/J20-s3-a2.png",
+      "bytes": 474900,
+      "sha256": "d65cea6f1169b7417478c1626a43b682f8a21352b4e0771bd788136b4f130d8b"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/main/J20-s3-a3.png",
+      "bytes": 483351,
+      "sha256": "3b8bfdaff44ede379cb96e389fb70b4b485c9fe35828f891ae3f037517c4bff9"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/main/J20-s4-a1.png",
+      "bytes": 478061,
+      "sha256": "0a943fc47d928e1d92f704675353ba9aa3b4672b39da21a7d42993b6855d84d9"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/main/J20-s4-a2.png",
+      "bytes": 474728,
+      "sha256": "f36fb5fb314568b3568eb115b9d9380b2cc75e11fb865f3e2a1a68ea6f3faaa9"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/main/J20-s4-a3.png",
+      "bytes": 501576,
+      "sha256": "7e8ad9c01d531119c3eff18f76d89f450c8835811591c9e2d5559f08686be8d1"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/main/J20-s5-a1.png",
+      "bytes": 504212,
+      "sha256": "602be7acb436398cdc26a135dcc2f3b9cecd3e0a4e0588e21633da3d9ba46bd3"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/main/J20-s5-a2.png",
+      "bytes": 420163,
+      "sha256": "2f5923f4ee9d5d75405ae16d78b5da4c1815275ff331d8a008f3d5515841d256"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/main/J20-s5-a3.png",
+      "bytes": 418375,
+      "sha256": "fe4b864576a72a060d8754b592c41293af678b70519e5d819e8e8edcfc9c3f3c"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/main/J20-s5-a4.png",
+      "bytes": 420576,
+      "sha256": "0561ff24b0f14f4a7d4636e78d72505c734f2f85df88b63fb76035c06fdf5b85"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/main/J20-s5-a5.png",
+      "bytes": 446773,
+      "sha256": "93e5605fce7523681288fcfc7c6dda113dc058062fcc867d34c97f6308e2a513"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/main/before.png",
+      "bytes": 476903,
+      "sha256": "069420578ca50e060d71ceaadba99057d381e0309a262c4319785eda52874f48"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/main/index.html",
+      "bytes": 6871,
+      "sha256": "a847db6f23d6cbf507c30f84733a57afb6893d2b1caa60e71b5c829d2405dee9"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/main/trace.json",
+      "bytes": 115132,
+      "sha256": "9e5e52465584b2a7082836fc0d5efb90f69c5422ded917e95f25ae7c56356527"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/narrow-large.png",
+      "bytes": 344854,
+      "sha256": "fca6efbc50917fdb911ebc427028d2b9628c1ea28b56cb1c7f28078c0388a3f9"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J20/reduced-motion.png",
+      "bytes": 344846,
+      "sha256": "971d5e35e0332264717d660633650e2c7db5eee5cec088626c984610467f805c"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/J21-three-state/J21-three-state-a1.png",
+      "bytes": 487885,
+      "sha256": "41571988ced726ab2044f73f8cd6dceb3f99c78f3f43a9bd14a157bc0b6c199a"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/J21-three-state/before.png",
+      "bytes": 451294,
+      "sha256": "126592982a5ef7d2ef57cd5cf42b061172f0cd6ea5862def57ebe3fa6292c0e2"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/J21-three-state/index.html",
+      "bytes": 1115,
+      "sha256": "eeddf6ea607ca407a90df054ccb9a780155638432c46ec8af0b2104180216d6b"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/J21-three-state/trace.json",
+      "bytes": 10536,
+      "sha256": "d7fa1bfc393b46e2c3d6e5d6316dcc4e4a06c0fbeecf3f4d2a962c36201302b6"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/J21-topology/J21-topology-a1.png",
+      "bytes": 413832,
+      "sha256": "88c407478757890db335f7db45ff1906e7a03c00c3eb69ba921ecf4ee0ed1252"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/J21-topology/before.png",
+      "bytes": 448899,
+      "sha256": "dc5a5fe4bad9d5eae0e4742ade1fb0e17c0dad9306079bc2004da557b521c958"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/J21-topology/index.html",
+      "bytes": 1071,
+      "sha256": "f5943bf5c63fb848fb6162a8f3a5688628feb759389f36ceffaed58c9e354ede"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/J21-topology/trace.json",
+      "bytes": 8629,
+      "sha256": "072c69d5c5d87bb3e16544e6d4afb7478ddc69a59710cb4ea83d162275d8d48f"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/J21-unavailable/J21-unavailable-a1.png",
+      "bytes": 471539,
+      "sha256": "fcfe630db1d3388b7e07184b666df93ad4cca7a9039a4c5deb34952749a39465"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/J21-unavailable/before.png",
+      "bytes": 448194,
+      "sha256": "cf4e04669f81bb433bfd05eeb66955a3430e0456dd8c1a34ae9aebd7039cf2df"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/J21-unavailable/index.html",
+      "bytes": 1105,
+      "sha256": "eb64c7a8adb553cf84d4a2b1229610bc458d330eec99ffe92c009aa725df2ab7"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/J21-unavailable/trace.json",
+      "bytes": 9415,
+      "sha256": "0b436a97cfd84415fa6710ae841d90df441e670106de9a1a83aeb53c56007669"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/accessibility-tree.json",
+      "bytes": 192873,
+      "sha256": "e29491ae5f4834c4691e2b235ea7380f13063401b2cd4c717442bdf5c78201e3"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/keyboard.png",
+      "bytes": 407603,
+      "sha256": "7e3d9cc241a7d0f46591a3d45264f53176c8d8188b8f12a10e683b8500b24bd6"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/list.png",
+      "bytes": 430397,
+      "sha256": "99a674ebae61ae57c77862564bed9cbf87263a42d681c03c09fb8c4b0f8d6e76"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/main/J21-s1-a1.png",
+      "bytes": 406564,
+      "sha256": "03d59f47fb70f0bf69ef4ecd3fb3203b57f813338914f1582ecbdd7b2439902e"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/main/J21-s1-a2.png",
+      "bytes": 400831,
+      "sha256": "3530d59b4510ace53293373f822265a6e9cdcf9d02595ae51b1526babd55ee62"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/main/J21-s2-a1.png",
+      "bytes": 484409,
+      "sha256": "363ae54d5ab27b0a4b5a49fb47f088fcdcc22b80224fe06d3c13682218bcf23c"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/main/J21-s2-a2.png",
+      "bytes": 478131,
+      "sha256": "a30c8119cf3205bb60e31c3625091e689896b8d9802820cf403cb439bcb9e345"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/main/J21-s3-a1.png",
+      "bytes": 509956,
+      "sha256": "742424f62f2dd2608bf92cec06ea2569324a8be4ca74ea101c87e5e4a96966e6"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/main/J21-s3-a2.png",
+      "bytes": 488466,
+      "sha256": "e0d865891c0efa48bc4e27dd5d0e6c3888e164b5da777961787490c4e259675c"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/main/J21-s4-a1.png",
+      "bytes": 428935,
+      "sha256": "9f986652b84cba150ed45d224b01005f13844d2050e22f7c224080c45c2bb1b0"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/main/J21-s4-a2.png",
+      "bytes": 672901,
+      "sha256": "6522138cc55471c60429803da4fe73ba21b284f581e5f36104b1693b71f5e222"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/main/J21-s4-a3.png",
+      "bytes": 486129,
+      "sha256": "c916f9f77c60b6bacf01bb5782aa13e1ccf92ed3123c77fd97e8d2c03a069b57"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/main/J21-s4-a4.png",
+      "bytes": 479550,
+      "sha256": "19f914be53871c5fef3a5868bae237ea1d52e3e72d9c29955fbe4f6e78a4f6fc"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/main/J21-s5-a1.png",
+      "bytes": 398790,
+      "sha256": "367f2b2efcc21178b3bf4486f8a16137bfb0ea5b6620f329fc5d3ed56e7971e7"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/main/J21-s5-a2.png",
+      "bytes": 413334,
+      "sha256": "c3171c5cf2d3a00fddc0ec2976e99f3af95463feab99cf4973876967619eef71"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/main/J21-s5-a3.png",
+      "bytes": 432678,
+      "sha256": "d8d2fc2e29496d0ace8399afd633046756a5fbedf5ef27bc41af9044822655c8"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/main/J21-s5-a4.png",
+      "bytes": 413764,
+      "sha256": "0e54dff772c96206bb3581f21936baadf2cbeb677a04b6b3966bc602145df4e4"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/main/J21-s5-a5.png",
+      "bytes": 428875,
+      "sha256": "0d01f63b1a8406e609759bf9fd49e6c4bf8820c8bbe371a7ad8d5e07056e7008"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/main/J21-s5-a6.png",
+      "bytes": 428402,
+      "sha256": "c7ac359b82473c6d72f5a80bd911f3e67a6a1c9a3a60dd93abd271cb1a6f98b1"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/main/before.png",
+      "bytes": 446881,
+      "sha256": "c2adbdd53b88820d112802236a54be8a94d354555c94453f5029d59a0e2e2663"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/main/index.html",
+      "bytes": 5614,
+      "sha256": "e2810d83265e6b505d295fda4ba8616186ca44a1ee828af59d6f8ee6c481d272"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/main/trace.json",
+      "bytes": 92531,
+      "sha256": "decc16955e080e0839beeba4805ecaf0fcb20690e0feec452ec185d056498242"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/narrow-large.png",
+      "bytes": 319758,
+      "sha256": "87e9e6078f3a84edc8ab45bc9817f28651b92c734590fba2c3abd32ba8379a59"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J21/reduced-motion.png",
+      "bytes": 319754,
+      "sha256": "211a0fb5ecdc8bbd99b0e0ff1e50a1252c84822196d500cdf7d8427b47c52393"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J22/J22-anchor-fold/J22-anchor-fold-s4-a1.png",
+      "bytes": 662768,
+      "sha256": "7be4cabc4a22db62570f96981ca8b699b38551e5bb3b5ce5ea70439d0d70c067"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J22/J22-anchor-fold/before.png",
+      "bytes": 671574,
+      "sha256": "a24d6cc6d9751be40f82cca9bd9e57d2547dfcf826315065dd36053176439469"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J22/J22-anchor-fold/index.html",
+      "bytes": 1112,
+      "sha256": "12a1e2e7b75696213be890fd406228e2c3c650e905b232982d48587a884e28b4"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J22/J22-anchor-fold/trace.json",
+      "bytes": 22118,
+      "sha256": "afdcfb55edbaae51e61b4c3408d7c46cdc05871df3961326ec48b61f6dbd795d"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J22/J22-partial-cancel/J22-partial-cancel-s4-a1.png",
+      "bytes": 757182,
+      "sha256": "bdcd57a0fea3e6b5f79f70f0130b90e52b531a5390230a8deecb5f45839a78a6"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J22/J22-partial-cancel/before.png",
+      "bytes": 679357,
+      "sha256": "4f0aebd23e4e1b9ff72854c8772452cb76928e3ce12869af895fbcbd81406dc0"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J22/J22-partial-cancel/index.html",
+      "bytes": 1138,
+      "sha256": "a6a4df90b22f75941367d6975feb4401c34a256c69ddcf814ed083d0a3d69ae0"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J22/J22-partial-cancel/trace.json",
+      "bytes": 22054,
+      "sha256": "a8708f605ee6760071a167dea298fec7c786d149c984ae366055162673e6c55f"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J22/J22-v12-not-hit/J22-v12-not-hit-s3-a1.png",
+      "bytes": 615511,
+      "sha256": "e8c8cf79a8b79457ee9daf623e67504ebd6fda0f43e806d39bbda70eb01752e0"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J22/J22-v12-not-hit/before.png",
+      "bytes": 671425,
+      "sha256": "7ec646e2ac909de519474c04582a707cdc2d38a5c4ee6e9a855620094ab88a8c"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J22/J22-v12-not-hit/index.html",
+      "bytes": 1088,
+      "sha256": "6d351fb528bb8c79ad03301af486d9ae88b1fa4e907d9eb7b9ef0a47c5e9c59e"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J22/J22-v12-not-hit/trace.json",
+      "bytes": 21004,
+      "sha256": "24ffd4755d170750f5226e02a4853c65fd53e96eedc08ad013d832fab38d6de9"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J22/accessibility-tree.json",
+      "bytes": 316005,
+      "sha256": "a7cea1fb87868ddc871d70cce496a13d1a36d569aaa11b5be85fe10be22b8e23"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J22/keyboard.png",
+      "bytes": 696716,
+      "sha256": "ae9896859968e381adf000ec9ec9aad22a7b8dff5ce7c1250b9cada19fce747d"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J22/list.png",
+      "bytes": 645672,
+      "sha256": "6e0ed81a1c722d33cdf4d83081895db9964f4179e491aebcf88df1dc383ef31c"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J22/main/J22-s1-a1.png",
+      "bytes": 699138,
+      "sha256": "decde30feaea82b15c68f3e708a0cad8f20e57b1f73c6a4bf8d104edc6b7c47b"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J22/main/J22-s1-a2.png",
+      "bytes": 737195,
+      "sha256": "2ad7fa8f9b3617e179d8fb8907abaa5214d99ff748de038a59f4c191157a63f1"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J22/main/J22-s2-a1.png",
+      "bytes": 825080,
+      "sha256": "f685aa0f4c79ed221b74d756ab2a52c42cced309eff6499e11e3157ba1189166"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J22/main/J22-s2-a2.png",
+      "bytes": 696067,
+      "sha256": "84b1129559ea2b32b3f8269db505bc7ac3ee485c390dac196ff14efb7105440d"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J22/main/J22-s3-a1.png",
+      "bytes": 702655,
+      "sha256": "d7dee0872a2a36fa1e24f828a4fae81b8781d8f78cf03a5218bb27409d184505"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J22/main/J22-s3-a2.png",
+      "bytes": 702775,
+      "sha256": "316247b5ed357dd2c69af80c91b5842099b9f56d607e021cc5895ff52849c442"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J22/main/J22-s3-a3.png",
+      "bytes": 701721,
+      "sha256": "e5fcbf8903187f2a18eeda3cf9be98d25e86e6ebeb2601171a2d1fc4a6c049f8"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J22/main/J22-s4-a1.png",
+      "bytes": 779534,
+      "sha256": "a1b6919d25eb4f0bb31c6b58eaea3e100de787175bc5d6bb3143a8e8a95902ad"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J22/main/J22-s4-a2.png",
+      "bytes": 757516,
+      "sha256": "1b20c47fea3282868abed042fe30f448f50b6d005680da934c7c99cc3f596d75"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J22/main/J22-s4-a3.png",
+      "bytes": 624505,
+      "sha256": "65ae5892f207b8819f5793a6b42a39457e924e9345a6ee46278c324527cc59b1"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J22/main/J22-s4-a4.png",
+      "bytes": 696257,
+      "sha256": "7a6e2c7d80628983c47e1c266107d7e544192a299ddae7ee901630d384320c45"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J22/main/J22-s5-a1.png",
+      "bytes": 673685,
+      "sha256": "d213aa934d10ea844de86799169c82d2b1ef2c3d02760aedb18080814e0d96ea"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J22/main/J22-s5-a2.png",
+      "bytes": 445526,
+      "sha256": "da7ca9f750e1a140fc782945a89ce4376cde2bac09951080cc93f6fbeb515669"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J22/main/J22-s5-a3.png",
+      "bytes": 759653,
+      "sha256": "acd15e0ddfd4cd1ae8f16f3485a3b5dbf96bbc48e0e286f18bcedb00bcc1bb66"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J22/main/J22-s5-a4.png",
+      "bytes": 530158,
+      "sha256": "cb32e6961dd5ff76c80d36ebedc959b978b829f66b109985064c1e969dedd18b"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J22/main/before.png",
+      "bytes": 679173,
+      "sha256": "f7228468296beff1e244859f7b0952d475f0c4e511e6d00a25acbfdc2667203d"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J22/main/index.html",
+      "bytes": 5826,
+      "sha256": "0320a012344cfae81a526c487542960dffeba2c59b00502a1c28a78d9b9ebcb2"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J22/main/trace.json",
+      "bytes": 171126,
+      "sha256": "28d0385ec1818346cbe39298dbc3d02c3e32b4be556cff9661adeac25c1abc0e"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J22/narrow-large.png",
+      "bytes": 447578,
+      "sha256": "7852bbb2a198e099edca4080b0aebe577c52e16675101adf0442945694dd2ad5"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J22/reduced-motion.png",
+      "bytes": 447575,
+      "sha256": "ae7c81d986ed6e029f9dbd944d0aeb42bf671ed4f08def72a89172b5c8f5510c"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J23/J23-invalid-signature/J23-invalid-signature-s2-a1.png",
+      "bytes": 437916,
+      "sha256": "3727987f428a1044c3a51035e25a27323e9fedb5fc69c41176452ddfc0d81fb1"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J23/J23-invalid-signature/before.png",
+      "bytes": 588001,
+      "sha256": "209d0e8d0e2bdafc4d8ab1a561909b84d2f43c00082fbbb3cb041fc29739503f"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J23/J23-invalid-signature/index.html",
+      "bytes": 1144,
+      "sha256": "2dc62ae62b4e21b1105bfb538e3a3fe0f0c8d83ba114a1ed8ad2fdf349988f94"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J23/J23-invalid-signature/trace.json",
+      "bytes": 15663,
+      "sha256": "079352f7a364e583172dce567f8c73a3a4e234bf6fa60a60cc580894430794e2"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J23/J23-retain-only/J23-retain-only-s4-a1.png",
+      "bytes": 403962,
+      "sha256": "2cf6e6d0f7258d8816833f44cbdcfec8d3d2571168ca7ccdca38d3461e9bc042"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J23/J23-retain-only/before.png",
+      "bytes": 584866,
+      "sha256": "717a05026593691a011d1617071c0d1611ce104c040d4c4b7bcc6aa3e0aae46a"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J23/J23-retain-only/index.html",
+      "bytes": 1090,
+      "sha256": "e5e941a6c20d0e4fd841f57c4dbdbe2365712b8272a2728ad58fe63bfff45996"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J23/J23-retain-only/trace.json",
+      "bytes": 14971,
+      "sha256": "2a8d495ac2c43ddf5e022e9c40b1491b43f3542865b3f0da02c66cbb9066acb3"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J23/J23-review-only/J23-review-only-s4-a1.png",
+      "bytes": 493623,
+      "sha256": "b53257e1e21760d86c0446cfc3494a751aff94c8fe58f86ca8c9c1d4c68ea804"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J23/J23-review-only/before.png",
+      "bytes": 587613,
+      "sha256": "a36456e3277a0db7ea543a3ae5916a0c22559d4017034da4304793c2fab4edeb"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J23/J23-review-only/index.html",
+      "bytes": 1051,
+      "sha256": "bf54607eab9db33f99fb67356d7290068d66ec198982f05e4657b40dd626dc12"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J23/J23-review-only/trace.json",
+      "bytes": 15728,
+      "sha256": "75a89b95b87e8b31e96fabead12ed83ba2e13766fcaaa9d5fae2d72c50cb172b"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J23/accessibility-tree.json",
+      "bytes": 262874,
+      "sha256": "391715c9b96a93eb47d6b46799b2215d04b21f20939ea3ea4e039d1f367a1399"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J23/keyboard.png",
+      "bytes": 603767,
+      "sha256": "78d3e5d61afe93124f231b6820576aa94d9c77b1636ba5c495cbd08e785f7c80"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J23/list.png",
+      "bytes": 571550,
+      "sha256": "604625521c6c5ae133f64bab495110aadbaa5977a0f9663f9a14ef5e9afba832"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J23/main/J23-s1-a1.png",
+      "bytes": 602666,
+      "sha256": "d581f48888468b044426ec83a38c2912096ec2cb86426254fbe9f207bb3d864b"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J23/main/J23-s1-a2.png",
+      "bytes": 427627,
+      "sha256": "ed751c0db9c7f9183643e014a2864938d39947737ec17e65fb0e9f259cedc302"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J23/main/J23-s2-a1.png",
+      "bytes": 477854,
+      "sha256": "70f60710eb62947fb41e7f95b283563c2924b1cbec3b23d5c1e75c099c30d294"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J23/main/J23-s2-a2.png",
+      "bytes": 450809,
+      "sha256": "04a371a314a627ce61ab69122ad14b1fec250fdf6f8e45622e42f15d1947ac66"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J23/main/J23-s3-a1.png",
+      "bytes": 888873,
+      "sha256": "0971ddb27a3fe183cb22c3cdc1cc7ee2f4b227979e3b14db3530e5509c52bbda"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J23/main/J23-s3-a2.png",
+      "bytes": 444828,
+      "sha256": "a6fd0bf43c11a7731fd6530a208c4fc847631c83f417fbf02e56ab05df937e86"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J23/main/J23-s3-a3.png",
+      "bytes": 382718,
+      "sha256": "3b9a062465553e62d6e64627b6dcbcf4baac0e64ebb5b29517ded60407018946"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J23/main/J23-s4-a1.png",
+      "bytes": 838156,
+      "sha256": "8e7a084df7f1dd811dbdefb0ca6c2d9410f58b54512014ce30a9cd7a92fa43ea"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J23/main/J23-s4-a2.png",
+      "bytes": 866277,
+      "sha256": "e56f1f5e55fa156b17ca33c1e7de82747e9138d230b1dea63ae6eaefad19066e"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J23/main/J23-s4-a3.png",
+      "bytes": 835204,
+      "sha256": "3f5ecfbe47abc953a23e2baebf31a489f94f1ddd3e128d9ff910a9c6fd147f03"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J23/main/J23-s5-a1.png",
+      "bytes": 409967,
+      "sha256": "334c22b4a6234bd738cc8e945c172ed816737304bf4556abef1fd03f8cb6b259"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J23/main/J23-s5-a2.png",
+      "bytes": 520553,
+      "sha256": "c252b19dee1a80724d3fcc3da1927c2c79cc0e42c49b017bd4eeb89deab48791"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J23/main/J23-s5-a3.png",
+      "bytes": 413659,
+      "sha256": "d31649e8bd43b2d47717e78343b4aa6756802032539f1d29fc854ad9b6f2c936"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J23/main/before.png",
+      "bytes": 590964,
+      "sha256": "90406258c41a85833dbf3f592e217b07771c28bfcfc630c4c8fb472248648bea"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J23/main/index.html",
+      "bytes": 4908,
+      "sha256": "b64749157b15f4be17244b56ba61b9fd4e9011c456340a98c51a44dadf2416cc"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J23/main/trace.json",
+      "bytes": 115909,
+      "sha256": "b243be33ed6f800959a783cb7a707af218bf2c2dbf29b64f9e3377e888396b34"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J23/narrow-large.png",
+      "bytes": 417270,
+      "sha256": "8c44689cdaaaef0f0de1c5f5fdc955132c9b13c42eaf3ee162e822a925848e09"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J23/reduced-motion.png",
+      "bytes": 417261,
+      "sha256": "e70d966ff2f864d90baa41a16d52b881ff1631b47f2224ac73c91c19278c777c"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/J24-cancel-unavailable/J24-cancel-unavailable-s3-a1.png",
+      "bytes": 521416,
+      "sha256": "ceb6edbef2281cb607a3c9497b5f7311d89f9048f89edd11eec9a6553d9a0994"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/J24-cancel-unavailable/before.png",
+      "bytes": 605997,
+      "sha256": "9096ce48f17f9f28b4a034112a93804f50b7b70e28a5173d151b1fdb15fe3d16"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/J24-cancel-unavailable/index.html",
+      "bytes": 1130,
+      "sha256": "6031e330e7dc2e30b274dd0384d3e494d17649c7bc3f7a17fcce35e2bbab9d69"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/J24-cancel-unavailable/trace.json",
+      "bytes": 18061,
+      "sha256": "8c4c34457800e9b713f9be1abfb75acd36b008589c722c5277fd814d198f2cff"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/J24-dismiss-carrier/J24-dismiss-carrier-a1.png",
+      "bytes": 402455,
+      "sha256": "b10d5fab6dff6312cafef52c3e8637a7d813adbad7626e475add7a3f541a294a"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/J24-dismiss-carrier/before.png",
+      "bytes": 429930,
+      "sha256": "e0a983968c5f06cf04e9ef78e7e068cf3a02888eeba7460a6dbeb95685e26301"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/J24-dismiss-carrier/index.html",
+      "bytes": 1222,
+      "sha256": "1732a4748b89ca5e5879d415dbd0b4d456f86ce6a43c909dc5af94862bf3e2c7"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/J24-dismiss-carrier/trace.json",
+      "bytes": 16372,
+      "sha256": "de73d9246c5a35fb127ef571a0e6b1d1f577e8932fa7cb193a7e502dd66b8c09"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/J24-overlap-link/J24-overlap-link-s2-a1.png",
+      "bytes": 395716,
+      "sha256": "e83939f8848df3b3521387c405389b5e6763dd8d9973abbc471fa62a6a51946c"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/J24-overlap-link/before.png",
+      "bytes": 606022,
+      "sha256": "bd261ae7bbb239c6518e18ec7fd93c865e8aa4320f9c2cfb7c12b7697cc2ef1e"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/J24-overlap-link/index.html",
+      "bytes": 1099,
+      "sha256": "147149c3a3e643c032e00d5286d918b8d229f6e1fd72f1ebe6fbc4a3106fc3bf"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/J24-overlap-link/trace.json",
+      "bytes": 15218,
+      "sha256": "bcc2f9b45489f88e477ef1641d350aef5a1b862fa70951c38ad7c5482888aafb"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/J24-reenable-carrier/J24-reenable-carrier-a1.png",
+      "bytes": 417468,
+      "sha256": "90398059a5c62b416ec363a6cd4354f050e6b60d2d61878f0b1e27aacb66cf30"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/J24-reenable-carrier/before.png",
+      "bytes": 427378,
+      "sha256": "167f171416528d8a3ffd95cb1c923d86371a7d497f9631e7bb96b11178d193fb"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/J24-reenable-carrier/index.html",
+      "bytes": 1211,
+      "sha256": "7c9041d3a1ae2d416b5c63b8262f41fe08451f0cc4b1f0d257b146b42b555b65"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/J24-reenable-carrier/trace.json",
+      "bytes": 17045,
+      "sha256": "30e7a6884766a8256a7092c2a3ecf6220354d72d5e50dcf463fbba03b973ad72"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/J24-wrong-version/J24-wrong-version-s4-a1.png",
+      "bytes": 515533,
+      "sha256": "6ee958f179a4dfb658cba77712fbc71b44c026bc8ce378e0509104dcf6e51445"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/J24-wrong-version/before.png",
+      "bytes": 613540,
+      "sha256": "fe2c3a04e0b9a44ca0a91ca27dfc57c2879e2adff2313db06bb71dddf6a2e354"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/J24-wrong-version/index.html",
+      "bytes": 1082,
+      "sha256": "44b3bfd26d8c3450140bf09fcc2db165ef7b5c68b9d84cb12eb45e9e366fd192"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/J24-wrong-version/trace.json",
+      "bytes": 18166,
+      "sha256": "9e8cac4b461d4b5dd6bc2f27dfbb11820ee762119dc8db4bcbec016468c1a298"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/accessibility-tree.json",
+      "bytes": 291654,
+      "sha256": "b55fcd1ec16ff42f09abed94a8d83a67d6b75e1646724c737dc52b13223c2879"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/keyboard.png",
+      "bytes": 660302,
+      "sha256": "2189ce74efccf46965a27aed899ddbb662224ed51c13c4b4dd6d24310fc08a12"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/list.png",
+      "bytes": 624066,
+      "sha256": "46afabc3a0f029e5f9e1acf51b08131c3848e17d230937007933fc746c074529"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/main/J24-s1-a1.png",
+      "bytes": 659085,
+      "sha256": "fa31b42d9aadd0ce1bb4b01c0e453842fb0401afc175709692e4822531323bc7"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/main/J24-s1-a2.png",
+      "bytes": 537281,
+      "sha256": "395b68e329b53a6b96482b4dc763797a79a18a038298a56365340caf64e900c2"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/main/J24-s1-a3.png",
+      "bytes": 522115,
+      "sha256": "292ee5c3bc351915ea24ea88794f5358bc837711711174afcf9198e97cdbaaea"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/main/J24-s2-a0.png",
+      "bytes": 571737,
+      "sha256": "9694dd7ead0badf7627a898ac82661c45bfe78bf11b5997ab2d742fc875bea44"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/main/J24-s2-a1.png",
+      "bytes": 596678,
+      "sha256": "7a3293ad0a774afa2994cf8ffe6bf11060639f18d0b85d43d5a587fc0db7827f"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/main/J24-s2-a2.png",
+      "bytes": 589816,
+      "sha256": "fc45018a15f32658a21720096e94b26636d46edb66d4d2326047f472027026da"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/main/J24-s2-a3.png",
+      "bytes": 577283,
+      "sha256": "583ab55e6500e3e65c7e498a6996347c4070b8ac07b68c8bc6ccbea7bed08e62"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/main/J24-s2-a4.png",
+      "bytes": 537231,
+      "sha256": "26572fe815eec9899d8b9ba56671f906edc79c6ca0966282a801970342705b74"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/main/J24-s2-a5.png",
+      "bytes": 466334,
+      "sha256": "7859dd32db80c0ba50bf498e3de2bb282e6833f1af387c0b534961ebbde44345"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/main/J24-s2-a6.png",
+      "bytes": 559559,
+      "sha256": "7e333ef16020a0a90e9d953bc9389202d86411ac24c403fd077edbc03a69b33e"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/main/J24-s2-a7.png",
+      "bytes": 568785,
+      "sha256": "ed82f8f057aac348962a0e0fbefae4ffb2d8fcc01a296016aedeee0c891de4a6"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/main/J24-s3-a1.png",
+      "bytes": 571378,
+      "sha256": "3341e5a75c948d02a8c14d2c40231b51f12fc076caaf7af1130fe722813b17e9"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/main/J24-s3-a2.png",
+      "bytes": 571893,
+      "sha256": "2d49a4f11f18e166b7c46bfef7ff15c8b31fa82b4fe00a8d9086a3b4be06a793"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/main/J24-s3-a3.png",
+      "bytes": 581690,
+      "sha256": "f2be4532511677a86749f267d3d549da16219dc8aabf6c5d231b3e4f10a05d19"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/main/J24-s3-a4.png",
+      "bytes": 571416,
+      "sha256": "f5d69e48c599b0e4b14a5621b0b0c8846f6e0d97840fb1e63f10e0684d2ec6a2"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/main/J24-s3-a5.png",
+      "bytes": 535942,
+      "sha256": "a0529d874549c10155418b643f22e8e472558b30c71d2dfd1ed6496707a4028f"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/main/J24-s4-a1.png",
+      "bytes": 724862,
+      "sha256": "4b7e53a9be0a9f1a4f64b0eecf70027c54d36a158ae9ef857fd76df43de89154"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/main/J24-s4-a2.png",
+      "bytes": 721980,
+      "sha256": "50fc3584d47ee20443bc4110cd27b35d95db3e8d298e28ac929428baae26cc34"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/main/J24-s4-a3.png",
+      "bytes": 528680,
+      "sha256": "9b3eff30b2edfaadd0ae5111f61dd9d1cfc391e3f882ca47dffee1ef440ec54c"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/main/J24-s4-a4.png",
+      "bytes": 528865,
+      "sha256": "116952c735dbf3ad4faf058902366cad51407e084a48a7a8d215160ab105b9fb"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/main/J24-s4-a5.png",
+      "bytes": 526288,
+      "sha256": "cd97f908b728a7d47baa1d5202d430dea1e057452e5e9c80fbf80e37da3f3d7f"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/main/J24-s5-a1.png",
+      "bytes": 431519,
+      "sha256": "810529d4aa376608170b41c87ef15e285d4ceb55f2180bdc51b0f053b03ef961"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/main/J24-s5-a2.png",
+      "bytes": 428985,
+      "sha256": "870dd4d06f9f5a1fd9a0f2644149595aa6f9985170f4d6848846eaca98d20054"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/main/before.png",
+      "bytes": 613974,
+      "sha256": "d196b173b0db3daa2d3f855a927276e23ddd474f7fd1a06e59f2290ee03197ba"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/main/index.html",
+      "bytes": 8319,
+      "sha256": "1ea7320649b770cfa4387aefb1be8f5aa34fea185732153917aff46d5ccffe6d"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/main/trace.json",
+      "bytes": 223794,
+      "sha256": "c9529c12cfcdaa6329223b99b65e6fd55010f59ac5e343b67bbe1901115a8455"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/narrow-large.png",
+      "bytes": 426322,
+      "sha256": "cb3d39cef576716870dd7fe590d792d6bf6ee3350c1c08d802876292ee54d675"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J24/reduced-motion.png",
+      "bytes": 426316,
+      "sha256": "1c766206235a086e7f6f48622feaf2e474b92000db5db79617f99866c8f03bd8"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/J25-preview-no-move/J25-preview-no-move-s2-a1.png",
+      "bytes": 613995,
+      "sha256": "951f75fbdd490d6eec2971c43e3717dc5d07124de11eefb0d4647d2222ea486b"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/J25-preview-no-move/before.png",
+      "bytes": 415984,
+      "sha256": "3d7b5107fc538ef2928cdeb0381625a6378e733740cf7a98c4869f2149f959ee"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/J25-preview-no-move/index.html",
+      "bytes": 1106,
+      "sha256": "f3694e27aadf982efd4d3fa9ac2186106b18255ba7f441a33c8effef4233aa2f"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/J25-preview-no-move/trace.json",
+      "bytes": 16682,
+      "sha256": "4ba4b3364856bda3788e49400caac766b80373b13a533d6c5a3d2c15268b2e24"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/J25-unavailable/J25-unavailable-s5-a1.png",
+      "bytes": 441041,
+      "sha256": "0dccef8b49af010b86c7c398849fccfb5a973330972ee32a41494adb5495344c"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/J25-unavailable/before.png",
+      "bytes": 430951,
+      "sha256": "b3702d623936e28b21281f07dfed373ce400b8e34e2dae7de4a8ebad81faaac8"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/J25-unavailable/index.html",
+      "bytes": 1096,
+      "sha256": "6d615094fe9d5482e11cb7386083ab351485a64d44b98376b03e9cd2c6be4580"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/J25-unavailable/trace.json",
+      "bytes": 16553,
+      "sha256": "21a58857727e59875bbb80a3c685929cd7084750dce6991d0684a312d610a565"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/accessibility-tree.json",
+      "bytes": 255105,
+      "sha256": "63d06b9fdd1cec53735b16d4efebe7160575732e687ed7fd3b079040275f21b8"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/keyboard.png",
+      "bytes": 544474,
+      "sha256": "704456309e1c6e62d9a574f322b3c81f1d21f517058103bcbad3afd474181ab1"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/list.png",
+      "bytes": 521753,
+      "sha256": "4f5d972558ed44437da5e805ce87591d8e4ff0822b6e4115642d32dc51e68af9"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/main/J25-s1-a1.png",
+      "bytes": 543485,
+      "sha256": "bdbe0dbde12075bb134ecc30f5148c2acd5b356f36ffcd3d6b889fc8b708c661"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/main/J25-s2-a1.png",
+      "bytes": 498828,
+      "sha256": "13110af0c3cdc86dd53566bfd1d667e95227ae589a462e2c58f8ffa25eac8ffe"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/main/J25-s2-a2.png",
+      "bytes": 427561,
+      "sha256": "f8a61626d2a9fefb22b313d359618f928b6323fa5e9e2d4f4478800df4a6fdbd"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/main/J25-s2-a3.png",
+      "bytes": 429879,
+      "sha256": "d0368b27d59682017b1586c833ee2731d40092b7f5907d0f0e48ca591ac0ae4e"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/main/J25-s3-a1.png",
+      "bytes": 538661,
+      "sha256": "48d23acd2720fdcf1abbc592d1648d72e1bf0561bd3a5e5e1b466217ad4c5161"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/main/J25-s3-a1b.png",
+      "bytes": 777135,
+      "sha256": "5dd73637509fecaa618157032998c027e0ec4d5c1c2e35862de39d3cbf010432"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/main/J25-s3-a2.png",
+      "bytes": 714673,
+      "sha256": "4c90cb3a268611c1c1d7129e8d0c0a01e0b65b33ea5ca6b98c7d484145db088a"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/main/J25-s3-a3.png",
+      "bytes": 716899,
+      "sha256": "c30f71a24554cdbbcb4243e8fa14f9d32af27fbe73d9b67b624a91da333a5f8e"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/main/J25-s3-a4.png",
+      "bytes": 451249,
+      "sha256": "ea4d509d82ca6c25708c992ec163d29b2ede4fb96f55be9e211955e6acdd4a83"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/main/J25-s3-a4b.png",
+      "bytes": 732117,
+      "sha256": "2ba66265ad3262ecbcd1f6994c262315c4fa2780b34687abab1a87f2c5b58a53"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/main/J25-s3-a5.png",
+      "bytes": 649633,
+      "sha256": "ce864063b9f02aec5ffe2509873122c1963541d169e12a8e8a373a8626979a0f"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/main/J25-s3-a6.png",
+      "bytes": 452852,
+      "sha256": "61603db30c0ab7c03b1810c059773246f421a4743aa3778a63c52f07fe0f6a96"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/main/J25-s3-a7.png",
+      "bytes": 631542,
+      "sha256": "e1bd9fed7afd38568650611cec43bc8c4be5b1af6fee876424ea80bd2f1297b4"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/main/J25-s4-a1.png",
+      "bytes": 465632,
+      "sha256": "da5cff46b65a7be15cb2368e35f064d6a3ecfcfa46056a8b41585a4f8af04329"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/main/J25-s4-a2.png",
+      "bytes": 647265,
+      "sha256": "bbc903d20c4dc69d718444cdbc1251dc2e4f0dc03089dfe26a19caa22c501e14"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/main/J25-s4-a3.png",
+      "bytes": 465001,
+      "sha256": "ad2347b784a6be7276855cd89f5155b7df80d78b0ed7bd8aa9741cc564fc18ae"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/main/J25-s4-a4.png",
+      "bytes": 766509,
+      "sha256": "0aa806b2f2ba290843c4bace76c6e4a6d722b1c4683723c116edc87e74002184"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/main/J25-s4-a5.png",
+      "bytes": 405889,
+      "sha256": "28d6ca429bd52d2e90a1cc3348a93df62167d51a8bf2ce30507060a23711f3a3"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/main/J25-s5-a1.png",
+      "bytes": 492832,
+      "sha256": "6be0ffb17401c62959f08c657257c8f4f36a310c9f41332a1c299078867e7ace"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/main/J25-s5-a2.png",
+      "bytes": 429219,
+      "sha256": "175ead71b324c12b219bee1595b503b7be1f687eb978c2cab04ea9ea68485cd7"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/main/J25-s5-a3.png",
+      "bytes": 433973,
+      "sha256": "bb24b3a27411a600272e8e2ee9b350b9809987b5e07a220787e60a88fb318426"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/main/J25-s5-a4.png",
+      "bytes": 485824,
+      "sha256": "684d0f6a45895dc566cddf626b58a123147bc53298b7b21634f503e454206084"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/main/J25-s5-a5.png",
+      "bytes": 403475,
+      "sha256": "f8298119f164398e19b3d121855670a35639ebdfcd652a993aa407b73e2c2094"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/main/J25-s5-a6.png",
+      "bytes": 464603,
+      "sha256": "1afc754fd9a03b174cbbc8ff8f93e317da6e829ca1f912b6acac8a94f0495017"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/main/before.png",
+      "bytes": 416900,
+      "sha256": "8301db5ef11db07cc717c7b7cad3dd12081f193436508e214315f354d8cca8a0"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/main/index.html",
+      "bytes": 8249,
+      "sha256": "6c19b9e31a72d858fd91304e1c86e79315fdc1fddd0e7685fb8ef9faac45fd93"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/main/trace.json",
+      "bytes": 216334,
+      "sha256": "24934e434e10b900017214d3cd2ec9c56428556ce726e7aa946cf3e25107f111"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/narrow-large.png",
+      "bytes": 360751,
+      "sha256": "21e95958c3451c69184560ed6d6ffa94d34e0c404ba64e06cf1c992833b8b38e"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J25/reduced-motion.png",
+      "bytes": 360749,
+      "sha256": "fbc4e09045973aef86a91f7330fbe0897002bb67f1d0ed7ececd8ff8a092d210"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/J26-availability/J26-availability-s5-a1.png",
+      "bytes": 442549,
+      "sha256": "f86fc9df8de1debb4254f0b714a53236ef8f5b7f264940da09e14dc598c358a6"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/J26-availability/before.png",
+      "bytes": 582034,
+      "sha256": "3803fd6c2fdd5b3e1a6884fe13dd0665329fccc5e90e94e4ebea404113c2aca7"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/J26-availability/index.html",
+      "bytes": 1137,
+      "sha256": "3886b17643b4879e98c5de73f041c6850afa604f3d50428835f144199b16df6b"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/J26-availability/trace.json",
+      "bytes": 257478,
+      "sha256": "11e4cf080203cefb8e5af239c6e4e63baf4e2f7784f09f3e4bfcd67a25a81fab"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/J26-equal-text/J26-equal-text-s4-a1.png",
+      "bytes": 467721,
+      "sha256": "31b79f462a32289a547ed07f0bb2c088318ce3550367ffa916fd3a9e6ffe06a3"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/J26-equal-text/before.png",
+      "bytes": 579374,
+      "sha256": "271aa44320fe5931bf36ea3efb5bbe4aeefc0aea180691d3ea63fc7060d7fd54"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/J26-equal-text/index.html",
+      "bytes": 1098,
+      "sha256": "0308bf4e1df275d29966dac286685b9260af4bc605611035c9f8e8a7880ecd2f"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/J26-equal-text/trace.json",
+      "bytes": 259148,
+      "sha256": "0aae462500ff26275fb2cbdffe91e99f617309b3064eb087b3e38a2c3b563a75"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/J26-exact-duplicate-default/J26-exact-duplicate-default-s4-a1.png",
+      "bytes": 466679,
+      "sha256": "82eb88858fb9673345f487989126990c22fc2d099abd7ddc208dfa0c0633e4a8"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/J26-exact-duplicate-default/before.png",
+      "bytes": 581942,
+      "sha256": "355e6839908a5d9129f117886a441db0ee0a0bbb58a2c2052569c656c02c6029"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/J26-exact-duplicate-default/index.html",
+      "bytes": 1158,
+      "sha256": "c0e94b3ba6dea56b8e46fdcf43b67ea07a9de595e651313cb764030330ea1b07"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/J26-exact-duplicate-default/trace.json",
+      "bytes": 259185,
+      "sha256": "d5dd9025fb95e17ca107e313506a4fb805ab61d28a1a422159446a4a9e280744"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/J26-shared-occurrence/J26-shared-occurrence-s4-a1.png",
+      "bytes": 468109,
+      "sha256": "64033e1969d9a9811f4bebcbf05c85c8362029eace106bda2bdb333c5fc15d7c"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/J26-shared-occurrence/before.png",
+      "bytes": 579911,
+      "sha256": "7368f957da7fbc97f7165c605e20f7d5f0d5782c78ba137ffa2da463b08869f3"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/J26-shared-occurrence/index.html",
+      "bytes": 1137,
+      "sha256": "f1ad7a19e89650f2648332f29184f0eac369ba05c2fdf9c5def6016fe3f49c81"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/J26-shared-occurrence/trace.json",
+      "bytes": 259198,
+      "sha256": "2f7c6e881e98ad53a7b49d054bda682b9160d28cc55a9b1f13888740efa5bf4d"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/J26-whole-cell-excluded/J26-whole-cell-excluded-s6-a1.png",
+      "bytes": 394246,
+      "sha256": "c261b12dfb53648a13dd9502ca760fe65ac807a298de3c5373a9c989e0c935b8"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/J26-whole-cell-excluded/before.png",
+      "bytes": 582564,
+      "sha256": "f12437227186407b5178de28c7333046554179d104e71e5a26a217f7338c08f6"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/J26-whole-cell-excluded/index.html",
+      "bytes": 1172,
+      "sha256": "bcbf894461c353a09081d47f3315b4e19901f30317345c431aa43faf6fef21db"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/J26-whole-cell-excluded/trace.json",
+      "bytes": 257740,
+      "sha256": "0c48ae36b6dee014ee8f845c99fe38595adf7f3420cc3f13d4c0e1c5469ceb1d"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/accessibility-tree.json",
+      "bytes": 305576,
+      "sha256": "baaa237bd34b75e48153a08c7b6c407a5816b215f95ae89964b2b523c569a094"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/inventory-0.png",
+      "bytes": 529434,
+      "sha256": "fae7ad9c478982134234b08f2d99bf7dbbe403c6623f47b007b535a0ae9c74de"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/keyboard.png",
+      "bytes": 689713,
+      "sha256": "3d6bc375280034ea942a65b118160a9cb410bf24deff93ca8499c9f11353ec0e"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/list.png",
+      "bytes": 623040,
+      "sha256": "494d333b66a7964817e5999426fe327494aa86a75cd02bab9c15f1837becf2be"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/main/J26-s1-a1.png",
+      "bytes": 688590,
+      "sha256": "41685b38997b8654d5cd3736248ae7b723bf2ce72e74f4e97c174b4993d94429"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/main/J26-s1-a2.png",
+      "bytes": 683311,
+      "sha256": "b5b238a47aab7c37171e6dfd83272cf541fd8d16fe2588ef640ff9748abcd958"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/main/J26-s1-a3.png",
+      "bytes": 689289,
+      "sha256": "9419d643ee2412d516307ba007148f0cd23922a49a71f31ab0341f6b63aedbe9"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/main/J26-s2-a1.png",
+      "bytes": 728134,
+      "sha256": "644aafcbfd785d7670e50f860fe5140753368de24c10e1b8eac2cefd65fb4210"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/main/J26-s2-a2.png",
+      "bytes": 728235,
+      "sha256": "71eea6e75dd0baa10f018681eb812e7992920980521b1072017463c0024ca155"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/main/J26-s2-a3.png",
+      "bytes": 732070,
+      "sha256": "68b1cde9c8d64bd80e5e3b78d95c5c54a1b86cb25ec081f4b8054de155e1f65a"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/main/J26-s2-a4.png",
+      "bytes": 729673,
+      "sha256": "38ba8bc7e33496990ff424f6a1b54c5282d11c8533d7770be7d466a5df2f3c8e"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/main/J26-s2-a5.png",
+      "bytes": 726603,
+      "sha256": "d73dce79f86ed548beee4a816fe9933ce2ce3cbf99c554b9bdffc8ac4aaaa261"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/main/J26-s3-a1.png",
+      "bytes": 481593,
+      "sha256": "caf5107ad7d8bf4f15a16455b865187b1160ca1520e4c5bb042ffb4feeb15401"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/main/J26-s3-a2.png",
+      "bytes": 525187,
+      "sha256": "d28b4157111520b9810c9d07e6b99decaef8f988cae235821b87a27242c384b2"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/main/J26-s3-a3.png",
+      "bytes": 461651,
+      "sha256": "795116799221780136f98dcd9d8ba1eee142efa3394fc826bfc9b1634dc978be"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/main/J26-s3-a4.png",
+      "bytes": 443303,
+      "sha256": "344bd7cef7f8db2e2908e1391e7a510727534bbfa33193327db01eaef2c0fe31"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/main/J26-s4-a1.png",
+      "bytes": 454535,
+      "sha256": "a38dea1d76b7ba0c6df4cdf28fdd25d217637f24064ca3c7457c7daac3b362ad"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/main/J26-s4-a2.png",
+      "bytes": 469510,
+      "sha256": "75fb685e594c8b4a6586eeccf8e6fd268f9cb27493ac69f5cbea4d6e143d4f45"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/main/J26-s4-a3.png",
+      "bytes": 468543,
+      "sha256": "146dcc697eefcaab13f189d27d0d7d106e42d329ac63becb2d3aee6111c97a06"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/main/J26-s4-a4.png",
+      "bytes": 471781,
+      "sha256": "ec6927dfb222c000baa98709191d7bbc74e7067848906afd86891f5c6a59d042"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/main/J26-s5-a1.png",
+      "bytes": 449249,
+      "sha256": "4e91bf3e75fb3eddc4e5a0ed59f7a9db7659d53ce0d78ed5fab595b8cddd965f"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/main/J26-s5-a2.png",
+      "bytes": 481491,
+      "sha256": "29c6f6f28276d588286c21b25fd5702802cd08698a126ddb3a12782aeec9e54a"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/main/J26-s5-a3.png",
+      "bytes": 520663,
+      "sha256": "49edf32c10b7fc37a1e9b013305c7954c829ae708156c1a27f66f31a0e0a3122"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/main/J26-s5-a4.png",
+      "bytes": 547515,
+      "sha256": "48fd6c800b01bae9c26b4169ea6801c4ec26baa9efdf634b30cc3bd38351b1b4"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/main/J26-s5-a5.png",
+      "bytes": 887037,
+      "sha256": "61319922fb3a93d7c2bf505b92579880baa8826feea67f07b23eed1632262e72"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/main/J26-s6-a1.png",
+      "bytes": 665359,
+      "sha256": "775673acec90a24d10de32d4665e535d222807911781e03659ce907a093684a3"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/main/J26-s6-a2.png",
+      "bytes": 468813,
+      "sha256": "6a4345f612ffdff2ccb845322483a61046fea9eb6bfc8ba31e5f1ee3066cf395"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/main/J26-s6-a3.png",
+      "bytes": 594524,
+      "sha256": "0362de9e2bc84501afe23f9b4e668daab7ca18efe8a0bedb470cf7da344d07a4"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/main/before.png",
+      "bytes": 590740,
+      "sha256": "5d08c72f7ae3a4fc3e91bd0639a82f4cea911b7fe6a8d75ef5f400f7554c9cd2"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/main/index.html",
+      "bytes": 8990,
+      "sha256": "2ed0185895abfc7d92e0c5fe4851d395e43b5168dcf282a4dc114257d2d42c96"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/main/trace.json",
+      "bytes": 3332365,
+      "sha256": "25ae6d623dfdc7d5f074f423e4e68903c612247952b58259c77da029f7c9d9f4"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/narrow-large.png",
+      "bytes": 422525,
+      "sha256": "38e83b3a754cc7586a5fbb684120c5006c41ba3c9988c916eb13cae681d9e062"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J26/reduced-motion.png",
+      "bytes": 422511,
+      "sha256": "b0647edc06b1f78c3ed3c2faef1ec59f4a3c0383ff7c2270ec991440080e3446"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J27/J27-discard-draft/J27-discard-draft-a1.png",
+      "bytes": 379655,
+      "sha256": "20cd6f110254c0fcb23dedc3ad106ad6a78b100d388ae013520b4ca1b38ed53b"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J27/J27-discard-draft/before.png",
+      "bytes": 415167,
+      "sha256": "7cf533e4317a9ba5450010e44d48755ee088cd44de6dd33432d03f8b329fbe85"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J27/J27-discard-draft/index.html",
+      "bytes": 1131,
+      "sha256": "eb1742cc6e47867d25553463621eae5378bed96ba8cfa6f8582a2c65f4d249d1"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J27/J27-discard-draft/trace.json",
+      "bytes": 9270,
+      "sha256": "044a8ea92620a9e8ab0e8c9fc779cfefd97eb89d58adf9ee49cb96922519178f"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J27/accessibility-tree.json",
+      "bytes": 249988,
+      "sha256": "bf5f0fc981dd8eae29777fe096b1c7f5349bb65b0ebf1bd154a2c2ce7143bdec"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J27/keyboard.png",
+      "bytes": 661212,
+      "sha256": "714dc21567914f85201857eaff7a05a806dee34353d26896a78cfd5f0c1abb1d"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J27/list.png",
+      "bytes": 656511,
+      "sha256": "d3b11f18f8cd1feb1dca327a8b89305467f66a873aa863a6bac4d1a3f9d28450"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J27/main/J27-s1-a1.png",
+      "bytes": 660101,
+      "sha256": "6704269c85a8e3cd61fc5b3065e5566c0a46ac7dfd8407b432378fdd1d5572bb"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J27/main/J27-s1-a2.png",
+      "bytes": 504840,
+      "sha256": "7f03e0c95be978ee08278e3b4a7cad76e0506f97f1e7d3199da102b192681c60"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J27/main/J27-s1-a3.png",
+      "bytes": 587390,
+      "sha256": "2c4812d9008d1901be8be2ca888ee6e167f66c9e8e8c45ea94c19ed5dd9f2fb8"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J27/main/J27-s1-a4.png",
+      "bytes": 659591,
+      "sha256": "061d5ce5b058dc47e34daa1b76a72be981748e99fe6ecb517f3e6a4021fda11c"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J27/main/J27-s2-a1.png",
+      "bytes": 444587,
+      "sha256": "c81af3408bcda52a6309d8551d9b4bd05795794b090ad695f4ef2661cff3f2a2"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J27/main/J27-s2-a2.png",
+      "bytes": 538420,
+      "sha256": "4a6134466c2d16cec646f215bc6dc7fc4fef440bff463cfd09940b6162883b0a"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J27/main/J27-s2-a3.png",
+      "bytes": 387374,
+      "sha256": "61c0b364ed9be38e93cb7ab96b2764724d7ccf4a3b91fbf69712e5d09cdc4987"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J27/main/J27-s2-a4.png",
+      "bytes": 652501,
+      "sha256": "57285c8b6a5811cb1f312a6ef7b74e0901c80bc11bc0b9d5312bb1fa5c36b834"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J27/main/J27-s2-a5.png",
+      "bytes": 543969,
+      "sha256": "54f4be71fc43078cb40032f6f5260c5c8ff2280cdf91c1e3b5ac28da67be084e"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J27/main/J27-s3-a1.png",
+      "bytes": 660428,
+      "sha256": "cef8698d539d443d06f2495fea6b49dde7fe8ad817848bd7a99660a097ed4e6f"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J27/main/J27-s3-a2.png",
+      "bytes": 410574,
+      "sha256": "073ce97ef2f4e10fe7060aebeb96252b824584e3c563fa27e93a2a2b98b5bb79"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J27/main/J27-s3-a3.png",
+      "bytes": 383761,
+      "sha256": "6f5f1f0d3e8e754e42c89f0a75e49bf979fbfe617f48d2e298d4c57cf46e611e"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J27/main/J27-s4-a1.png",
+      "bytes": 648212,
+      "sha256": "bde18db4eb6587eb629ce32db882d2d1aa04f578220596a415f83b919d764ba7"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J27/main/J27-s4-a2.png",
+      "bytes": 381773,
+      "sha256": "64d071f8a0698feb03ee0af0e01f8a43da13d82caf384609dbd83bd0894f3a54"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J27/main/J27-s5-a1.png",
+      "bytes": 642605,
+      "sha256": "3395a04680a158d5d357587fc2cff01ebf3eb1e08699db12f11eda43c99550d7"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J27/main/J27-s5-a2.png",
+      "bytes": 663350,
+      "sha256": "b10bba5b1fa582dfa69f01f0343fb98e7de9f5d749a6962993bb2c2f6eaab803"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J27/main/J27-s5-a3.png",
+      "bytes": 423020,
+      "sha256": "72ef6aa137875266559fd5b9c6e8120c8e7ae3ba942eafd57bcf249964fe0321"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J27/main/before.png",
+      "bytes": 426910,
+      "sha256": "22a79596e4b3a25e7749f287f9e2a904c607407b778cff1c3efb2ec1fa9ea590"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J27/main/index.html",
+      "bytes": 6525,
+      "sha256": "238e4555b1954f3ac89aa903a006744050e40e00855a3b876edbd057c9ee13ce"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J27/main/trace.json",
+      "bytes": 140329,
+      "sha256": "5d3abf39c56136166a25138286e586f25e520ea444b4235d6692fb1b57f5638a"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J27/narrow-large.png",
+      "bytes": 382555,
+      "sha256": "1ed34adf4ff477d75800d4bfe54d48711a4d2433a83bd88cc104e6d4723d073d"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J27/reduced-motion.png",
+      "bytes": 382548,
+      "sha256": "4717ce91afd19b9ffd9b7687967dde5a0c96f900144ff4e51d4ca4187ede154a"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/J28-destination-failure/J28-destination-failure-a1.png",
+      "bytes": 439828,
+      "sha256": "9f6355bb2e29eddda2562947cd4e5f3f557f327d78549e0909af794b831e6839"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/J28-destination-failure/J28-destination-failure-a2.png",
+      "bytes": 443066,
+      "sha256": "797fa55f506b1e43bee65c4caa1736f9c250bf100edf52ef5605f9cd485a933d"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/J28-destination-failure/before.png",
+      "bytes": 408605,
+      "sha256": "3dde3c603a541ee04066a31a8c85590b6a0340ceddb5acd0ae054839de128926"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/J28-destination-failure/index.html",
+      "bytes": 1644,
+      "sha256": "42f37214a3cdf85722065a65b404499c0f540ca1021160d51fc4c07390e419ec"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/J28-destination-failure/trace.json",
+      "bytes": 145156,
+      "sha256": "1ee675deec542ca43ffc6a783f0e058ae2ee91b5adecac2f93d7ad5402e11122"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/J28-discard-confirmed-uncommitted/J28-discard-confirmed-uncommitted-a1.png",
+      "bytes": 428292,
+      "sha256": "1a4ad39f34bc443115560e4f4fba8cb30e665abe11051cdebb3b802b16b1aa80"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/J28-discard-confirmed-uncommitted/J28-discard-confirmed-uncommitted-a2.png",
+      "bytes": 434965,
+      "sha256": "933e3ef8c5bde4a1b820ad2c1e670894bf869b81f0d8521ba32e76c6e0a42313"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/J28-discard-confirmed-uncommitted/before.png",
+      "bytes": 396310,
+      "sha256": "41262b4c9c2cd93bc6b77e3575ee2753f90538eeca7cfaf7dacf330f6a4b117a"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/J28-discard-confirmed-uncommitted/index.html",
+      "bytes": 1667,
+      "sha256": "2dd889f22c1d8f06a77108ce87ede4fed61ed3143a2ebf0bbf53e5a91a9a21e7"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/J28-discard-confirmed-uncommitted/trace.json",
+      "bytes": 145104,
+      "sha256": "2c98591367a0e5e80f6a27ea08613cda2b979df361207bc751d0eb9879ac167b"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/J28-status-created-existing/J28-status-created-existing-a1.png",
+      "bytes": 442520,
+      "sha256": "098868f4a039fc3a890ad93a360f463ca6243527482824a276818e476c8e2a81"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/J28-status-created-existing/J28-status-created-existing-a2.png",
+      "bytes": 437560,
+      "sha256": "ef7524bcffc2531d38ed9a1ba4a58f0d945b428e02bfd5846058526484097583"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/J28-status-created-existing/before.png",
+      "bytes": 407321,
+      "sha256": "1052960925dd97636799b20ca006e73cf6c8fec511f0d174cc3e4b6d86bc1e2a"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/J28-status-created-existing/index.html",
+      "bytes": 1645,
+      "sha256": "e5b3f69ffe376f686731d96abb49edcdb6742e448f845e07b284b7bfea9fc29d"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/J28-status-created-existing/trace.json",
+      "bytes": 145709,
+      "sha256": "4679311a5ab65b5606564e4ed918aa5122a1094c1e89dfa1d3bc7c0784ad787d"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/J28-status-unavailable/J28-status-unavailable-a1.png",
+      "bytes": 438901,
+      "sha256": "b2e3bf71db292cd3e1cf9efe3ad4acd59d2886073e114460488514ac26a0c26d"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/J28-status-unavailable/J28-status-unavailable-a2.png",
+      "bytes": 436763,
+      "sha256": "680f35698e259e37379af5ba7b13817d0a5f829c934b67eca58fd6df00a21a0d"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/J28-status-unavailable/before.png",
+      "bytes": 406224,
+      "sha256": "8255ad463d40e782da50d2249b6abca6edb3a13a3bf2f7696721697b41d708d5"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/J28-status-unavailable/index.html",
+      "bytes": 1584,
+      "sha256": "187049e655c0b3fea680649ca5fa4f7709be6a03418ca00f6e4a378dd17e6114"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/J28-status-unavailable/trace.json",
+      "bytes": 145135,
+      "sha256": "42406f44222638eb8c5fe8db84e35e13d4e5616c7e9309d25615c4af37e86a81"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/J28-unknown-confirmed-uncommitted/J28-unknown-confirmed-uncommitted-a1.png",
+      "bytes": 447260,
+      "sha256": "344ad64bb57040e5cdd75f095b9cb9ac51a8d543897fc289004701d3950f8f90"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/J28-unknown-confirmed-uncommitted/J28-unknown-confirmed-uncommitted-a2.png",
+      "bytes": 446256,
+      "sha256": "9d7a77f39f60c5b4aa4a514f152ba4371421737ea95bb0b4080210d2de5c01c6"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/J28-unknown-confirmed-uncommitted/J28-unknown-confirmed-uncommitted-a3.png",
+      "bytes": 449651,
+      "sha256": "0024b101cdca6e4cd4cab43ca41239ddea60b03ad0833bbc81affc31512e395c"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/J28-unknown-confirmed-uncommitted/before.png",
+      "bytes": 415653,
+      "sha256": "518a0d7088fb0c069fb5d8eb2fe6b36a0ca2f80bd3010b7ebea126988a490c57"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/J28-unknown-confirmed-uncommitted/index.html",
+      "bytes": 2143,
+      "sha256": "3edab987933bc28d25dc8a2717ae8f4a05bfe1d3fc1e8adc66b1fc53368a86b8"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/J28-unknown-confirmed-uncommitted/trace.json",
+      "bytes": 194111,
+      "sha256": "fea965fdcba7c922ff0f67fa37011c8241c5674ef867569f3eaeda598faf631b"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/accessibility-tree.json",
+      "bytes": 242352,
+      "sha256": "900fa9524ed965226a2dac54f4ae97a21bb52e3ec307e8e995a4dec556e4e5a8"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/inventory-0.png",
+      "bytes": 557910,
+      "sha256": "d3bb8c35b492b4a21fe078c092be36f6043d8628c1a47630f18e4adfd07f0ee9"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/inventory-1.png",
+      "bytes": 560532,
+      "sha256": "9f6248cc045e8de10a6bb70e7e0bc14aa8ae0aa9c6c78c3c3b307c7065d99898"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/keyboard.png",
+      "bytes": 605796,
+      "sha256": "7a5b44ec6370a5a7617db0c4e09d7759f0f5033e38411e5fc74789761aabc24b"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/list.png",
+      "bytes": 581171,
+      "sha256": "852a5667216d0e74e0d77a9c5196c8d4cfdb307c13ff09ea004056552aad8a74"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/main/J28-s1-a1.png",
+      "bytes": 604686,
+      "sha256": "58f81803aaba0cf442eb5c1c0224be71c568d8ea347518a325d0331310113556"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/main/J28-s1-a2.png",
+      "bytes": 601304,
+      "sha256": "6291f5449685c099044f99a8b32e615404b08e8e13c38a7f325e666f8af1af89"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/main/J28-s2-a1.png",
+      "bytes": 617813,
+      "sha256": "a3f803dd852a7b8a753038eaebc6b5515587ac9d01ffd2a6a93cefb75d4ad599"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/main/J28-s2-a2.png",
+      "bytes": 621661,
+      "sha256": "a7f296c3297fdb5a974a6f03f4d7e6f83bdd332923f0b2bf8783668cbb6613fe"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/main/J28-s2-a3.png",
+      "bytes": 615830,
+      "sha256": "899d8e0625a33c826abf567b33e090c2b2078d71aae6c35b0a4c1d7672205437"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/main/J28-s3-a1.png",
+      "bytes": 740863,
+      "sha256": "779bbaf966b56b0493cbd2b56fac20791806a56d16e90ec1e09adea1d443cfdc"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/main/J28-s3-a2.png",
+      "bytes": 741106,
+      "sha256": "9fc0d037697abe4cc25cd21f9976eebac04d8ca5fb188bedb15f714bedaf00f7"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/main/J28-s3-a3.png",
+      "bytes": 583615,
+      "sha256": "d377ac953e4cdaeb5daa1319ffcc86fc81be5955e21786091f5376eaee3bd5e3"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/main/J28-s3-a4.png",
+      "bytes": 520362,
+      "sha256": "7b62a9066deb65a4b94cc03fb606c80617ec43593835b9191f8e04ffb42220bc"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/main/J28-s3-a5.png",
+      "bytes": 645513,
+      "sha256": "10f9874a6f02bc80699d301364abb9e29fe45a6805268d8d2e30fd25e92ee83e"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/main/J28-s4-a1.png",
+      "bytes": 726560,
+      "sha256": "def8eae2bde2a1126ef798eaa9dcf22e10ed049abb053c3be3237cb63e9cc9af"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/main/J28-s4-a2.png",
+      "bytes": 723879,
+      "sha256": "a07e33da3b7b8be840a69ffef2c7832230c6f4ba95588fbe7252aeec1d6905bb"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/main/J28-s4-a3.png",
+      "bytes": 728708,
+      "sha256": "800b5980a8da42f3c8a82b73ffc9dde2406ddf661ab4d9e5657304d4a4db35ed"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/main/J28-s4-a4.png",
+      "bytes": 446021,
+      "sha256": "3985e5f9313ba397fe991946820a254af7fae92ec21a1a9a201e298bc61cd800"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/main/J28-s4-a5.png",
+      "bytes": 718020,
+      "sha256": "55ca9ea8b5a08807865e3539270b5a7e552ac90b54731822d8859986bcff814f"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/main/J28-s5-a1.png",
+      "bytes": 446665,
+      "sha256": "beda3166897937b500b06381b0a1c35877025b05d5917c86d8cf7a135b5e4377"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/main/J28-s5-a2.png",
+      "bytes": 445591,
+      "sha256": "c0b2403d24decd3d9714b6b5fe5ab8ba76b7665d45d3e778876dcdaf91d58b2b"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/main/J28-s5-a3.png",
+      "bytes": 604792,
+      "sha256": "45066c4e20c54657ed728cdb1f3cd8944d6a7e5dd2aabe82824285103a3f7a00"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/main/J28-s6-a1.png",
+      "bytes": 418578,
+      "sha256": "1977afb0e99b04495a77193671ffe2a86bec7ba01ead9600819b78f0b4a00e87"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/main/J28-s6-a2.png",
+      "bytes": 415946,
+      "sha256": "b2f739d225727845326d81bb3d68163a1f2692af981718a5e4f8ccf493bc2550"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/main/before.png",
+      "bytes": 589091,
+      "sha256": "7c397508261b0cc1a7885de7b15070517bdec9101474e4b9f8bc54b32b0c4f23"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/main/index.html",
+      "bytes": 8256,
+      "sha256": "64511b5bbc6fcd255419269fc9910ee47b51a32739f52df3de27f3173401ea86"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/main/trace.json",
+      "bytes": 1106951,
+      "sha256": "4727eaab120643b027312768e5352f87ad482b9bc0d7d4ee34d1cebb82452079"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/narrow-large.png",
+      "bytes": 365454,
+      "sha256": "878077612f9208258beba62622bc7a24628719e940910e89e12d5832b9c3660d"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J28/reduced-motion.png",
+      "bytes": 365441,
+      "sha256": "98ee1221c7eea3301c5dcb1c0f6a0b877eadb1b2f70182cf4bccf349d50c04d9"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J29/J29-unavailable-segment/J29-unavailable-segment-a1.png",
+      "bytes": 430878,
+      "sha256": "5343ab0d8e6b8c090917ad0acf776105b3b0449fd84546ab0ef3497cc6631deb"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J29/J29-unavailable-segment/J29-unavailable-segment-a2.png",
+      "bytes": 430713,
+      "sha256": "6f8f9dc2bfdb436e286f30f196178535648a69838d2d402dfd583ac20b3e3efd"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J29/J29-unavailable-segment/before.png",
+      "bytes": 456657,
+      "sha256": "82af28371e8b98c0eb355ccb49c78728e815229938d5f17018dd8602c233b862"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J29/J29-unavailable-segment/index.html",
+      "bytes": 1611,
+      "sha256": "1625c089738fc2c232219bc61268e5ec7fd993d7d0a438833810a08620d681ee"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J29/J29-unavailable-segment/trace.json",
+      "bytes": 16954,
+      "sha256": "df675ffd44720b47512b7ce045e3f00ad3e0640ca2aa4baaabd9eaaad8a3f7dc"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J29/J29-unsupported-word-seek/J29-unsupported-word-seek-a1.png",
+      "bytes": 440766,
+      "sha256": "1e0e8a598bb0ce0b77dcf276aba60dbf403344a7d3763c7e0e89b98b7c9a8d7f"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J29/J29-unsupported-word-seek/J29-unsupported-word-seek-a2.png",
+      "bytes": 437444,
+      "sha256": "12df909ed2fb5cd7570da40bdb564ddfcbb97d4a273a7eddd7708ecdca96ea9c"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J29/J29-unsupported-word-seek/before.png",
+      "bytes": 462507,
+      "sha256": "0384362888fadef0ed27a0bc90538e7532760493c400feb8fdd31006aa6ec1da"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J29/J29-unsupported-word-seek/index.html",
+      "bytes": 1682,
+      "sha256": "d79c2c58e5e60dfa2995cb742bf2b7b45f404fd95372ec87bff58d69a56b5fde"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J29/J29-unsupported-word-seek/trace.json",
+      "bytes": 17158,
+      "sha256": "b14e996855e805a81bc22ce2d5ca10ad2087cb7fb290979d25c5947762166e88"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J29/accessibility-tree.json",
+      "bytes": 231141,
+      "sha256": "e69377594c5122f4e76ef8c11e6062b1b3d4b3705fa08e663f33c0219be632d3"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J29/keyboard.png",
+      "bytes": 434910,
+      "sha256": "ca6ff7aafe9aac7547362823d6239ed8837b401f004973b3c28c185783cb1478"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J29/list.png",
+      "bytes": 410782,
+      "sha256": "07976adac39b3401a978dca632c6eb745bd2fa7bb22dd514029d9f89fd91967f"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J29/main/J29-s1-a1.png",
+      "bytes": 433682,
+      "sha256": "a4aa0d278293cf737b3bbf019d99b5a499faca622523ac73593eb498a18147e2"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J29/main/J29-s1-a2.png",
+      "bytes": 650840,
+      "sha256": "6cc28cbf41a30499b497c917eb484d394c9982e2586ba8ea8c5421b3de967a47"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J29/main/J29-s2-a1.png",
+      "bytes": 665533,
+      "sha256": "6f15556b771e8d1ee5f9b29e28fd63acb4384c85c261ec13a29ec7cb4ac184b1"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J29/main/J29-s2-a2.png",
+      "bytes": 405818,
+      "sha256": "99b2adf54108fbe22f06fbd52f589c09e7c7ad7bac545dfcb07f40d677dc6661"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J29/main/J29-s2-a3.png",
+      "bytes": 407932,
+      "sha256": "1c9e3bab52f62a55ccd6b55e9cf16dd365ffa61a67bb39950c4dd6912b1bf010"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J29/main/J29-s2-a4.png",
+      "bytes": 404137,
+      "sha256": "b8bbd4da6af5aef72fda56e64971213ca66970a30af55f15406b8365712115c4"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J29/main/J29-s3-a1.png",
+      "bytes": 652037,
+      "sha256": "e074eacb1aeea97706d6c60b4ebd40ed630dda30ebd05d358b99cfcf82f43df2"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J29/main/J29-s3-a2.png",
+      "bytes": 648450,
+      "sha256": "ece21ab4f3fc9cd27a434341e6dcbc39eef7667a9650d84b588933663a5d45f8"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J29/main/J29-s3-a3.png",
+      "bytes": 373564,
+      "sha256": "5b4afad7743cb977f9eae580269229dda68f6d444b42c3e4f508b0bc0247220c"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J29/main/J29-s4-a1.png",
+      "bytes": 647120,
+      "sha256": "e5b406ef36e440cce7c31f1e9d6207232a0c5b50c2433d6b2c4cb8441fded676"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J29/main/J29-s4-a2.png",
+      "bytes": 655502,
+      "sha256": "d6f6456b7f9cb255636b7f39c56c1e4cc3c850fb10277a7ffed1a99f653beb72"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J29/main/J29-s4-a3.png",
+      "bytes": 361319,
+      "sha256": "2edc77e6613681b309d4a270f56b5d2e4c13f01d3cd1e751237fdc09b787a30a"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J29/main/J29-s5-a1.png",
+      "bytes": 372417,
+      "sha256": "82b7c2000315804b07effc0299ad4e1200faf5d3c0bd53a6543d4ff36cfe704c"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J29/main/J29-s5-a2.png",
+      "bytes": 373156,
+      "sha256": "718bf2509462e07759429fcc5e1ff12a9ef925017a04887e062479c455e18ffb"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J29/main/J29-s5-a3.png",
+      "bytes": 654961,
+      "sha256": "6a6d748fd6ab3240738a7eaa5d68aa5332a9192bd653ca135a169fb681fa38da"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J29/main/before.png",
+      "bytes": 425407,
+      "sha256": "92b26648fc4ca18979ab7aa00903f72984a6c38dbb8f2d6eb31ae5374dc97cbf"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J29/main/index.html",
+      "bytes": 5713,
+      "sha256": "6f2bfe101347440fc384aea5e1dde3acf970126ef91a5a400568b1d88548c8d7"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J29/main/trace.json",
+      "bytes": 111709,
+      "sha256": "92c2fa81325d86070c135e3ea53d33bd86bb6b4a78ec3723d1252eae8ee1c9c8"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J29/narrow-large.png",
+      "bytes": 353192,
+      "sha256": "173f9466e4a4d81daa071a452d3d5ea99b66e0b3f6cc36ca21b5647a8ce3ef3d"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J29/reduced-motion.png",
+      "bytes": 353176,
+      "sha256": "5b396e688b33be5ddb7ae11061fdc095a29c6071242a18f05fda3722b8812d95"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/J30-ten-paths/J30-ten-paths-a1.png",
+      "bytes": 712373,
+      "sha256": "0dfcc1f168f26c88757393d2b205bfe1ebb5d49e8e0bd54fdf7b8a83e58cb489"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/J30-ten-paths/J30-ten-paths-a2.png",
+      "bytes": 569668,
+      "sha256": "d0f48738763c40700bb94a8a73738c87eb934275f32ef50bb69fa7421b26ce6d"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/J30-ten-paths/before.png",
+      "bytes": 783604,
+      "sha256": "63c5c62eb232002e620ac17dd235ee2e05f777414737c7a2012d079b6819a212"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/J30-ten-paths/index.html",
+      "bytes": 1492,
+      "sha256": "a8241254f89e3c5091958e56d6f9320da4acea6b175ff6dfb391e9adc2104f00"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/J30-ten-paths/trace.json",
+      "bytes": 214292,
+      "sha256": "1ad8a40f2cac789a14a6d963f32645785dbcb057beb862e0b17e34dcc4d34dc8"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/accessibility-tree.json",
+      "bytes": 251186,
+      "sha256": "9d9f5ef9d9353f8175bd2c3b957e92a5c5334ed1062a1c98362e99c5f22c950a"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/inventory-0.png",
+      "bytes": 628879,
+      "sha256": "4caca76bcd2130cbbcd7fb76d0bc6b26827fc2fe4f35a783bb16391405201264"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/inventory-1.png",
+      "bytes": 436158,
+      "sha256": "05b112d894df9b6bda7ca648c45a1572e115884a16573d73b6e33d72795bf726"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/keyboard.png",
+      "bytes": 795088,
+      "sha256": "99fea6978936e17057f748958ffa83dd14ac5e92b2af2d5a0a51eb6f57345e3d"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/list.png",
+      "bytes": 839267,
+      "sha256": "000555ee4c98fc9e974a8e3b718fd4c13b2565ce5113350554fc0f71c9866874"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/main/J30-s1-a1.png",
+      "bytes": 794136,
+      "sha256": "c0dabdfcb896a06d82f85fb5199cad9368f4e00accda139628deab2482973a7d"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/main/J30-s1-a2.png",
+      "bytes": 353219,
+      "sha256": "da6af7b815ba83b98550b6b6b4a9a169ef739b428c5e201a438d00f268465e1b"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/main/J30-s2-a1.png",
+      "bytes": 608806,
+      "sha256": "9b744dbd8cd01e0eab574a219e13a80bb10d41b5bff29d331efc1b40fc6da962"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/main/J30-s2-a2.png",
+      "bytes": 493688,
+      "sha256": "f5c4a41669b7adfd43813a17f2e2afc53d78e231a0282d1e0f7fdcb006ae3fe4"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/main/J30-s2-a3.png",
+      "bytes": 360404,
+      "sha256": "a1d845f5f05dc64abc032bea7af331e82142fe637ae30b1fde8d33fc6af1e728"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/main/J30-s3-a1.png",
+      "bytes": 596057,
+      "sha256": "67e121efbf7b704e9b76f7fa88ce2fb510b7284ded870b897bb6b1bd77d156d3"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/main/J30-s3-a2.png",
+      "bytes": 443271,
+      "sha256": "58e32c70c618c59b12e8f80aa4fb5fb76d63bee8ba8fdf31a651b23aca98d2f4"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/main/J30-s3-a3.png",
+      "bytes": 467791,
+      "sha256": "290c7b41ce7888e704238d8d2a43d5055dcf74dbfd7a9a4e126a22256f38ed1d"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/main/J30-s3-a4.png",
+      "bytes": 465235,
+      "sha256": "202b19ce18620f5cf043209d3f0437710c125e42bb3cd670a0bf9094afe76001"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/main/J30-s3-a5.png",
+      "bytes": 444340,
+      "sha256": "15c012b9cd5b2bcea66a5ac6dec9de9c8021f911d92c6c31dced37771c57b9fc"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/main/J30-s3-a6.png",
+      "bytes": 409879,
+      "sha256": "0464925150d79f2f280f7ecd3d1f8ca66806217fda83b22a80d2301dff6c3939"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/main/J30-s4-a1.png",
+      "bytes": 384087,
+      "sha256": "8ad75561ccfdc4cfd2bf61a591860cb3f8b465b812b3bf658c0b2d113600e887"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/main/J30-s4-a2.png",
+      "bytes": 539620,
+      "sha256": "82f61133a6c63564d4a4255fbd3b1a9e5dff9eac004142fda808e90a5083f24d"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/main/J30-s5-a1.png",
+      "bytes": 539260,
+      "sha256": "3e930452b4e27a9be9a35adee1930ac8d4c0230f6c86eeb4b28046983fdeddf2"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/main/J30-s5-a2.png",
+      "bytes": 509744,
+      "sha256": "8d4ff4e7358c84a8563f1810cf3f28d7e55bae88146ace1a01155519cc44fc91"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/main/J30-s5-a3.png",
+      "bytes": 416816,
+      "sha256": "76b51190fd7b72f2f80a2d14d01569595722bcbe8c18fde83ad2b9f9c4562b10"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/main/J30-s6-a1.png",
+      "bytes": 518607,
+      "sha256": "bb98d440a9b02825067ffc701a4f340e9b3864d57f5f187fe3b7e7a902dc294b"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/main/J30-s6-a2.png",
+      "bytes": 421819,
+      "sha256": "a6071961c7b77d41e637e9bb608f429611de8b1a156422dd91f3934aab480650"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/main/J30-s6-a3.png",
+      "bytes": 423059,
+      "sha256": "17581565ca2877a0894fed97aee87339356509912079df597a18c65a1be208ad"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/main/J30-s7-a1.png",
+      "bytes": 546167,
+      "sha256": "cc7fa08cd30018d958f793c21c05deafbe62e73bf6f5f2259d9715e271c5fc0c"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/main/J30-s7-a2.png",
+      "bytes": 553208,
+      "sha256": "45b0ba86f7d8c10a475f63b86ba0050b3ec08772908fdefc54b1bd000c2ad96f"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/main/J30-s7-a3.png",
+      "bytes": 392699,
+      "sha256": "52b4ccf991abfa758a3a3a6bbdd12f252779aa41455987282292b851f148ae25"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/main/J30-s7-a4.png",
+      "bytes": 422946,
+      "sha256": "48524e11e32e5389c2ee423432ba5b30fa9701705db2a6ea7c78121b4d9e03dc"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/main/J30-s7-a5.png",
+      "bytes": 732761,
+      "sha256": "35a017f82cb2407a977ea7d1004a34e7ec49574254ef85c8cfc3d0767b43d3c1"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/main/before.png",
+      "bytes": 1153540,
+      "sha256": "7996742921cf813bf03c9e1fc7fda755b5716bf9269d56355a6758306425a02c"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/main/index.html",
+      "bytes": 9529,
+      "sha256": "1b9d05e90c0bb8e491a4037dac570015b6413be0023d2fa6456ddcddf4ef406c"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/main/trace.json",
+      "bytes": 1825360,
+      "sha256": "c5725f5b67f07563f3c094bede73b25203b41e20945e7369f2dc9612d5212a77"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/narrow-large.png",
+      "bytes": 439377,
+      "sha256": "a9ae9756711985214033509096255af149a0700b2bcf314ad6ed46132cd43415"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J30/reduced-motion.png",
+      "bytes": 439367,
+      "sha256": "08fa4ceebd14a74ebb70b661d35414445073c7d7f57e11c8414df6501c6763e9"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/J31-choose-new-base/J31-choose-new-base-a1.png",
+      "bytes": 434156,
+      "sha256": "78ca1f8f1a37971f435d7f8bf71a0f65dc06d0a778140bf93b240ebc8ff98bf3"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/J31-choose-new-base/J31-choose-new-base-a2.png",
+      "bytes": 439505,
+      "sha256": "499074419c4d92ed1f6baa692b78069d3fa2594e1ff1c50416a534ea22719024"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/J31-choose-new-base/J31-choose-new-base-a3.png",
+      "bytes": 436031,
+      "sha256": "c8da47fa93a353669993cf6bf1001c66533b89e79c136299e4806bf5121a99ce"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/J31-choose-new-base/before.png",
+      "bytes": 380503,
+      "sha256": "ca967ef2de890d34ca7efad9c67e5fba632120b59530b1522843b64e452822b1"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/J31-choose-new-base/index.html",
+      "bytes": 1935,
+      "sha256": "f8a13a7bc59d255336d5dd3f01df7d0851af7bb8ff1cfc05ff51401903a55ee4"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/J31-choose-new-base/trace.json",
+      "bytes": 24684,
+      "sha256": "78be661cf5ed54d1a019039cb2f5fe5ceaaac754456a4595ab1ac374028bf6ca"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/J31-invalid-author-destination/J31-invalid-author-destination-a1.png",
+      "bytes": 429721,
+      "sha256": "f7ba2c05377777854e038b6fdf3f0cb941616c6e9f76541da05831c8607b9ab4"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/J31-invalid-author-destination/J31-invalid-author-destination-a2.png",
+      "bytes": 438846,
+      "sha256": "09e9593dc1a98607acdd3cbf6bcf7ef2564af92064c2d302420a2f7b2eb9fe61"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/J31-invalid-author-destination/J31-invalid-author-destination-a3.png",
+      "bytes": 441245,
+      "sha256": "8fcdcd62fa047a969f74246e9d462e24f38ebcba21a52eaa504bf45cd7e48b77"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/J31-invalid-author-destination/J31-invalid-author-destination-a4.png",
+      "bytes": 439316,
+      "sha256": "6d12dee4129378502f790f6767eae566d289062ac944b7a7a9c9bed3d72c10d7"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/J31-invalid-author-destination/before.png",
+      "bytes": 381770,
+      "sha256": "fd4cf61650827761cb8920b4d1d3e497f08f54ecd90ba6ac37417baef2d16a4a"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/J31-invalid-author-destination/index.html",
+      "bytes": 2576,
+      "sha256": "1d9d3952cf62deacbfc91e023225e89e4beb1bd1ef5527f8090a4c3c20ad015c"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/J31-invalid-author-destination/trace.json",
+      "bytes": 29522,
+      "sha256": "bf4ae1a17371ad9be3e0a184eeea92dc20749f75e3f2f2b658ed1f374a29b36a"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/J31-recovery-confirmed-uncommitted/J31-recovery-confirmed-uncommitted-a1.png",
+      "bytes": 450428,
+      "sha256": "9dd0357161b543f0d109b2cc1222af0026e07b71dd3827473def489629cacf78"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/J31-recovery-confirmed-uncommitted/J31-recovery-confirmed-uncommitted-a2.png",
+      "bytes": 449007,
+      "sha256": "761cca9019e01be500714b03b5bf20787c0d85a2a81af68f6f886b2cb792836f"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/J31-recovery-confirmed-uncommitted/J31-recovery-confirmed-uncommitted-a3.png",
+      "bytes": 449584,
+      "sha256": "cff0ace43ade9ffa31c0886bdb7e1c8b5f1d8653bca54de7f13c0266b083a4fc"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/J31-recovery-confirmed-uncommitted/J31-recovery-confirmed-uncommitted-a4.png",
+      "bytes": 448475,
+      "sha256": "c14f50e2be3cb76e5986c076be88ee930bc80487c5aebe4475a35aceb3666fb1"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/J31-recovery-confirmed-uncommitted/before.png",
+      "bytes": 390494,
+      "sha256": "a7c6936ea830bc89fd870bdcce008fe54b9784792d5984cd383cac4015d49ab8"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/J31-recovery-confirmed-uncommitted/index.html",
+      "bytes": 2570,
+      "sha256": "6dae9ca2bb611bb54f3ce39003b4cf3c51d3a81ac8f1e1f27fac4e8d8ae7648d"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/J31-recovery-confirmed-uncommitted/trace.json",
+      "bytes": 31675,
+      "sha256": "3bc14b71f1a29a6688e6c91679a11795fbf00acb43fb9581b20c67df326f0a14"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/J31-recovery-status-unavailable/J31-recovery-status-unavailable-a1.png",
+      "bytes": 429785,
+      "sha256": "bb02a98a1541b6e55df35039d5212038be7c5e735829e02fbbc7101865e28b42"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/J31-recovery-status-unavailable/J31-recovery-status-unavailable-a2.png",
+      "bytes": 427337,
+      "sha256": "68ba3b3d17a9708a6e319eb443bedd63f894b61c2e378ca984759b9ebc812d19"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/J31-recovery-status-unavailable/before.png",
+      "bytes": 373200,
+      "sha256": "3ec0871571cb80a0bb0099b2b04740b0d68a7ad7745cb5f0672a22b5d6ec9692"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/J31-recovery-status-unavailable/index.html",
+      "bytes": 1608,
+      "sha256": "492511924b4d1b1277d92b5e182c4babb2d117a19b594d9f5a185bef1c2837a7"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/J31-recovery-status-unavailable/trace.json",
+      "bytes": 17754,
+      "sha256": "98b85becd7b3fd20f0d68f12353d59a4e065c0d43ef088690502e3ac88878955"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/J31-recovery-unknown-created/J31-recovery-unknown-created-a1.png",
+      "bytes": 430014,
+      "sha256": "569fb7e144add6728387462c4d37896f51a8de0a3d537528205e30ab3daa2d11"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/J31-recovery-unknown-created/J31-recovery-unknown-created-a2.png",
+      "bytes": 431606,
+      "sha256": "f8dee1261df89d6699a9c40b69ddc579b6f0d2ff8be54aaf785d5eeae247ca58"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/J31-recovery-unknown-created/before.png",
+      "bytes": 376300,
+      "sha256": "21c6f02f92e7d0d8a77e2ac6fbb3a1c7ad143f1a38677057e67aca0c94b11c88"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/J31-recovery-unknown-created/index.html",
+      "bytes": 1650,
+      "sha256": "8ab7ef7796616bcfeb3eeb0492981a221ac893c9fac70ae8a708fa2ccb6d8974"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/J31-recovery-unknown-created/trace.json",
+      "bytes": 18723,
+      "sha256": "e8576ed64349118d945ffc9f489528489f8afdeeccda40db27e9a2e34600f22c"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/J31-unavailable-source/J31-unavailable-source-a1.png",
+      "bytes": 429733,
+      "sha256": "55f84a8d4e8f5ef3160b07308f3c979b330b61ace5c5891f995911285a9af96a"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/J31-unavailable-source/J31-unavailable-source-a2.png",
+      "bytes": 427113,
+      "sha256": "bd07e2985458c8541227497280a7dbd5c3aed4b1a1390b2902c7eb1425d4d63a"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/J31-unavailable-source/before.png",
+      "bytes": 371856,
+      "sha256": "a8081258fa2c2468f52aba5a51aca134034f77fda3507679edee518ba8c69c0c"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/J31-unavailable-source/index.html",
+      "bytes": 1600,
+      "sha256": "18ea40c64e11383a8f60f097fe60ec36a9a3aaa0b6a42642a2ea92bce09a853d"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/J31-unavailable-source/trace.json",
+      "bytes": 16924,
+      "sha256": "121dafcfdb4d0aaf77c6b55303c10dc1de44be18d664cc326ad7ad0d1849fe0c"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/accessibility-tree.json",
+      "bytes": 224688,
+      "sha256": "00494a9344cd9e8a09c7783d2ae92298d947cdf3e176971e7c5b8ed0954642f5"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/keyboard.png",
+      "bytes": 572837,
+      "sha256": "c222f870738979981bfcba9035b6a02a7d81050269539333e59064aaa9b4c701"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/list.png",
+      "bytes": 550833,
+      "sha256": "f3d32c6b054d9255d19364a35546bdc3c514b0a1a4bf0221c5903d80b6819b10"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/main/J31-s1-a1.png",
+      "bytes": 571838,
+      "sha256": "eca82b41d88a16ee6866d8340b007e731c458531b67d5e0e67883a859d1d8649"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/main/J31-s1-a2.png",
+      "bytes": 566420,
+      "sha256": "661bb2bb6e4e8e8f69ed71ce7317a420460203d536d7376966d8476ead0a8b7a"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/main/J31-s2-a1.png",
+      "bytes": 394559,
+      "sha256": "8d7e712a50bea98f5da79189fc881649c91bdca38a650b4694e6b65a84e28415"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/main/J31-s2-a2.png",
+      "bytes": 565048,
+      "sha256": "1a65d3826fa814d2a1eb295bc975d565ebe136af516dfd087c33918a86c3e62c"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/main/J31-s3-a1.png",
+      "bytes": 401484,
+      "sha256": "c472490b5965f319b92ec09632b1ebaf2d0aaa2293f65aae9a7fc23d7ee6f873"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/main/J31-s3-a2.png",
+      "bytes": 566328,
+      "sha256": "a28d65936c91e102ae21555160e3be33562bccf9c36ca982f905bdef9cc6f235"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/main/J31-s4-a1.png",
+      "bytes": 586675,
+      "sha256": "489b96b507ab86d3667ccfcb5008d1f283e37dc0a3cc5f20144cabc829902c84"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/main/J31-s4-a2.png",
+      "bytes": 597418,
+      "sha256": "1328af060c75786d3e230ebf91a2206a892f481d026937760339fa941b5f0aa2"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/main/J31-s4-a3.png",
+      "bytes": 593117,
+      "sha256": "f7cc159bfd3f01fb19fc8fb71502deb7979ed6dec32635f60378168ad35e2f4b"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/main/J31-s4-a4.png",
+      "bytes": 438705,
+      "sha256": "9a3d96ab61e06462b4b70dae8c903539c73c33d350872e1cdd78df609197c882"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/main/J31-s4-a5.png",
+      "bytes": 587480,
+      "sha256": "2740c7d5b05d3b69ef483d2c9247d4b49941973198fb237de181d5c84e0c4165"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/main/J31-s5-a1.png",
+      "bytes": 432164,
+      "sha256": "c8e5a0e6ec63d0e35c1ee63468ebe76d620e344d48f3ab3b3644abbd1c737b4a"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/main/J31-s5-a2.png",
+      "bytes": 577398,
+      "sha256": "e6b57825110605d3a94c05d79eb927fea05bb0818278ef9fdfe9739af9f9f8b1"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/main/J31-s5-a3.png",
+      "bytes": 406387,
+      "sha256": "685253cc4f61b6bf04505b047712dad8ac783534d31ee067cfd00a24237e2b19"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/main/J31-s6-a1.png",
+      "bytes": 538905,
+      "sha256": "274bdb6c1eaca2b2ecc3d66908c033fda4703a03d8042b85beff8d12ebb49467"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/main/J31-s6-a2.png",
+      "bytes": 384775,
+      "sha256": "528e3599c88aaf0c225392b46ab3dcbb40d8099927a599571d6db9f173d3a997"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/main/before.png",
+      "bytes": 556342,
+      "sha256": "a36ebd8d2d1e94dd2fc55d7d71b8a6b29b595767c6cfa65bcc6d2307ae8557b9"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/main/index.html",
+      "bytes": 6596,
+      "sha256": "bb3e8ca2d3da89c18641df021ce1965311c8d9ba65c07028ef1156e310c4335a"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/main/trace.json",
+      "bytes": 139238,
+      "sha256": "e85b47109db95359859fc1e8040b746de35ebad9cbd3074fc0ba6da12158b936"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/narrow-large.png",
+      "bytes": 358578,
+      "sha256": "67a699264d18b01e6365ad8b112f5267b0a155d6bdea693c2fedd35bfdd767e4"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J31/reduced-motion.png",
+      "bytes": 358561,
+      "sha256": "0753f32d706415bf985a66dff44d52173a419848a2fa41c937eb5ff7903204c3"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/J32-cancel-request/J32-cancel-request-a1.png",
+      "bytes": 440282,
+      "sha256": "212b24c90717300ebdf9cf6c365171b2807a053bb49419bf82853be8a2a8ebc1"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/J32-cancel-request/J32-cancel-request-a2.png",
+      "bytes": 409795,
+      "sha256": "6a505e5b4cf8f4e72092d29489a4f7737d85d0b32373c67ae75751d4345005f1"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/J32-cancel-request/before.png",
+      "bytes": 675521,
+      "sha256": "e9b14c63694e65a3487e7827c7ecf03e79c38bff623c50c127d70931d630b7fa"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/J32-cancel-request/index.html",
+      "bytes": 1551,
+      "sha256": "12e39fab6d9ffee6ebaac04b7691a0cc71964b3eca76945c04c6c165f695a630"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/J32-cancel-request/trace.json",
+      "bytes": 45737,
+      "sha256": "b566ff77350d3921d5cd9726a997a7ec531d6357397eeba2e1435759cfbc36d4"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/J32-repair-session/J32-repair-session-a1.png",
+      "bytes": 452475,
+      "sha256": "ed011f109fae433df48fd5c1b7e6efa00c638981a24a0e45d20b58b1f763fd4e"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/J32-repair-session/J32-repair-session-a2.png",
+      "bytes": 451717,
+      "sha256": "d87d0f93f811607c7f6064fe6e64909c2501966646cc5638ac5937e23182f625"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/J32-repair-session/J32-repair-session-a3.png",
+      "bytes": 551140,
+      "sha256": "0d21af07fc8ded2da4e5af13c1257870b220b200eb42a61461152075b119ac6d"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/J32-repair-session/before.png",
+      "bytes": 678931,
+      "sha256": "e8a28c7cd814d517978139e06a910f283ee99cdaf371668750023f575bd96f60"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/J32-repair-session/index.html",
+      "bytes": 1906,
+      "sha256": "642f26bf643a9e971e2f9358d41981c52bcdda9510daa1859d858fe618a37af4"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/J32-repair-session/trace.json",
+      "bytes": 68493,
+      "sha256": "c08535c44edf23848190b740d33bf643c4b866d55349b8c5d1e43e4563d8b61e"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/accessibility-tree.json",
+      "bytes": 213694,
+      "sha256": "3b1f1030ad665e26303db0ae10901fc670d3d2b3b58621c6a7adc290a5a2254c"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/keyboard.png",
+      "bytes": 454772,
+      "sha256": "0c18eeb8088475d4518839f28f3b8e22e6dbec20d3ca817a1a4b7f20e3098485"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/list.png",
+      "bytes": 443942,
+      "sha256": "ed686028ee68a58f62abe127f15580b8b40cba910c1184d1d08d73e971d01db7"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/main/J32-s1-a1.png",
+      "bytes": 453783,
+      "sha256": "6167d92e2fe206f41eaedb2f3263da3a2605e7d93823c67acdf0ed70ddbbd2b4"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/main/J32-s1-a2.png",
+      "bytes": 437714,
+      "sha256": "d4d353d3f76a64be98b622e081dab715265344f5c2f71290c232cd7ae0caf041"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/main/J32-s2-a1.png",
+      "bytes": 448033,
+      "sha256": "1cd19dce66abf300fc73eb5bd9af2bcd29caff88368a56e01dae0a8433e7a82d"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/main/J32-s2-a2.png",
+      "bytes": 676582,
+      "sha256": "53d0b2d1d80f10c463a2ba65115c9a00275f3339bc7e81f4233101e2b9fcb98b"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/main/J32-s2-a3.png",
+      "bytes": 417728,
+      "sha256": "1a632e12b31fa72c3634b8c4ebe31f4910ff3b0d17b6853c8031aed3325d270f"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/main/J32-s3-a1.png",
+      "bytes": 414292,
+      "sha256": "179ce198de629a0509eb95337e93853659592751eab979d3a88339287de49bc9"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/main/J32-s3-a2.png",
+      "bytes": 547533,
+      "sha256": "2dd540611fe9c9acbe2c04f5bda6a381b4c88a46630de7feb9f9fddb207d8aff"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/main/J32-s3-a3.png",
+      "bytes": 433384,
+      "sha256": "b1a0c957068b8e43c544ac40e6ef4a560e592a6391287500b68586b5ed5b20b2"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/main/J32-s3-a4.png",
+      "bytes": 549060,
+      "sha256": "995c3ef1b63ad945f689a36014e4d9bf364f5318c8dd994ea8ac1593d19fa601"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/main/J32-s4-a1.png",
+      "bytes": 401857,
+      "sha256": "fdfa63bd637a119437647dca5a42a35f1a0f18735eaa3f6b7e5ca958a220afc5"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/main/J32-s4-a2.png",
+      "bytes": 511833,
+      "sha256": "bc1d9698ad6597be8de3224cf27b065608eacbdbd6ae1b5271c53c2339cb711d"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/main/J32-s4-a3.png",
+      "bytes": 533945,
+      "sha256": "f11efdae6c8a396a32839589c3878aca05166378897a90dbcddc8415a8915b43"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/main/J32-s5-a1.png",
+      "bytes": 528712,
+      "sha256": "2c6fedd1b2a2cca23fc5ff3aa352076febd746041d20dc2b56238f3874e7ae00"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/main/J32-s5-a2.png",
+      "bytes": 427135,
+      "sha256": "8a1a4f9c16878f51e12a64358c912f4a4c7fc0e9fc57227f3fdacfa2f7ab2245"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/main/J32-s5-a3.png",
+      "bytes": 610603,
+      "sha256": "bced7d721e2a39e5d6871400b4d6d47b8e54c684571a17dd260b08cdcf1a32af"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/main/J32-s6-a1.png",
+      "bytes": 414380,
+      "sha256": "fa80fb9ade24bb7bd4a760d7f4abd6e1d561459c9ea8626405057d51fcd1fb3c"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/main/J32-s6-a2.png",
+      "bytes": 427719,
+      "sha256": "b0565fbdfd427b574c139af4ea38c19136febb8a1faa0e6476e05af6b55728e1"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/main/J32-s6-a3.png",
+      "bytes": 431019,
+      "sha256": "99a637796cdae50fa4bb18338bbcc8166aaefe70c4e9c6aafc80592e8c59e365"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/main/J32-s6-a4.png",
+      "bytes": 571740,
+      "sha256": "eea501e4ee9cd29623f7c98fba2c52afd0fd86d02907bc1112fe2e0ac0dd1128"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/main/J32-s6-a5.png",
+      "bytes": 436756,
+      "sha256": "c3920f1803cd64d44156e274993948162d20e8f213513adf07228e4b332773f5"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/main/J32-s6-a6.png",
+      "bytes": 416201,
+      "sha256": "a17d380c32adb225acad8329c1bfbf5ec865c5399d11d64256af95cf02a6cca5"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/main/before.png",
+      "bytes": 639098,
+      "sha256": "617f17a2b5b55b8c194ef6190a74a24317b613adcfa3c6f84c867150d6b50a4d"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/main/index.html",
+      "bytes": 8244,
+      "sha256": "6752c5049ec3641ce2f0f9e692780575f12a80d62905c5d0c485a618861fc9c5"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/main/trace.json",
+      "bytes": 498232,
+      "sha256": "9113b52450536ee64d381a566e12d61251f1d4588186411ef63671d787f21217"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/narrow-large.png",
+      "bytes": 381190,
+      "sha256": "f7ba13a3fb6f304201049208707086b8601137c0ce97f21d191b6c9433ed29f4"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/J32/reduced-motion.png",
+      "bytes": 381184,
+      "sha256": "064817c452feabcda51f5a898595e98a82d242c5db6aa6e81ff999a174eb88b1"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/compiled-manifest.json",
+      "bytes": 1913,
+      "sha256": "c0471870e268620ae0801d8f41695b8cf30ad513adb2886bdec10df803cdbedc"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/index.html",
+      "bytes": 10826,
+      "sha256": "be71fffced93e9b89b7850953c16e09ceb72b178b7100aafb356a147fa21e462"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/run.json",
+      "bytes": 154692,
+      "sha256": "bde97f22ac0678c1c4d35ad332ccd9189b88003c5ebf1ce9d73c253de832ee7f"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/evidence/validation.json",
+      "bytes": 107,
+      "sha256": "8e776b0b98e5b4572fea3373968de8e78a4ee58259771b65ff6e0c0244d58008"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/index.html",
+      "bytes": 3063,
+      "sha256": "7ab0f55b60017b7f5a7d5ab69a0c295a74419b902d737b5469ce579148fdeec8"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/journey-data.js",
+      "bytes": 1527095,
+      "sha256": "3cb33cf90ec97b782473cae25d2acf46f100aa1076e97ef53bc341a235fdba53"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/pack-schema.md",
+      "bytes": 4685,
+      "sha256": "d5efe3730ee9ad3ae8f909f2742f705aaa2deb81f1378ff56454193d5558022b"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/packs/authoring-history-coverage.md",
+      "bytes": 16108,
+      "sha256": "d891ef1c34f2e826157a57e801f71b2b1c0bc4d7cbe7ad2c0b6b47a833ea7726"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/packs/authoring-history.json",
+      "bytes": 1306021,
+      "sha256": "426bed7507175365c2fd4e172a4233f691f536864f3bf7c5bbafcaccbafb2f6f"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/packs/search-comparison-coverage.md",
+      "bytes": 16633,
+      "sha256": "88668695e279b90bf4a1c922c787f883090132915f3cfe01bde320ba003c8999"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/packs/search-comparison.json",
+      "bytes": 524634,
+      "sha256": "67cc2a49baa51e3d365bb166909be1fdc25f1ad5ad6b1999b1e360f55f0cd663"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/packs/workspace-references-coverage.md",
+      "bytes": 10858,
+      "sha256": "a3af82bb169f9d588827ad4038acf59987a919a7d3c7c377d82e3d14717c18db"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/packs/workspace-references.json",
+      "bytes": 1712650,
+      "sha256": "1343f09996fffab44518a74a3ec16d7534e76506e79661f69fd20c909e19cb58"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/prototype.css",
+      "bytes": 8052,
+      "sha256": "84188e9f0c1ce4f4e1ee3a6c36cada8ee3f4e97e88a0185478c17c429d3f9037"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/prototype.js",
+      "bytes": 15370,
+      "sha256": "e56b4ea546720b4562fa96e7f9d5b682d155a3c89db3c974a3ca82bdfb895ed2"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/tools/build.py",
+      "bytes": 2386,
+      "sha256": "962910327b10f55f9dd399f19453db58aebcd0b0d80e999cc8acad0ac925e2bd"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/tools/close_review.py",
+      "bytes": 11669,
+      "sha256": "d390fee09c64684af184488395a44737ff4eaf5eba74bb6ed07847e335b43beb"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/tools/render.cjs",
+      "bytes": 14372,
+      "sha256": "b4efb810a64232dba1670b5690c5e2032a06fee829909fce99b05a7d27579eb8"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/tools/validate.py",
+      "bytes": 3658,
+      "sha256": "390cb9c7bfbc302865888773704ca6187e13cb64903c6b7440aeffdd1a665d4f"
+    },
+    {
+      "path": "design/prototypes/spatial-journeys-2026-10-13/tools/verify_evidence.py",
+      "bytes": 2197,
+      "sha256": "9db679c87cebcc1443ee9fde87fce05a7bf102221609e2ffff6bd3ccb4d8bfb7"
+    }
+  ]
+}

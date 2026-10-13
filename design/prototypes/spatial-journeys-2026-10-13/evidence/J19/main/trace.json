@@ -1,0 +1,4267 @@
+{
+  "journey": "J19",
+  "route": "main",
+  "frames": [
+    {
+      "file": "J19/main/before.png",
+      "location": "?journey=J19",
+      "frame": "J19-main-s1-before",
+      "state": {
+        "fixture": "query-lifecycle-q1-q2",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "calibration://media": 0,
+          "debrief://media": 0,
+          "pressure-video://media": 0,
+          "field-manual://remote": 0,
+          "archive://remote": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Reading place",
+            "kind": "document",
+            "body": [
+              "Current visit 01 · Lab notes · V12.",
+              "The starting caret and occurrence remain pinned while tools open."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01"
+              },
+              {
+                "label": "Offset",
+                "value": "p.14 · 54.2"
+              },
+              {
+                "label": "Occurrence",
+                "value": "Lab:p14:r54.2"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "query",
+            "title": "Query Q1 · pressure",
+            "kind": "list",
+            "body": [
+              "Request identity and selected occurrence remain pinned through filtering."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "Q1 · generation 1"
+              },
+              {
+                "label": "Query",
+                "value": "literal pressure"
+              },
+              {
+                "label": "Selection",
+                "value": "occ-C17-V8 · C17 V8"
+              },
+              {
+                "label": "Coverage",
+                "value": "local 3/3 · remote 2/5 · 3 pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "c17",
+                "label": "C17 · Rig slice",
+                "detail": "V8 · native cell · historical",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "review",
+                "label": "Review passage",
+                "detail": "V4 · native text",
+                "status": "match",
+                "ordinal": 2
+              },
+              {
+                "id": "ocr",
+                "label": "Calibration plate",
+                "detail": "V5 · OCR",
+                "status": "match",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 24,
+              "filtered": 24,
+              "visible": 3
+            }
+          }
+        ],
+        "query": {
+          "id": "Q1",
+          "text": "pressure",
+          "mode": "literal",
+          "media": [
+            "text",
+            "cells",
+            "images",
+            "audio",
+            "video"
+          ],
+          "fields": [
+            "native",
+            "OCR",
+            "transcript",
+            "metadata"
+          ],
+          "stores": [
+            "all-eight"
+          ],
+          "versions": "reachable",
+          "status": "running",
+          "coverage": "local 3/3; remote 2/5; 3 pending",
+          "results": [
+            "occ-C17-V8",
+            "occ-review-V4",
+            "occ-ocr-V5"
+          ],
+          "selected": "occ-C17-V8",
+          "counts": {
+            "total": 24,
+            "filtered": 24,
+            "visible": 3
+          }
+        }
+      },
+      "effects": [],
+      "action": "Before",
+      "note": ""
+    },
+    {
+      "file": "J19/main/J19-s1-a1.png",
+      "location": "?journey=J19&task=0&action=1",
+      "frame": "J19-s1-a1",
+      "state": {
+        "fixture": "query-lifecycle-q1-q2",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "occ-C17-V8",
+          "state": "V8",
+          "locator": "Rig:V8:C17:r17:cB2:span[0,8]"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "calibration://media": 0,
+          "debrief://media": 0,
+          "pressure-video://media": 0,
+          "field-manual://remote": 0,
+          "archive://remote": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "filtered",
+            "title": "Q1 · Cell + native text + historical",
+            "kind": "list",
+            "body": [
+              "Filters alter membership of the result view, not source objects or curated references."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "Q1 · generation 1"
+              },
+              {
+                "label": "Media",
+                "value": "cells"
+              },
+              {
+                "label": "Fields",
+                "value": "native"
+              },
+              {
+                "label": "Versions",
+                "value": "historical"
+              },
+              {
+                "label": "Stores",
+                "value": "all eight"
+              },
+              {
+                "label": "Excluded by filter",
+                "value": "other media/fields/stores per displayed facets"
+              },
+              {
+                "label": "Selected occurrence",
+                "value": "occ-C17-V8 · retained inspector"
+              }
+            ],
+            "rows": [
+              {
+                "id": "c17",
+                "label": "C17 / Rig slice",
+                "detail": "V8 · historical native cell",
+                "status": "selected",
+                "ordinal": 1
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 24,
+              "filtered": 1,
+              "visible": 1
+            }
+          },
+          {
+            "id": "query",
+            "title": "Query Q1 · pressure",
+            "kind": "list",
+            "body": [
+              "Request identity and selected occurrence remain pinned through filtering."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "Q1 · generation 1"
+              },
+              {
+                "label": "Query",
+                "value": "literal pressure"
+              },
+              {
+                "label": "Selection",
+                "value": "occ-C17-V8 · C17 V8"
+              },
+              {
+                "label": "Coverage",
+                "value": "local 3/3 · remote 2/5 · 3 pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "c17",
+                "label": "C17 · Rig slice",
+                "detail": "V8 · native cell · historical",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "review",
+                "label": "Review passage",
+                "detail": "V4 · native text",
+                "status": "match",
+                "ordinal": 2
+              },
+              {
+                "id": "ocr",
+                "label": "Calibration plate",
+                "detail": "V5 · OCR",
+                "status": "match",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 24,
+              "filtered": 24,
+              "visible": 3
+            }
+          },
+          {
+            "id": "selected",
+            "title": "Pinned inspector",
+            "kind": "inspector",
+            "body": [
+              "Selection remains the exact C17 V8 occurrence even as filters change."
+            ],
+            "facts": [
+              {
+                "label": "Occurrence",
+                "value": "occ-C17-V8"
+              },
+              {
+                "label": "Version",
+                "value": "Rig V8"
+              },
+              {
+                "label": "Locator",
+                "value": "C17:r17:cB2:span[0,8]"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "Q1",
+          "text": "pressure",
+          "mode": "literal",
+          "media": [
+            "text",
+            "cells",
+            "images",
+            "audio",
+            "video"
+          ],
+          "fields": [
+            "native",
+            "OCR",
+            "transcript",
+            "metadata"
+          ],
+          "stores": [
+            "all-eight"
+          ],
+          "versions": "reachable",
+          "status": "running",
+          "coverage": "local 3/3; remote 2/5; 3 pending",
+          "results": [
+            "occ-C17-V8",
+            "occ-review-V4",
+            "occ-ocr-V5"
+          ],
+          "selected": "occ-C17-V8",
+          "counts": {
+            "total": 24,
+            "filtered": 24,
+            "visible": 3
+          },
+          "filters": {
+            "media": [
+              "cells"
+            ],
+            "fields": [
+              "native"
+            ],
+            "versions": "historical"
+          }
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Apply Cell + native text + historical",
+      "note": "Filter changed result membership; selected occurrence identity did not change."
+    },
+    {
+      "file": "J19/main/J19-s1-a2.png",
+      "location": "?journey=J19&task=0&action=2",
+      "frame": "J19-s1-a2",
+      "state": {
+        "fixture": "query-lifecycle-q1-q2",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "occ-C17-V8",
+          "state": "V8",
+          "locator": "Rig:V8:C17:r17:cB2:span[0,8]"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "calibration://media": 0,
+          "debrief://media": 0,
+          "pressure-video://media": 0,
+          "field-manual://remote": 0,
+          "archive://remote": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "filtered",
+            "title": "Q1 · All media restored",
+            "kind": "list",
+            "body": [
+              "Filters alter membership of the result view, not source objects or curated references."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "Q1 · generation 1"
+              },
+              {
+                "label": "Media",
+                "value": "text, cells, images, audio, video"
+              },
+              {
+                "label": "Fields",
+                "value": "native, OCR, transcript, metadata"
+              },
+              {
+                "label": "Versions",
+                "value": "reachable"
+              },
+              {
+                "label": "Stores",
+                "value": "all eight"
+              },
+              {
+                "label": "Excluded by filter",
+                "value": "other media/fields/stores per displayed facets"
+              },
+              {
+                "label": "Selected occurrence",
+                "value": "occ-C17-V8 · retained inspector"
+              }
+            ],
+            "rows": [
+              {
+                "id": "c17",
+                "label": "C17 / Rig slice",
+                "detail": "V8 · historical native cell",
+                "status": "selected",
+                "ordinal": 1
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 24,
+              "filtered": 1,
+              "visible": 1
+            }
+          },
+          {
+            "id": "query",
+            "title": "Query Q1 · pressure",
+            "kind": "list",
+            "body": [
+              "Request identity and selected occurrence remain pinned through filtering."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "Q1 · generation 1"
+              },
+              {
+                "label": "Query",
+                "value": "literal pressure"
+              },
+              {
+                "label": "Selection",
+                "value": "occ-C17-V8 · C17 V8"
+              },
+              {
+                "label": "Coverage",
+                "value": "local 3/3 · remote 2/5 · 3 pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "c17",
+                "label": "C17 · Rig slice",
+                "detail": "V8 · native cell · historical",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "review",
+                "label": "Review passage",
+                "detail": "V4 · native text",
+                "status": "match",
+                "ordinal": 2
+              },
+              {
+                "id": "ocr",
+                "label": "Calibration plate",
+                "detail": "V5 · OCR",
+                "status": "match",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 24,
+              "filtered": 24,
+              "visible": 3
+            }
+          },
+          {
+            "id": "selected",
+            "title": "Pinned inspector",
+            "kind": "inspector",
+            "body": [
+              "Selection remains the exact C17 V8 occurrence even as filters change."
+            ],
+            "facts": [
+              {
+                "label": "Occurrence",
+                "value": "occ-C17-V8"
+              },
+              {
+                "label": "Version",
+                "value": "Rig V8"
+              },
+              {
+                "label": "Locator",
+                "value": "C17:r17:cB2:span[0,8]"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "Q1",
+          "text": "pressure",
+          "mode": "literal",
+          "media": [
+            "text",
+            "cells",
+            "images",
+            "audio",
+            "video"
+          ],
+          "fields": [
+            "native",
+            "OCR",
+            "transcript",
+            "metadata"
+          ],
+          "stores": [
+            "all-eight"
+          ],
+          "versions": "reachable",
+          "status": "running",
+          "coverage": "local 3/3; remote 2/5; 3 pending",
+          "results": [
+            "occ-C17-V8",
+            "occ-review-V4",
+            "occ-ocr-V5"
+          ],
+          "selected": "occ-C17-V8",
+          "counts": {
+            "total": 24,
+            "filtered": 24,
+            "visible": 3
+          },
+          "filters": {
+            "media": [
+              "text",
+              "cells",
+              "images",
+              "audio",
+              "video"
+            ],
+            "fields": [
+              "native",
+              "OCR",
+              "transcript",
+              "metadata"
+            ],
+            "versions": "reachable"
+          }
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Apply All media restored",
+      "note": "Filter changed result membership; selected occurrence identity did not change."
+    },
+    {
+      "file": "J19/main/J19-s1-a3.png",
+      "location": "?journey=J19&task=0&action=3",
+      "frame": "J19-s1-a3",
+      "state": {
+        "fixture": "query-lifecycle-q1-q2",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "occ-C17-V8",
+          "state": "V8",
+          "locator": "Rig:V8:C17:r17:cB2:span[0,8]"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "calibration://media": 0,
+          "debrief://media": 0,
+          "pressure-video://media": 0,
+          "field-manual://remote": 0,
+          "archive://remote": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "filtered",
+            "title": "Q1 · Cached-only · rig://lab + review://remote",
+            "kind": "list",
+            "body": [
+              "Filters alter membership of the result view, not source objects or curated references."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "Q1 · generation 1"
+              },
+              {
+                "label": "Media",
+                "value": "text · cells · images · audio · video"
+              },
+              {
+                "label": "Fields",
+                "value": "native · OCR · transcript · metadata"
+              },
+              {
+                "label": "Versions",
+                "value": "unchanged"
+              },
+              {
+                "label": "Stores",
+                "value": "rig://lab, review://remote"
+              },
+              {
+                "label": "Excluded by filter",
+                "value": "other media/fields/stores per displayed facets"
+              },
+              {
+                "label": "Selected occurrence",
+                "value": "occ-C17-V8 · retained inspector"
+              }
+            ],
+            "rows": [
+              {
+                "id": "c17",
+                "label": "C17 / Rig slice",
+                "detail": "V8 · historical native cell",
+                "status": "selected",
+                "ordinal": 1
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 24,
+              "filtered": 1,
+              "visible": 1
+            }
+          },
+          {
+            "id": "query",
+            "title": "Query Q1 · pressure",
+            "kind": "list",
+            "body": [
+              "Request identity and selected occurrence remain pinned through filtering."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "Q1 · generation 1"
+              },
+              {
+                "label": "Query",
+                "value": "literal pressure"
+              },
+              {
+                "label": "Selection",
+                "value": "occ-C17-V8 · C17 V8"
+              },
+              {
+                "label": "Coverage",
+                "value": "local 3/3 · remote 2/5 · 3 pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "c17",
+                "label": "C17 · Rig slice",
+                "detail": "V8 · native cell · historical",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "review",
+                "label": "Review passage",
+                "detail": "V4 · native text",
+                "status": "match",
+                "ordinal": 2
+              },
+              {
+                "id": "ocr",
+                "label": "Calibration plate",
+                "detail": "V5 · OCR",
+                "status": "match",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 24,
+              "filtered": 24,
+              "visible": 3
+            }
+          },
+          {
+            "id": "selected",
+            "title": "Pinned inspector",
+            "kind": "inspector",
+            "body": [
+              "Selection remains the exact C17 V8 occurrence even as filters change."
+            ],
+            "facts": [
+              {
+                "label": "Occurrence",
+                "value": "occ-C17-V8"
+              },
+              {
+                "label": "Version",
+                "value": "Rig V8"
+              },
+              {
+                "label": "Locator",
+                "value": "C17:r17:cB2:span[0,8]"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "Q1",
+          "text": "pressure",
+          "mode": "literal",
+          "media": [
+            "text",
+            "cells",
+            "images",
+            "audio",
+            "video"
+          ],
+          "fields": [
+            "native",
+            "OCR",
+            "transcript",
+            "metadata"
+          ],
+          "stores": [
+            "all-eight"
+          ],
+          "versions": "reachable",
+          "status": "running",
+          "coverage": "local 3/3; remote 2/5; 3 pending",
+          "results": [
+            "occ-C17-V8",
+            "occ-review-V4",
+            "occ-ocr-V5"
+          ],
+          "selected": "occ-C17-V8",
+          "counts": {
+            "total": 24,
+            "filtered": 24,
+            "visible": 3
+          },
+          "filters": {
+            "media": [
+              "text",
+              "cells",
+              "images",
+              "audio",
+              "video"
+            ],
+            "fields": [
+              "native",
+              "OCR",
+              "transcript",
+              "metadata"
+            ],
+            "versions": "reachable",
+            "stores": [
+              "rig://lab",
+              "review://remote"
+            ],
+            "availability": "cached"
+          }
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Apply Cached-only · Review + Calibration",
+      "note": "Filter changed result membership; selected occurrence identity did not change."
+    },
+    {
+      "file": "J19/main/J19-s2-a1.png",
+      "location": "?journey=J19&task=1&action=1",
+      "frame": "J19-s2-a1",
+      "state": {
+        "fixture": "query-lifecycle-q1-q2",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "occ-C17-V8",
+          "state": "V8",
+          "locator": "Rig:V8:C17:r17:cB2:span[0,8]"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "calibration://media": 0,
+          "debrief://media": 0,
+          "pressure-video://media": 0,
+          "field-manual://remote": 0,
+          "archive://remote": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "grouped",
+            "title": "Grouped and sorted Q1 results",
+            "kind": "list",
+            "body": [
+              "Grouping and order are view preferences; selection remains the same occurrence."
+            ],
+            "facts": [
+              {
+                "label": "Group",
+                "value": "store"
+              },
+              {
+                "label": "Sort",
+                "value": "version descending"
+              },
+              {
+                "label": "Selected",
+                "value": "occ-C17-V8"
+              }
+            ],
+            "rows": [
+              {
+                "id": "c17",
+                "label": "Rig · C17 V8",
+                "detail": "historical native cell",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "review",
+                "label": "Review V4",
+                "detail": "native text",
+                "status": "match",
+                "ordinal": 2
+              }
+            ],
+            "tone": "neutral"
+          },
+          {
+            "id": "query",
+            "title": "Query Q1 · pressure",
+            "kind": "list",
+            "body": [
+              "Request identity and selected occurrence remain pinned through filtering."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "Q1 · generation 1"
+              },
+              {
+                "label": "Query",
+                "value": "literal pressure"
+              },
+              {
+                "label": "Selection",
+                "value": "occ-C17-V8 · C17 V8"
+              },
+              {
+                "label": "Coverage",
+                "value": "local 3/3 · remote 2/5 · 3 pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "c17",
+                "label": "C17 · Rig slice",
+                "detail": "V8 · native cell · historical",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "review",
+                "label": "Review passage",
+                "detail": "V4 · native text",
+                "status": "match",
+                "ordinal": 2
+              },
+              {
+                "id": "ocr",
+                "label": "Calibration plate",
+                "detail": "V5 · OCR",
+                "status": "match",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 24,
+              "filtered": 24,
+              "visible": 3
+            }
+          }
+        ],
+        "query": {
+          "id": "Q1",
+          "text": "pressure",
+          "mode": "literal",
+          "media": [
+            "text",
+            "cells",
+            "images",
+            "audio",
+            "video"
+          ],
+          "fields": [
+            "native",
+            "OCR",
+            "transcript",
+            "metadata"
+          ],
+          "stores": [
+            "all-eight"
+          ],
+          "versions": "reachable",
+          "status": "running",
+          "coverage": "local 3/3; remote 2/5; 3 pending",
+          "results": [
+            "occ-C17-V8",
+            "occ-review-V4",
+            "occ-ocr-V5"
+          ],
+          "selected": "occ-C17-V8",
+          "counts": {
+            "total": 24,
+            "filtered": 24,
+            "visible": 3
+          },
+          "filters": {
+            "media": [
+              "text",
+              "cells",
+              "images",
+              "audio",
+              "video"
+            ],
+            "fields": [
+              "native",
+              "OCR",
+              "transcript",
+              "metadata"
+            ],
+            "versions": "reachable",
+            "stores": [
+              "rig://lab",
+              "review://remote"
+            ],
+            "availability": "cached"
+          },
+          "group": "store",
+          "sort": "version-desc"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Group by store then sort by version",
+      "note": "Changing order does not replace the selected occurrence."
+    },
+    {
+      "file": "J19/main/J19-s2-a2.png",
+      "location": "?journey=J19&task=1&action=2",
+      "frame": "J19-s2-a2",
+      "state": {
+        "fixture": "query-lifecycle-q1-q2",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "occ-C17-V8",
+          "state": "V8",
+          "locator": "Rig:V8:C17:r17:cB2:span[0,8]"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "calibration://media": 0,
+          "debrief://media": 0,
+          "pressure-video://media": 0,
+          "field-manual://remote": 0,
+          "archive://remote": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "results",
+            "title": "Q1 results",
+            "kind": "list",
+            "body": [
+              "Current result membership excludes C17; pinned inspector remains visible."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "Q1"
+              },
+              {
+                "label": "Filter",
+                "value": "Review only"
+              },
+              {
+                "label": "Selected",
+                "value": "occ-C17-V8 · excluded"
+              }
+            ],
+            "rows": [
+              {
+                "id": "review",
+                "label": "Review passage",
+                "detail": "V4",
+                "status": "match",
+                "ordinal": 1
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 24,
+              "filtered": 1,
+              "visible": 1
+            }
+          },
+          {
+            "id": "excluded",
+            "title": "Selected occurrence excluded by filter",
+            "kind": "inspector",
+            "body": [
+              "Inspector remains pinned outside the current result set."
+            ],
+            "facts": [
+              {
+                "label": "Occurrence",
+                "value": "occ-C17-V8"
+              },
+              {
+                "label": "Status",
+                "value": "excluded from results by store filter"
+              },
+              {
+                "label": "Current filter",
+                "value": "Review only"
+              }
+            ],
+            "rows": [
+              {
+                "id": "restore",
+                "label": "Restore filter",
+                "detail": "returns to prior membership",
+                "status": "available"
+              },
+              {
+                "id": "clear",
+                "label": "Clear selection",
+                "detail": "does not delete source",
+                "status": "available"
+              }
+            ],
+            "tone": "selected"
+          }
+        ],
+        "query": {
+          "id": "Q1",
+          "text": "pressure",
+          "mode": "literal",
+          "media": [
+            "text",
+            "cells",
+            "images",
+            "audio",
+            "video"
+          ],
+          "fields": [
+            "native",
+            "OCR",
+            "transcript",
+            "metadata"
+          ],
+          "stores": [
+            "all-eight"
+          ],
+          "versions": "reachable",
+          "status": "running",
+          "coverage": "local 3/3; remote 2/5; 3 pending",
+          "results": [
+            "occ-C17-V8",
+            "occ-review-V4",
+            "occ-ocr-V5"
+          ],
+          "selected": "occ-C17-V8",
+          "counts": {
+            "total": 24,
+            "filtered": 24,
+            "visible": 3
+          },
+          "filters": {
+            "media": [
+              "text",
+              "cells",
+              "images",
+              "audio",
+              "video"
+            ],
+            "fields": [
+              "native",
+              "OCR",
+              "transcript",
+              "metadata"
+            ],
+            "versions": "reachable",
+            "stores": [
+              "review://remote"
+            ],
+            "availability": "cached"
+          },
+          "group": "store",
+          "sort": "version-desc",
+          "selectionStatus": "excluded"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Apply Review-only filter that excludes C17",
+      "note": "Exclusion does not clear selection or delete a saved reference."
+    },
+    {
+      "file": "J19/main/J19-s2-a3.png",
+      "location": "?journey=J19&task=1&action=3",
+      "frame": "J19-s2-a3",
+      "state": {
+        "fixture": "query-lifecycle-q1-q2",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "occ-C17-V8",
+          "state": "V8",
+          "locator": "Rig:V8:C17:r17:cB2:span[0,8]"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "calibration://media": 0,
+          "debrief://media": 0,
+          "pressure-video://media": 0,
+          "field-manual://remote": 0,
+          "archive://remote": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "query",
+            "title": "Query Q1 · pressure",
+            "kind": "list",
+            "body": [
+              "Request identity and selected occurrence remain pinned through filtering."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "Q1 · generation 1"
+              },
+              {
+                "label": "Query",
+                "value": "literal pressure"
+              },
+              {
+                "label": "Selection",
+                "value": "occ-C17-V8 · C17 V8"
+              },
+              {
+                "label": "Coverage",
+                "value": "local 3/3 · remote 2/5 · 3 pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "c17",
+                "label": "C17 · Rig slice",
+                "detail": "V8 · native cell · historical",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "review",
+                "label": "Review passage",
+                "detail": "V4 · native text",
+                "status": "match",
+                "ordinal": 2
+              },
+              {
+                "id": "ocr",
+                "label": "Calibration plate",
+                "detail": "V5 · OCR",
+                "status": "match",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 24,
+              "filtered": 24,
+              "visible": 3
+            }
+          },
+          {
+            "id": "restored",
+            "title": "Q1 filter restored",
+            "kind": "list",
+            "body": [
+              "C17 returns to result membership with same occurrence ID."
+            ],
+            "facts": [
+              {
+                "label": "Selected",
+                "value": "occ-C17-V8"
+              },
+              {
+                "label": "Status",
+                "value": "included"
+              }
+            ],
+            "rows": [
+              {
+                "id": "c17",
+                "label": "C17 · Rig slice",
+                "detail": "V8 · same occurrence",
+                "status": "selected",
+                "ordinal": 1
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "Q1",
+          "text": "pressure",
+          "mode": "literal",
+          "media": [
+            "text",
+            "cells",
+            "images",
+            "audio",
+            "video"
+          ],
+          "fields": [
+            "native",
+            "OCR",
+            "transcript",
+            "metadata"
+          ],
+          "stores": [
+            "all-eight"
+          ],
+          "versions": "reachable",
+          "status": "running",
+          "coverage": "local 3/3; remote 2/5; 3 pending",
+          "results": [
+            "occ-C17-V8",
+            "occ-review-V4",
+            "occ-ocr-V5"
+          ],
+          "selected": "occ-C17-V8",
+          "counts": {
+            "total": 24,
+            "filtered": 24,
+            "visible": 3
+          },
+          "filters": {
+            "media": [
+              "text",
+              "cells",
+              "images",
+              "audio",
+              "video"
+            ],
+            "fields": [
+              "native",
+              "OCR",
+              "transcript",
+              "metadata"
+            ],
+            "versions": "reachable",
+            "stores": [
+              "all-eight"
+            ],
+            "availability": "cached"
+          },
+          "group": "store",
+          "sort": "version-desc",
+          "selectionStatus": "included"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Restore filter",
+      "note": "Restore changes query view only."
+    },
+    {
+      "file": "J19/main/J19-s2-a4.png",
+      "location": "?journey=J19&task=1&action=4",
+      "frame": "J19-s2-a4",
+      "state": {
+        "fixture": "query-lifecycle-q1-q2",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": null,
+          "state": "V8",
+          "locator": "Rig:V8:C17:r17:cB2:span[0,8]"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "calibration://media": 0,
+          "debrief://media": 0,
+          "pressure-video://media": 0,
+          "field-manual://remote": 0,
+          "archive://remote": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "query",
+            "title": "Query Q1 · pressure",
+            "kind": "list",
+            "body": [
+              "Request identity and selected occurrence remain pinned through filtering."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "Q1 · generation 1"
+              },
+              {
+                "label": "Query",
+                "value": "literal pressure"
+              },
+              {
+                "label": "Selection",
+                "value": "none"
+              },
+              {
+                "label": "Coverage",
+                "value": "local 3/3 · remote 2/5 · 3 pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "c17",
+                "label": "C17 · Rig slice",
+                "detail": "V8 · native cell · historical",
+                "status": "match",
+                "ordinal": 1
+              },
+              {
+                "id": "review",
+                "label": "Review passage",
+                "detail": "V4 · native text",
+                "status": "match",
+                "ordinal": 2
+              },
+              {
+                "id": "ocr",
+                "label": "Calibration plate",
+                "detail": "V5 · OCR",
+                "status": "match",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 24,
+              "filtered": 24,
+              "visible": 3
+            }
+          },
+          {
+            "id": "cleared",
+            "title": "Selection cleared",
+            "kind": "notice",
+            "body": [
+              "No result was selected; results and saved references remain."
+            ],
+            "facts": [
+              {
+                "label": "Result set",
+                "value": "retained"
+              },
+              {
+                "label": "Saved members",
+                "value": "unchanged"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "Q1",
+          "text": "pressure",
+          "mode": "literal",
+          "media": [
+            "text",
+            "cells",
+            "images",
+            "audio",
+            "video"
+          ],
+          "fields": [
+            "native",
+            "OCR",
+            "transcript",
+            "metadata"
+          ],
+          "stores": [
+            "all-eight"
+          ],
+          "versions": "reachable",
+          "status": "running",
+          "coverage": "local 3/3; remote 2/5; 3 pending",
+          "results": [
+            "occ-C17-V8",
+            "occ-review-V4",
+            "occ-ocr-V5"
+          ],
+          "selected": null,
+          "counts": {
+            "total": 24,
+            "filtered": 24,
+            "visible": 3
+          },
+          "filters": {
+            "media": [
+              "text",
+              "cells",
+              "images",
+              "audio",
+              "video"
+            ],
+            "fields": [
+              "native",
+              "OCR",
+              "transcript",
+              "metadata"
+            ],
+            "versions": "reachable",
+            "stores": [
+              "all-eight"
+            ],
+            "availability": "cached"
+          },
+          "group": "store",
+          "sort": "version-desc",
+          "selectionStatus": "included"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Clear selection explicitly",
+      "note": "Clear selection removes inspector focus only."
+    },
+    {
+      "file": "J19/main/J19-s3-a1.png",
+      "location": "?journey=J19&task=2&action=1",
+      "frame": "J19-s3-a1",
+      "state": {
+        "fixture": "query-lifecycle-q1-q2",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": null,
+          "state": "V8",
+          "locator": "Rig:V8:C17:r17:cB2:span[0,8]"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "calibration://media": 0,
+          "debrief://media": 0,
+          "pressure-video://media": 0,
+          "field-manual://remote": 0,
+          "archive://remote": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "query",
+            "title": "Query Q1 · pressure",
+            "kind": "list",
+            "body": [
+              "Request identity and selected occurrence remain pinned through filtering."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "Q1 · generation 1"
+              },
+              {
+                "label": "Query",
+                "value": "literal pressure"
+              },
+              {
+                "label": "Selection",
+                "value": "occ-C17-V8 · C17 V8"
+              },
+              {
+                "label": "Coverage",
+                "value": "local 3/3 · remote 2/5 · 3 pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "c17",
+                "label": "C17 · Rig slice",
+                "detail": "V8 · native cell · historical",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "review",
+                "label": "Review passage",
+                "detail": "V4 · native text",
+                "status": "match",
+                "ordinal": 2
+              },
+              {
+                "id": "ocr",
+                "label": "Calibration plate",
+                "detail": "V5 · OCR",
+                "status": "match",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 24,
+              "filtered": 24,
+              "visible": 3
+            }
+          },
+          {
+            "id": "pending",
+            "title": "Q2 running",
+            "kind": "notice",
+            "body": [
+              "Q2 is the active request; Q1 is retained as superseded history."
+            ],
+            "facts": [
+              {
+                "label": "Active",
+                "value": "Q2 · generation 2"
+              },
+              {
+                "label": "Superseded",
+                "value": "Q1 · generation 1"
+              },
+              {
+                "label": "Counts",
+                "value": "Q2 only"
+              },
+              {
+                "label": "Selection",
+                "value": "occ-C17-V8 retained"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "Q2",
+          "text": "pressure",
+          "mode": "literal",
+          "media": [
+            "text",
+            "cells",
+            "images",
+            "audio",
+            "video"
+          ],
+          "fields": [
+            "native",
+            "OCR",
+            "transcript",
+            "metadata"
+          ],
+          "stores": [
+            "all-eight"
+          ],
+          "versions": "reachable",
+          "status": "running",
+          "coverage": "local 3/3; remote 2/5; 3 pending",
+          "results": [
+            "occ-C17-V8",
+            "occ-review-V4",
+            "occ-ocr-V5"
+          ],
+          "selected": null,
+          "counts": {
+            "total": 24,
+            "filtered": 24,
+            "visible": 3
+          },
+          "filters": {
+            "media": [
+              "text",
+              "cells",
+              "images",
+              "audio",
+              "video"
+            ],
+            "fields": [
+              "native",
+              "OCR",
+              "transcript",
+              "metadata"
+            ],
+            "versions": "reachable",
+            "stores": [
+              "all-eight"
+            ],
+            "availability": "cached"
+          },
+          "group": "store",
+          "sort": "version-desc",
+          "selectionStatus": "included",
+          "generation": 2
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Start refined request Q2",
+      "note": "New request receives a distinct identity."
+    },
+    {
+      "file": "J19/main/J19-s3-a2.png",
+      "location": "?journey=J19&task=2&action=2",
+      "frame": "J19-s3-a2",
+      "state": {
+        "fixture": "query-lifecycle-q1-q2",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": null,
+          "state": "V8",
+          "locator": "Rig:V8:C17:r17:cB2:span[0,8]"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "calibration://media": 0,
+          "debrief://media": 0,
+          "pressure-video://media": 0,
+          "field-manual://remote": 0,
+          "archive://remote": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "q2",
+            "title": "Current request Q2",
+            "kind": "list",
+            "body": [
+              "Only responses for current request ID and fixture generation update displayed results."
+            ],
+            "facts": [
+              {
+                "label": "Current request",
+                "value": "Q2 · generation 2"
+              },
+              {
+                "label": "Superseded request",
+                "value": "Q1 · generation 1"
+              },
+              {
+                "label": "Displayed counts belong to",
+                "value": "Q2"
+              },
+              {
+                "label": "Selection",
+                "value": "occ-C17-V8 pinned"
+              },
+              {
+                "label": "Last reply",
+                "value": "Q2 · generation 2 response received"
+              }
+            ],
+            "rows": [
+              {
+                "id": "q2review",
+                "label": "Review V4",
+                "detail": "Q2 result",
+                "status": "match",
+                "ordinal": 1
+              },
+              {
+                "id": "q2c17",
+                "label": "C17 V8",
+                "detail": "Q2 result",
+                "status": "selected",
+                "ordinal": 2
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 9,
+              "filtered": 9,
+              "visible": 2
+            }
+          },
+          {
+            "id": "query",
+            "title": "Prior query Q1 snapshot · pressure",
+            "kind": "list",
+            "body": [
+              "Superseded Q1 result snapshot retained for comparison; displayed counts and response state belong to current Q2."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "Q1 · prior snapshot · superseded"
+              },
+              {
+                "label": "Query",
+                "value": "literal pressure"
+              },
+              {
+                "label": "Selection",
+                "value": "occ-C17-V8 · pinned independently of Q2 selection"
+              },
+              {
+                "label": "Coverage",
+                "value": "local 3/3 · remote 2/5 · 3 pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "c17",
+                "label": "C17 · Rig slice",
+                "detail": "V8 · native cell · historical",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "review",
+                "label": "Review passage",
+                "detail": "V4 · native text",
+                "status": "match",
+                "ordinal": 2
+              },
+              {
+                "id": "ocr",
+                "label": "Calibration plate",
+                "detail": "V5 · OCR",
+                "status": "match",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 24,
+              "filtered": 24,
+              "visible": 3
+            }
+          }
+        ],
+        "query": {
+          "id": "Q2",
+          "text": "pressure",
+          "mode": "literal",
+          "media": [
+            "text",
+            "cells",
+            "images",
+            "audio",
+            "video"
+          ],
+          "fields": [
+            "native",
+            "OCR",
+            "transcript",
+            "metadata"
+          ],
+          "stores": [
+            "all-eight"
+          ],
+          "versions": "reachable",
+          "status": "running",
+          "coverage": "local 3/3; remote 2/5; 3 pending",
+          "results": [
+            "occ-C17-V8",
+            "occ-review-V4",
+            "occ-ocr-V5"
+          ],
+          "selected": null,
+          "counts": {
+            "total": 24,
+            "filtered": 24,
+            "visible": 3
+          },
+          "filters": {
+            "media": [
+              "text",
+              "cells",
+              "images",
+              "audio",
+              "video"
+            ],
+            "fields": [
+              "native",
+              "OCR",
+              "transcript",
+              "metadata"
+            ],
+            "versions": "reachable",
+            "stores": [
+              "all-eight"
+            ],
+            "availability": "cached"
+          },
+          "group": "store",
+          "sort": "version-desc",
+          "selectionStatus": "included",
+          "generation": 2,
+          "q2Counts": {
+            "total": 9,
+            "filtered": 9,
+            "visible": 2
+          },
+          "q2Results": [
+            "occ-review-v4",
+            "occ-C17-V8"
+          ]
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Deliver Q2 response",
+      "note": "Q2 response updates its own result set."
+    },
+    {
+      "file": "J19/main/J19-s3-a3.png",
+      "location": "?journey=J19&task=2&action=3",
+      "frame": "J19-s3-a3",
+      "state": {
+        "fixture": "query-lifecycle-q1-q2",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": null,
+          "state": "V8",
+          "locator": "Rig:V8:C17:r17:cB2:span[0,8]"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "calibration://media": 0,
+          "debrief://media": 0,
+          "pressure-video://media": 0,
+          "field-manual://remote": 0,
+          "archive://remote": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "q2",
+            "title": "Current request Q2",
+            "kind": "list",
+            "body": [
+              "Only responses for current request ID and fixture generation update displayed results."
+            ],
+            "facts": [
+              {
+                "label": "Current request",
+                "value": "Q2 · generation 2"
+              },
+              {
+                "label": "Superseded request",
+                "value": "Q1 · generation 1"
+              },
+              {
+                "label": "Displayed counts belong to",
+                "value": "Q2"
+              },
+              {
+                "label": "Selection",
+                "value": "occ-C17-V8 pinned"
+              },
+              {
+                "label": "Last reply",
+                "value": "Q1 late response · ignored"
+              }
+            ],
+            "rows": [
+              {
+                "id": "q2review",
+                "label": "Review V4",
+                "detail": "Q2 result",
+                "status": "match",
+                "ordinal": 1
+              },
+              {
+                "id": "q2c17",
+                "label": "C17 V8",
+                "detail": "Q2 result",
+                "status": "selected",
+                "ordinal": 2
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 9,
+              "filtered": 9,
+              "visible": 2
+            }
+          },
+          {
+            "id": "query",
+            "title": "Prior query Q1 snapshot · pressure",
+            "kind": "list",
+            "body": [
+              "Superseded Q1 result snapshot retained for comparison; displayed counts and response state belong to current Q2."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "Q1 · prior snapshot · superseded"
+              },
+              {
+                "label": "Query",
+                "value": "literal pressure"
+              },
+              {
+                "label": "Selection",
+                "value": "occ-C17-V8 · pinned independently of Q2 selection"
+              },
+              {
+                "label": "Coverage",
+                "value": "local 3/3 · remote 2/5 · 3 pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "c17",
+                "label": "C17 · Rig slice",
+                "detail": "V8 · native cell · historical",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "review",
+                "label": "Review passage",
+                "detail": "V4 · native text",
+                "status": "match",
+                "ordinal": 2
+              },
+              {
+                "id": "ocr",
+                "label": "Calibration plate",
+                "detail": "V5 · OCR",
+                "status": "match",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 24,
+              "filtered": 24,
+              "visible": 3
+            }
+          },
+          {
+            "id": "stale",
+            "title": "Superseded Q1 response ignored",
+            "kind": "notice",
+            "body": [
+              "The old response is logged and cannot replace Q2 rows/counts."
+            ],
+            "facts": [
+              {
+                "label": "Late request",
+                "value": "Q1 · generation 1"
+              },
+              {
+                "label": "Active request",
+                "value": "Q2 · generation 2"
+              },
+              {
+                "label": "Disposition",
+                "value": "ignored"
+              },
+              {
+                "label": "Displayed counts",
+                "value": "Q2: 9 total"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "Q2",
+          "text": "pressure",
+          "mode": "literal",
+          "media": [
+            "text",
+            "cells",
+            "images",
+            "audio",
+            "video"
+          ],
+          "fields": [
+            "native",
+            "OCR",
+            "transcript",
+            "metadata"
+          ],
+          "stores": [
+            "all-eight"
+          ],
+          "versions": "reachable",
+          "status": "running",
+          "coverage": "local 3/3; remote 2/5; 3 pending",
+          "results": [
+            "occ-C17-V8",
+            "occ-review-V4",
+            "occ-ocr-V5"
+          ],
+          "selected": null,
+          "counts": {
+            "total": 24,
+            "filtered": 24,
+            "visible": 3
+          },
+          "filters": {
+            "media": [
+              "text",
+              "cells",
+              "images",
+              "audio",
+              "video"
+            ],
+            "fields": [
+              "native",
+              "OCR",
+              "transcript",
+              "metadata"
+            ],
+            "versions": "reachable",
+            "stores": [
+              "all-eight"
+            ],
+            "availability": "cached"
+          },
+          "group": "store",
+          "sort": "version-desc",
+          "selectionStatus": "included",
+          "generation": 2,
+          "q2Counts": {
+            "total": 9,
+            "filtered": 9,
+            "visible": 2
+          },
+          "q2Results": [
+            "occ-review-v4",
+            "occ-C17-V8"
+          ],
+          "lateResponse": "Q1 · generation 1",
+          "lateResponseDisposition": "ignored"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Deliver late Q1 response",
+      "note": "Stale response is visible in status history and has no result effect."
+    },
+    {
+      "file": "J19/main/J19-s4-a1.png",
+      "location": "?journey=J19&task=3&action=1",
+      "frame": "J19-s4-a1",
+      "state": {
+        "fixture": "query-lifecycle-q1-q2",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": null,
+          "state": "V8",
+          "locator": "Rig:V8:C17:r17:cB2:span[0,8]"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "calibration://media": 0,
+          "debrief://media": 0,
+          "pressure-video://media": 0,
+          "field-manual://remote": 0,
+          "archive://remote": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "q2",
+            "title": "Current request Q2",
+            "kind": "list",
+            "body": [
+              "Only responses for current request ID and fixture generation update displayed results."
+            ],
+            "facts": [
+              {
+                "label": "Current request",
+                "value": "Q2 · generation 2"
+              },
+              {
+                "label": "Superseded request",
+                "value": "Q1 · generation 1"
+              },
+              {
+                "label": "Displayed counts belong to",
+                "value": "Q2"
+              },
+              {
+                "label": "Selection",
+                "value": "occ-C17-V8 pinned"
+              },
+              {
+                "label": "Last reply",
+                "value": "Q1 late response · ignored"
+              }
+            ],
+            "rows": [
+              {
+                "id": "q2review",
+                "label": "Review V4",
+                "detail": "Q2 result",
+                "status": "match",
+                "ordinal": 1
+              },
+              {
+                "id": "q2c17",
+                "label": "C17 V8",
+                "detail": "Q2 result",
+                "status": "selected",
+                "ordinal": 2
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 9,
+              "filtered": 9,
+              "visible": 2
+            }
+          },
+          {
+            "id": "coverage",
+            "title": "Coverage by store and evidence surface",
+            "kind": "inspector",
+            "body": [
+              "A completed surface does not imply all stores or media were searched."
+            ],
+            "facts": [
+              {
+                "label": "Local",
+                "value": "3/3 complete"
+              },
+              {
+                "label": "Remote",
+                "value": "2/5 complete"
+              },
+              {
+                "label": "Pending",
+                "value": "3 stores"
+              },
+              {
+                "label": "Unsupported",
+                "value": "OCR surface on archive://remote · unsupported"
+              },
+              {
+                "label": "Q2 results",
+                "value": "9 found so far"
+              }
+            ],
+            "rows": [
+              {
+                "id": "archive-ocr",
+                "label": "archive://remote · OCR",
+                "detail": "unsupported",
+                "status": "unsupported"
+              },
+              {
+                "id": "remote-a",
+                "label": "Review",
+                "detail": "complete",
+                "status": "complete"
+              },
+              {
+                "id": "remote-p",
+                "label": "remote store 3",
+                "detail": "pending",
+                "status": "pending"
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "Q2",
+          "text": "pressure",
+          "mode": "literal",
+          "media": [
+            "text",
+            "cells",
+            "images",
+            "audio",
+            "video"
+          ],
+          "fields": [
+            "native",
+            "OCR",
+            "transcript",
+            "metadata"
+          ],
+          "stores": [
+            "all-eight"
+          ],
+          "versions": "reachable",
+          "status": "running",
+          "coverage": "local 3/3; remote 2/5; 3 pending",
+          "results": [
+            "occ-C17-V8",
+            "occ-review-V4",
+            "occ-ocr-V5"
+          ],
+          "selected": null,
+          "counts": {
+            "total": 24,
+            "filtered": 24,
+            "visible": 3
+          },
+          "filters": {
+            "media": [
+              "text",
+              "cells",
+              "images",
+              "audio",
+              "video"
+            ],
+            "fields": [
+              "native",
+              "OCR",
+              "transcript",
+              "metadata"
+            ],
+            "versions": "reachable",
+            "stores": [
+              "all-eight"
+            ],
+            "availability": "cached"
+          },
+          "group": "store",
+          "sort": "version-desc",
+          "selectionStatus": "included",
+          "generation": 2,
+          "q2Counts": {
+            "total": 9,
+            "filtered": 9,
+            "visible": 2
+          },
+          "q2Results": [
+            "occ-review-v4",
+            "occ-C17-V8"
+          ],
+          "lateResponse": "Q1 · generation 1",
+          "lateResponseDisposition": "ignored",
+          "coverageDetail": "open"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Inspect coverage details",
+      "note": "Coverage is scoped by store and evidence surface."
+    },
+    {
+      "file": "J19/main/J19-s4-a2.png",
+      "location": "?journey=J19&task=3&action=2",
+      "frame": "J19-s4-a2",
+      "state": {
+        "fixture": "query-lifecycle-q1-q2",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": null,
+          "state": "V8",
+          "locator": "Rig:V8:C17:r17:cB2:span[0,8]"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "calibration://media": 0,
+          "debrief://media": 0,
+          "pressure-video://media": 0,
+          "field-manual://remote": 0,
+          "archive://remote": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "coverage",
+            "title": "Coverage by store and evidence surface",
+            "kind": "inspector",
+            "body": [
+              "A completed surface does not imply all stores or media were searched."
+            ],
+            "facts": [
+              {
+                "label": "Local",
+                "value": "3/3 complete"
+              },
+              {
+                "label": "Remote",
+                "value": "2/5 complete"
+              },
+              {
+                "label": "Pending",
+                "value": "3 stores"
+              },
+              {
+                "label": "Unsupported",
+                "value": "OCR surface on archive://remote · unsupported"
+              },
+              {
+                "label": "Q2 results",
+                "value": "9 found so far"
+              }
+            ],
+            "rows": [
+              {
+                "id": "archive-ocr",
+                "label": "archive://remote · OCR",
+                "detail": "unsupported",
+                "status": "unsupported"
+              },
+              {
+                "id": "remote-a",
+                "label": "Review",
+                "detail": "complete",
+                "status": "complete"
+              },
+              {
+                "id": "remote-p",
+                "label": "remote store 3",
+                "detail": "pending",
+                "status": "pending"
+              }
+            ],
+            "tone": "neutral"
+          },
+          {
+            "id": "cancel",
+            "title": "Q2 cancelled",
+            "kind": "notice",
+            "body": [
+              "Cancellation stops new work; collected rows and partial coverage remain."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "Q2"
+              },
+              {
+                "label": "Status",
+                "value": "cancelled"
+              },
+              {
+                "label": "Results",
+                "value": "9 found so far · retained"
+              },
+              {
+                "label": "Coverage",
+                "value": "3 remote stores pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "r",
+                "label": "Collected result",
+                "detail": "retained",
+                "status": "available"
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "Q2",
+          "text": "pressure",
+          "mode": "literal",
+          "media": [
+            "text",
+            "cells",
+            "images",
+            "audio",
+            "video"
+          ],
+          "fields": [
+            "native",
+            "OCR",
+            "transcript",
+            "metadata"
+          ],
+          "stores": [
+            "all-eight"
+          ],
+          "versions": "reachable",
+          "status": "cancelled",
+          "coverage": "local 3/3; remote 2/5; 3 pending",
+          "results": [
+            "occ-C17-V8",
+            "occ-review-V4",
+            "occ-ocr-V5"
+          ],
+          "selected": null,
+          "counts": {
+            "total": 24,
+            "filtered": 24,
+            "visible": 3
+          },
+          "filters": {
+            "media": [
+              "text",
+              "cells",
+              "images",
+              "audio",
+              "video"
+            ],
+            "fields": [
+              "native",
+              "OCR",
+              "transcript",
+              "metadata"
+            ],
+            "versions": "reachable",
+            "stores": [
+              "all-eight"
+            ],
+            "availability": "cached"
+          },
+          "group": "store",
+          "sort": "version-desc",
+          "selectionStatus": "included",
+          "generation": 2,
+          "q2Counts": {
+            "total": 9,
+            "filtered": 9,
+            "visible": 2
+          },
+          "q2Results": [
+            "occ-review-v4",
+            "occ-C17-V8"
+          ],
+          "lateResponse": "Q1 · generation 1",
+          "lateResponseDisposition": "ignored",
+          "coverageDetail": "open",
+          "cancelledResults": "retained"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Cancel Q2",
+      "note": "Cancel preserves all nine found-so-far records and coverage."
+    },
+    {
+      "file": "J19/main/J19-s4-a3.png",
+      "location": "?journey=J19&task=3&action=3",
+      "frame": "J19-s4-a3",
+      "state": {
+        "fixture": "query-lifecycle-q1-q2",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": null,
+          "state": "V8",
+          "locator": "Rig:V8:C17:r17:cB2:span[0,8]"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "calibration://media": 0,
+          "debrief://media": 0,
+          "pressure-video://media": 0,
+          "field-manual://remote": 0,
+          "archive://remote": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "coverage",
+            "title": "Coverage by store and evidence surface",
+            "kind": "inspector",
+            "body": [
+              "A completed surface does not imply all stores or media were searched."
+            ],
+            "facts": [
+              {
+                "label": "Local",
+                "value": "3/3 complete"
+              },
+              {
+                "label": "Remote",
+                "value": "2/5 complete"
+              },
+              {
+                "label": "Pending",
+                "value": "3 stores"
+              },
+              {
+                "label": "Unsupported",
+                "value": "OCR surface on archive://remote · unsupported"
+              },
+              {
+                "label": "Q2 results",
+                "value": "9 found so far"
+              }
+            ],
+            "rows": [
+              {
+                "id": "archive-ocr",
+                "label": "archive://remote · OCR",
+                "detail": "unsupported",
+                "status": "unsupported"
+              },
+              {
+                "id": "remote-a",
+                "label": "Review",
+                "detail": "complete",
+                "status": "complete"
+              },
+              {
+                "id": "remote-p",
+                "label": "remote store 3",
+                "detail": "pending",
+                "status": "pending"
+              }
+            ],
+            "tone": "neutral"
+          },
+          {
+            "id": "q3",
+            "title": "Explicit rerun Q3",
+            "kind": "notice",
+            "body": [
+              "Rerun creates a new request ID from the recipe; existing result snapshot remains unchanged."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "Q3 · generation 3"
+              },
+              {
+                "label": "From recipe",
+                "value": "recipe-pressure-01"
+              },
+              {
+                "label": "Previous results",
+                "value": "Q2 snapshot retained"
+              },
+              {
+                "label": "New matches",
+                "value": "pending"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "Q3",
+          "text": "pressure",
+          "mode": "literal",
+          "media": [
+            "text",
+            "cells",
+            "images",
+            "audio",
+            "video"
+          ],
+          "fields": [
+            "native",
+            "OCR",
+            "transcript",
+            "metadata"
+          ],
+          "stores": [
+            "all-eight"
+          ],
+          "versions": "reachable",
+          "status": "running",
+          "coverage": "local 3/3; remote 2/5; 3 pending",
+          "results": [
+            "occ-C17-V8",
+            "occ-review-V4",
+            "occ-ocr-V5"
+          ],
+          "selected": null,
+          "counts": {
+            "total": 24,
+            "filtered": 24,
+            "visible": 3
+          },
+          "filters": {
+            "media": [
+              "text",
+              "cells",
+              "images",
+              "audio",
+              "video"
+            ],
+            "fields": [
+              "native",
+              "OCR",
+              "transcript",
+              "metadata"
+            ],
+            "versions": "reachable",
+            "stores": [
+              "all-eight"
+            ],
+            "availability": "cached"
+          },
+          "group": "store",
+          "sort": "version-desc",
+          "selectionStatus": "included",
+          "generation": 3,
+          "q2Counts": {
+            "total": 9,
+            "filtered": 9,
+            "visible": 2
+          },
+          "q2Results": [
+            "occ-review-v4",
+            "occ-C17-V8"
+          ],
+          "lateResponse": "Q1 · generation 1",
+          "lateResponseDisposition": "ignored",
+          "coverageDetail": "open",
+          "cancelledResults": "retained",
+          "parentRecipe": "recipe-pressure-01"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Rerun explicitly as Q3",
+      "note": "Rerun is explicit; it does not alter a saved collection or Link."
+    },
+    {
+      "file": "J19/main/J19-s5-a1.png",
+      "location": "?journey=J19&task=4&action=1",
+      "frame": "J19-s5-a1",
+      "state": {
+        "fixture": "query-lifecycle-q1-q2",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": null,
+          "state": "V8",
+          "locator": "Rig:V8:C17:r17:cB2:span[0,8]"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "calibration://media": 0,
+          "debrief://media": 0,
+          "pressure-video://media": 0,
+          "field-manual://remote": 0,
+          "archive://remote": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "query",
+            "title": "Query Q1 · pressure",
+            "kind": "list",
+            "body": [
+              "Request identity and selected occurrence remain pinned through filtering."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "Q1 · generation 1"
+              },
+              {
+                "label": "Query",
+                "value": "literal pressure"
+              },
+              {
+                "label": "Selection",
+                "value": "occ-C17-V8 · C17 V8"
+              },
+              {
+                "label": "Coverage",
+                "value": "local 3/3 · remote 2/5 · 3 pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "c17",
+                "label": "C17 · Rig slice",
+                "detail": "V8 · native cell · historical",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "review",
+                "label": "Review passage",
+                "detail": "V4 · native text",
+                "status": "match",
+                "ordinal": 2
+              },
+              {
+                "id": "ocr",
+                "label": "Calibration plate",
+                "detail": "V5 · OCR",
+                "status": "match",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 24,
+              "filtered": 24,
+              "visible": 3
+            }
+          },
+          {
+            "id": "empty",
+            "title": "Completed · no matches",
+            "kind": "notice",
+            "body": [
+              "This declared surface completed successfully with zero matching records."
+            ],
+            "facts": [
+              {
+                "label": "Scope",
+                "value": "Rig V4 · native cell text"
+              },
+              {
+                "label": "Status",
+                "value": "complete"
+              },
+              {
+                "label": "Matches",
+                "value": "0"
+              },
+              {
+                "label": "Coverage",
+                "value": "complete"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "Q3",
+          "text": "pressure",
+          "mode": "literal",
+          "media": [
+            "text",
+            "cells",
+            "images",
+            "audio",
+            "video"
+          ],
+          "fields": [
+            "native",
+            "OCR",
+            "transcript",
+            "metadata"
+          ],
+          "stores": [
+            "all-eight"
+          ],
+          "versions": "reachable",
+          "status": "running",
+          "coverage": "local 3/3; remote 2/5; 3 pending",
+          "results": [
+            "occ-C17-V8",
+            "occ-review-V4",
+            "occ-ocr-V5"
+          ],
+          "selected": null,
+          "counts": {
+            "total": 24,
+            "filtered": 24,
+            "visible": 3
+          },
+          "filters": {
+            "media": [
+              "text",
+              "cells",
+              "images",
+              "audio",
+              "video"
+            ],
+            "fields": [
+              "native",
+              "OCR",
+              "transcript",
+              "metadata"
+            ],
+            "versions": "reachable",
+            "stores": [
+              "all-eight"
+            ],
+            "availability": "cached"
+          },
+          "group": "store",
+          "sort": "version-desc",
+          "selectionStatus": "included",
+          "generation": 3,
+          "q2Counts": {
+            "total": 9,
+            "filtered": 9,
+            "visible": 2
+          },
+          "q2Results": [
+            "occ-review-v4",
+            "occ-C17-V8"
+          ],
+          "lateResponse": "Q1 · generation 1",
+          "lateResponseDisposition": "ignored",
+          "coverageDetail": "open",
+          "cancelledResults": "retained",
+          "parentRecipe": "recipe-pressure-01",
+          "emptyState": "completed-empty"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Inspect completed-empty scope",
+      "note": "Zero matches with complete coverage is distinct from pending."
+    },
+    {
+      "file": "J19/main/J19-s5-a2.png",
+      "location": "?journey=J19&task=4&action=2",
+      "frame": "J19-s5-a2",
+      "state": {
+        "fixture": "query-lifecycle-q1-q2",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": null,
+          "state": "V8",
+          "locator": "Rig:V8:C17:r17:cB2:span[0,8]"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "calibration://media": 0,
+          "debrief://media": 0,
+          "pressure-video://media": 0,
+          "field-manual://remote": 0,
+          "archive://remote": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "query",
+            "title": "Query Q1 · pressure",
+            "kind": "list",
+            "body": [
+              "Request identity and selected occurrence remain pinned through filtering."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "Q1 · generation 1"
+              },
+              {
+                "label": "Query",
+                "value": "literal pressure"
+              },
+              {
+                "label": "Selection",
+                "value": "occ-C17-V8 · C17 V8"
+              },
+              {
+                "label": "Coverage",
+                "value": "local 3/3 · remote 2/5 · 3 pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "c17",
+                "label": "C17 · Rig slice",
+                "detail": "V8 · native cell · historical",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "review",
+                "label": "Review passage",
+                "detail": "V4 · native text",
+                "status": "match",
+                "ordinal": 2
+              },
+              {
+                "id": "ocr",
+                "label": "Calibration plate",
+                "detail": "V5 · OCR",
+                "status": "match",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 24,
+              "filtered": 24,
+              "visible": 3
+            }
+          },
+          {
+            "id": "zero-pending",
+            "title": "No matches found so far",
+            "kind": "notice",
+            "body": [
+              "Search is incomplete; zero so far is not a completed empty result."
+            ],
+            "facts": [
+              {
+                "label": "Scope",
+                "value": "remote archive · OCR"
+              },
+              {
+                "label": "Status",
+                "value": "pending / unsupported"
+              },
+              {
+                "label": "Matches",
+                "value": "0 so far"
+              },
+              {
+                "label": "Coverage",
+                "value": "incomplete"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "Q3",
+          "text": "pressure",
+          "mode": "literal",
+          "media": [
+            "text",
+            "cells",
+            "images",
+            "audio",
+            "video"
+          ],
+          "fields": [
+            "native",
+            "OCR",
+            "transcript",
+            "metadata"
+          ],
+          "stores": [
+            "all-eight"
+          ],
+          "versions": "reachable",
+          "status": "running",
+          "coverage": "local 3/3; remote 2/5; 3 pending",
+          "results": [
+            "occ-C17-V8",
+            "occ-review-V4",
+            "occ-ocr-V5"
+          ],
+          "selected": null,
+          "counts": {
+            "total": 24,
+            "filtered": 24,
+            "visible": 3
+          },
+          "filters": {
+            "media": [
+              "text",
+              "cells",
+              "images",
+              "audio",
+              "video"
+            ],
+            "fields": [
+              "native",
+              "OCR",
+              "transcript",
+              "metadata"
+            ],
+            "versions": "reachable",
+            "stores": [
+              "all-eight"
+            ],
+            "availability": "cached"
+          },
+          "group": "store",
+          "sort": "version-desc",
+          "selectionStatus": "included",
+          "generation": 3,
+          "q2Counts": {
+            "total": 9,
+            "filtered": 9,
+            "visible": 2
+          },
+          "q2Results": [
+            "occ-review-v4",
+            "occ-C17-V8"
+          ],
+          "lateResponse": "Q1 · generation 1",
+          "lateResponseDisposition": "ignored",
+          "coverageDetail": "open",
+          "cancelledResults": "retained",
+          "parentRecipe": "recipe-pressure-01",
+          "emptyState": "incomplete-zero"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Inspect incomplete zero-found scope",
+      "note": "Incomplete zero remains unresolved and distinct from complete-empty."
+    },
+    {
+      "file": "J19/main/J19-s5-a3.png",
+      "location": "?journey=J19&task=4&action=3",
+      "frame": "J19-s5-a3",
+      "state": {
+        "fixture": "query-lifecycle-q1-q2",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": null,
+          "state": "V8",
+          "locator": "Rig:V8:C17:r17:cB2:span[0,8]"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "calibration://media": 0,
+          "debrief://media": 0,
+          "pressure-video://media": 0,
+          "field-manual://remote": 0,
+          "archive://remote": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [
+            {
+              "id": "recipe-pressure-01",
+              "type": "query-recipe",
+              "query": "pressure",
+              "mode": "literal-casefold",
+              "scope": "eight-stores"
+            }
+          ],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "query",
+            "title": "Query Q1 · pressure",
+            "kind": "list",
+            "body": [
+              "Request identity and selected occurrence remain pinned through filtering."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "Q1 · generation 1"
+              },
+              {
+                "label": "Query",
+                "value": "literal pressure"
+              },
+              {
+                "label": "Selection",
+                "value": "occ-C17-V8 · C17 V8"
+              },
+              {
+                "label": "Coverage",
+                "value": "local 3/3 · remote 2/5 · 3 pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "c17",
+                "label": "C17 · Rig slice",
+                "detail": "V8 · native cell · historical",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "review",
+                "label": "Review passage",
+                "detail": "V4 · native text",
+                "status": "match",
+                "ordinal": 2
+              },
+              {
+                "id": "ocr",
+                "label": "Calibration plate",
+                "detail": "V5 · OCR",
+                "status": "match",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 24,
+              "filtered": 24,
+              "visible": 3
+            }
+          },
+          {
+            "id": "recipe",
+            "title": "Saved search recipe",
+            "kind": "inspector",
+            "body": [
+              "A recipe stores query rules and scope, not its current result members."
+            ],
+            "facts": [
+              {
+                "label": "Recipe ID",
+                "value": "recipe-pressure-01"
+              },
+              {
+                "label": "Text",
+                "value": "pressure"
+              },
+              {
+                "label": "Mode",
+                "value": "literal · case folded"
+              },
+              {
+                "label": "Scope",
+                "value": "eight stores · reachable versions"
+              },
+              {
+                "label": "Last request",
+                "value": "Q2"
+              },
+              {
+                "label": "Rerun",
+                "value": "explicit"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "Q3",
+          "text": "pressure",
+          "mode": "literal",
+          "media": [
+            "text",
+            "cells",
+            "images",
+            "audio",
+            "video"
+          ],
+          "fields": [
+            "native",
+            "OCR",
+            "transcript",
+            "metadata"
+          ],
+          "stores": [
+            "all-eight"
+          ],
+          "versions": "reachable",
+          "status": "running",
+          "coverage": "local 3/3; remote 2/5; 3 pending",
+          "results": [
+            "occ-C17-V8",
+            "occ-review-V4",
+            "occ-ocr-V5"
+          ],
+          "selected": null,
+          "counts": {
+            "total": 24,
+            "filtered": 24,
+            "visible": 3
+          },
+          "filters": {
+            "media": [
+              "text",
+              "cells",
+              "images",
+              "audio",
+              "video"
+            ],
+            "fields": [
+              "native",
+              "OCR",
+              "transcript",
+              "metadata"
+            ],
+            "versions": "reachable",
+            "stores": [
+              "all-eight"
+            ],
+            "availability": "cached"
+          },
+          "group": "store",
+          "sort": "version-desc",
+          "selectionStatus": "included",
+          "generation": 3,
+          "q2Counts": {
+            "total": 9,
+            "filtered": 9,
+            "visible": 2
+          },
+          "q2Results": [
+            "occ-review-v4",
+            "occ-C17-V8"
+          ],
+          "lateResponse": "Q1 · generation 1",
+          "lateResponseDisposition": "ignored",
+          "coverageDetail": "open",
+          "cancelledResults": "retained",
+          "parentRecipe": "recipe-pressure-01",
+          "emptyState": "incomplete-zero"
+        }
+      },
+      "effects": [
+        {
+          "domain": "reader collection",
+          "summary": "Saved recipe recipe-pressure-01; no result members copied.",
+          "identity": "recipe-pressure-01"
+        }
+      ],
+      "action": "Save recipe",
+      "note": "Explicit Save writes a reader collection recipe only."
+    },
+    {
+      "file": "J19/main/J19-s5-a4.png",
+      "location": "?journey=J19&task=4&action=4",
+      "frame": "J19-s5-a4",
+      "state": {
+        "fixture": "query-lifecycle-q1-q2",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": null,
+          "state": "V8",
+          "locator": "Rig:V8:C17:r17:cB2:span[0,8]"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "calibration://media": 0,
+          "debrief://media": 0,
+          "pressure-video://media": 0,
+          "field-manual://remote": 0,
+          "archive://remote": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [
+            {
+              "id": "recipe-pressure-01",
+              "type": "query-recipe"
+            },
+            {
+              "id": "snapshot-Q2-01",
+              "type": "result-snapshot",
+              "request": "Q2",
+              "members": [
+                "occ-review-v4",
+                "occ-C17-V8",
+                "occ-ocr-v5",
+                "occ-audio-v7",
+                "occ-video-v9-title",
+                "occ-field-v3",
+                "occ-math-v8",
+                "occ-rig-v7",
+                "occ-new-v6"
+              ]
+            }
+          ],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "snapshot",
+            "title": "Captured result snapshot",
+            "kind": "list",
+            "body": [
+              "Snapshot membership is frozen at capture time and does not refresh when recipe is rerun."
+            ],
+            "facts": [
+              {
+                "label": "Snapshot ID",
+                "value": "snapshot-Q2-01"
+              },
+              {
+                "label": "Source request",
+                "value": "Q2"
+              },
+              {
+                "label": "Captured matches",
+                "value": "9"
+              },
+              {
+                "label": "Refresh",
+                "value": "never · immutable membership"
+              }
+            ],
+            "rows": [
+              {
+                "id": "sr1",
+                "label": "Review V4",
+                "detail": "occ-review-v4",
+                "status": "captured",
+                "ordinal": 1
+              },
+              {
+                "id": "sr2",
+                "label": "C17 V8",
+                "detail": "occ-C17-V8",
+                "status": "captured",
+                "ordinal": 2
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 9,
+              "filtered": 9,
+              "visible": 2
+            }
+          },
+          {
+            "id": "recipe",
+            "title": "Saved search recipe",
+            "kind": "inspector",
+            "body": [
+              "A recipe stores query rules and scope, not its current result members."
+            ],
+            "facts": [
+              {
+                "label": "Recipe ID",
+                "value": "recipe-pressure-01"
+              },
+              {
+                "label": "Text",
+                "value": "pressure"
+              },
+              {
+                "label": "Mode",
+                "value": "literal · case folded"
+              },
+              {
+                "label": "Scope",
+                "value": "eight stores · reachable versions"
+              },
+              {
+                "label": "Last request",
+                "value": "Q2"
+              },
+              {
+                "label": "Rerun",
+                "value": "explicit"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "Q3",
+          "text": "pressure",
+          "mode": "literal",
+          "media": [
+            "text",
+            "cells",
+            "images",
+            "audio",
+            "video"
+          ],
+          "fields": [
+            "native",
+            "OCR",
+            "transcript",
+            "metadata"
+          ],
+          "stores": [
+            "all-eight"
+          ],
+          "versions": "reachable",
+          "status": "running",
+          "coverage": "local 3/3; remote 2/5; 3 pending",
+          "results": [
+            "occ-C17-V8",
+            "occ-review-V4",
+            "occ-ocr-V5"
+          ],
+          "selected": null,
+          "counts": {
+            "total": 24,
+            "filtered": 24,
+            "visible": 3
+          },
+          "filters": {
+            "media": [
+              "text",
+              "cells",
+              "images",
+              "audio",
+              "video"
+            ],
+            "fields": [
+              "native",
+              "OCR",
+              "transcript",
+              "metadata"
+            ],
+            "versions": "reachable",
+            "stores": [
+              "all-eight"
+            ],
+            "availability": "cached"
+          },
+          "group": "store",
+          "sort": "version-desc",
+          "selectionStatus": "included",
+          "generation": 3,
+          "q2Counts": {
+            "total": 9,
+            "filtered": 9,
+            "visible": 2
+          },
+          "q2Results": [
+            "occ-review-v4",
+            "occ-C17-V8"
+          ],
+          "lateResponse": "Q1 · generation 1",
+          "lateResponseDisposition": "ignored",
+          "coverageDetail": "open",
+          "cancelledResults": "retained",
+          "parentRecipe": "recipe-pressure-01",
+          "emptyState": "incomplete-zero"
+        }
+      },
+      "effects": [
+        {
+          "domain": "reader collection",
+          "summary": "Saved snapshot snapshot-Q2-01 with nine immutable members.",
+          "identity": "snapshot-Q2-01"
+        }
+      ],
+      "action": "Capture Q2 results separately",
+      "note": "Snapshot captures Q2 membership; recipe remains independently rerunnable."
+    },
+    {
+      "file": "J19/main/J19-s5-a5.png",
+      "location": "?journey=J19&task=4&action=5",
+      "frame": "J19-s5-a5",
+      "state": {
+        "fixture": "query-lifecycle-q1-q2",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": null,
+          "state": "V8",
+          "locator": "Rig:V8:C17:r17:cB2:span[0,8]"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "calibration://media": 0,
+          "debrief://media": 0,
+          "pressure-video://media": 0,
+          "field-manual://remote": 0,
+          "archive://remote": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [
+            {
+              "id": "recipe-pressure-01",
+              "type": "query-recipe"
+            },
+            {
+              "id": "snapshot-Q2-01",
+              "type": "result-snapshot",
+              "request": "Q2",
+              "members": [
+                "occ-review-v4",
+                "occ-C17-V8",
+                "occ-ocr-v5",
+                "occ-audio-v7",
+                "occ-video-v9-title",
+                "occ-field-v3",
+                "occ-math-v8",
+                "occ-rig-v7",
+                "occ-new-v6"
+              ]
+            }
+          ],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "rerun",
+            "title": "Recipe rerun Q3",
+            "kind": "list",
+            "body": [
+              "One new match appears in Q3; snapshot-Q2-01 remains unchanged."
+            ],
+            "facts": [
+              {
+                "label": "Recipe",
+                "value": "recipe-pressure-01"
+              },
+              {
+                "label": "Request",
+                "value": "Q3"
+              },
+              {
+                "label": "New match",
+                "value": "occ-new-v6"
+              },
+              {
+                "label": "Old snapshot",
+                "value": "snapshot-Q2-01 · 9 members · unchanged"
+              }
+            ],
+            "rows": [
+              {
+                "id": "new",
+                "label": "New V6 match",
+                "detail": "occ-new-v6",
+                "status": "new",
+                "ordinal": 1
+              }
+            ],
+            "tone": "neutral"
+          },
+          {
+            "id": "snapshot",
+            "title": "Captured result snapshot",
+            "kind": "list",
+            "body": [
+              "Snapshot membership is frozen at capture time and does not refresh when recipe is rerun."
+            ],
+            "facts": [
+              {
+                "label": "Snapshot ID",
+                "value": "snapshot-Q2-01"
+              },
+              {
+                "label": "Source request",
+                "value": "Q2"
+              },
+              {
+                "label": "Captured matches",
+                "value": "9"
+              },
+              {
+                "label": "Refresh",
+                "value": "never · immutable membership"
+              }
+            ],
+            "rows": [
+              {
+                "id": "sr1",
+                "label": "Review V4",
+                "detail": "occ-review-v4",
+                "status": "captured",
+                "ordinal": 1
+              },
+              {
+                "id": "sr2",
+                "label": "C17 V8",
+                "detail": "occ-C17-V8",
+                "status": "captured",
+                "ordinal": 2
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 9,
+              "filtered": 9,
+              "visible": 2
+            }
+          },
+          {
+            "id": "recipe",
+            "title": "Saved search recipe",
+            "kind": "inspector",
+            "body": [
+              "A recipe stores query rules and scope, not its current result members."
+            ],
+            "facts": [
+              {
+                "label": "Recipe ID",
+                "value": "recipe-pressure-01"
+              },
+              {
+                "label": "Text",
+                "value": "pressure"
+              },
+              {
+                "label": "Mode",
+                "value": "literal · case folded"
+              },
+              {
+                "label": "Scope",
+                "value": "eight stores · reachable versions"
+              },
+              {
+                "label": "Last request",
+                "value": "Q2"
+              },
+              {
+                "label": "Rerun",
+                "value": "explicit"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "Q3",
+          "text": "pressure",
+          "mode": "literal",
+          "media": [
+            "text",
+            "cells",
+            "images",
+            "audio",
+            "video"
+          ],
+          "fields": [
+            "native",
+            "OCR",
+            "transcript",
+            "metadata"
+          ],
+          "stores": [
+            "all-eight"
+          ],
+          "versions": "reachable",
+          "status": "running",
+          "coverage": "local 3/3; remote 2/5; 3 pending",
+          "results": [
+            "occ-C17-V8",
+            "occ-review-V4",
+            "occ-ocr-V5"
+          ],
+          "selected": null,
+          "counts": {
+            "total": 24,
+            "filtered": 24,
+            "visible": 3
+          },
+          "filters": {
+            "media": [
+              "text",
+              "cells",
+              "images",
+              "audio",
+              "video"
+            ],
+            "fields": [
+              "native",
+              "OCR",
+              "transcript",
+              "metadata"
+            ],
+            "versions": "reachable",
+            "stores": [
+              "all-eight"
+            ],
+            "availability": "cached"
+          },
+          "group": "store",
+          "sort": "version-desc",
+          "selectionStatus": "included",
+          "generation": 3,
+          "q2Counts": {
+            "total": 9,
+            "filtered": 9,
+            "visible": 2
+          },
+          "q2Results": [
+            "occ-review-v4",
+            "occ-C17-V8"
+          ],
+          "lateResponse": "Q1 · generation 1",
+          "lateResponseDisposition": "ignored",
+          "coverageDetail": "open",
+          "cancelledResults": "retained",
+          "parentRecipe": "recipe-pressure-01",
+          "emptyState": "incomplete-zero",
+          "newMatch": "occ-new-v6"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Rerun recipe as Q3 and inspect new match",
+      "note": "Rerun updates query results only, not the captured snapshot or collection membership."
+    }
+  ]
+}

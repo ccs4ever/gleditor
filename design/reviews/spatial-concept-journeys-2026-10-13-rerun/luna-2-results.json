@@ -1,0 +1,1687 @@
+{
+  "reviewScope": "Independent AI expert visual review of final scripted concept prototype evidence; not participant or production validation.",
+  "journeys": [
+    {
+      "journeyId": "J27",
+      "step": 1,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J27-s1-a1",
+        "J27-s1-a2",
+        "J27-s1-a3",
+        "J27-s1-a4"
+      ],
+      "evidenceFrames": [
+        "J27/main/J27-s1-a1.png",
+        "J27/main/J27-s1-a2.png",
+        "J27/main/J27-s1-a3.png",
+        "J27/main/J27-s1-a4.png"
+      ],
+      "variantIds": [
+        "J27-discard-draft"
+      ],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J27",
+      "step": 2,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J27-s2-a1",
+        "J27-s2-a2",
+        "J27-s2-a3",
+        "J27-s2-a4",
+        "J27-s2-a5"
+      ],
+      "evidenceFrames": [
+        "J27/main/J27-s2-a1.png",
+        "J27/main/J27-s2-a2.png",
+        "J27/main/J27-s2-a3.png",
+        "J27/main/J27-s2-a4.png",
+        "J27/main/J27-s2-a5.png"
+      ],
+      "variantIds": [
+        "J27-discard-draft"
+      ],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J27",
+      "step": 3,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J27-s3-a1",
+        "J27-s3-a2",
+        "J27-s3-a3"
+      ],
+      "evidenceFrames": [
+        "J27/main/J27-s3-a1.png",
+        "J27/main/J27-s3-a2.png",
+        "J27/main/J27-s3-a3.png"
+      ],
+      "variantIds": [],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J27",
+      "step": 4,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J27-s4-a1",
+        "J27-s4-a2"
+      ],
+      "evidenceFrames": [
+        "J27/main/J27-s4-a1.png",
+        "J27/main/J27-s4-a2.png"
+      ],
+      "variantIds": [],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J27",
+      "step": 5,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J27-s5-a1",
+        "J27-s5-a2",
+        "J27-s5-a3"
+      ],
+      "evidenceFrames": [
+        "J27/main/J27-s5-a1.png",
+        "J27/main/J27-s5-a2.png",
+        "J27/main/J27-s5-a3.png"
+      ],
+      "variantIds": [],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J28",
+      "step": 1,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J28-s1-a1",
+        "J28-s1-a2"
+      ],
+      "evidenceFrames": [
+        "J28/main/J28-s1-a1.png",
+        "J28/main/J28-s1-a2.png"
+      ],
+      "variantIds": [
+        "J28-destination-failure",
+        "J28-unknown-confirmed-uncommitted",
+        "J28-status-created-existing",
+        "J28-status-unavailable",
+        "J28-discard-confirmed-uncommitted"
+      ],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J28",
+      "step": 2,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J28-s2-a1",
+        "J28-s2-a2",
+        "J28-s2-a3"
+      ],
+      "evidenceFrames": [
+        "J28/main/J28-s2-a1.png",
+        "J28/main/J28-s2-a2.png",
+        "J28/main/J28-s2-a3.png"
+      ],
+      "variantIds": [
+        "J28-destination-failure",
+        "J28-unknown-confirmed-uncommitted",
+        "J28-status-created-existing",
+        "J28-status-unavailable",
+        "J28-discard-confirmed-uncommitted"
+      ],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J28",
+      "step": 3,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J28-s3-a1",
+        "J28-s3-a2",
+        "J28-s3-a3",
+        "J28-s3-a4",
+        "J28-s3-a5"
+      ],
+      "evidenceFrames": [
+        "J28/main/J28-s3-a1.png",
+        "J28/main/J28-s3-a2.png",
+        "J28/main/J28-s3-a3.png",
+        "J28/main/J28-s3-a4.png",
+        "J28/main/J28-s3-a5.png"
+      ],
+      "variantIds": [
+        "J28-unknown-confirmed-uncommitted"
+      ],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J28",
+      "step": 4,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J28-s4-a1",
+        "J28-s4-a2",
+        "J28-s4-a3",
+        "J28-s4-a4",
+        "J28-s4-a5"
+      ],
+      "evidenceFrames": [
+        "J28/main/J28-s4-a1.png",
+        "J28/main/J28-s4-a2.png",
+        "J28/main/J28-s4-a3.png",
+        "J28/main/J28-s4-a4.png",
+        "J28/main/J28-s4-a5.png"
+      ],
+      "variantIds": [],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J28",
+      "step": 5,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J28-s5-a1",
+        "J28-s5-a2",
+        "J28-s5-a3"
+      ],
+      "evidenceFrames": [
+        "J28/main/J28-s5-a1.png",
+        "J28/main/J28-s5-a2.png",
+        "J28/main/J28-s5-a3.png"
+      ],
+      "variantIds": [],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J28",
+      "step": 6,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J28-s6-a1",
+        "J28-s6-a2"
+      ],
+      "evidenceFrames": [
+        "J28/main/J28-s6-a1.png",
+        "J28/main/J28-s6-a2.png"
+      ],
+      "variantIds": [],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J29",
+      "step": 1,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J29-s1-a1",
+        "J29-s1-a2"
+      ],
+      "evidenceFrames": [
+        "J29/main/J29-s1-a1.png",
+        "J29/main/J29-s1-a2.png"
+      ],
+      "variantIds": [
+        "J29-unsupported-word-seek",
+        "J29-unavailable-segment"
+      ],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J29",
+      "step": 2,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J29-s2-a1",
+        "J29-s2-a2",
+        "J29-s2-a3",
+        "J29-s2-a4"
+      ],
+      "evidenceFrames": [
+        "J29/main/J29-s2-a1.png",
+        "J29/main/J29-s2-a2.png",
+        "J29/main/J29-s2-a3.png",
+        "J29/main/J29-s2-a4.png"
+      ],
+      "variantIds": [
+        "J29-unsupported-word-seek",
+        "J29-unavailable-segment"
+      ],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J29",
+      "step": 3,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J29-s3-a1",
+        "J29-s3-a2",
+        "J29-s3-a3"
+      ],
+      "evidenceFrames": [
+        "J29/main/J29-s3-a1.png",
+        "J29/main/J29-s3-a2.png",
+        "J29/main/J29-s3-a3.png"
+      ],
+      "variantIds": [],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J29",
+      "step": 4,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J29-s4-a1",
+        "J29-s4-a2",
+        "J29-s4-a3"
+      ],
+      "evidenceFrames": [
+        "J29/main/J29-s4-a1.png",
+        "J29/main/J29-s4-a2.png",
+        "J29/main/J29-s4-a3.png"
+      ],
+      "variantIds": [],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J29",
+      "step": 5,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J29-s5-a1",
+        "J29-s5-a2",
+        "J29-s5-a3"
+      ],
+      "evidenceFrames": [
+        "J29/main/J29-s5-a1.png",
+        "J29/main/J29-s5-a2.png",
+        "J29/main/J29-s5-a3.png"
+      ],
+      "variantIds": [],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J30",
+      "step": 1,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J30-s1-a1",
+        "J30-s1-a2"
+      ],
+      "evidenceFrames": [
+        "J30/main/J30-s1-a1.png",
+        "J30/main/J30-s1-a2.png"
+      ],
+      "variantIds": [
+        "J30-ten-paths"
+      ],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J30",
+      "step": 2,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J30-s2-a1",
+        "J30-s2-a2",
+        "J30-s2-a3"
+      ],
+      "evidenceFrames": [
+        "J30/main/J30-s2-a1.png",
+        "J30/main/J30-s2-a2.png",
+        "J30/main/J30-s2-a3.png"
+      ],
+      "variantIds": [
+        "J30-ten-paths"
+      ],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J30",
+      "step": 3,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J30-s3-a1",
+        "J30-s3-a2",
+        "J30-s3-a3",
+        "J30-s3-a4",
+        "J30-s3-a5",
+        "J30-s3-a6"
+      ],
+      "evidenceFrames": [
+        "J30/main/J30-s3-a1.png",
+        "J30/main/J30-s3-a2.png",
+        "J30/main/J30-s3-a3.png",
+        "J30/main/J30-s3-a4.png",
+        "J30/main/J30-s3-a5.png",
+        "J30/main/J30-s3-a6.png"
+      ],
+      "variantIds": [
+        "J30-ten-paths"
+      ],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J30",
+      "step": 4,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J30-s4-a1",
+        "J30-s4-a2"
+      ],
+      "evidenceFrames": [
+        "J30/main/J30-s4-a1.png",
+        "J30/main/J30-s4-a2.png"
+      ],
+      "variantIds": [],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J30",
+      "step": 5,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J30-s5-a1",
+        "J30-s5-a2",
+        "J30-s5-a3"
+      ],
+      "evidenceFrames": [
+        "J30/main/J30-s5-a1.png",
+        "J30/main/J30-s5-a2.png",
+        "J30/main/J30-s5-a3.png"
+      ],
+      "variantIds": [],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J30",
+      "step": 6,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J30-s6-a1",
+        "J30-s6-a2",
+        "J30-s6-a3"
+      ],
+      "evidenceFrames": [
+        "J30/main/J30-s6-a1.png",
+        "J30/main/J30-s6-a2.png",
+        "J30/main/J30-s6-a3.png"
+      ],
+      "variantIds": [],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J30",
+      "step": 7,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J30-s7-a1",
+        "J30-s7-a2",
+        "J30-s7-a3",
+        "J30-s7-a4",
+        "J30-s7-a5"
+      ],
+      "evidenceFrames": [
+        "J30/main/J30-s7-a1.png",
+        "J30/main/J30-s7-a2.png",
+        "J30/main/J30-s7-a3.png",
+        "J30/main/J30-s7-a4.png",
+        "J30/main/J30-s7-a5.png"
+      ],
+      "variantIds": [],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J31",
+      "step": 1,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J31-s1-a1",
+        "J31-s1-a2"
+      ],
+      "evidenceFrames": [
+        "J31/main/J31-s1-a1.png",
+        "J31/main/J31-s1-a2.png"
+      ],
+      "variantIds": [
+        "J31-unavailable-source",
+        "J31-choose-new-base",
+        "J31-recovery-unknown-created",
+        "J31-invalid-author-destination",
+        "J31-recovery-confirmed-uncommitted",
+        "J31-recovery-status-unavailable"
+      ],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J31",
+      "step": 2,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J31-s2-a1",
+        "J31-s2-a2"
+      ],
+      "evidenceFrames": [
+        "J31/main/J31-s2-a1.png",
+        "J31/main/J31-s2-a2.png"
+      ],
+      "variantIds": [
+        "J31-unavailable-source",
+        "J31-choose-new-base",
+        "J31-recovery-unknown-created",
+        "J31-invalid-author-destination",
+        "J31-recovery-confirmed-uncommitted",
+        "J31-recovery-status-unavailable"
+      ],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J31",
+      "step": 3,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J31-s3-a1",
+        "J31-s3-a2"
+      ],
+      "evidenceFrames": [
+        "J31/main/J31-s3-a1.png",
+        "J31/main/J31-s3-a2.png"
+      ],
+      "variantIds": [
+        "J31-unavailable-source",
+        "J31-choose-new-base",
+        "J31-recovery-unknown-created",
+        "J31-invalid-author-destination",
+        "J31-recovery-confirmed-uncommitted",
+        "J31-recovery-status-unavailable"
+      ],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J31",
+      "step": 4,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J31-s4-a1",
+        "J31-s4-a2",
+        "J31-s4-a3",
+        "J31-s4-a4",
+        "J31-s4-a5"
+      ],
+      "evidenceFrames": [
+        "J31/main/J31-s4-a1.png",
+        "J31/main/J31-s4-a2.png",
+        "J31/main/J31-s4-a3.png",
+        "J31/main/J31-s4-a4.png",
+        "J31/main/J31-s4-a5.png"
+      ],
+      "variantIds": [
+        "J31-invalid-author-destination",
+        "J31-recovery-confirmed-uncommitted"
+      ],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J31",
+      "step": 5,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J31-s5-a1",
+        "J31-s5-a2",
+        "J31-s5-a3"
+      ],
+      "evidenceFrames": [
+        "J31/main/J31-s5-a1.png",
+        "J31/main/J31-s5-a2.png",
+        "J31/main/J31-s5-a3.png"
+      ],
+      "variantIds": [],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J31",
+      "step": 6,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J31-s6-a1",
+        "J31-s6-a2"
+      ],
+      "evidenceFrames": [
+        "J31/main/J31-s6-a1.png",
+        "J31/main/J31-s6-a2.png"
+      ],
+      "variantIds": [],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J32",
+      "step": 1,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J32-s1-a1",
+        "J32-s1-a2"
+      ],
+      "evidenceFrames": [
+        "J32/main/J32-s1-a1.png",
+        "J32/main/J32-s1-a2.png"
+      ],
+      "variantIds": [
+        "J32-repair-session",
+        "J32-cancel-request"
+      ],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J32",
+      "step": 2,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J32-s2-a1",
+        "J32-s2-a2",
+        "J32-s2-a3"
+      ],
+      "evidenceFrames": [
+        "J32/main/J32-s2-a1.png",
+        "J32/main/J32-s2-a2.png",
+        "J32/main/J32-s2-a3.png"
+      ],
+      "variantIds": [
+        "J32-repair-session",
+        "J32-cancel-request"
+      ],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J32",
+      "step": 3,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J32-s3-a1",
+        "J32-s3-a2",
+        "J32-s3-a3",
+        "J32-s3-a4"
+      ],
+      "evidenceFrames": [
+        "J32/main/J32-s3-a1.png",
+        "J32/main/J32-s3-a2.png",
+        "J32/main/J32-s3-a3.png",
+        "J32/main/J32-s3-a4.png"
+      ],
+      "variantIds": [
+        "J32-repair-session",
+        "J32-cancel-request"
+      ],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J32",
+      "step": 4,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J32-s4-a1",
+        "J32-s4-a2",
+        "J32-s4-a3"
+      ],
+      "evidenceFrames": [
+        "J32/main/J32-s4-a1.png",
+        "J32/main/J32-s4-a2.png",
+        "J32/main/J32-s4-a3.png"
+      ],
+      "variantIds": [],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J32",
+      "step": 5,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J32-s5-a1",
+        "J32-s5-a2",
+        "J32-s5-a3"
+      ],
+      "evidenceFrames": [
+        "J32/main/J32-s5-a1.png",
+        "J32/main/J32-s5-a2.png",
+        "J32/main/J32-s5-a3.png"
+      ],
+      "variantIds": [],
+      "findingIds": []
+    },
+    {
+      "journeyId": "J32",
+      "step": 6,
+      "status": "Concept supported",
+      "coveredActionIds": [
+        "J32-s6-a1",
+        "J32-s6-a2",
+        "J32-s6-a3",
+        "J32-s6-a4",
+        "J32-s6-a5",
+        "J32-s6-a6"
+      ],
+      "evidenceFrames": [
+        "J32/main/J32-s6-a1.png",
+        "J32/main/J32-s6-a2.png",
+        "J32/main/J32-s6-a3.png",
+        "J32/main/J32-s6-a4.png",
+        "J32/main/J32-s6-a5.png",
+        "J32/main/J32-s6-a6.png"
+      ],
+      "variantIds": [],
+      "findingIds": []
+    }
+  ],
+  "variants": [
+    {
+      "journeyId": "J27",
+      "variantId": "J27-discard-draft",
+      "status": "Concept supported",
+      "actionCount": 1,
+      "frames": [
+        "J27-discard-draft/J27-discard-draft-a1.png",
+        "J27-discard-draft/before.png"
+      ],
+      "runtimeErrors": [],
+      "step": 5,
+      "coveredActionIds": [
+        "J27-discard-draft-a1"
+      ],
+      "negativeAlternative": "Discard draft without changing its source material"
+    },
+    {
+      "journeyId": "J28",
+      "variantId": "J28-destination-failure",
+      "status": "Concept supported",
+      "actionCount": 2,
+      "frames": [
+        "J28-destination-failure/J28-destination-failure-a1.png",
+        "J28-destination-failure/J28-destination-failure-a2.png",
+        "J28-destination-failure/before.png"
+      ],
+      "runtimeErrors": [],
+      "step": 2,
+      "coveredActionIds": [
+        "J28-destination-failure-a1",
+        "J28-destination-failure-a2"
+      ],
+      "negativeAlternative": "Destination/base validation fails while source reference is valid"
+    },
+    {
+      "journeyId": "J28",
+      "variantId": "J28-unknown-confirmed-uncommitted",
+      "status": "Concept supported",
+      "actionCount": 3,
+      "frames": [
+        "J28-unknown-confirmed-uncommitted/J28-unknown-confirmed-uncommitted-a1.png",
+        "J28-unknown-confirmed-uncommitted/J28-unknown-confirmed-uncommitted-a2.png",
+        "J28-unknown-confirmed-uncommitted/J28-unknown-confirmed-uncommitted-a3.png",
+        "J28-unknown-confirmed-uncommitted/before.png"
+      ],
+      "runtimeErrors": [],
+      "step": 5,
+      "coveredActionIds": [
+        "J28-unknown-confirmed-uncommitted-a1",
+        "J28-unknown-confirmed-uncommitted-a2",
+        "J28-unknown-confirmed-uncommitted-a3"
+      ],
+      "negativeAlternative": "Unknown reply; status confirms uncommitted and same-token retry is safe"
+    },
+    {
+      "journeyId": "J28",
+      "variantId": "J28-status-created-existing",
+      "status": "Concept supported",
+      "actionCount": 2,
+      "frames": [
+        "J28-status-created-existing/J28-status-created-existing-a1.png",
+        "J28-status-created-existing/J28-status-created-existing-a2.png",
+        "J28-status-created-existing/before.png"
+      ],
+      "runtimeErrors": [],
+      "step": 5,
+      "coveredActionIds": [
+        "J28-status-created-existing-a1",
+        "J28-status-created-existing-a2"
+      ],
+      "negativeAlternative": "Unknown reply; status finds already-created Link"
+    },
+    {
+      "journeyId": "J28",
+      "variantId": "J28-status-unavailable",
+      "status": "Concept supported",
+      "actionCount": 2,
+      "frames": [
+        "J28-status-unavailable/J28-status-unavailable-a1.png",
+        "J28-status-unavailable/J28-status-unavailable-a2.png",
+        "J28-status-unavailable/before.png"
+      ],
+      "runtimeErrors": [],
+      "step": 5,
+      "coveredActionIds": [
+        "J28-status-unavailable-a1",
+        "J28-status-unavailable-a2"
+      ],
+      "negativeAlternative": "Status service unavailable keeps unknown attempt blocked"
+    },
+    {
+      "journeyId": "J28",
+      "variantId": "J28-discard-confirmed-uncommitted",
+      "status": "Concept supported",
+      "actionCount": 2,
+      "frames": [
+        "J28-discard-confirmed-uncommitted/J28-discard-confirmed-uncommitted-a1.png",
+        "J28-discard-confirmed-uncommitted/J28-discard-confirmed-uncommitted-a2.png",
+        "J28-discard-confirmed-uncommitted/before.png"
+      ],
+      "runtimeErrors": [],
+      "step": 6,
+      "coveredActionIds": [
+        "J28-discard-confirmed-uncommitted-a1",
+        "J28-discard-confirmed-uncommitted-a2"
+      ],
+      "negativeAlternative": "Discard only after attempt resolves confirmed uncommitted"
+    },
+    {
+      "journeyId": "J29",
+      "variantId": "J29-unsupported-word-seek",
+      "status": "Concept supported",
+      "actionCount": 2,
+      "frames": [
+        "J29-unsupported-word-seek/J29-unsupported-word-seek-a1.png",
+        "J29-unsupported-word-seek/J29-unsupported-word-seek-a2.png",
+        "J29-unsupported-word-seek/before.png"
+      ],
+      "runtimeErrors": [],
+      "step": 4,
+      "coveredActionIds": [
+        "J29-unsupported-word-seek-a1",
+        "J29-unsupported-word-seek-a2"
+      ],
+      "negativeAlternative": "Transcript word lacks supported seek basis"
+    },
+    {
+      "journeyId": "J29",
+      "variantId": "J29-unavailable-segment",
+      "status": "Concept supported",
+      "actionCount": 2,
+      "frames": [
+        "J29-unavailable-segment/J29-unavailable-segment-a1.png",
+        "J29-unavailable-segment/J29-unavailable-segment-a2.png",
+        "J29-unavailable-segment/before.png"
+      ],
+      "runtimeErrors": [],
+      "step": 4,
+      "coveredActionIds": [
+        "J29-unavailable-segment-a1",
+        "J29-unavailable-segment-a2"
+      ],
+      "negativeAlternative": "Unavailable media segment and exact retry"
+    },
+    {
+      "journeyId": "J30",
+      "variantId": "J30-ten-paths",
+      "status": "Concept supported",
+      "actionCount": 2,
+      "frames": [
+        "J30-ten-paths/J30-ten-paths-a1.png",
+        "J30-ten-paths/J30-ten-paths-a2.png",
+        "J30-ten-paths/before.png"
+      ],
+      "runtimeErrors": [],
+      "step": 1,
+      "coveredActionIds": [
+        "J30-ten-paths-a1",
+        "J30-ten-paths-a2"
+      ],
+      "negativeAlternative": "Inspect distinct ten-path branch fixture and counted exits"
+    },
+    {
+      "journeyId": "J31",
+      "variantId": "J31-unavailable-source",
+      "status": "Concept supported",
+      "actionCount": 2,
+      "frames": [
+        "J31-unavailable-source/J31-unavailable-source-a1.png",
+        "J31-unavailable-source/J31-unavailable-source-a2.png",
+        "J31-unavailable-source/before.png"
+      ],
+      "runtimeErrors": [],
+      "step": 4,
+      "coveredActionIds": [
+        "J31-unavailable-source-a1",
+        "J31-unavailable-source-a2"
+      ],
+      "negativeAlternative": "Unavailable historical source and exact retry"
+    },
+    {
+      "journeyId": "J31",
+      "variantId": "J31-choose-new-base",
+      "status": "Concept supported",
+      "actionCount": 3,
+      "frames": [
+        "J31-choose-new-base/J31-choose-new-base-a1.png",
+        "J31-choose-new-base/J31-choose-new-base-a2.png",
+        "J31-choose-new-base/J31-choose-new-base-a3.png",
+        "J31-choose-new-base/before.png"
+      ],
+      "runtimeErrors": [],
+      "step": 4,
+      "coveredActionIds": [
+        "J31-choose-new-base-a1",
+        "J31-choose-new-base-a2",
+        "J31-choose-new-base-a3"
+      ],
+      "negativeAlternative": "Head advances; explicitly review a new V41 base"
+    },
+    {
+      "journeyId": "J31",
+      "variantId": "J31-recovery-unknown-created",
+      "status": "Concept supported",
+      "actionCount": 2,
+      "frames": [
+        "J31-recovery-unknown-created/J31-recovery-unknown-created-a1.png",
+        "J31-recovery-unknown-created/J31-recovery-unknown-created-a2.png",
+        "J31-recovery-unknown-created/before.png"
+      ],
+      "runtimeErrors": [],
+      "step": 5,
+      "coveredActionIds": [
+        "J31-recovery-unknown-created-a1",
+        "J31-recovery-unknown-created-a2"
+      ],
+      "negativeAlternative": "Lost reply reconciles to the existing recovery receipt"
+    },
+    {
+      "journeyId": "J31",
+      "variantId": "J31-invalid-author-destination",
+      "status": "Concept supported",
+      "actionCount": 4,
+      "frames": [
+        "J31-invalid-author-destination/J31-invalid-author-destination-a1.png",
+        "J31-invalid-author-destination/J31-invalid-author-destination-a2.png",
+        "J31-invalid-author-destination/J31-invalid-author-destination-a3.png",
+        "J31-invalid-author-destination/J31-invalid-author-destination-a4.png",
+        "J31-invalid-author-destination/before.png"
+      ],
+      "runtimeErrors": [],
+      "step": 5,
+      "coveredActionIds": [
+        "J31-invalid-author-destination-a1",
+        "J31-invalid-author-destination-a2",
+        "J31-invalid-author-destination-a3",
+        "J31-invalid-author-destination-a4"
+      ],
+      "negativeAlternative": "Invalid author and receiving destination block commit"
+    },
+    {
+      "journeyId": "J31",
+      "variantId": "J31-recovery-confirmed-uncommitted",
+      "status": "Concept supported",
+      "actionCount": 4,
+      "frames": [
+        "J31-recovery-confirmed-uncommitted/J31-recovery-confirmed-uncommitted-a1.png",
+        "J31-recovery-confirmed-uncommitted/J31-recovery-confirmed-uncommitted-a2.png",
+        "J31-recovery-confirmed-uncommitted/J31-recovery-confirmed-uncommitted-a3.png",
+        "J31-recovery-confirmed-uncommitted/J31-recovery-confirmed-uncommitted-a4.png",
+        "J31-recovery-confirmed-uncommitted/before.png"
+      ],
+      "runtimeErrors": [],
+      "step": 5,
+      "coveredActionIds": [
+        "J31-recovery-confirmed-uncommitted-a1",
+        "J31-recovery-confirmed-uncommitted-a2",
+        "J31-recovery-confirmed-uncommitted-a3",
+        "J31-recovery-confirmed-uncommitted-a4"
+      ],
+      "negativeAlternative": "Unknown recovery attempt resolves uncommitted and retries safely"
+    },
+    {
+      "journeyId": "J31",
+      "variantId": "J31-recovery-status-unavailable",
+      "status": "Concept supported",
+      "actionCount": 2,
+      "frames": [
+        "J31-recovery-status-unavailable/J31-recovery-status-unavailable-a1.png",
+        "J31-recovery-status-unavailable/J31-recovery-status-unavailable-a2.png",
+        "J31-recovery-status-unavailable/before.png"
+      ],
+      "runtimeErrors": [],
+      "step": 5,
+      "coveredActionIds": [
+        "J31-recovery-status-unavailable-a1",
+        "J31-recovery-status-unavailable-a2"
+      ],
+      "negativeAlternative": "Unavailable status keeps recovery attempt blocked"
+    },
+    {
+      "journeyId": "J32",
+      "variantId": "J32-repair-session",
+      "status": "Concept supported",
+      "actionCount": 3,
+      "frames": [
+        "J32-repair-session/J32-repair-session-a1.png",
+        "J32-repair-session/J32-repair-session-a2.png",
+        "J32-repair-session/J32-repair-session-a3.png",
+        "J32-repair-session/before.png"
+      ],
+      "runtimeErrors": [],
+      "step": 5,
+      "coveredActionIds": [
+        "J32-repair-session-a1",
+        "J32-repair-session-a2",
+        "J32-repair-session-a3"
+      ],
+      "negativeAlternative": "Preserve and repair unreadable reader session from exact copy"
+    },
+    {
+      "journeyId": "J32",
+      "variantId": "J32-cancel-request",
+      "status": "Concept supported",
+      "actionCount": 2,
+      "frames": [
+        "J32-cancel-request/J32-cancel-request-a1.png",
+        "J32-cancel-request/J32-cancel-request-a2.png",
+        "J32-cancel-request/before.png"
+      ],
+      "runtimeErrors": [],
+      "step": 5,
+      "coveredActionIds": [
+        "J32-cancel-request-a1",
+        "J32-cancel-request-a2"
+      ],
+      "negativeAlternative": "Cancelled request remains partial and separately saveable"
+    }
+  ],
+  "crossChecks": [
+    {
+      "journeyId": "J27",
+      "check": "keyboard",
+      "status": "Captured with limitation",
+      "observed": "Native Tab/Enter delivery captured for this journey; prototype only.",
+      "evidence": "J27/keyboard.png"
+    },
+    {
+      "journeyId": "J27",
+      "check": "synchronized-list",
+      "status": "Captured with limitation",
+      "observed": "List selection and same-frame state captured.",
+      "evidence": "J27/list.png"
+    },
+    {
+      "journeyId": "J27",
+      "check": "accessibility-tree",
+      "status": "Captured with limitation",
+      "observed": "Static browser tree; no assistive technology test.",
+      "evidence": "J27/accessibility-tree.json"
+    },
+    {
+      "journeyId": "J27",
+      "check": "narrow-layout",
+      "status": "Captured with limitation",
+      "observed": "390 px viewport capture and reading identity.",
+      "evidence": "J27/narrow-large.png"
+    },
+    {
+      "journeyId": "J27",
+      "check": "enlarged-text",
+      "status": "Captured with limitation",
+      "observed": "Combined narrow/enlarged capture reviewed.",
+      "evidence": "J27/narrow-large.png"
+    },
+    {
+      "journeyId": "J27",
+      "check": "reduced-motion",
+      "status": "Captured with limitation",
+      "observed": "Reduced-motion capture reviewed.",
+      "evidence": "J27/reduced-motion.png"
+    },
+    {
+      "journeyId": "J27",
+      "check": "optics",
+      "status": "Captured with limitation",
+      "observed": "Computed contrast values are native prototype measurements only.",
+      "evidence": "run.json"
+    },
+    {
+      "journeyId": "J27",
+      "check": "pointer",
+      "status": "Captured with limitation",
+      "observed": "DOM named-action click delivery; gesture picking not implemented by this engine.",
+      "evidence": "J27/main/trace.json"
+    },
+    {
+      "journeyId": "J27",
+      "check": "lifecycle",
+      "status": "Captured with limitation",
+      "observed": "Base and alternate routes are scripted snapshots.",
+      "evidence": "J27/main/trace.json"
+    },
+    {
+      "journeyId": "J27",
+      "check": "source-storage-effects",
+      "status": "Captured with limitation",
+      "observed": "Fixture traces record immutable sourceOps and reader visit deltas; not production proof.",
+      "evidence": "J27/main/trace.json"
+    },
+    {
+      "journeyId": "J27",
+      "check": "typed-relations",
+      "status": "Captured with limitation",
+      "observed": "Exact descriptors and relation state are visible in captured journey states.",
+      "evidence": "J27/main/trace.json"
+    },
+    {
+      "journeyId": "J28",
+      "check": "keyboard",
+      "status": "Captured with limitation",
+      "observed": "Native Tab/Enter delivery captured for this journey; prototype only.",
+      "evidence": "J28/keyboard.png"
+    },
+    {
+      "journeyId": "J28",
+      "check": "synchronized-list",
+      "status": "Captured with limitation",
+      "observed": "List selection and same-frame state captured.",
+      "evidence": "J28/list.png"
+    },
+    {
+      "journeyId": "J28",
+      "check": "accessibility-tree",
+      "status": "Captured with limitation",
+      "observed": "Static browser tree; no assistive technology test.",
+      "evidence": "J28/accessibility-tree.json"
+    },
+    {
+      "journeyId": "J28",
+      "check": "narrow-layout",
+      "status": "Captured with limitation",
+      "observed": "390 px viewport capture and reading identity.",
+      "evidence": "J28/narrow-large.png"
+    },
+    {
+      "journeyId": "J28",
+      "check": "enlarged-text",
+      "status": "Captured with limitation",
+      "observed": "Combined narrow/enlarged capture reviewed.",
+      "evidence": "J28/narrow-large.png"
+    },
+    {
+      "journeyId": "J28",
+      "check": "reduced-motion",
+      "status": "Captured with limitation",
+      "observed": "Reduced-motion capture reviewed.",
+      "evidence": "J28/reduced-motion.png"
+    },
+    {
+      "journeyId": "J28",
+      "check": "optics",
+      "status": "Captured with limitation",
+      "observed": "Computed contrast values are native prototype measurements only.",
+      "evidence": "run.json"
+    },
+    {
+      "journeyId": "J28",
+      "check": "pointer",
+      "status": "Captured with limitation",
+      "observed": "DOM named-action click delivery; gesture picking not implemented by this engine.",
+      "evidence": "J28/main/trace.json"
+    },
+    {
+      "journeyId": "J28",
+      "check": "lifecycle",
+      "status": "Captured with limitation",
+      "observed": "Base and alternate routes are scripted snapshots.",
+      "evidence": "J28/main/trace.json"
+    },
+    {
+      "journeyId": "J28",
+      "check": "source-storage-effects",
+      "status": "Captured with limitation",
+      "observed": "Fixture traces record immutable sourceOps and reader visit deltas; not production proof.",
+      "evidence": "J28/main/trace.json"
+    },
+    {
+      "journeyId": "J28",
+      "check": "typed-relations",
+      "status": "Captured with limitation",
+      "observed": "Exact descriptors and relation state are visible in captured journey states.",
+      "evidence": "J28/main/trace.json"
+    },
+    {
+      "journeyId": "J29",
+      "check": "keyboard",
+      "status": "Captured with limitation",
+      "observed": "Native Tab/Enter delivery captured for this journey; prototype only.",
+      "evidence": "J29/keyboard.png"
+    },
+    {
+      "journeyId": "J29",
+      "check": "synchronized-list",
+      "status": "Captured with limitation",
+      "observed": "List selection and same-frame state captured.",
+      "evidence": "J29/list.png"
+    },
+    {
+      "journeyId": "J29",
+      "check": "accessibility-tree",
+      "status": "Captured with limitation",
+      "observed": "Static browser tree; no assistive technology test.",
+      "evidence": "J29/accessibility-tree.json"
+    },
+    {
+      "journeyId": "J29",
+      "check": "narrow-layout",
+      "status": "Captured with limitation",
+      "observed": "390 px viewport capture and reading identity.",
+      "evidence": "J29/narrow-large.png"
+    },
+    {
+      "journeyId": "J29",
+      "check": "enlarged-text",
+      "status": "Captured with limitation",
+      "observed": "Combined narrow/enlarged capture reviewed.",
+      "evidence": "J29/narrow-large.png"
+    },
+    {
+      "journeyId": "J29",
+      "check": "reduced-motion",
+      "status": "Captured with limitation",
+      "observed": "Reduced-motion capture reviewed.",
+      "evidence": "J29/reduced-motion.png"
+    },
+    {
+      "journeyId": "J29",
+      "check": "optics",
+      "status": "Captured with limitation",
+      "observed": "Computed contrast values are native prototype measurements only.",
+      "evidence": "run.json"
+    },
+    {
+      "journeyId": "J29",
+      "check": "pointer",
+      "status": "Captured with limitation",
+      "observed": "DOM named-action click delivery; gesture picking not implemented by this engine.",
+      "evidence": "J29/main/trace.json"
+    },
+    {
+      "journeyId": "J29",
+      "check": "lifecycle",
+      "status": "Captured with limitation",
+      "observed": "Base and alternate routes are scripted snapshots.",
+      "evidence": "J29/main/trace.json"
+    },
+    {
+      "journeyId": "J29",
+      "check": "source-storage-effects",
+      "status": "Captured with limitation",
+      "observed": "Fixture traces record immutable sourceOps and reader visit deltas; not production proof.",
+      "evidence": "J29/main/trace.json"
+    },
+    {
+      "journeyId": "J29",
+      "check": "typed-relations",
+      "status": "Captured with limitation",
+      "observed": "Exact descriptors and relation state are visible in captured journey states.",
+      "evidence": "J29/main/trace.json"
+    },
+    {
+      "journeyId": "J30",
+      "check": "keyboard",
+      "status": "Captured with limitation",
+      "observed": "Native Tab/Enter delivery captured for this journey; prototype only.",
+      "evidence": "J30/keyboard.png"
+    },
+    {
+      "journeyId": "J30",
+      "check": "synchronized-list",
+      "status": "Captured with limitation",
+      "observed": "List selection and same-frame state captured.",
+      "evidence": "J30/list.png"
+    },
+    {
+      "journeyId": "J30",
+      "check": "accessibility-tree",
+      "status": "Captured with limitation",
+      "observed": "Static browser tree; no assistive technology test.",
+      "evidence": "J30/accessibility-tree.json"
+    },
+    {
+      "journeyId": "J30",
+      "check": "narrow-layout",
+      "status": "Captured with limitation",
+      "observed": "390 px viewport capture and reading identity.",
+      "evidence": "J30/narrow-large.png"
+    },
+    {
+      "journeyId": "J30",
+      "check": "enlarged-text",
+      "status": "Captured with limitation",
+      "observed": "Combined narrow/enlarged capture reviewed.",
+      "evidence": "J30/narrow-large.png"
+    },
+    {
+      "journeyId": "J30",
+      "check": "reduced-motion",
+      "status": "Captured with limitation",
+      "observed": "Reduced-motion capture reviewed.",
+      "evidence": "J30/reduced-motion.png"
+    },
+    {
+      "journeyId": "J30",
+      "check": "optics",
+      "status": "Captured with limitation",
+      "observed": "Computed contrast values are native prototype measurements only.",
+      "evidence": "run.json"
+    },
+    {
+      "journeyId": "J30",
+      "check": "pointer",
+      "status": "Captured with limitation",
+      "observed": "DOM named-action click delivery; gesture picking not implemented by this engine.",
+      "evidence": "J30/main/trace.json"
+    },
+    {
+      "journeyId": "J30",
+      "check": "lifecycle",
+      "status": "Captured with limitation",
+      "observed": "Base and alternate routes are scripted snapshots.",
+      "evidence": "J30/main/trace.json"
+    },
+    {
+      "journeyId": "J30",
+      "check": "source-storage-effects",
+      "status": "Captured with limitation",
+      "observed": "Fixture traces record immutable sourceOps and reader visit deltas; not production proof.",
+      "evidence": "J30/main/trace.json"
+    },
+    {
+      "journeyId": "J30",
+      "check": "typed-relations",
+      "status": "Captured with limitation",
+      "observed": "Exact descriptors and relation state are visible in captured journey states.",
+      "evidence": "J30/main/trace.json"
+    },
+    {
+      "journeyId": "J31",
+      "check": "keyboard",
+      "status": "Captured with limitation",
+      "observed": "Native Tab/Enter delivery captured for this journey; prototype only.",
+      "evidence": "J31/keyboard.png"
+    },
+    {
+      "journeyId": "J31",
+      "check": "synchronized-list",
+      "status": "Captured with limitation",
+      "observed": "List selection and same-frame state captured.",
+      "evidence": "J31/list.png"
+    },
+    {
+      "journeyId": "J31",
+      "check": "accessibility-tree",
+      "status": "Captured with limitation",
+      "observed": "Static browser tree; no assistive technology test.",
+      "evidence": "J31/accessibility-tree.json"
+    },
+    {
+      "journeyId": "J31",
+      "check": "narrow-layout",
+      "status": "Captured with limitation",
+      "observed": "390 px viewport capture and reading identity.",
+      "evidence": "J31/narrow-large.png"
+    },
+    {
+      "journeyId": "J31",
+      "check": "enlarged-text",
+      "status": "Captured with limitation",
+      "observed": "Combined narrow/enlarged capture reviewed.",
+      "evidence": "J31/narrow-large.png"
+    },
+    {
+      "journeyId": "J31",
+      "check": "reduced-motion",
+      "status": "Captured with limitation",
+      "observed": "Reduced-motion capture reviewed.",
+      "evidence": "J31/reduced-motion.png"
+    },
+    {
+      "journeyId": "J31",
+      "check": "optics",
+      "status": "Captured with limitation",
+      "observed": "Computed contrast values are native prototype measurements only.",
+      "evidence": "run.json"
+    },
+    {
+      "journeyId": "J31",
+      "check": "pointer",
+      "status": "Captured with limitation",
+      "observed": "DOM named-action click delivery; gesture picking not implemented by this engine.",
+      "evidence": "J31/main/trace.json"
+    },
+    {
+      "journeyId": "J31",
+      "check": "lifecycle",
+      "status": "Captured with limitation",
+      "observed": "Base and alternate routes are scripted snapshots.",
+      "evidence": "J31/main/trace.json"
+    },
+    {
+      "journeyId": "J31",
+      "check": "source-storage-effects",
+      "status": "Captured with limitation",
+      "observed": "Fixture traces record immutable sourceOps and reader visit deltas; not production proof.",
+      "evidence": "J31/main/trace.json"
+    },
+    {
+      "journeyId": "J31",
+      "check": "typed-relations",
+      "status": "Captured with limitation",
+      "observed": "Exact descriptors and relation state are visible in captured journey states.",
+      "evidence": "J31/main/trace.json"
+    },
+    {
+      "journeyId": "J32",
+      "check": "keyboard",
+      "status": "Captured with limitation",
+      "observed": "Native Tab/Enter delivery captured for this journey; prototype only.",
+      "evidence": "J32/keyboard.png"
+    },
+    {
+      "journeyId": "J32",
+      "check": "synchronized-list",
+      "status": "Captured with limitation",
+      "observed": "List selection and same-frame state captured.",
+      "evidence": "J32/list.png"
+    },
+    {
+      "journeyId": "J32",
+      "check": "accessibility-tree",
+      "status": "Captured with limitation",
+      "observed": "Static browser tree; no assistive technology test.",
+      "evidence": "J32/accessibility-tree.json"
+    },
+    {
+      "journeyId": "J32",
+      "check": "narrow-layout",
+      "status": "Captured with limitation",
+      "observed": "390 px viewport capture and reading identity.",
+      "evidence": "J32/narrow-large.png"
+    },
+    {
+      "journeyId": "J32",
+      "check": "enlarged-text",
+      "status": "Captured with limitation",
+      "observed": "Combined narrow/enlarged capture reviewed.",
+      "evidence": "J32/narrow-large.png"
+    },
+    {
+      "journeyId": "J32",
+      "check": "reduced-motion",
+      "status": "Captured with limitation",
+      "observed": "Reduced-motion capture reviewed.",
+      "evidence": "J32/reduced-motion.png"
+    },
+    {
+      "journeyId": "J32",
+      "check": "optics",
+      "status": "Captured with limitation",
+      "observed": "Computed contrast values are native prototype measurements only.",
+      "evidence": "run.json"
+    },
+    {
+      "journeyId": "J32",
+      "check": "pointer",
+      "status": "Captured with limitation",
+      "observed": "DOM named-action click delivery; gesture picking not implemented by this engine.",
+      "evidence": "J32/main/trace.json"
+    },
+    {
+      "journeyId": "J32",
+      "check": "lifecycle",
+      "status": "Captured with limitation",
+      "observed": "Base and alternate routes are scripted snapshots.",
+      "evidence": "J32/main/trace.json"
+    },
+    {
+      "journeyId": "J32",
+      "check": "source-storage-effects",
+      "status": "Captured with limitation",
+      "observed": "Fixture traces record immutable sourceOps and reader visit deltas; not production proof.",
+      "evidence": "J32/main/trace.json"
+    },
+    {
+      "journeyId": "J32",
+      "check": "typed-relations",
+      "status": "Captured with limitation",
+      "observed": "Exact descriptors and relation state are visible in captured journey states.",
+      "evidence": "J32/main/trace.json"
+    }
+  ],
+  "inspectedAssets": [
+    "J27/J27-discard-draft/J27-discard-draft-a1.png",
+    "J27/J27-discard-draft/before.png",
+    "J27/keyboard.png",
+    "J27/list.png",
+    "J27/main/J27-s1-a1.png",
+    "J27/main/J27-s1-a2.png",
+    "J27/main/J27-s1-a3.png",
+    "J27/main/J27-s1-a4.png",
+    "J27/main/J27-s2-a1.png",
+    "J27/main/J27-s2-a2.png",
+    "J27/main/J27-s2-a3.png",
+    "J27/main/J27-s2-a4.png",
+    "J27/main/J27-s2-a5.png",
+    "J27/main/J27-s3-a1.png",
+    "J27/main/J27-s3-a2.png",
+    "J27/main/J27-s3-a3.png",
+    "J27/main/J27-s4-a1.png",
+    "J27/main/J27-s4-a2.png",
+    "J27/main/J27-s5-a1.png",
+    "J27/main/J27-s5-a2.png",
+    "J27/main/J27-s5-a3.png",
+    "J27/main/before.png",
+    "J27/narrow-large.png",
+    "J27/reduced-motion.png",
+    "J28/J28-destination-failure/J28-destination-failure-a1.png",
+    "J28/J28-destination-failure/J28-destination-failure-a2.png",
+    "J28/J28-destination-failure/before.png",
+    "J28/J28-discard-confirmed-uncommitted/J28-discard-confirmed-uncommitted-a1.png",
+    "J28/J28-discard-confirmed-uncommitted/J28-discard-confirmed-uncommitted-a2.png",
+    "J28/J28-discard-confirmed-uncommitted/before.png",
+    "J28/J28-status-created-existing/J28-status-created-existing-a1.png",
+    "J28/J28-status-created-existing/J28-status-created-existing-a2.png",
+    "J28/J28-status-created-existing/before.png",
+    "J28/J28-status-unavailable/J28-status-unavailable-a1.png",
+    "J28/J28-status-unavailable/J28-status-unavailable-a2.png",
+    "J28/J28-status-unavailable/before.png",
+    "J28/J28-unknown-confirmed-uncommitted/J28-unknown-confirmed-uncommitted-a1.png",
+    "J28/J28-unknown-confirmed-uncommitted/J28-unknown-confirmed-uncommitted-a2.png",
+    "J28/J28-unknown-confirmed-uncommitted/J28-unknown-confirmed-uncommitted-a3.png",
+    "J28/J28-unknown-confirmed-uncommitted/before.png",
+    "J28/inventory-0.png",
+    "J28/inventory-1.png",
+    "J28/keyboard.png",
+    "J28/list.png",
+    "J28/main/J28-s1-a1.png",
+    "J28/main/J28-s1-a2.png",
+    "J28/main/J28-s2-a1.png",
+    "J28/main/J28-s2-a2.png",
+    "J28/main/J28-s2-a3.png",
+    "J28/main/J28-s3-a1.png",
+    "J28/main/J28-s3-a2.png",
+    "J28/main/J28-s3-a3.png",
+    "J28/main/J28-s3-a4.png",
+    "J28/main/J28-s3-a5.png",
+    "J28/main/J28-s4-a1.png",
+    "J28/main/J28-s4-a2.png",
+    "J28/main/J28-s4-a3.png",
+    "J28/main/J28-s4-a4.png",
+    "J28/main/J28-s4-a5.png",
+    "J28/main/J28-s5-a1.png",
+    "J28/main/J28-s5-a2.png",
+    "J28/main/J28-s5-a3.png",
+    "J28/main/J28-s6-a1.png",
+    "J28/main/J28-s6-a2.png",
+    "J28/main/before.png",
+    "J28/narrow-large.png",
+    "J28/reduced-motion.png",
+    "J29/J29-unavailable-segment/J29-unavailable-segment-a1.png",
+    "J29/J29-unavailable-segment/J29-unavailable-segment-a2.png",
+    "J29/J29-unavailable-segment/before.png",
+    "J29/J29-unsupported-word-seek/J29-unsupported-word-seek-a1.png",
+    "J29/J29-unsupported-word-seek/J29-unsupported-word-seek-a2.png",
+    "J29/J29-unsupported-word-seek/before.png",
+    "J29/keyboard.png",
+    "J29/list.png",
+    "J29/main/J29-s1-a1.png",
+    "J29/main/J29-s1-a2.png",
+    "J29/main/J29-s2-a1.png",
+    "J29/main/J29-s2-a2.png",
+    "J29/main/J29-s2-a3.png",
+    "J29/main/J29-s2-a4.png",
+    "J29/main/J29-s3-a1.png",
+    "J29/main/J29-s3-a2.png",
+    "J29/main/J29-s3-a3.png",
+    "J29/main/J29-s4-a1.png",
+    "J29/main/J29-s4-a2.png",
+    "J29/main/J29-s4-a3.png",
+    "J29/main/J29-s5-a1.png",
+    "J29/main/J29-s5-a2.png",
+    "J29/main/J29-s5-a3.png",
+    "J29/main/before.png",
+    "J29/narrow-large.png",
+    "J29/reduced-motion.png",
+    "J30/J30-ten-paths/J30-ten-paths-a1.png",
+    "J30/J30-ten-paths/J30-ten-paths-a2.png",
+    "J30/J30-ten-paths/before.png",
+    "J30/inventory-0.png",
+    "J30/inventory-1.png",
+    "J30/keyboard.png",
+    "J30/list.png",
+    "J30/main/J30-s1-a1.png",
+    "J30/main/J30-s1-a2.png",
+    "J30/main/J30-s2-a1.png",
+    "J30/main/J30-s2-a2.png",
+    "J30/main/J30-s2-a3.png",
+    "J30/main/J30-s3-a1.png",
+    "J30/main/J30-s3-a2.png",
+    "J30/main/J30-s3-a3.png",
+    "J30/main/J30-s3-a4.png",
+    "J30/main/J30-s3-a5.png",
+    "J30/main/J30-s3-a6.png",
+    "J30/main/J30-s4-a1.png",
+    "J30/main/J30-s4-a2.png",
+    "J30/main/J30-s5-a1.png",
+    "J30/main/J30-s5-a2.png",
+    "J30/main/J30-s5-a3.png",
+    "J30/main/J30-s6-a1.png",
+    "J30/main/J30-s6-a2.png",
+    "J30/main/J30-s6-a3.png",
+    "J30/main/J30-s7-a1.png",
+    "J30/main/J30-s7-a2.png",
+    "J30/main/J30-s7-a3.png",
+    "J30/main/J30-s7-a4.png",
+    "J30/main/J30-s7-a5.png",
+    "J30/main/before.png",
+    "J30/narrow-large.png",
+    "J30/reduced-motion.png",
+    "J31/J31-choose-new-base/J31-choose-new-base-a1.png",
+    "J31/J31-choose-new-base/J31-choose-new-base-a2.png",
+    "J31/J31-choose-new-base/J31-choose-new-base-a3.png",
+    "J31/J31-choose-new-base/before.png",
+    "J31/J31-invalid-author-destination/J31-invalid-author-destination-a1.png",
+    "J31/J31-invalid-author-destination/J31-invalid-author-destination-a2.png",
+    "J31/J31-invalid-author-destination/J31-invalid-author-destination-a3.png",
+    "J31/J31-invalid-author-destination/J31-invalid-author-destination-a4.png",
+    "J31/J31-invalid-author-destination/before.png",
+    "J31/J31-recovery-confirmed-uncommitted/J31-recovery-confirmed-uncommitted-a1.png",
+    "J31/J31-recovery-confirmed-uncommitted/J31-recovery-confirmed-uncommitted-a2.png",
+    "J31/J31-recovery-confirmed-uncommitted/J31-recovery-confirmed-uncommitted-a3.png",
+    "J31/J31-recovery-confirmed-uncommitted/J31-recovery-confirmed-uncommitted-a4.png",
+    "J31/J31-recovery-confirmed-uncommitted/before.png",
+    "J31/J31-recovery-status-unavailable/J31-recovery-status-unavailable-a1.png",
+    "J31/J31-recovery-status-unavailable/J31-recovery-status-unavailable-a2.png",
+    "J31/J31-recovery-status-unavailable/before.png",
+    "J31/J31-recovery-unknown-created/J31-recovery-unknown-created-a1.png",
+    "J31/J31-recovery-unknown-created/J31-recovery-unknown-created-a2.png",
+    "J31/J31-recovery-unknown-created/before.png",
+    "J31/J31-unavailable-source/J31-unavailable-source-a1.png",
+    "J31/J31-unavailable-source/J31-unavailable-source-a2.png",
+    "J31/J31-unavailable-source/before.png",
+    "J31/keyboard.png",
+    "J31/list.png",
+    "J31/main/J31-s1-a1.png",
+    "J31/main/J31-s1-a2.png",
+    "J31/main/J31-s2-a1.png",
+    "J31/main/J31-s2-a2.png",
+    "J31/main/J31-s3-a1.png",
+    "J31/main/J31-s3-a2.png",
+    "J31/main/J31-s4-a1.png",
+    "J31/main/J31-s4-a2.png",
+    "J31/main/J31-s4-a3.png",
+    "J31/main/J31-s4-a4.png",
+    "J31/main/J31-s4-a5.png",
+    "J31/main/J31-s5-a1.png",
+    "J31/main/J31-s5-a2.png",
+    "J31/main/J31-s5-a3.png",
+    "J31/main/J31-s6-a1.png",
+    "J31/main/J31-s6-a2.png",
+    "J31/main/before.png",
+    "J31/narrow-large.png",
+    "J31/reduced-motion.png",
+    "J32/J32-cancel-request/J32-cancel-request-a1.png",
+    "J32/J32-cancel-request/J32-cancel-request-a2.png",
+    "J32/J32-cancel-request/before.png",
+    "J32/J32-repair-session/J32-repair-session-a1.png",
+    "J32/J32-repair-session/J32-repair-session-a2.png",
+    "J32/J32-repair-session/J32-repair-session-a3.png",
+    "J32/J32-repair-session/before.png",
+    "J32/keyboard.png",
+    "J32/list.png",
+    "J32/main/J32-s1-a1.png",
+    "J32/main/J32-s1-a2.png",
+    "J32/main/J32-s2-a1.png",
+    "J32/main/J32-s2-a2.png",
+    "J32/main/J32-s2-a3.png",
+    "J32/main/J32-s3-a1.png",
+    "J32/main/J32-s3-a2.png",
+    "J32/main/J32-s3-a3.png",
+    "J32/main/J32-s3-a4.png",
+    "J32/main/J32-s4-a1.png",
+    "J32/main/J32-s4-a2.png",
+    "J32/main/J32-s4-a3.png",
+    "J32/main/J32-s5-a1.png",
+    "J32/main/J32-s5-a2.png",
+    "J32/main/J32-s5-a3.png",
+    "J32/main/J32-s6-a1.png",
+    "J32/main/J32-s6-a2.png",
+    "J32/main/J32-s6-a3.png",
+    "J32/main/J32-s6-a4.png",
+    "J32/main/J32-s6-a5.png",
+    "J32/main/J32-s6-a6.png",
+    "J32/main/before.png",
+    "J32/narrow-large.png",
+    "J32/reduced-motion.png"
+  ],
+  "findings": [],
+  "crossCheckBoundaries": {
+    "method": "Native Chromium UI captures, DOM actions and fixture traces.",
+    "keyboard": "Native delivery in this prototype only; Xuzz keyboard governance remains untested.",
+    "accessibility": "Static browser accessibility tree; assistiveTechnologyTested=false.",
+    "layout": "Narrow/enlarged and reduced-motion screenshots describe the HTML prototype.",
+    "pointer": "DOM named-action delivery only; gesture picking is not implemented in the Xuzz engine.",
+    "storageNetwork": "Scripted fixture effects do not prove persistence, network, crypto, source-store writes or renderer behavior.",
+    "conceptOutcome": "Concept supported indicates coherent visible representation, not participant or production validation.",
+    "renderValidation": {
+      "journeys": 16,
+      "steps": 86,
+      "variants": 49,
+      "actions": 370,
+      "states": 435,
+      "failures": []
+    }
+  }
+}

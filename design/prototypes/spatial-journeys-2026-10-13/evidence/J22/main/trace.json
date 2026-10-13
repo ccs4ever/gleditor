@@ -1,0 +1,5747 @@
+{
+  "journey": "J22",
+  "route": "main",
+  "frames": [
+    {
+      "file": "J22/main/before.png",
+      "location": "?journey=J22",
+      "frame": "J22-main-s1-before",
+      "state": {
+        "fixture": "fixture:integrated-pressure-investigation-v12-v4",
+        "reading": {
+          "visit": "03",
+          "subject": "doc:Review",
+          "store": "store:orion-pub-17",
+          "version": "V4",
+          "occurrence": "occ:review-pressure-passage-02",
+          "offset": 1184,
+          "body": [
+            "Review of the pressure test.",
+            "The recorded pressure remained stable during the run.",
+            "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "doc:LabNotes",
+            "version": "V12",
+            "occurrence": "occ:lab-passage-09"
+          },
+          {
+            "id": "02",
+            "parent": "01",
+            "subject": "cell:C17",
+            "version": "V8",
+            "occurrence": "occ:c17-pressure-spans-1"
+          },
+          {
+            "id": "03",
+            "parent": "02",
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02"
+          },
+          {
+            "id": "04",
+            "parent": "02",
+            "subject": "doc:Calibration",
+            "version": "V5",
+            "occurrence": "occ:calibration-page-01"
+          }
+        ],
+        "selection": {
+          "subject": "link:L17",
+          "state": "Review V4",
+          "locator": "occ:review-pressure-passage-02",
+          "activeSide": "right"
+        },
+        "sourceOps": {
+          "store:local-lab": 1402,
+          "store:orion-pub-17": 0
+        },
+        "readerEffects": {
+          "visits": 3,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Current reading place",
+            "kind": "document",
+            "body": [
+              "Review of the pressure test",
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03 · current"
+              },
+              {
+                "label": "Document",
+                "value": "Review · V4"
+              },
+              {
+                "label": "Occurrence",
+                "value": "occ:review-pressure-passage-02"
+              },
+              {
+                "label": "Offset",
+                "value": 1184
+              },
+              {
+                "label": "Origin",
+                "value": "Visit 01"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "query",
+            "title": "Search scope and progress",
+            "kind": "list",
+            "body": [
+              "Literal “pressure”; Unicode case folded. Local and remote stores; reachable versions."
+            ],
+            "facts": [
+              {
+                "label": "Found",
+                "value": "24"
+              },
+              {
+                "label": "Pending stores",
+                "value": "3"
+              },
+              {
+                "label": "Local",
+                "value": "3/3 complete"
+              },
+              {
+                "label": "Remote",
+                "value": "2/5 complete"
+              }
+            ],
+            "rows": [
+              {
+                "id": "match-c17v8",
+                "label": "C17 · Rig slice · V8",
+                "detail": "pressure: 3.14 bar · Historical match",
+                "status": "available"
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 24,
+              "filtered": 24,
+              "visible": 1
+            }
+          },
+          {
+            "id": "link",
+            "title": "Selected relation · L17",
+            "kind": "inspector",
+            "body": [
+              "One Comment Link with two ordered endsets. Active side: right. Cross previews a selected side; Enter records a visit."
+            ],
+            "facts": [
+              {
+                "label": "Active",
+                "value": "right"
+              },
+              {
+                "label": "Left cursor",
+                "value": "2/2"
+              },
+              {
+                "label": "Right cursor",
+                "value": "1/3"
+              },
+              {
+                "label": "Session origin",
+                "value": "Visit 01"
+              }
+            ],
+            "rows": [
+              {
+                "id": "L17-L1",
+                "label": "Left 1 · Lab notes V12",
+                "detail": "Passage · occurrence occ:lab-passage-09",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "L17-L2",
+                "label": "Left 2 · C17 V8",
+                "detail": "Two exact spans · selected cursor · occurrence occ:c17-pressure-spans-1",
+                "status": "selected",
+                "ordinal": 2
+              },
+              {
+                "id": "L17-R1",
+                "label": "Right 1 · Review V4",
+                "detail": "Current occurrence · selected cursor",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "L17-R2",
+                "label": "Right 2 · C24 V8",
+                "detail": "Contents span · occurrence occ:c24-temperature-01",
+                "status": "available",
+                "ordinal": 2
+              },
+              {
+                "id": "L17-R3",
+                "label": "Right 3 · Remote span V9",
+                "detail": "Unavailable · retained exact target",
+                "status": "unavailable",
+                "ordinal": 3
+              }
+            ],
+            "tone": "comment",
+            "count": {
+              "total": 5,
+              "filtered": 5,
+              "visible": 5
+            }
+          },
+          {
+            "id": "collection-dock",
+            "title": "Saved evidence",
+            "kind": "list",
+            "body": [
+              "Pressure review remains attached to reader context."
+            ],
+            "facts": [
+              {
+                "label": "Saved",
+                "value": "3"
+              }
+            ],
+            "rows": [
+              {
+                "id": "pouch-passage",
+                "label": "PASSAGE · Lab notes V12",
+                "detail": "Saved source passage",
+                "status": "available"
+              },
+              {
+                "id": "pouch-cell",
+                "label": "CELL · C17 V8",
+                "detail": "Whole-cell reference",
+                "status": "available"
+              },
+              {
+                "id": "pouch-query",
+                "label": "SEARCH · pressure",
+                "detail": "Saved recipe · rerun explicitly",
+                "status": "available"
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 3,
+              "filtered": 3,
+              "visible": 3
+            }
+          }
+        ],
+        "query": {
+          "id": "query:pressure-literal-01",
+          "text": "pressure",
+          "mode": "literal",
+          "caseFold": true,
+          "stores": [
+            "store:local-lab",
+            "store:orion-pub-17"
+          ],
+          "versions": "reachable",
+          "found": 24,
+          "pendingStores": 3
+        },
+        "linkSession": {
+          "link": {
+            "id": "link:L17",
+            "carrier": "carrier:lab-review-12:sha256:8b6e2d91a407c3f1",
+            "relation": "Comment",
+            "left": [
+              {
+                "ordinal": 1,
+                "subject": "doc:LabNotes",
+                "store": "store:local-lab",
+                "version": "V12",
+                "ranges": [
+                  "prim:LN12:44-83"
+                ],
+                "occurrences": [
+                  "occ:lab-passage-09"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C17",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C17V8:118-142",
+                  "prim:C17V8:151-166"
+                ],
+                "occurrences": [
+                  "occ:c17-pressure-spans-1",
+                  "occ:c17-pressure-spans-2"
+                ]
+              }
+            ],
+            "right": [
+              {
+                "ordinal": 1,
+                "subject": "doc:Review",
+                "store": "store:orion-pub-17",
+                "version": "V4",
+                "ranges": [
+                  "prim:RV4:320-374"
+                ],
+                "occurrences": [
+                  "occ:review-pressure-passage-02"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C24",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C24V8:51-82"
+                ],
+                "occurrences": [
+                  "occ:c24-temperature-01"
+                ]
+              },
+              {
+                "ordinal": 3,
+                "subject": "remote-span:rs-778",
+                "store": "store:remote-lab",
+                "version": "V9",
+                "ranges": [
+                  "prim:RS778V9:700-748"
+                ],
+                "occurrences": [
+                  "occ:rs778-01"
+                ],
+                "availability": "unavailable"
+              }
+            ]
+          },
+          "activeSide": "right",
+          "leftCursor": 2,
+          "rightCursor": 1,
+          "originVisit": "01"
+        },
+        "comparison": {
+          "cell": "C17",
+          "selectedVersion": "V8",
+          "pinnedVersion": "V12",
+          "selectedValue": "3.14 bar",
+          "pinnedValue": "3.16 bar",
+          "pinnedIsSearchHit": false
+        },
+        "view": {
+          "tools": "quiet",
+          "readingAnchor": {
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02",
+            "offset": 1184
+          },
+          "comparisonOpen": false
+        },
+        "pouch": {
+          "id": "pouch:pressure-review",
+          "saved": 3,
+          "items": [
+            "pouch-passage",
+            "pouch-cell",
+            "pouch-query"
+          ]
+        },
+        "packages": {
+          "carrier:lab-review-12:sha256:8b6e2d91a407c3f1": {
+            "enabled": true,
+            "emphasis": "normal"
+          },
+          "carrier:methods-annotations-4:sha256:62c18aa94bf8de31": {
+            "enabled": true,
+            "emphasis": "quiet"
+          }
+        }
+      },
+      "effects": [],
+      "action": "Before",
+      "note": ""
+    },
+    {
+      "file": "J22/main/J22-s1-a1.png",
+      "location": "?journey=J22&task=0&action=1",
+      "frame": "J22-s1-a1",
+      "state": {
+        "fixture": "fixture:integrated-pressure-investigation-v12-v4",
+        "reading": {
+          "visit": "03",
+          "subject": "doc:Review",
+          "store": "store:orion-pub-17",
+          "version": "V4",
+          "occurrence": "occ:review-pressure-passage-02",
+          "offset": 1184,
+          "body": [
+            "Review of the pressure test.",
+            "The recorded pressure remained stable during the run.",
+            "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "doc:LabNotes",
+            "version": "V12",
+            "occurrence": "occ:lab-passage-09"
+          },
+          {
+            "id": "02",
+            "parent": "01",
+            "subject": "cell:C17",
+            "version": "V8",
+            "occurrence": "occ:c17-pressure-spans-1"
+          },
+          {
+            "id": "03",
+            "parent": "02",
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02"
+          },
+          {
+            "id": "04",
+            "parent": "02",
+            "subject": "doc:Calibration",
+            "version": "V5",
+            "occurrence": "occ:calibration-page-01"
+          }
+        ],
+        "selection": {
+          "subject": "link:L17",
+          "state": "Review V4",
+          "locator": "occ:review-pressure-passage-02",
+          "activeSide": "right"
+        },
+        "sourceOps": {
+          "store:local-lab": 1402,
+          "store:orion-pub-17": 0
+        },
+        "readerEffects": {
+          "visits": 3,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Current reading place",
+            "kind": "document",
+            "body": [
+              "Review of the pressure test",
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03 · current"
+              },
+              {
+                "label": "Document",
+                "value": "Review · V4"
+              },
+              {
+                "label": "Occurrence",
+                "value": "occ:review-pressure-passage-02"
+              },
+              {
+                "label": "Offset",
+                "value": 1184
+              },
+              {
+                "label": "Origin",
+                "value": "Visit 01"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "query",
+            "title": "Search scope and progress",
+            "kind": "list",
+            "body": [
+              "Literal “pressure”; Unicode case folded. Local and remote stores; reachable versions."
+            ],
+            "facts": [
+              {
+                "label": "Found",
+                "value": "24"
+              },
+              {
+                "label": "Pending stores",
+                "value": "3"
+              },
+              {
+                "label": "Local",
+                "value": "3/3 complete"
+              },
+              {
+                "label": "Remote",
+                "value": "2/5 complete"
+              }
+            ],
+            "rows": [
+              {
+                "id": "match-c17v8",
+                "label": "C17 · Rig slice · V8",
+                "detail": "pressure: 3.14 bar · Historical match",
+                "status": "available"
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 27,
+              "filtered": 24,
+              "visible": 1
+            }
+          },
+          {
+            "id": "link",
+            "title": "Selected relation · L17",
+            "kind": "inspector",
+            "body": [
+              "One Comment Link with two ordered endsets. Active side: right. Cross previews a selected side; Enter records a visit."
+            ],
+            "facts": [
+              {
+                "label": "Active",
+                "value": "right"
+              },
+              {
+                "label": "Left cursor",
+                "value": "2/2"
+              },
+              {
+                "label": "Right cursor",
+                "value": "1/3"
+              },
+              {
+                "label": "Session origin",
+                "value": "Visit 01"
+              }
+            ],
+            "rows": [
+              {
+                "id": "L17-L1",
+                "label": "Left 1 · Lab notes V12",
+                "detail": "Passage · occurrence occ:lab-passage-09",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "L17-L2",
+                "label": "Left 2 · C17 V8",
+                "detail": "Two exact spans · selected cursor · occurrence occ:c17-pressure-spans-1",
+                "status": "selected",
+                "ordinal": 2
+              },
+              {
+                "id": "L17-R1",
+                "label": "Right 1 · Review V4",
+                "detail": "Current occurrence · selected cursor",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "L17-R2",
+                "label": "Right 2 · C24 V8",
+                "detail": "Contents span · occurrence occ:c24-temperature-01",
+                "status": "available",
+                "ordinal": 2
+              },
+              {
+                "id": "L17-R3",
+                "label": "Right 3 · Remote span V9",
+                "detail": "Unavailable · retained exact target",
+                "status": "unavailable",
+                "ordinal": 3
+              }
+            ],
+            "tone": "comment",
+            "count": {
+              "total": 5,
+              "filtered": 5,
+              "visible": 5
+            }
+          },
+          {
+            "id": "collection-dock",
+            "title": "Saved evidence",
+            "kind": "list",
+            "body": [
+              "Pressure review remains attached to reader context."
+            ],
+            "facts": [
+              {
+                "label": "Saved",
+                "value": "3"
+              }
+            ],
+            "rows": [
+              {
+                "id": "pouch-passage",
+                "label": "PASSAGE · Lab notes V12",
+                "detail": "Saved source passage",
+                "status": "available"
+              },
+              {
+                "id": "pouch-cell",
+                "label": "CELL · C17 V8",
+                "detail": "Whole-cell reference",
+                "status": "available"
+              },
+              {
+                "id": "pouch-query",
+                "label": "SEARCH · pressure",
+                "detail": "Saved recipe · rerun explicitly",
+                "status": "available"
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 3,
+              "filtered": 3,
+              "visible": 3
+            }
+          }
+        ],
+        "query": {
+          "id": "query:pressure-literal-01",
+          "text": "pressure",
+          "mode": "literal",
+          "caseFold": true,
+          "stores": [
+            "store:local-lab",
+            "store:orion-pub-17"
+          ],
+          "versions": "reachable",
+          "found": 24,
+          "pendingStores": 3
+        },
+        "linkSession": {
+          "link": {
+            "id": "link:L17",
+            "carrier": "carrier:lab-review-12:sha256:8b6e2d91a407c3f1",
+            "relation": "Comment",
+            "left": [
+              {
+                "ordinal": 1,
+                "subject": "doc:LabNotes",
+                "store": "store:local-lab",
+                "version": "V12",
+                "ranges": [
+                  "prim:LN12:44-83"
+                ],
+                "occurrences": [
+                  "occ:lab-passage-09"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C17",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C17V8:118-142",
+                  "prim:C17V8:151-166"
+                ],
+                "occurrences": [
+                  "occ:c17-pressure-spans-1",
+                  "occ:c17-pressure-spans-2"
+                ]
+              }
+            ],
+            "right": [
+              {
+                "ordinal": 1,
+                "subject": "doc:Review",
+                "store": "store:orion-pub-17",
+                "version": "V4",
+                "ranges": [
+                  "prim:RV4:320-374"
+                ],
+                "occurrences": [
+                  "occ:review-pressure-passage-02"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C24",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C24V8:51-82"
+                ],
+                "occurrences": [
+                  "occ:c24-temperature-01"
+                ]
+              },
+              {
+                "ordinal": 3,
+                "subject": "remote-span:rs-778",
+                "store": "store:remote-lab",
+                "version": "V9",
+                "ranges": [
+                  "prim:RS778V9:700-748"
+                ],
+                "occurrences": [
+                  "occ:rs778-01"
+                ],
+                "availability": "unavailable"
+              }
+            ]
+          },
+          "activeSide": "right",
+          "leftCursor": 2,
+          "rightCursor": 1,
+          "originVisit": "01"
+        },
+        "comparison": {
+          "cell": "C17",
+          "selectedVersion": "V8",
+          "pinnedVersion": "V12",
+          "selectedValue": "3.14 bar",
+          "pinnedValue": "3.16 bar",
+          "pinnedIsSearchHit": false
+        },
+        "view": {
+          "tools": "quiet",
+          "readingAnchor": {
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02",
+            "offset": 1184
+          },
+          "comparisonOpen": false
+        },
+        "pouch": {
+          "id": "pouch:pressure-review",
+          "saved": 3,
+          "items": [
+            "pouch-passage",
+            "pouch-cell",
+            "pouch-query"
+          ]
+        },
+        "packages": {
+          "carrier:lab-review-12:sha256:8b6e2d91a407c3f1": {
+            "enabled": true,
+            "emphasis": "normal"
+          },
+          "carrier:methods-annotations-4:sha256:62c18aa94bf8de31": {
+            "enabled": true,
+            "emphasis": "quiet"
+          }
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state changed.",
+          "identity": "fixture-effect:none"
+        }
+      ],
+      "action": "Show quiet reading context",
+      "note": "Reading stays at Review V4, visit 03; query, L17 cursor/origin and three saved pouch references are visible."
+    },
+    {
+      "file": "J22/main/J22-s1-a2.png",
+      "location": "?journey=J22&task=0&action=2",
+      "frame": "J22-s1-a2",
+      "state": {
+        "fixture": "fixture:integrated-pressure-investigation-v12-v4",
+        "reading": {
+          "visit": "03",
+          "subject": "doc:Review",
+          "store": "store:orion-pub-17",
+          "version": "V4",
+          "occurrence": "occ:review-pressure-passage-02",
+          "offset": 1184,
+          "body": [
+            "Review of the pressure test.",
+            "The recorded pressure remained stable during the run.",
+            "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "doc:LabNotes",
+            "version": "V12",
+            "occurrence": "occ:lab-passage-09"
+          },
+          {
+            "id": "02",
+            "parent": "01",
+            "subject": "cell:C17",
+            "version": "V8",
+            "occurrence": "occ:c17-pressure-spans-1"
+          },
+          {
+            "id": "03",
+            "parent": "02",
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02"
+          },
+          {
+            "id": "04",
+            "parent": "02",
+            "subject": "doc:Calibration",
+            "version": "V5",
+            "occurrence": "occ:calibration-page-01"
+          }
+        ],
+        "selection": {
+          "subject": "pouch:pressure-review",
+          "state": "Review V4",
+          "locator": "occ:review-pressure-passage-02",
+          "activeSide": "right"
+        },
+        "sourceOps": {
+          "store:local-lab": 1402,
+          "store:orion-pub-17": 0
+        },
+        "readerEffects": {
+          "visits": 3,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Current reading place",
+            "kind": "document",
+            "body": [
+              "Review of the pressure test",
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03 · current"
+              },
+              {
+                "label": "Document",
+                "value": "Review · V4"
+              },
+              {
+                "label": "Occurrence",
+                "value": "occ:review-pressure-passage-02"
+              },
+              {
+                "label": "Offset",
+                "value": 1184
+              },
+              {
+                "label": "Origin",
+                "value": "Visit 01"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "collection-dock",
+            "title": "Saved evidence",
+            "kind": "list",
+            "body": [
+              "Pressure review remains attached to reader context."
+            ],
+            "facts": [
+              {
+                "label": "Saved",
+                "value": "3"
+              }
+            ],
+            "rows": [
+              {
+                "id": "pouch-passage",
+                "label": "PASSAGE · Lab notes V12",
+                "detail": "Saved source passage",
+                "status": "available"
+              },
+              {
+                "id": "pouch-cell",
+                "label": "CELL · C17 V8",
+                "detail": "Whole-cell reference",
+                "status": "available"
+              },
+              {
+                "id": "pouch-query",
+                "label": "SEARCH · pressure",
+                "detail": "Saved recipe · rerun explicitly",
+                "status": "available"
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 3,
+              "filtered": 3,
+              "visible": 3
+            }
+          },
+          {
+            "id": "link",
+            "title": "Selected relation · L17",
+            "kind": "inspector",
+            "body": [
+              "One Comment Link with two ordered endsets. Active side: right. Cross previews a selected side; Enter records a visit."
+            ],
+            "facts": [
+              {
+                "label": "Active",
+                "value": "right"
+              },
+              {
+                "label": "Left cursor",
+                "value": "2/2"
+              },
+              {
+                "label": "Right cursor",
+                "value": "1/3"
+              },
+              {
+                "label": "Session origin",
+                "value": "Visit 01"
+              }
+            ],
+            "rows": [
+              {
+                "id": "L17-L1",
+                "label": "Left 1 · Lab notes V12",
+                "detail": "Passage · occurrence occ:lab-passage-09",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "L17-L2",
+                "label": "Left 2 · C17 V8",
+                "detail": "Two exact spans · selected cursor · occurrence occ:c17-pressure-spans-1",
+                "status": "selected",
+                "ordinal": 2
+              },
+              {
+                "id": "L17-R1",
+                "label": "Right 1 · Review V4",
+                "detail": "Current occurrence · selected cursor",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "L17-R2",
+                "label": "Right 2 · C24 V8",
+                "detail": "Contents span · occurrence occ:c24-temperature-01",
+                "status": "available",
+                "ordinal": 2
+              },
+              {
+                "id": "L17-R3",
+                "label": "Right 3 · Remote span V9",
+                "detail": "Unavailable · retained exact target",
+                "status": "unavailable",
+                "ordinal": 3
+              }
+            ],
+            "tone": "comment",
+            "count": {
+              "total": 5,
+              "filtered": 5,
+              "visible": 5
+            }
+          }
+        ],
+        "query": {
+          "id": "query:pressure-literal-01",
+          "text": "pressure",
+          "mode": "literal",
+          "caseFold": true,
+          "stores": [
+            "store:local-lab",
+            "store:orion-pub-17"
+          ],
+          "versions": "reachable",
+          "found": 24,
+          "pendingStores": 3
+        },
+        "linkSession": {
+          "link": {
+            "id": "link:L17",
+            "carrier": "carrier:lab-review-12:sha256:8b6e2d91a407c3f1",
+            "relation": "Comment",
+            "left": [
+              {
+                "ordinal": 1,
+                "subject": "doc:LabNotes",
+                "store": "store:local-lab",
+                "version": "V12",
+                "ranges": [
+                  "prim:LN12:44-83"
+                ],
+                "occurrences": [
+                  "occ:lab-passage-09"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C17",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C17V8:118-142",
+                  "prim:C17V8:151-166"
+                ],
+                "occurrences": [
+                  "occ:c17-pressure-spans-1",
+                  "occ:c17-pressure-spans-2"
+                ]
+              }
+            ],
+            "right": [
+              {
+                "ordinal": 1,
+                "subject": "doc:Review",
+                "store": "store:orion-pub-17",
+                "version": "V4",
+                "ranges": [
+                  "prim:RV4:320-374"
+                ],
+                "occurrences": [
+                  "occ:review-pressure-passage-02"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C24",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C24V8:51-82"
+                ],
+                "occurrences": [
+                  "occ:c24-temperature-01"
+                ]
+              },
+              {
+                "ordinal": 3,
+                "subject": "remote-span:rs-778",
+                "store": "store:remote-lab",
+                "version": "V9",
+                "ranges": [
+                  "prim:RS778V9:700-748"
+                ],
+                "occurrences": [
+                  "occ:rs778-01"
+                ],
+                "availability": "unavailable"
+              }
+            ]
+          },
+          "activeSide": "right",
+          "leftCursor": 2,
+          "rightCursor": 1,
+          "originVisit": "01"
+        },
+        "comparison": {
+          "cell": "C17",
+          "selectedVersion": "V8",
+          "pinnedVersion": "V12",
+          "selectedValue": "3.14 bar",
+          "pinnedValue": "3.16 bar",
+          "pinnedIsSearchHit": false
+        },
+        "view": {
+          "tools": "quiet",
+          "readingAnchor": {
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02",
+            "offset": 1184
+          },
+          "comparisonOpen": false
+        },
+        "pouch": {
+          "id": "pouch:pressure-review",
+          "saved": 3,
+          "items": [
+            "pouch-passage",
+            "pouch-cell",
+            "pouch-query"
+          ]
+        },
+        "packages": {
+          "carrier:lab-review-12:sha256:8b6e2d91a407c3f1": {
+            "enabled": true,
+            "emphasis": "normal"
+          },
+          "carrier:methods-annotations-4:sha256:62c18aa94bf8de31": {
+            "enabled": true,
+            "emphasis": "quiet"
+          }
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state changed.",
+          "identity": "fixture-effect:none"
+        }
+      ],
+      "action": "Inspect saved pouch summary",
+      "note": "The pouch summary is inspected in place; the current reading offset and visit do not change."
+    },
+    {
+      "file": "J22/main/J22-s2-a1.png",
+      "location": "?journey=J22&task=1&action=1",
+      "frame": "J22-s2-a1",
+      "state": {
+        "fixture": "fixture:integrated-pressure-investigation-v12-v4",
+        "reading": {
+          "visit": "03",
+          "subject": "doc:Review",
+          "store": "store:orion-pub-17",
+          "version": "V4",
+          "occurrence": "occ:review-pressure-passage-02",
+          "offset": 1184,
+          "body": [
+            "Review of the pressure test.",
+            "The recorded pressure remained stable during the run.",
+            "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "doc:LabNotes",
+            "version": "V12",
+            "occurrence": "occ:lab-passage-09"
+          },
+          {
+            "id": "02",
+            "parent": "01",
+            "subject": "cell:C17",
+            "version": "V8",
+            "occurrence": "occ:c17-pressure-spans-1"
+          },
+          {
+            "id": "03",
+            "parent": "02",
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02"
+          },
+          {
+            "id": "04",
+            "parent": "02",
+            "subject": "doc:Calibration",
+            "version": "V5",
+            "occurrence": "occ:calibration-page-01"
+          }
+        ],
+        "selection": {
+          "subject": "pouch:pressure-review",
+          "state": "Review V4",
+          "locator": "occ:review-pressure-passage-02",
+          "activeSide": "right"
+        },
+        "sourceOps": {
+          "store:local-lab": 1402,
+          "store:orion-pub-17": 0
+        },
+        "readerEffects": {
+          "visits": 3,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Current reading place",
+            "kind": "document",
+            "body": [
+              "Review of the pressure test",
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03 · current"
+              },
+              {
+                "label": "Document",
+                "value": "Review · V4"
+              },
+              {
+                "label": "Occurrence",
+                "value": "occ:review-pressure-passage-02"
+              },
+              {
+                "label": "Offset",
+                "value": 1184
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "results",
+            "title": "Search results",
+            "kind": "list",
+            "body": [
+              "Literal pressure · case folded · local + remote · reachable versions."
+            ],
+            "facts": [
+              {
+                "label": "Found",
+                "value": "24 so far"
+              },
+              {
+                "label": "Coverage",
+                "value": "3 stores pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "result-c17",
+                "label": "C17 · Rig slice · V8",
+                "detail": "Local · native text · historical · pressure: 3.14 bar",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "result-image",
+                "label": "Calibration plate · V5",
+                "detail": "Remote · cached · OCR · Recognized: PRESSURE",
+                "status": "available",
+                "ordinal": 2
+              },
+              {
+                "id": "result-audio",
+                "label": "Debrief · V7",
+                "detail": "Remote · cached · transcript · 02:14 · Pressure stayed stable",
+                "status": "available",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 24,
+              "filtered": 24,
+              "visible": 3
+            }
+          },
+          {
+            "id": "comparison",
+            "title": "Inspect C17 · reading place unchanged",
+            "kind": "comparison",
+            "body": [
+              "Pinned state comparison; current Review V4 remains the reading place."
+            ],
+            "facts": [
+              {
+                "label": "Selected state",
+                "value": "C17 · V8"
+              },
+              {
+                "label": "Pinned state",
+                "value": "C17 · V12"
+              },
+              {
+                "label": "Selected match",
+                "value": "pressure: 3.14 bar"
+              },
+              {
+                "label": "Pinned result",
+                "value": "3.16 bar · No pressure match"
+              }
+            ],
+            "rows": [
+              {
+                "id": "V8",
+                "label": "V8 · selected",
+                "detail": "pressure: 3.14 bar · Historical match",
+                "status": "selected"
+              },
+              {
+                "id": "V12",
+                "label": "V12 · pinned",
+                "detail": "3.16 bar · No pressure match",
+                "status": "available"
+              }
+            ],
+            "tone": "selected"
+          },
+          {
+            "id": "tools",
+            "title": "Layers and saved pouch",
+            "kind": "list",
+            "body": [
+              "View emphasis and package enablement are independent. Quiet packages remain reachable from List layers.",
+              "Inspect each typed reference without moving the reading place."
+            ],
+            "facts": [
+              {
+                "label": "Enabled",
+                "value": "2 packages"
+              },
+              {
+                "label": "Retained",
+                "value": "3 packages"
+              },
+              {
+                "label": "Saved",
+                "value": "3"
+              }
+            ],
+            "rows": [
+              {
+                "id": "pkg12",
+                "label": "Lab review · #12",
+                "detail": "Enabled · normal · 8 links",
+                "status": "available"
+              },
+              {
+                "id": "pkg4",
+                "label": "Methods annotations · #4",
+                "detail": "Enabled · quiet · 14 links",
+                "status": "available"
+              },
+              {
+                "id": "pkg7",
+                "label": "Open discussion · #7",
+                "detail": "Disabled · signature unchecked · 63 links",
+                "status": "unavailable"
+              },
+              {
+                "id": "pass",
+                "label": "PASSAGE · Lab notes V12",
+                "detail": "Pressure stayed stable.",
+                "status": "available"
+              },
+              {
+                "id": "cell",
+                "label": "CELL · C17 V8",
+                "detail": "Whole-cell reference",
+                "status": "available"
+              },
+              {
+                "id": "query",
+                "label": "SEARCH · pressure",
+                "detail": "Saved recipe · rerun explicitly",
+                "status": "available"
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 6,
+              "filtered": 6,
+              "visible": 6
+            }
+          }
+        ],
+        "query": {
+          "id": "query:pressure-literal-01",
+          "text": "pressure",
+          "mode": "literal",
+          "caseFold": true,
+          "stores": [
+            "store:local-lab",
+            "store:orion-pub-17"
+          ],
+          "versions": "reachable",
+          "found": 24,
+          "pendingStores": 3
+        },
+        "linkSession": {
+          "link": {
+            "id": "link:L17",
+            "carrier": "carrier:lab-review-12:sha256:8b6e2d91a407c3f1",
+            "relation": "Comment",
+            "left": [
+              {
+                "ordinal": 1,
+                "subject": "doc:LabNotes",
+                "store": "store:local-lab",
+                "version": "V12",
+                "ranges": [
+                  "prim:LN12:44-83"
+                ],
+                "occurrences": [
+                  "occ:lab-passage-09"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C17",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C17V8:118-142",
+                  "prim:C17V8:151-166"
+                ],
+                "occurrences": [
+                  "occ:c17-pressure-spans-1",
+                  "occ:c17-pressure-spans-2"
+                ]
+              }
+            ],
+            "right": [
+              {
+                "ordinal": 1,
+                "subject": "doc:Review",
+                "store": "store:orion-pub-17",
+                "version": "V4",
+                "ranges": [
+                  "prim:RV4:320-374"
+                ],
+                "occurrences": [
+                  "occ:review-pressure-passage-02"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C24",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C24V8:51-82"
+                ],
+                "occurrences": [
+                  "occ:c24-temperature-01"
+                ]
+              },
+              {
+                "ordinal": 3,
+                "subject": "remote-span:rs-778",
+                "store": "store:remote-lab",
+                "version": "V9",
+                "ranges": [
+                  "prim:RS778V9:700-748"
+                ],
+                "occurrences": [
+                  "occ:rs778-01"
+                ],
+                "availability": "unavailable"
+              }
+            ]
+          },
+          "activeSide": "right",
+          "leftCursor": 2,
+          "rightCursor": 1,
+          "originVisit": "01"
+        },
+        "comparison": {
+          "cell": "C17",
+          "selectedVersion": "V8",
+          "pinnedVersion": "V12",
+          "selectedValue": "3.14 bar",
+          "pinnedValue": "3.16 bar",
+          "pinnedIsSearchHit": false
+        },
+        "view": {
+          "tools": "expanded",
+          "readingAnchor": {
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02",
+            "offset": 1184
+          },
+          "comparisonOpen": false
+        },
+        "pouch": {
+          "id": "pouch:pressure-review",
+          "saved": 3,
+          "items": [
+            "pouch-passage",
+            "pouch-cell",
+            "pouch-query"
+          ]
+        },
+        "packages": {
+          "carrier:lab-review-12:sha256:8b6e2d91a407c3f1": {
+            "enabled": true,
+            "emphasis": "normal"
+          },
+          "carrier:methods-annotations-4:sha256:62c18aa94bf8de31": {
+            "enabled": true,
+            "emphasis": "quiet"
+          }
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state changed.",
+          "identity": "fixture-effect:none"
+        }
+      ],
+      "action": "Expand investigation",
+      "note": "The page remains Review V4 at the same occurrence and offset; tools open around it. The comparison is an inspection preview, not a completed visit."
+    },
+    {
+      "file": "J22/main/J22-s2-a2.png",
+      "location": "?journey=J22&task=1&action=2",
+      "frame": "J22-s2-a2",
+      "state": {
+        "fixture": "fixture:integrated-pressure-investigation-v12-v4",
+        "reading": {
+          "visit": "03",
+          "subject": "doc:Review",
+          "store": "store:orion-pub-17",
+          "version": "V4",
+          "occurrence": "occ:review-pressure-passage-02",
+          "offset": 1184,
+          "body": [
+            "Review of the pressure test.",
+            "The recorded pressure remained stable during the run.",
+            "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "doc:LabNotes",
+            "version": "V12",
+            "occurrence": "occ:lab-passage-09"
+          },
+          {
+            "id": "02",
+            "parent": "01",
+            "subject": "cell:C17",
+            "version": "V8",
+            "occurrence": "occ:c17-pressure-spans-1"
+          },
+          {
+            "id": "03",
+            "parent": "02",
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02"
+          },
+          {
+            "id": "04",
+            "parent": "02",
+            "subject": "doc:Calibration",
+            "version": "V5",
+            "occurrence": "occ:calibration-page-01"
+          }
+        ],
+        "selection": {
+          "subject": "cell:C17",
+          "state": "V8",
+          "locator": "occ:review-pressure-passage-02",
+          "activeSide": "right"
+        },
+        "sourceOps": {
+          "store:local-lab": 1402,
+          "store:orion-pub-17": 0
+        },
+        "readerEffects": {
+          "visits": 3,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Current reading place",
+            "kind": "document",
+            "body": [
+              "Review of the pressure test",
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03 · current"
+              },
+              {
+                "label": "Document",
+                "value": "Review · V4"
+              },
+              {
+                "label": "Occurrence",
+                "value": "occ:review-pressure-passage-02"
+              },
+              {
+                "label": "Offset",
+                "value": 1184
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "results",
+            "title": "Search results",
+            "kind": "list",
+            "body": [
+              "Literal pressure · case folded · local + remote · reachable versions."
+            ],
+            "facts": [
+              {
+                "label": "Found",
+                "value": "24 so far"
+              },
+              {
+                "label": "Coverage",
+                "value": "3 stores pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "result-c17",
+                "label": "C17 · Rig slice · V8",
+                "detail": "Local · native text · historical · pressure: 3.14 bar",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "result-image",
+                "label": "Calibration plate · V5",
+                "detail": "Remote · cached · OCR · Recognized: PRESSURE",
+                "status": "available",
+                "ordinal": 2
+              },
+              {
+                "id": "result-audio",
+                "label": "Debrief · V7",
+                "detail": "Remote · cached · transcript · 02:14 · Pressure stayed stable",
+                "status": "available",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 24,
+              "filtered": 24,
+              "visible": 3
+            }
+          },
+          {
+            "id": "comparison",
+            "title": "Inspect C17 · reading place unchanged",
+            "kind": "comparison",
+            "body": [
+              "Pinned state comparison; current Review V4 remains the reading place."
+            ],
+            "facts": [
+              {
+                "label": "Selected state",
+                "value": "C17 · V8"
+              },
+              {
+                "label": "Pinned state",
+                "value": "C17 · V12"
+              },
+              {
+                "label": "Selected match",
+                "value": "pressure: 3.14 bar"
+              },
+              {
+                "label": "Pinned result",
+                "value": "3.16 bar · No pressure match"
+              }
+            ],
+            "rows": [
+              {
+                "id": "V8",
+                "label": "V8 · selected",
+                "detail": "pressure: 3.14 bar · Historical match",
+                "status": "selected"
+              },
+              {
+                "id": "V12",
+                "label": "V12 · pinned",
+                "detail": "3.16 bar · No pressure match",
+                "status": "available"
+              }
+            ],
+            "tone": "selected"
+          },
+          {
+            "id": "link",
+            "title": "L17 · Comment",
+            "kind": "inspector",
+            "body": [
+              "Full members remain available from Inspect all members."
+            ],
+            "facts": [
+              {
+                "label": "Active",
+                "value": "right"
+              },
+              {
+                "label": "Left cursor",
+                "value": "2/2"
+              },
+              {
+                "label": "Right cursor",
+                "value": "1/3"
+              },
+              {
+                "label": "Origin",
+                "value": "Visit 01"
+              },
+              {
+                "label": "Identity",
+                "value": "link:L17 · carrier #12"
+              }
+            ],
+            "rows": [
+              {
+                "id": "summary",
+                "label": "Endsets",
+                "detail": "2 left · 3 right · Right 3 unavailable",
+                "status": "available"
+              }
+            ],
+            "tone": "comment"
+          }
+        ],
+        "query": {
+          "id": "query:pressure-literal-01",
+          "text": "pressure",
+          "mode": "literal",
+          "caseFold": true,
+          "stores": [
+            "store:local-lab",
+            "store:orion-pub-17"
+          ],
+          "versions": "reachable",
+          "found": 24,
+          "pendingStores": 3
+        },
+        "linkSession": {
+          "link": {
+            "id": "link:L17",
+            "carrier": "carrier:lab-review-12:sha256:8b6e2d91a407c3f1",
+            "relation": "Comment",
+            "left": [
+              {
+                "ordinal": 1,
+                "subject": "doc:LabNotes",
+                "store": "store:local-lab",
+                "version": "V12",
+                "ranges": [
+                  "prim:LN12:44-83"
+                ],
+                "occurrences": [
+                  "occ:lab-passage-09"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C17",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C17V8:118-142",
+                  "prim:C17V8:151-166"
+                ],
+                "occurrences": [
+                  "occ:c17-pressure-spans-1",
+                  "occ:c17-pressure-spans-2"
+                ]
+              }
+            ],
+            "right": [
+              {
+                "ordinal": 1,
+                "subject": "doc:Review",
+                "store": "store:orion-pub-17",
+                "version": "V4",
+                "ranges": [
+                  "prim:RV4:320-374"
+                ],
+                "occurrences": [
+                  "occ:review-pressure-passage-02"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C24",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C24V8:51-82"
+                ],
+                "occurrences": [
+                  "occ:c24-temperature-01"
+                ]
+              },
+              {
+                "ordinal": 3,
+                "subject": "remote-span:rs-778",
+                "store": "store:remote-lab",
+                "version": "V9",
+                "ranges": [
+                  "prim:RS778V9:700-748"
+                ],
+                "occurrences": [
+                  "occ:rs778-01"
+                ],
+                "availability": "unavailable"
+              }
+            ]
+          },
+          "activeSide": "right",
+          "leftCursor": 2,
+          "rightCursor": 1,
+          "originVisit": "01"
+        },
+        "comparison": {
+          "cell": "C17",
+          "selectedVersion": "V8",
+          "pinnedVersion": "V12",
+          "selectedValue": "3.14 bar",
+          "pinnedValue": "3.16 bar",
+          "pinnedIsSearchHit": false
+        },
+        "view": {
+          "tools": "expanded",
+          "readingAnchor": {
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02",
+            "offset": 1184
+          },
+          "comparisonOpen": false
+        },
+        "pouch": {
+          "id": "pouch:pressure-review",
+          "saved": 3,
+          "items": [
+            "pouch-passage",
+            "pouch-cell",
+            "pouch-query"
+          ]
+        },
+        "packages": {
+          "carrier:lab-review-12:sha256:8b6e2d91a407c3f1": {
+            "enabled": true,
+            "emphasis": "normal"
+          },
+          "carrier:methods-annotations-4:sha256:62c18aa94bf8de31": {
+            "enabled": true,
+            "emphasis": "quiet"
+          }
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state changed.",
+          "identity": "fixture-effect:none"
+        }
+      ],
+      "action": "Inspect selected C17 comparison",
+      "note": "C17 is selected for inspection; Review remains current and the comparison does not create a visit."
+    },
+    {
+      "file": "J22/main/J22-s3-a1.png",
+      "location": "?journey=J22&task=2&action=1",
+      "frame": "J22-s3-a1",
+      "state": {
+        "fixture": "fixture:integrated-pressure-investigation-v12-v4",
+        "reading": {
+          "visit": "03",
+          "subject": "doc:Review",
+          "store": "store:orion-pub-17",
+          "version": "V4",
+          "occurrence": "occ:review-pressure-passage-02",
+          "offset": 1184,
+          "body": [
+            "Review of the pressure test.",
+            "The recorded pressure remained stable during the run.",
+            "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "doc:LabNotes",
+            "version": "V12",
+            "occurrence": "occ:lab-passage-09"
+          },
+          {
+            "id": "02",
+            "parent": "01",
+            "subject": "cell:C17",
+            "version": "V8",
+            "occurrence": "occ:c17-pressure-spans-1"
+          },
+          {
+            "id": "03",
+            "parent": "02",
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02"
+          },
+          {
+            "id": "04",
+            "parent": "02",
+            "subject": "doc:Calibration",
+            "version": "V5",
+            "occurrence": "occ:calibration-page-01"
+          }
+        ],
+        "selection": {
+          "subject": "cell:C17",
+          "state": "V8",
+          "locator": "occ:review-pressure-passage-02",
+          "activeSide": "right"
+        },
+        "sourceOps": {
+          "store:local-lab": 1402,
+          "store:orion-pub-17": 0
+        },
+        "readerEffects": {
+          "visits": 3,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Current reading place",
+            "kind": "document",
+            "body": [
+              "Review of the pressure test",
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03 · current"
+              },
+              {
+                "label": "Document",
+                "value": "Review · V4"
+              },
+              {
+                "label": "Occurrence",
+                "value": "occ:review-pressure-passage-02"
+              },
+              {
+                "label": "Offset",
+                "value": 1184
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "results",
+            "title": "Search results",
+            "kind": "list",
+            "body": [
+              "Literal pressure · case folded · local + remote · reachable versions."
+            ],
+            "facts": [
+              {
+                "label": "Found",
+                "value": "24 so far"
+              },
+              {
+                "label": "Coverage",
+                "value": "3 stores pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "result-c17",
+                "label": "C17 · Rig slice · V8",
+                "detail": "Local · native text · historical · pressure: 3.14 bar",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "result-image",
+                "label": "Calibration plate · V5",
+                "detail": "Remote · cached · OCR · Recognized: PRESSURE",
+                "status": "available",
+                "ordinal": 2
+              },
+              {
+                "id": "result-audio",
+                "label": "Debrief · V7",
+                "detail": "Remote · cached · transcript · 02:14 · Pressure stayed stable",
+                "status": "available",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 24,
+              "filtered": 24,
+              "visible": 3
+            }
+          },
+          {
+            "id": "comparison",
+            "title": "Inspect C17 · reading place unchanged",
+            "kind": "comparison",
+            "body": [
+              "Pinned state comparison; current Review V4 remains the reading place."
+            ],
+            "facts": [
+              {
+                "label": "Selected state",
+                "value": "C17 · V8"
+              },
+              {
+                "label": "Pinned state",
+                "value": "C17 · V12"
+              },
+              {
+                "label": "Selected match",
+                "value": "pressure: 3.14 bar"
+              },
+              {
+                "label": "Pinned result",
+                "value": "3.16 bar · No pressure match"
+              }
+            ],
+            "rows": [
+              {
+                "id": "V8",
+                "label": "V8 · selected",
+                "detail": "pressure: 3.14 bar · Historical match",
+                "status": "selected"
+              },
+              {
+                "id": "V12",
+                "label": "V12 · pinned",
+                "detail": "3.16 bar · No pressure match",
+                "status": "available"
+              }
+            ],
+            "tone": "selected"
+          },
+          {
+            "id": "link",
+            "title": "L17 · Comment",
+            "kind": "inspector",
+            "body": [
+              "Full members remain available from Inspect all members."
+            ],
+            "facts": [
+              {
+                "label": "Active",
+                "value": "right"
+              },
+              {
+                "label": "Left cursor",
+                "value": "2/2"
+              },
+              {
+                "label": "Right cursor",
+                "value": "1/3"
+              },
+              {
+                "label": "Origin",
+                "value": "Visit 01"
+              },
+              {
+                "label": "Identity",
+                "value": "link:L17 · carrier #12"
+              }
+            ],
+            "rows": [
+              {
+                "id": "summary",
+                "label": "Endsets",
+                "detail": "2 left · 3 right · Right 3 unavailable",
+                "status": "available"
+              }
+            ],
+            "tone": "comment"
+          }
+        ],
+        "query": {
+          "id": "query:pressure-literal-01",
+          "text": "pressure",
+          "mode": "literal",
+          "caseFold": true,
+          "stores": [
+            "store:local-lab",
+            "store:orion-pub-17"
+          ],
+          "versions": "reachable",
+          "found": 24,
+          "pendingStores": 3
+        },
+        "linkSession": {
+          "link": {
+            "id": "link:L17",
+            "carrier": "carrier:lab-review-12:sha256:8b6e2d91a407c3f1",
+            "relation": "Comment",
+            "left": [
+              {
+                "ordinal": 1,
+                "subject": "doc:LabNotes",
+                "store": "store:local-lab",
+                "version": "V12",
+                "ranges": [
+                  "prim:LN12:44-83"
+                ],
+                "occurrences": [
+                  "occ:lab-passage-09"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C17",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C17V8:118-142",
+                  "prim:C17V8:151-166"
+                ],
+                "occurrences": [
+                  "occ:c17-pressure-spans-1",
+                  "occ:c17-pressure-spans-2"
+                ]
+              }
+            ],
+            "right": [
+              {
+                "ordinal": 1,
+                "subject": "doc:Review",
+                "store": "store:orion-pub-17",
+                "version": "V4",
+                "ranges": [
+                  "prim:RV4:320-374"
+                ],
+                "occurrences": [
+                  "occ:review-pressure-passage-02"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C24",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C24V8:51-82"
+                ],
+                "occurrences": [
+                  "occ:c24-temperature-01"
+                ]
+              },
+              {
+                "ordinal": 3,
+                "subject": "remote-span:rs-778",
+                "store": "store:remote-lab",
+                "version": "V9",
+                "ranges": [
+                  "prim:RS778V9:700-748"
+                ],
+                "occurrences": [
+                  "occ:rs778-01"
+                ],
+                "availability": "unavailable"
+              }
+            ]
+          },
+          "activeSide": "right",
+          "leftCursor": 2,
+          "rightCursor": 1,
+          "originVisit": "01"
+        },
+        "comparison": {
+          "cell": "C17",
+          "selectedVersion": "V8",
+          "pinnedVersion": "V12",
+          "selectedValue": "3.14 bar",
+          "pinnedValue": "3.16 bar",
+          "pinnedIsSearchHit": false
+        },
+        "view": {
+          "tools": "expanded",
+          "readingAnchor": {
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02",
+            "offset": 1184
+          },
+          "comparisonOpen": false
+        },
+        "pouch": {
+          "id": "pouch:pressure-review",
+          "saved": 3,
+          "items": [
+            "pouch-passage",
+            "pouch-cell",
+            "pouch-query"
+          ]
+        },
+        "packages": {
+          "carrier:lab-review-12:sha256:8b6e2d91a407c3f1": {
+            "enabled": true,
+            "emphasis": "normal"
+          },
+          "carrier:methods-annotations-4:sha256:62c18aa94bf8de31": {
+            "enabled": true,
+            "emphasis": "quiet"
+          }
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state changed.",
+          "identity": "fixture-effect:none"
+        }
+      ],
+      "action": "Open selected C17 V8 result",
+      "note": "The selected V8 state is the pressure hit; this is comparison inspection and does not move the reading place."
+    },
+    {
+      "file": "J22/main/J22-s3-a2.png",
+      "location": "?journey=J22&task=2&action=2",
+      "frame": "J22-s3-a2",
+      "state": {
+        "fixture": "fixture:integrated-pressure-investigation-v12-v4",
+        "reading": {
+          "visit": "03",
+          "subject": "doc:Review",
+          "store": "store:orion-pub-17",
+          "version": "V4",
+          "occurrence": "occ:review-pressure-passage-02",
+          "offset": 1184,
+          "body": [
+            "Review of the pressure test.",
+            "The recorded pressure remained stable during the run.",
+            "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "doc:LabNotes",
+            "version": "V12",
+            "occurrence": "occ:lab-passage-09"
+          },
+          {
+            "id": "02",
+            "parent": "01",
+            "subject": "cell:C17",
+            "version": "V8",
+            "occurrence": "occ:c17-pressure-spans-1"
+          },
+          {
+            "id": "03",
+            "parent": "02",
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02"
+          },
+          {
+            "id": "04",
+            "parent": "02",
+            "subject": "doc:Calibration",
+            "version": "V5",
+            "occurrence": "occ:calibration-page-01"
+          }
+        ],
+        "selection": {
+          "subject": "cell:C17",
+          "state": "V8",
+          "locator": "occ:review-pressure-passage-02",
+          "activeSide": "right"
+        },
+        "sourceOps": {
+          "store:local-lab": 1402,
+          "store:orion-pub-17": 0
+        },
+        "readerEffects": {
+          "visits": 3,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Current reading place",
+            "kind": "document",
+            "body": [
+              "Review of the pressure test",
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03 · current"
+              },
+              {
+                "label": "Document",
+                "value": "Review · V4"
+              },
+              {
+                "label": "Occurrence",
+                "value": "occ:review-pressure-passage-02"
+              },
+              {
+                "label": "Offset",
+                "value": 1184
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "results",
+            "title": "Search results",
+            "kind": "list",
+            "body": [
+              "Literal pressure · case folded · local + remote · reachable versions."
+            ],
+            "facts": [
+              {
+                "label": "Found",
+                "value": "24 so far"
+              },
+              {
+                "label": "Coverage",
+                "value": "3 stores pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "result-c17",
+                "label": "C17 · Rig slice · V8",
+                "detail": "Local · native text · historical · pressure: 3.14 bar",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "result-image",
+                "label": "Calibration plate · V5",
+                "detail": "Remote · cached · OCR · Recognized: PRESSURE",
+                "status": "available",
+                "ordinal": 2
+              },
+              {
+                "id": "result-audio",
+                "label": "Debrief · V7",
+                "detail": "Remote · cached · transcript · 02:14 · Pressure stayed stable",
+                "status": "available",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 24,
+              "filtered": 24,
+              "visible": 3
+            }
+          },
+          {
+            "id": "comparison",
+            "title": "Inspect C17 · reading place unchanged",
+            "kind": "comparison",
+            "body": [
+              "Pinned state comparison; current Review V4 remains the reading place."
+            ],
+            "facts": [
+              {
+                "label": "Selected state",
+                "value": "C17 · V8"
+              },
+              {
+                "label": "Pinned state",
+                "value": "C17 · V12"
+              },
+              {
+                "label": "Selected match",
+                "value": "pressure: 3.14 bar"
+              },
+              {
+                "label": "Pinned result",
+                "value": "3.16 bar · No pressure match"
+              }
+            ],
+            "rows": [
+              {
+                "id": "V8",
+                "label": "V8 · selected",
+                "detail": "pressure: 3.14 bar · Historical match",
+                "status": "selected"
+              },
+              {
+                "id": "V12",
+                "label": "V12 · pinned",
+                "detail": "3.16 bar · No pressure match",
+                "status": "available"
+              }
+            ],
+            "tone": "selected"
+          },
+          {
+            "id": "link",
+            "title": "L17 · Comment",
+            "kind": "inspector",
+            "body": [
+              "Full members remain available from Inspect all members."
+            ],
+            "facts": [
+              {
+                "label": "Active",
+                "value": "right"
+              },
+              {
+                "label": "Left cursor",
+                "value": "2/2"
+              },
+              {
+                "label": "Right cursor",
+                "value": "1/3"
+              },
+              {
+                "label": "Origin",
+                "value": "Visit 01"
+              },
+              {
+                "label": "Identity",
+                "value": "link:L17 · carrier #12"
+              }
+            ],
+            "rows": [
+              {
+                "id": "summary",
+                "label": "Endsets",
+                "detail": "2 left · 3 right · Right 3 unavailable",
+                "status": "available"
+              }
+            ],
+            "tone": "comment"
+          }
+        ],
+        "query": {
+          "id": "query:pressure-literal-01",
+          "text": "pressure",
+          "mode": "literal",
+          "caseFold": true,
+          "stores": [
+            "store:local-lab",
+            "store:orion-pub-17"
+          ],
+          "versions": "reachable",
+          "found": 24,
+          "pendingStores": 3
+        },
+        "linkSession": {
+          "link": {
+            "id": "link:L17",
+            "carrier": "carrier:lab-review-12:sha256:8b6e2d91a407c3f1",
+            "relation": "Comment",
+            "left": [
+              {
+                "ordinal": 1,
+                "subject": "doc:LabNotes",
+                "store": "store:local-lab",
+                "version": "V12",
+                "ranges": [
+                  "prim:LN12:44-83"
+                ],
+                "occurrences": [
+                  "occ:lab-passage-09"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C17",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C17V8:118-142",
+                  "prim:C17V8:151-166"
+                ],
+                "occurrences": [
+                  "occ:c17-pressure-spans-1",
+                  "occ:c17-pressure-spans-2"
+                ]
+              }
+            ],
+            "right": [
+              {
+                "ordinal": 1,
+                "subject": "doc:Review",
+                "store": "store:orion-pub-17",
+                "version": "V4",
+                "ranges": [
+                  "prim:RV4:320-374"
+                ],
+                "occurrences": [
+                  "occ:review-pressure-passage-02"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C24",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C24V8:51-82"
+                ],
+                "occurrences": [
+                  "occ:c24-temperature-01"
+                ]
+              },
+              {
+                "ordinal": 3,
+                "subject": "remote-span:rs-778",
+                "store": "store:remote-lab",
+                "version": "V9",
+                "ranges": [
+                  "prim:RS778V9:700-748"
+                ],
+                "occurrences": [
+                  "occ:rs778-01"
+                ],
+                "availability": "unavailable"
+              }
+            ]
+          },
+          "activeSide": "right",
+          "leftCursor": 2,
+          "rightCursor": 1,
+          "originVisit": "01"
+        },
+        "comparison": {
+          "cell": "C17",
+          "selectedVersion": "V8",
+          "pinnedVersion": "V12",
+          "selectedValue": "3.14 bar",
+          "pinnedValue": "3.16 bar",
+          "pinnedIsSearchHit": false
+        },
+        "view": {
+          "tools": "expanded",
+          "readingAnchor": {
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02",
+            "offset": 1184
+          },
+          "comparisonOpen": false
+        },
+        "pouch": {
+          "id": "pouch:pressure-review",
+          "saved": 3,
+          "items": [
+            "pouch-passage",
+            "pouch-cell",
+            "pouch-query"
+          ]
+        },
+        "packages": {
+          "carrier:lab-review-12:sha256:8b6e2d91a407c3f1": {
+            "enabled": true,
+            "emphasis": "normal"
+          },
+          "carrier:methods-annotations-4:sha256:62c18aa94bf8de31": {
+            "enabled": true,
+            "emphasis": "quiet"
+          }
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state changed.",
+          "identity": "fixture-effect:none"
+        }
+      ],
+      "action": "Pin C17 V12 for comparison",
+      "note": "V12 remains a pinned comparison descriptor, not a result or current reading place."
+    },
+    {
+      "file": "J22/main/J22-s3-a3.png",
+      "location": "?journey=J22&task=2&action=3",
+      "frame": "J22-s3-a3",
+      "state": {
+        "fixture": "fixture:integrated-pressure-investigation-v12-v4",
+        "reading": {
+          "visit": "03",
+          "subject": "doc:Review",
+          "store": "store:orion-pub-17",
+          "version": "V4",
+          "occurrence": "occ:review-pressure-passage-02",
+          "offset": 1184,
+          "body": [
+            "Review of the pressure test.",
+            "The recorded pressure remained stable during the run.",
+            "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "doc:LabNotes",
+            "version": "V12",
+            "occurrence": "occ:lab-passage-09"
+          },
+          {
+            "id": "02",
+            "parent": "01",
+            "subject": "cell:C17",
+            "version": "V8",
+            "occurrence": "occ:c17-pressure-spans-1"
+          },
+          {
+            "id": "03",
+            "parent": "02",
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02"
+          },
+          {
+            "id": "04",
+            "parent": "02",
+            "subject": "doc:Calibration",
+            "version": "V5",
+            "occurrence": "occ:calibration-page-01"
+          }
+        ],
+        "selection": {
+          "subject": "link:L17",
+          "state": "V8",
+          "locator": "occ:review-pressure-passage-02",
+          "activeSide": "right"
+        },
+        "sourceOps": {
+          "store:local-lab": 1402,
+          "store:orion-pub-17": 0
+        },
+        "readerEffects": {
+          "visits": 3,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Current reading place",
+            "kind": "document",
+            "body": [
+              "Review of the pressure test",
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03 · current"
+              },
+              {
+                "label": "Document",
+                "value": "Review · V4"
+              },
+              {
+                "label": "Occurrence",
+                "value": "occ:review-pressure-passage-02"
+              },
+              {
+                "label": "Offset",
+                "value": 1184
+              },
+              {
+                "label": "Origin",
+                "value": "Visit 01"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "link",
+            "title": "Selected relation · L17",
+            "kind": "inspector",
+            "body": [
+              "One Comment Link with two ordered endsets. Active side: right. Cross previews a selected side; Enter records a visit."
+            ],
+            "facts": [
+              {
+                "label": "Active",
+                "value": "right"
+              },
+              {
+                "label": "Left cursor",
+                "value": "2/2"
+              },
+              {
+                "label": "Right cursor",
+                "value": "1/3"
+              },
+              {
+                "label": "Session origin",
+                "value": "Visit 01"
+              }
+            ],
+            "rows": [
+              {
+                "id": "L17-L1",
+                "label": "Left 1 · Lab notes V12",
+                "detail": "Passage · occurrence occ:lab-passage-09",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "L17-L2",
+                "label": "Left 2 · C17 V8",
+                "detail": "Two exact spans · selected cursor · occurrence occ:c17-pressure-spans-1",
+                "status": "selected",
+                "ordinal": 2
+              },
+              {
+                "id": "L17-R1",
+                "label": "Right 1 · Review V4",
+                "detail": "Current occurrence · selected cursor",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "L17-R2",
+                "label": "Right 2 · C24 V8",
+                "detail": "Contents span · occurrence occ:c24-temperature-01",
+                "status": "available",
+                "ordinal": 2
+              },
+              {
+                "id": "L17-R3",
+                "label": "Right 3 · Remote span V9",
+                "detail": "Unavailable · retained exact target",
+                "status": "unavailable",
+                "ordinal": 3
+              }
+            ],
+            "tone": "comment",
+            "count": {
+              "total": 5,
+              "filtered": 5,
+              "visible": 5
+            }
+          },
+          {
+            "id": "comparison",
+            "title": "Inspect C17 · reading place unchanged",
+            "kind": "comparison",
+            "body": [
+              "Pinned state comparison; current Review V4 remains the reading place."
+            ],
+            "facts": [
+              {
+                "label": "Selected state",
+                "value": "C17 · V8"
+              },
+              {
+                "label": "Pinned state",
+                "value": "C17 · V12"
+              },
+              {
+                "label": "Selected match",
+                "value": "pressure: 3.14 bar"
+              },
+              {
+                "label": "Pinned result",
+                "value": "3.16 bar · No pressure match"
+              }
+            ],
+            "rows": [
+              {
+                "id": "V8",
+                "label": "V8 · selected",
+                "detail": "pressure: 3.14 bar · Historical match",
+                "status": "selected"
+              },
+              {
+                "id": "V12",
+                "label": "V12 · pinned",
+                "detail": "3.16 bar · No pressure match",
+                "status": "available"
+              }
+            ],
+            "tone": "selected"
+          }
+        ],
+        "query": {
+          "id": "query:pressure-literal-01",
+          "text": "pressure",
+          "mode": "literal",
+          "caseFold": true,
+          "stores": [
+            "store:local-lab",
+            "store:orion-pub-17"
+          ],
+          "versions": "reachable",
+          "found": 24,
+          "pendingStores": 3
+        },
+        "linkSession": {
+          "link": {
+            "id": "link:L17",
+            "carrier": "carrier:lab-review-12:sha256:8b6e2d91a407c3f1",
+            "relation": "Comment",
+            "left": [
+              {
+                "ordinal": 1,
+                "subject": "doc:LabNotes",
+                "store": "store:local-lab",
+                "version": "V12",
+                "ranges": [
+                  "prim:LN12:44-83"
+                ],
+                "occurrences": [
+                  "occ:lab-passage-09"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C17",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C17V8:118-142",
+                  "prim:C17V8:151-166"
+                ],
+                "occurrences": [
+                  "occ:c17-pressure-spans-1",
+                  "occ:c17-pressure-spans-2"
+                ]
+              }
+            ],
+            "right": [
+              {
+                "ordinal": 1,
+                "subject": "doc:Review",
+                "store": "store:orion-pub-17",
+                "version": "V4",
+                "ranges": [
+                  "prim:RV4:320-374"
+                ],
+                "occurrences": [
+                  "occ:review-pressure-passage-02"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C24",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C24V8:51-82"
+                ],
+                "occurrences": [
+                  "occ:c24-temperature-01"
+                ]
+              },
+              {
+                "ordinal": 3,
+                "subject": "remote-span:rs-778",
+                "store": "store:remote-lab",
+                "version": "V9",
+                "ranges": [
+                  "prim:RS778V9:700-748"
+                ],
+                "occurrences": [
+                  "occ:rs778-01"
+                ],
+                "availability": "unavailable"
+              }
+            ]
+          },
+          "activeSide": "right",
+          "leftCursor": 2,
+          "rightCursor": 1,
+          "originVisit": "01"
+        },
+        "comparison": {
+          "cell": "C17",
+          "selectedVersion": "V8",
+          "pinnedVersion": "V12",
+          "selectedValue": "3.14 bar",
+          "pinnedValue": "3.16 bar",
+          "pinnedIsSearchHit": false
+        },
+        "view": {
+          "tools": "expanded",
+          "readingAnchor": {
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02",
+            "offset": 1184
+          },
+          "comparisonOpen": false
+        },
+        "pouch": {
+          "id": "pouch:pressure-review",
+          "saved": 3,
+          "items": [
+            "pouch-passage",
+            "pouch-cell",
+            "pouch-query"
+          ]
+        },
+        "packages": {
+          "carrier:lab-review-12:sha256:8b6e2d91a407c3f1": {
+            "enabled": true,
+            "emphasis": "normal"
+          },
+          "carrier:methods-annotations-4:sha256:62c18aa94bf8de31": {
+            "enabled": true,
+            "emphasis": "quiet"
+          }
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state changed.",
+          "identity": "fixture-effect:none"
+        }
+      ],
+      "action": "Inspect complete L17 endsets",
+      "note": "The full relation shows Right 2 is C24 V8; C17 V12 is a separate comparison subject. No pairing is inferred from the comparison."
+    },
+    {
+      "file": "J22/main/J22-s4-a1.png",
+      "location": "?journey=J22&task=3&action=1",
+      "frame": "J22-s4-a1",
+      "state": {
+        "fixture": "fixture:integrated-pressure-investigation-v12-v4",
+        "reading": {
+          "visit": "03",
+          "subject": "doc:Review",
+          "store": "store:orion-pub-17",
+          "version": "V4",
+          "occurrence": "occ:review-pressure-passage-02",
+          "offset": 1184,
+          "body": [
+            "Review of the pressure test.",
+            "The recorded pressure remained stable during the run.",
+            "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "doc:LabNotes",
+            "version": "V12",
+            "occurrence": "occ:lab-passage-09"
+          },
+          {
+            "id": "02",
+            "parent": "01",
+            "subject": "cell:C17",
+            "version": "V8",
+            "occurrence": "occ:c17-pressure-spans-1"
+          },
+          {
+            "id": "03",
+            "parent": "02",
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02"
+          },
+          {
+            "id": "04",
+            "parent": "02",
+            "subject": "doc:Calibration",
+            "version": "V5",
+            "occurrence": "occ:calibration-page-01"
+          }
+        ],
+        "selection": {
+          "subject": "link:L17",
+          "state": "V8",
+          "locator": "occ:review-pressure-passage-02",
+          "activeSide": "right"
+        },
+        "sourceOps": {
+          "store:local-lab": 1402,
+          "store:orion-pub-17": 0
+        },
+        "readerEffects": {
+          "visits": 3,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Current reading place",
+            "kind": "document",
+            "body": [
+              "Review of the pressure test",
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03 · current"
+              },
+              {
+                "label": "Document",
+                "value": "Review · V4"
+              },
+              {
+                "label": "Occurrence",
+                "value": "occ:review-pressure-passage-02"
+              },
+              {
+                "label": "Offset",
+                "value": 1184
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "results",
+            "title": "Search results",
+            "kind": "list",
+            "body": [
+              "Literal pressure · case folded · local + remote · reachable versions."
+            ],
+            "facts": [
+              {
+                "label": "Found",
+                "value": "24 so far"
+              },
+              {
+                "label": "Coverage",
+                "value": "3 stores pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "result-c17",
+                "label": "C17 · Rig slice · V8",
+                "detail": "Local · native text · historical · pressure: 3.14 bar",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "result-image",
+                "label": "Calibration plate · V5",
+                "detail": "Remote · cached · OCR · Recognized: PRESSURE",
+                "status": "available",
+                "ordinal": 2
+              },
+              {
+                "id": "result-audio",
+                "label": "Debrief · V7",
+                "detail": "Remote · cached · transcript · 02:14 · Pressure stayed stable",
+                "status": "available",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 24,
+              "filtered": 24,
+              "visible": 3
+            }
+          },
+          {
+            "id": "link",
+            "title": "L17 · Comment",
+            "kind": "inspector",
+            "body": [
+              "Full members remain available from Inspect all members."
+            ],
+            "facts": [
+              {
+                "label": "Active",
+                "value": "right"
+              },
+              {
+                "label": "Left cursor",
+                "value": "2/2"
+              },
+              {
+                "label": "Right cursor",
+                "value": "1/3"
+              },
+              {
+                "label": "Origin",
+                "value": "Visit 01"
+              },
+              {
+                "label": "Identity",
+                "value": "link:L17 · carrier #12"
+              }
+            ],
+            "rows": [
+              {
+                "id": "summary",
+                "label": "Endsets",
+                "detail": "2 left · 3 right · Right 3 unavailable",
+                "status": "available"
+              }
+            ],
+            "tone": "comment"
+          },
+          {
+            "id": "layers",
+            "title": "Link layers",
+            "kind": "list",
+            "body": [
+              "View emphasis and package enablement are independent. Quiet packages remain reachable from List layers."
+            ],
+            "facts": [
+              {
+                "label": "Enabled",
+                "value": "2 packages"
+              },
+              {
+                "label": "Retained",
+                "value": "3 packages"
+              }
+            ],
+            "rows": [
+              {
+                "id": "pkg12",
+                "label": "Lab review · #12",
+                "detail": "Enabled · normal · 8 links",
+                "status": "available"
+              },
+              {
+                "id": "pkg4",
+                "label": "Methods annotations · #4",
+                "detail": "Enabled · quiet · 14 links",
+                "status": "available"
+              },
+              {
+                "id": "pkg7",
+                "label": "Open discussion · #7",
+                "detail": "Disabled · signature unchecked · 63 links",
+                "status": "unavailable"
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 3,
+              "filtered": 3,
+              "visible": 3
+            }
+          }
+        ],
+        "query": {
+          "id": "query:pressure-literal-01",
+          "text": "pressure",
+          "mode": "literal",
+          "caseFold": true,
+          "stores": [
+            "store:local-lab",
+            "store:orion-pub-17"
+          ],
+          "versions": "reachable",
+          "found": 24,
+          "pendingStores": 3
+        },
+        "linkSession": {
+          "link": {
+            "id": "link:L17",
+            "carrier": "carrier:lab-review-12:sha256:8b6e2d91a407c3f1",
+            "relation": "Comment",
+            "left": [
+              {
+                "ordinal": 1,
+                "subject": "doc:LabNotes",
+                "store": "store:local-lab",
+                "version": "V12",
+                "ranges": [
+                  "prim:LN12:44-83"
+                ],
+                "occurrences": [
+                  "occ:lab-passage-09"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C17",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C17V8:118-142",
+                  "prim:C17V8:151-166"
+                ],
+                "occurrences": [
+                  "occ:c17-pressure-spans-1",
+                  "occ:c17-pressure-spans-2"
+                ]
+              }
+            ],
+            "right": [
+              {
+                "ordinal": 1,
+                "subject": "doc:Review",
+                "store": "store:orion-pub-17",
+                "version": "V4",
+                "ranges": [
+                  "prim:RV4:320-374"
+                ],
+                "occurrences": [
+                  "occ:review-pressure-passage-02"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C24",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C24V8:51-82"
+                ],
+                "occurrences": [
+                  "occ:c24-temperature-01"
+                ]
+              },
+              {
+                "ordinal": 3,
+                "subject": "remote-span:rs-778",
+                "store": "store:remote-lab",
+                "version": "V9",
+                "ranges": [
+                  "prim:RS778V9:700-748"
+                ],
+                "occurrences": [
+                  "occ:rs778-01"
+                ],
+                "availability": "unavailable"
+              }
+            ]
+          },
+          "activeSide": "right",
+          "leftCursor": 2,
+          "rightCursor": 1,
+          "originVisit": "01"
+        },
+        "comparison": {
+          "cell": "C17",
+          "selectedVersion": "V8",
+          "pinnedVersion": "V12",
+          "selectedValue": "3.14 bar",
+          "pinnedValue": "3.16 bar",
+          "pinnedIsSearchHit": false
+        },
+        "view": {
+          "tools": "expanded",
+          "readingAnchor": {
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02",
+            "offset": 1184
+          },
+          "comparisonOpen": false
+        },
+        "pouch": {
+          "id": "pouch:pressure-review",
+          "saved": 3,
+          "items": [
+            "pouch-passage",
+            "pouch-cell",
+            "pouch-query"
+          ]
+        },
+        "packages": {
+          "carrier:lab-review-12:sha256:8b6e2d91a407c3f1": {
+            "enabled": true,
+            "emphasis": "normal"
+          },
+          "carrier:methods-annotations-4:sha256:62c18aa94bf8de31": {
+            "enabled": true,
+            "emphasis": "quiet"
+          }
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state changed.",
+          "identity": "fixture-effect:none"
+        }
+      ],
+      "action": "Fold comparison",
+      "note": "Only comparison folds. Query, Review V4 anchor, L17 cursor pair, origin and pouch remain unchanged."
+    },
+    {
+      "file": "J22/main/J22-s4-a2.png",
+      "location": "?journey=J22&task=3&action=2",
+      "frame": "J22-s4-a2",
+      "state": {
+        "fixture": "fixture:integrated-pressure-investigation-v12-v4",
+        "reading": {
+          "visit": "03",
+          "subject": "doc:Review",
+          "store": "store:orion-pub-17",
+          "version": "V4",
+          "occurrence": "occ:review-pressure-passage-02",
+          "offset": 1184,
+          "body": [
+            "Review of the pressure test.",
+            "The recorded pressure remained stable during the run.",
+            "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "doc:LabNotes",
+            "version": "V12",
+            "occurrence": "occ:lab-passage-09"
+          },
+          {
+            "id": "02",
+            "parent": "01",
+            "subject": "cell:C17",
+            "version": "V8",
+            "occurrence": "occ:c17-pressure-spans-1"
+          },
+          {
+            "id": "03",
+            "parent": "02",
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02"
+          },
+          {
+            "id": "04",
+            "parent": "02",
+            "subject": "doc:Calibration",
+            "version": "V5",
+            "occurrence": "occ:calibration-page-01"
+          }
+        ],
+        "selection": {
+          "subject": "link:L17",
+          "state": "V8",
+          "locator": "occ:review-pressure-passage-02",
+          "activeSide": "right"
+        },
+        "sourceOps": {
+          "store:local-lab": 1402,
+          "store:orion-pub-17": 0
+        },
+        "readerEffects": {
+          "visits": 3,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Current reading place",
+            "kind": "document",
+            "body": [
+              "Review of the pressure test",
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03 · current"
+              },
+              {
+                "label": "Document",
+                "value": "Review · V4"
+              },
+              {
+                "label": "Occurrence",
+                "value": "occ:review-pressure-passage-02"
+              },
+              {
+                "label": "Offset",
+                "value": 1184
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "results",
+            "title": "Search results",
+            "kind": "list",
+            "body": [
+              "Literal pressure · case folded · local + remote · reachable versions."
+            ],
+            "facts": [
+              {
+                "label": "Found",
+                "value": "24 so far"
+              },
+              {
+                "label": "Coverage",
+                "value": "3 stores pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "result-c17",
+                "label": "C17 · Rig slice · V8",
+                "detail": "Local · native text · historical · pressure: 3.14 bar",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "result-image",
+                "label": "Calibration plate · V5",
+                "detail": "Remote · cached · OCR · Recognized: PRESSURE",
+                "status": "available",
+                "ordinal": 2
+              },
+              {
+                "id": "result-audio",
+                "label": "Debrief · V7",
+                "detail": "Remote · cached · transcript · 02:14 · Pressure stayed stable",
+                "status": "available",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 24,
+              "filtered": 24,
+              "visible": 3
+            }
+          },
+          {
+            "id": "link",
+            "title": "L17 · Comment",
+            "kind": "inspector",
+            "body": [
+              "Full members remain available from Inspect all members."
+            ],
+            "facts": [
+              {
+                "label": "Active",
+                "value": "right"
+              },
+              {
+                "label": "Left cursor",
+                "value": "2/2"
+              },
+              {
+                "label": "Right cursor",
+                "value": "1/3"
+              },
+              {
+                "label": "Origin",
+                "value": "Visit 01"
+              },
+              {
+                "label": "Identity",
+                "value": "link:L17 · carrier #12"
+              }
+            ],
+            "rows": [
+              {
+                "id": "summary",
+                "label": "Endsets",
+                "detail": "2 left · 3 right · Right 3 unavailable",
+                "status": "available"
+              }
+            ],
+            "tone": "comment"
+          },
+          {
+            "id": "layers",
+            "title": "Link layers",
+            "kind": "list",
+            "body": [
+              "Quiet changes only view emphasis; package remains enabled."
+            ],
+            "facts": [
+              {
+                "label": "Enabled",
+                "value": "2"
+              },
+              {
+                "label": "Retained",
+                "value": "3"
+              }
+            ],
+            "rows": [
+              {
+                "id": "pkg12",
+                "label": "Lab review #12",
+                "detail": "Enabled · quiet · links remain listable",
+                "status": "available"
+              },
+              {
+                "id": "pkg4",
+                "label": "Methods #4",
+                "detail": "Enabled · quiet",
+                "status": "available"
+              },
+              {
+                "id": "pkg7",
+                "label": "Open discussion #7",
+                "detail": "Disabled · unchecked signature",
+                "status": "unavailable"
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 3,
+              "filtered": 3,
+              "visible": 3
+            }
+          }
+        ],
+        "query": {
+          "id": "query:pressure-literal-01",
+          "text": "pressure",
+          "mode": "literal",
+          "caseFold": true,
+          "stores": [
+            "store:local-lab",
+            "store:orion-pub-17"
+          ],
+          "versions": "reachable",
+          "found": 24,
+          "pendingStores": 3
+        },
+        "linkSession": {
+          "link": {
+            "id": "link:L17",
+            "carrier": "carrier:lab-review-12:sha256:8b6e2d91a407c3f1",
+            "relation": "Comment",
+            "left": [
+              {
+                "ordinal": 1,
+                "subject": "doc:LabNotes",
+                "store": "store:local-lab",
+                "version": "V12",
+                "ranges": [
+                  "prim:LN12:44-83"
+                ],
+                "occurrences": [
+                  "occ:lab-passage-09"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C17",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C17V8:118-142",
+                  "prim:C17V8:151-166"
+                ],
+                "occurrences": [
+                  "occ:c17-pressure-spans-1",
+                  "occ:c17-pressure-spans-2"
+                ]
+              }
+            ],
+            "right": [
+              {
+                "ordinal": 1,
+                "subject": "doc:Review",
+                "store": "store:orion-pub-17",
+                "version": "V4",
+                "ranges": [
+                  "prim:RV4:320-374"
+                ],
+                "occurrences": [
+                  "occ:review-pressure-passage-02"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C24",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C24V8:51-82"
+                ],
+                "occurrences": [
+                  "occ:c24-temperature-01"
+                ]
+              },
+              {
+                "ordinal": 3,
+                "subject": "remote-span:rs-778",
+                "store": "store:remote-lab",
+                "version": "V9",
+                "ranges": [
+                  "prim:RS778V9:700-748"
+                ],
+                "occurrences": [
+                  "occ:rs778-01"
+                ],
+                "availability": "unavailable"
+              }
+            ]
+          },
+          "activeSide": "right",
+          "leftCursor": 2,
+          "rightCursor": 1,
+          "originVisit": "01"
+        },
+        "comparison": {
+          "cell": "C17",
+          "selectedVersion": "V8",
+          "pinnedVersion": "V12",
+          "selectedValue": "3.14 bar",
+          "pinnedValue": "3.16 bar",
+          "pinnedIsSearchHit": false
+        },
+        "view": {
+          "tools": "expanded",
+          "readingAnchor": {
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02",
+            "offset": 1184
+          },
+          "comparisonOpen": false
+        },
+        "pouch": {
+          "id": "pouch:pressure-review",
+          "saved": 3,
+          "items": [
+            "pouch-passage",
+            "pouch-cell",
+            "pouch-query"
+          ]
+        },
+        "packages": {
+          "carrier:lab-review-12:sha256:8b6e2d91a407c3f1": {
+            "enabled": true,
+            "emphasis": "quiet"
+          },
+          "carrier:methods-annotations-4:sha256:62c18aa94bf8de31": {
+            "enabled": true,
+            "emphasis": "quiet"
+          }
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state changed.",
+          "identity": "fixture-effect:none"
+        }
+      ],
+      "action": "Set Lab review emphasis to quiet",
+      "note": "The carrier stays enabled and retained; only its reader-view emphasis changes."
+    },
+    {
+      "file": "J22/main/J22-s4-a3.png",
+      "location": "?journey=J22&task=3&action=3",
+      "frame": "J22-s4-a3",
+      "state": {
+        "fixture": "fixture:integrated-pressure-investigation-v12-v4",
+        "reading": {
+          "visit": "03",
+          "subject": "doc:Review",
+          "store": "store:orion-pub-17",
+          "version": "V4",
+          "occurrence": "occ:review-pressure-passage-02",
+          "offset": 1184,
+          "body": [
+            "Review of the pressure test.",
+            "The recorded pressure remained stable during the run.",
+            "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "doc:LabNotes",
+            "version": "V12",
+            "occurrence": "occ:lab-passage-09"
+          },
+          {
+            "id": "02",
+            "parent": "01",
+            "subject": "cell:C17",
+            "version": "V8",
+            "occurrence": "occ:c17-pressure-spans-1"
+          },
+          {
+            "id": "03",
+            "parent": "02",
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02"
+          },
+          {
+            "id": "04",
+            "parent": "02",
+            "subject": "doc:Calibration",
+            "version": "V5",
+            "occurrence": "occ:calibration-page-01"
+          }
+        ],
+        "selection": {
+          "subject": "pouch-passage",
+          "state": "V8",
+          "locator": "occ:review-pressure-passage-02",
+          "activeSide": "right"
+        },
+        "sourceOps": {
+          "store:local-lab": 1402,
+          "store:orion-pub-17": 0
+        },
+        "readerEffects": {
+          "visits": 3,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Current reading place",
+            "kind": "document",
+            "body": [
+              "Review of the pressure test",
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03 · current"
+              },
+              {
+                "label": "Document",
+                "value": "Review · V4"
+              },
+              {
+                "label": "Occurrence",
+                "value": "occ:review-pressure-passage-02"
+              },
+              {
+                "label": "Offset",
+                "value": 1184
+              },
+              {
+                "label": "Origin",
+                "value": "Visit 01"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "evidence",
+            "title": "Saved passage reference",
+            "kind": "inspector",
+            "body": [
+              "Pressure stayed stable."
+            ],
+            "facts": [
+              {
+                "label": "Type",
+                "value": "PASSAGE"
+              },
+              {
+                "label": "Source",
+                "value": "Lab notes V12"
+              },
+              {
+                "label": "Occurrence",
+                "value": "occ:lab-passage-09"
+              },
+              {
+                "label": "Ranges",
+                "value": "prim:LN12:44-83"
+              }
+            ],
+            "rows": [
+              {
+                "id": "inspect",
+                "label": "Inspect source",
+                "detail": "Returns to exact saved occurrence without replacing Review",
+                "status": "available"
+              }
+            ],
+            "tone": "selected"
+          },
+          {
+            "id": "link",
+            "title": "L17 · Comment",
+            "kind": "inspector",
+            "body": [
+              "Full members remain available from Inspect all members."
+            ],
+            "facts": [
+              {
+                "label": "Active",
+                "value": "right"
+              },
+              {
+                "label": "Left cursor",
+                "value": "2/2"
+              },
+              {
+                "label": "Right cursor",
+                "value": "1/3"
+              },
+              {
+                "label": "Origin",
+                "value": "Visit 01"
+              },
+              {
+                "label": "Identity",
+                "value": "link:L17 · carrier #12"
+              }
+            ],
+            "rows": [
+              {
+                "id": "summary",
+                "label": "Endsets",
+                "detail": "2 left · 3 right · Right 3 unavailable",
+                "status": "available"
+              }
+            ],
+            "tone": "comment"
+          }
+        ],
+        "query": {
+          "id": "query:pressure-literal-01",
+          "text": "pressure",
+          "mode": "literal",
+          "caseFold": true,
+          "stores": [
+            "store:local-lab",
+            "store:orion-pub-17"
+          ],
+          "versions": "reachable",
+          "found": 24,
+          "pendingStores": 3
+        },
+        "linkSession": {
+          "link": {
+            "id": "link:L17",
+            "carrier": "carrier:lab-review-12:sha256:8b6e2d91a407c3f1",
+            "relation": "Comment",
+            "left": [
+              {
+                "ordinal": 1,
+                "subject": "doc:LabNotes",
+                "store": "store:local-lab",
+                "version": "V12",
+                "ranges": [
+                  "prim:LN12:44-83"
+                ],
+                "occurrences": [
+                  "occ:lab-passage-09"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C17",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C17V8:118-142",
+                  "prim:C17V8:151-166"
+                ],
+                "occurrences": [
+                  "occ:c17-pressure-spans-1",
+                  "occ:c17-pressure-spans-2"
+                ]
+              }
+            ],
+            "right": [
+              {
+                "ordinal": 1,
+                "subject": "doc:Review",
+                "store": "store:orion-pub-17",
+                "version": "V4",
+                "ranges": [
+                  "prim:RV4:320-374"
+                ],
+                "occurrences": [
+                  "occ:review-pressure-passage-02"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C24",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C24V8:51-82"
+                ],
+                "occurrences": [
+                  "occ:c24-temperature-01"
+                ]
+              },
+              {
+                "ordinal": 3,
+                "subject": "remote-span:rs-778",
+                "store": "store:remote-lab",
+                "version": "V9",
+                "ranges": [
+                  "prim:RS778V9:700-748"
+                ],
+                "occurrences": [
+                  "occ:rs778-01"
+                ],
+                "availability": "unavailable"
+              }
+            ]
+          },
+          "activeSide": "right",
+          "leftCursor": 2,
+          "rightCursor": 1,
+          "originVisit": "01"
+        },
+        "comparison": {
+          "cell": "C17",
+          "selectedVersion": "V8",
+          "pinnedVersion": "V12",
+          "selectedValue": "3.14 bar",
+          "pinnedValue": "3.16 bar",
+          "pinnedIsSearchHit": false
+        },
+        "view": {
+          "tools": "expanded",
+          "readingAnchor": {
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02",
+            "offset": 1184
+          },
+          "comparisonOpen": false
+        },
+        "pouch": {
+          "id": "pouch:pressure-review",
+          "saved": 3,
+          "items": [
+            "pouch-passage",
+            "pouch-cell",
+            "pouch-query"
+          ]
+        },
+        "packages": {
+          "carrier:lab-review-12:sha256:8b6e2d91a407c3f1": {
+            "enabled": true,
+            "emphasis": "quiet"
+          },
+          "carrier:methods-annotations-4:sha256:62c18aa94bf8de31": {
+            "enabled": true,
+            "emphasis": "quiet"
+          }
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state changed.",
+          "identity": "fixture-effect:none"
+        }
+      ],
+      "action": "Inspect saved passage evidence",
+      "note": "The reader-owned reference is inspected without entering its source or changing the query."
+    },
+    {
+      "file": "J22/main/J22-s4-a4.png",
+      "location": "?journey=J22&task=3&action=4",
+      "frame": "J22-s4-a4",
+      "state": {
+        "fixture": "fixture:integrated-pressure-investigation-v12-v4",
+        "reading": {
+          "visit": "03",
+          "subject": "doc:Review",
+          "store": "store:orion-pub-17",
+          "version": "V4",
+          "occurrence": "occ:review-pressure-passage-02",
+          "offset": 1184,
+          "body": [
+            "Review of the pressure test.",
+            "The recorded pressure remained stable during the run.",
+            "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "doc:LabNotes",
+            "version": "V12",
+            "occurrence": "occ:lab-passage-09"
+          },
+          {
+            "id": "02",
+            "parent": "01",
+            "subject": "cell:C17",
+            "version": "V8",
+            "occurrence": "occ:c17-pressure-spans-1"
+          },
+          {
+            "id": "03",
+            "parent": "02",
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02"
+          },
+          {
+            "id": "04",
+            "parent": "02",
+            "subject": "doc:Calibration",
+            "version": "V5",
+            "occurrence": "occ:calibration-page-01"
+          }
+        ],
+        "selection": {
+          "subject": "link:L17",
+          "state": "V8",
+          "locator": "occ:review-pressure-passage-02",
+          "activeSide": "right"
+        },
+        "sourceOps": {
+          "store:local-lab": 1402,
+          "store:orion-pub-17": 0
+        },
+        "readerEffects": {
+          "visits": 3,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Current reading place",
+            "kind": "document",
+            "body": [
+              "Review of the pressure test",
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03 · current"
+              },
+              {
+                "label": "Document",
+                "value": "Review · V4"
+              },
+              {
+                "label": "Occurrence",
+                "value": "occ:review-pressure-passage-02"
+              },
+              {
+                "label": "Offset",
+                "value": 1184
+              },
+              {
+                "label": "Origin",
+                "value": "Visit 01"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "query",
+            "title": "Search scope and progress",
+            "kind": "list",
+            "body": [
+              "Literal “pressure”; Unicode case folded. Local and remote stores; reachable versions."
+            ],
+            "facts": [
+              {
+                "label": "Found",
+                "value": "24"
+              },
+              {
+                "label": "Pending stores",
+                "value": "3"
+              },
+              {
+                "label": "Local",
+                "value": "3/3 complete"
+              },
+              {
+                "label": "Remote",
+                "value": "2/5 complete"
+              }
+            ],
+            "rows": [
+              {
+                "id": "match-c17v8",
+                "label": "C17 · Rig slice · V8",
+                "detail": "pressure: 3.14 bar · Historical match",
+                "status": "available"
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 27,
+              "filtered": 24,
+              "visible": 1
+            }
+          },
+          {
+            "id": "link",
+            "title": "Selected relation · L17",
+            "kind": "inspector",
+            "body": [
+              "One Comment Link with two ordered endsets. Active side: right. Cross previews a selected side; Enter records a visit."
+            ],
+            "facts": [
+              {
+                "label": "Active",
+                "value": "right"
+              },
+              {
+                "label": "Left cursor",
+                "value": "2/2"
+              },
+              {
+                "label": "Right cursor",
+                "value": "1/3"
+              },
+              {
+                "label": "Session origin",
+                "value": "Visit 01"
+              }
+            ],
+            "rows": [
+              {
+                "id": "L17-L1",
+                "label": "Left 1 · Lab notes V12",
+                "detail": "Passage · occurrence occ:lab-passage-09",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "L17-L2",
+                "label": "Left 2 · C17 V8",
+                "detail": "Two exact spans · selected cursor · occurrence occ:c17-pressure-spans-1",
+                "status": "selected",
+                "ordinal": 2
+              },
+              {
+                "id": "L17-R1",
+                "label": "Right 1 · Review V4",
+                "detail": "Current occurrence · selected cursor",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "L17-R2",
+                "label": "Right 2 · C24 V8",
+                "detail": "Contents span · occurrence occ:c24-temperature-01",
+                "status": "available",
+                "ordinal": 2
+              },
+              {
+                "id": "L17-R3",
+                "label": "Right 3 · Remote span V9",
+                "detail": "Unavailable · retained exact target",
+                "status": "unavailable",
+                "ordinal": 3
+              }
+            ],
+            "tone": "comment",
+            "count": {
+              "total": 5,
+              "filtered": 5,
+              "visible": 5
+            }
+          },
+          {
+            "id": "collection-dock",
+            "title": "Saved evidence",
+            "kind": "list",
+            "body": [
+              "Pressure review remains attached to reader context."
+            ],
+            "facts": [
+              {
+                "label": "Saved",
+                "value": "3"
+              }
+            ],
+            "rows": [
+              {
+                "id": "pouch-passage",
+                "label": "PASSAGE · Lab notes V12",
+                "detail": "Saved source passage",
+                "status": "available"
+              },
+              {
+                "id": "pouch-cell",
+                "label": "CELL · C17 V8",
+                "detail": "Whole-cell reference",
+                "status": "available"
+              },
+              {
+                "id": "pouch-query",
+                "label": "SEARCH · pressure",
+                "detail": "Saved recipe · rerun explicitly",
+                "status": "available"
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 3,
+              "filtered": 3,
+              "visible": 3
+            }
+          }
+        ],
+        "query": {
+          "id": "query:pressure-literal-01",
+          "text": "pressure",
+          "mode": "literal",
+          "caseFold": true,
+          "stores": [
+            "store:local-lab",
+            "store:orion-pub-17"
+          ],
+          "versions": "reachable",
+          "found": 24,
+          "pendingStores": 3
+        },
+        "linkSession": {
+          "link": {
+            "id": "link:L17",
+            "carrier": "carrier:lab-review-12:sha256:8b6e2d91a407c3f1",
+            "relation": "Comment",
+            "left": [
+              {
+                "ordinal": 1,
+                "subject": "doc:LabNotes",
+                "store": "store:local-lab",
+                "version": "V12",
+                "ranges": [
+                  "prim:LN12:44-83"
+                ],
+                "occurrences": [
+                  "occ:lab-passage-09"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C17",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C17V8:118-142",
+                  "prim:C17V8:151-166"
+                ],
+                "occurrences": [
+                  "occ:c17-pressure-spans-1",
+                  "occ:c17-pressure-spans-2"
+                ]
+              }
+            ],
+            "right": [
+              {
+                "ordinal": 1,
+                "subject": "doc:Review",
+                "store": "store:orion-pub-17",
+                "version": "V4",
+                "ranges": [
+                  "prim:RV4:320-374"
+                ],
+                "occurrences": [
+                  "occ:review-pressure-passage-02"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C24",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C24V8:51-82"
+                ],
+                "occurrences": [
+                  "occ:c24-temperature-01"
+                ]
+              },
+              {
+                "ordinal": 3,
+                "subject": "remote-span:rs-778",
+                "store": "store:remote-lab",
+                "version": "V9",
+                "ranges": [
+                  "prim:RS778V9:700-748"
+                ],
+                "occurrences": [
+                  "occ:rs778-01"
+                ],
+                "availability": "unavailable"
+              }
+            ]
+          },
+          "activeSide": "right",
+          "leftCursor": 2,
+          "rightCursor": 1,
+          "originVisit": "01"
+        },
+        "comparison": {
+          "cell": "C17",
+          "selectedVersion": "V8",
+          "pinnedVersion": "V12",
+          "selectedValue": "3.14 bar",
+          "pinnedValue": "3.16 bar",
+          "pinnedIsSearchHit": false
+        },
+        "view": {
+          "tools": "quiet",
+          "readingAnchor": {
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02",
+            "offset": 1184
+          },
+          "comparisonOpen": false
+        },
+        "pouch": {
+          "id": "pouch:pressure-review",
+          "saved": 3,
+          "items": [
+            "pouch-passage",
+            "pouch-cell",
+            "pouch-query"
+          ]
+        },
+        "packages": {
+          "carrier:lab-review-12:sha256:8b6e2d91a407c3f1": {
+            "enabled": true,
+            "emphasis": "quiet"
+          },
+          "carrier:methods-annotations-4:sha256:62c18aa94bf8de31": {
+            "enabled": true,
+            "emphasis": "quiet"
+          }
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state changed.",
+          "identity": "fixture-effect:none"
+        }
+      ],
+      "action": "Fold all tools",
+      "note": "Quiet view returns with query, reading offset/version, both L17 cursors, origin, source companions and route retained; no visit or source op is added."
+    },
+    {
+      "file": "J22/main/J22-s5-a1.png",
+      "location": "?journey=J22&task=4&action=1",
+      "frame": "J22-s5-a1",
+      "state": {
+        "fixture": "fixture:integrated-pressure-investigation-v12-v4",
+        "reading": {
+          "visit": "02",
+          "subject": "cell:C17",
+          "store": "store:local-lab",
+          "version": "V8",
+          "occurrence": "occ:c17-pressure-spans-1",
+          "offset": 122,
+          "body": [
+            "C17 · Rig slice",
+            "pressure: 3.14 bar."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "doc:LabNotes",
+            "version": "V12",
+            "occurrence": "occ:lab-passage-09"
+          },
+          {
+            "id": "02",
+            "parent": "01",
+            "subject": "cell:C17",
+            "version": "V8",
+            "occurrence": "occ:c17-pressure-spans-1"
+          },
+          {
+            "id": "03",
+            "parent": "02",
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02"
+          },
+          {
+            "id": "04",
+            "parent": "02",
+            "subject": "doc:Calibration",
+            "version": "V5",
+            "occurrence": "occ:calibration-page-01"
+          }
+        ],
+        "selection": {
+          "subject": "link:L17",
+          "state": "V8",
+          "locator": "occ:review-pressure-passage-02",
+          "activeSide": "right"
+        },
+        "sourceOps": {
+          "store:local-lab": 1402,
+          "store:orion-pub-17": 0
+        },
+        "readerEffects": {
+          "visits": 3,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Visit 02 · Rig slice",
+            "kind": "cell",
+            "body": [
+              "C17 · Rig slice",
+              "pressure: 3.14 bar"
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "02 · restored"
+              },
+              {
+                "label": "Version",
+                "value": "V8"
+              },
+              {
+                "label": "Occurrence",
+                "value": "occ:c17-pressure-spans-1"
+              },
+              {
+                "label": "Offset",
+                "value": 122
+              }
+            ],
+            "rows": [
+              {
+                "id": "back",
+                "label": "Back destination",
+                "detail": "Existing visit restored; no new visit",
+                "status": "available"
+              }
+            ],
+            "tone": "selected"
+          },
+          {
+            "id": "link",
+            "title": "Selected relation · L17",
+            "kind": "inspector",
+            "body": [
+              "One Comment Link with two ordered endsets. Active side: right. Cross previews a selected side; Enter records a visit."
+            ],
+            "facts": [
+              {
+                "label": "Active",
+                "value": "right"
+              },
+              {
+                "label": "Left cursor",
+                "value": "2/2"
+              },
+              {
+                "label": "Right cursor",
+                "value": "1/3"
+              },
+              {
+                "label": "Session origin",
+                "value": "Visit 01"
+              }
+            ],
+            "rows": [
+              {
+                "id": "L17-L1",
+                "label": "Left 1 · Lab notes V12",
+                "detail": "Passage · occurrence occ:lab-passage-09",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "L17-L2",
+                "label": "Left 2 · C17 V8",
+                "detail": "Two exact spans · selected cursor · occurrence occ:c17-pressure-spans-1",
+                "status": "selected",
+                "ordinal": 2
+              },
+              {
+                "id": "L17-R1",
+                "label": "Right 1 · Review V4",
+                "detail": "Current occurrence · selected cursor",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "L17-R2",
+                "label": "Right 2 · C24 V8",
+                "detail": "Contents span · occurrence occ:c24-temperature-01",
+                "status": "available",
+                "ordinal": 2
+              },
+              {
+                "id": "L17-R3",
+                "label": "Right 3 · Remote span V9",
+                "detail": "Unavailable · retained exact target",
+                "status": "unavailable",
+                "ordinal": 3
+              }
+            ],
+            "tone": "comment",
+            "count": {
+              "total": 5,
+              "filtered": 5,
+              "visible": 5
+            }
+          },
+          {
+            "id": "walks",
+            "title": "Reader activity",
+            "kind": "history",
+            "body": [
+              "Current path is 01 → 02. Sibling route 02 → 04 Calibration remains available."
+            ],
+            "facts": [
+              {
+                "label": "Current",
+                "value": "02"
+              },
+              {
+                "label": "Children",
+                "value": "03 Review V4 · 04 Calibration V5"
+              }
+            ],
+            "rows": [
+              {
+                "id": "child03",
+                "label": "Visit 03",
+                "detail": "Review V4",
+                "status": "available",
+                "ordinal": 1
+              },
+              {
+                "id": "child04",
+                "label": "Visit 04",
+                "detail": "Calibration V5 · retained sibling",
+                "status": "available",
+                "ordinal": 2
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "query:pressure-literal-01",
+          "text": "pressure",
+          "mode": "literal",
+          "caseFold": true,
+          "stores": [
+            "store:local-lab",
+            "store:orion-pub-17"
+          ],
+          "versions": "reachable",
+          "found": 24,
+          "pendingStores": 3
+        },
+        "linkSession": {
+          "link": {
+            "id": "link:L17",
+            "carrier": "carrier:lab-review-12:sha256:8b6e2d91a407c3f1",
+            "relation": "Comment",
+            "left": [
+              {
+                "ordinal": 1,
+                "subject": "doc:LabNotes",
+                "store": "store:local-lab",
+                "version": "V12",
+                "ranges": [
+                  "prim:LN12:44-83"
+                ],
+                "occurrences": [
+                  "occ:lab-passage-09"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C17",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C17V8:118-142",
+                  "prim:C17V8:151-166"
+                ],
+                "occurrences": [
+                  "occ:c17-pressure-spans-1",
+                  "occ:c17-pressure-spans-2"
+                ]
+              }
+            ],
+            "right": [
+              {
+                "ordinal": 1,
+                "subject": "doc:Review",
+                "store": "store:orion-pub-17",
+                "version": "V4",
+                "ranges": [
+                  "prim:RV4:320-374"
+                ],
+                "occurrences": [
+                  "occ:review-pressure-passage-02"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C24",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C24V8:51-82"
+                ],
+                "occurrences": [
+                  "occ:c24-temperature-01"
+                ]
+              },
+              {
+                "ordinal": 3,
+                "subject": "remote-span:rs-778",
+                "store": "store:remote-lab",
+                "version": "V9",
+                "ranges": [
+                  "prim:RS778V9:700-748"
+                ],
+                "occurrences": [
+                  "occ:rs778-01"
+                ],
+                "availability": "unavailable"
+              }
+            ]
+          },
+          "activeSide": "right",
+          "leftCursor": 2,
+          "rightCursor": 1,
+          "originVisit": "01"
+        },
+        "comparison": {
+          "cell": "C17",
+          "selectedVersion": "V8",
+          "pinnedVersion": "V12",
+          "selectedValue": "3.14 bar",
+          "pinnedValue": "3.16 bar",
+          "pinnedIsSearchHit": false
+        },
+        "view": {
+          "tools": "quiet",
+          "readingAnchor": {
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02",
+            "offset": 1184
+          },
+          "comparisonOpen": false
+        },
+        "pouch": {
+          "id": "pouch:pressure-review",
+          "saved": 3,
+          "items": [
+            "pouch-passage",
+            "pouch-cell",
+            "pouch-query"
+          ]
+        },
+        "packages": {
+          "carrier:lab-review-12:sha256:8b6e2d91a407c3f1": {
+            "enabled": true,
+            "emphasis": "quiet"
+          },
+          "carrier:methods-annotations-4:sha256:62c18aa94bf8de31": {
+            "enabled": true,
+            "emphasis": "quiet"
+          }
+        }
+      },
+      "effects": [
+        {
+          "domain": "reader activity",
+          "summary": "Restored existing visit 02; reader visit count unchanged.",
+          "identity": "visit:02"
+        }
+      ],
+      "action": "Activity Back · visit 02",
+      "note": "Back changes current visit to existing parent; no child is created."
+    },
+    {
+      "file": "J22/main/J22-s5-a2.png",
+      "location": "?journey=J22&task=4&action=2",
+      "frame": "J22-s5-a2",
+      "state": {
+        "fixture": "fixture:integrated-pressure-investigation-v12-v4",
+        "reading": {
+          "visit": "01",
+          "subject": "doc:LabNotes",
+          "store": "store:local-lab",
+          "version": "V12",
+          "occurrence": "occ:lab-passage-09",
+          "offset": 44,
+          "body": [
+            "Lab notes · V12",
+            "Pressure stayed stable."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "doc:LabNotes",
+            "version": "V12",
+            "occurrence": "occ:lab-passage-09"
+          },
+          {
+            "id": "02",
+            "parent": "01",
+            "subject": "cell:C17",
+            "version": "V8",
+            "occurrence": "occ:c17-pressure-spans-1"
+          },
+          {
+            "id": "03",
+            "parent": "02",
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02"
+          },
+          {
+            "id": "04",
+            "parent": "02",
+            "subject": "doc:Calibration",
+            "version": "V5",
+            "occurrence": "occ:calibration-page-01"
+          }
+        ],
+        "selection": {
+          "subject": "link:L17",
+          "state": "V8",
+          "locator": "occ:review-pressure-passage-02",
+          "activeSide": "right"
+        },
+        "sourceOps": {
+          "store:local-lab": 1402,
+          "store:orion-pub-17": 0
+        },
+        "readerEffects": {
+          "visits": 3,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Visit 01 · Lab notes",
+            "kind": "document",
+            "body": [
+              "Pressure stayed stable."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01 · origin restored"
+              },
+              {
+                "label": "Version",
+                "value": "V12"
+              },
+              {
+                "label": "Occurrence",
+                "value": "occ:lab-passage-09"
+              },
+              {
+                "label": "Offset",
+                "value": 44
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "link",
+            "title": "Selected relation · L17",
+            "kind": "inspector",
+            "body": [
+              "One Comment Link with two ordered endsets. Active side: right. Cross previews a selected side; Enter records a visit."
+            ],
+            "facts": [
+              {
+                "label": "Active",
+                "value": "right"
+              },
+              {
+                "label": "Left cursor",
+                "value": "2/2"
+              },
+              {
+                "label": "Right cursor",
+                "value": "1/3"
+              },
+              {
+                "label": "Session origin",
+                "value": "Visit 01"
+              }
+            ],
+            "rows": [
+              {
+                "id": "L17-L1",
+                "label": "Left 1 · Lab notes V12",
+                "detail": "Passage · occurrence occ:lab-passage-09",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "L17-L2",
+                "label": "Left 2 · C17 V8",
+                "detail": "Two exact spans · selected cursor · occurrence occ:c17-pressure-spans-1",
+                "status": "selected",
+                "ordinal": 2
+              },
+              {
+                "id": "L17-R1",
+                "label": "Right 1 · Review V4",
+                "detail": "Current occurrence · selected cursor",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "L17-R2",
+                "label": "Right 2 · C24 V8",
+                "detail": "Contents span · occurrence occ:c24-temperature-01",
+                "status": "available",
+                "ordinal": 2
+              },
+              {
+                "id": "L17-R3",
+                "label": "Right 3 · Remote span V9",
+                "detail": "Unavailable · retained exact target",
+                "status": "unavailable",
+                "ordinal": 3
+              }
+            ],
+            "tone": "comment",
+            "count": {
+              "total": 5,
+              "filtered": 5,
+              "visible": 5
+            }
+          },
+          {
+            "id": "walks",
+            "title": "Reader activity",
+            "kind": "history",
+            "body": [
+              "The 02 → 04 sibling remains in the saved route graph."
+            ],
+            "facts": [
+              {
+                "label": "Current",
+                "value": "01"
+              },
+              {
+                "label": "Child",
+                "value": "02"
+              }
+            ],
+            "rows": [
+              {
+                "id": "route",
+                "label": "Retained sibling",
+                "detail": "01 → 02 → 04 Calibration V5",
+                "status": "available"
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "query": {
+          "id": "query:pressure-literal-01",
+          "text": "pressure",
+          "mode": "literal",
+          "caseFold": true,
+          "stores": [
+            "store:local-lab",
+            "store:orion-pub-17"
+          ],
+          "versions": "reachable",
+          "found": 24,
+          "pendingStores": 3
+        },
+        "linkSession": {
+          "link": {
+            "id": "link:L17",
+            "carrier": "carrier:lab-review-12:sha256:8b6e2d91a407c3f1",
+            "relation": "Comment",
+            "left": [
+              {
+                "ordinal": 1,
+                "subject": "doc:LabNotes",
+                "store": "store:local-lab",
+                "version": "V12",
+                "ranges": [
+                  "prim:LN12:44-83"
+                ],
+                "occurrences": [
+                  "occ:lab-passage-09"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C17",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C17V8:118-142",
+                  "prim:C17V8:151-166"
+                ],
+                "occurrences": [
+                  "occ:c17-pressure-spans-1",
+                  "occ:c17-pressure-spans-2"
+                ]
+              }
+            ],
+            "right": [
+              {
+                "ordinal": 1,
+                "subject": "doc:Review",
+                "store": "store:orion-pub-17",
+                "version": "V4",
+                "ranges": [
+                  "prim:RV4:320-374"
+                ],
+                "occurrences": [
+                  "occ:review-pressure-passage-02"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C24",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C24V8:51-82"
+                ],
+                "occurrences": [
+                  "occ:c24-temperature-01"
+                ]
+              },
+              {
+                "ordinal": 3,
+                "subject": "remote-span:rs-778",
+                "store": "store:remote-lab",
+                "version": "V9",
+                "ranges": [
+                  "prim:RS778V9:700-748"
+                ],
+                "occurrences": [
+                  "occ:rs778-01"
+                ],
+                "availability": "unavailable"
+              }
+            ]
+          },
+          "activeSide": "right",
+          "leftCursor": 2,
+          "rightCursor": 1,
+          "originVisit": "01"
+        },
+        "comparison": {
+          "cell": "C17",
+          "selectedVersion": "V8",
+          "pinnedVersion": "V12",
+          "selectedValue": "3.14 bar",
+          "pinnedValue": "3.16 bar",
+          "pinnedIsSearchHit": false
+        },
+        "view": {
+          "tools": "quiet",
+          "readingAnchor": {
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02",
+            "offset": 1184
+          },
+          "comparisonOpen": false
+        },
+        "pouch": {
+          "id": "pouch:pressure-review",
+          "saved": 3,
+          "items": [
+            "pouch-passage",
+            "pouch-cell",
+            "pouch-query"
+          ]
+        },
+        "packages": {
+          "carrier:lab-review-12:sha256:8b6e2d91a407c3f1": {
+            "enabled": true,
+            "emphasis": "quiet"
+          },
+          "carrier:methods-annotations-4:sha256:62c18aa94bf8de31": {
+            "enabled": true,
+            "emphasis": "quiet"
+          }
+        }
+      },
+      "effects": [
+        {
+          "domain": "reader activity",
+          "summary": "Restored origin visit 01; no visit was added.",
+          "identity": "visit:01"
+        }
+      ],
+      "action": "Return to origin · visit 01",
+      "note": "Restored origin visit 01; no visit was added."
+    },
+    {
+      "file": "J22/main/J22-s5-a3.png",
+      "location": "?journey=J22&task=4&action=3",
+      "frame": "J22-s5-a3",
+      "state": {
+        "fixture": "fixture:integrated-pressure-investigation-v12-v4",
+        "reading": {
+          "visit": "01",
+          "subject": "doc:LabNotes",
+          "store": "store:local-lab",
+          "version": "V12",
+          "occurrence": "occ:lab-passage-09",
+          "offset": 44,
+          "body": [
+            "Lab notes · V12",
+            "Pressure stayed stable."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "doc:LabNotes",
+            "version": "V12",
+            "occurrence": "occ:lab-passage-09"
+          },
+          {
+            "id": "02",
+            "parent": "01",
+            "subject": "cell:C17",
+            "version": "V8",
+            "occurrence": "occ:c17-pressure-spans-1"
+          },
+          {
+            "id": "03",
+            "parent": "02",
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02"
+          },
+          {
+            "id": "04",
+            "parent": "02",
+            "subject": "doc:Calibration",
+            "version": "V5",
+            "occurrence": "occ:calibration-page-01"
+          }
+        ],
+        "selection": {
+          "subject": "link:L17",
+          "state": "V8",
+          "locator": "occ:review-pressure-passage-02",
+          "activeSide": "right"
+        },
+        "sourceOps": {
+          "store:local-lab": 1402,
+          "store:orion-pub-17": 0
+        },
+        "readerEffects": {
+          "visits": 3,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Current reading place · Visit 01",
+            "kind": "document",
+            "body": [
+              "Lab notes · V12",
+              "Pressure stayed stable."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01 · current"
+              },
+              {
+                "label": "Document",
+                "value": "Lab notes · V12"
+              },
+              {
+                "label": "Occurrence",
+                "value": "occ:lab-passage-09"
+              },
+              {
+                "label": "Offset",
+                "value": 44
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "results",
+            "title": "Search results",
+            "kind": "list",
+            "body": [
+              "Literal pressure · case folded · local + remote · reachable versions."
+            ],
+            "facts": [
+              {
+                "label": "Found",
+                "value": "24 so far"
+              },
+              {
+                "label": "Coverage",
+                "value": "3 stores pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "result-c17",
+                "label": "C17 · Rig slice · V8",
+                "detail": "Local · native text · historical · pressure: 3.14 bar",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "result-image",
+                "label": "Calibration plate · V5",
+                "detail": "Remote · cached · OCR · Recognized: PRESSURE",
+                "status": "available",
+                "ordinal": 2
+              },
+              {
+                "id": "result-audio",
+                "label": "Debrief · V7",
+                "detail": "Remote · cached · transcript · 02:14 · Pressure stayed stable",
+                "status": "available",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 24,
+              "filtered": 24,
+              "visible": 3
+            }
+          },
+          {
+            "id": "link",
+            "title": "L17 · Comment",
+            "kind": "inspector",
+            "body": [
+              "Full members remain available from Inspect all members."
+            ],
+            "facts": [
+              {
+                "label": "Active",
+                "value": "right"
+              },
+              {
+                "label": "Left cursor",
+                "value": "2/2"
+              },
+              {
+                "label": "Right cursor",
+                "value": "1/3"
+              },
+              {
+                "label": "Origin",
+                "value": "Visit 01"
+              },
+              {
+                "label": "Identity",
+                "value": "link:L17 · carrier #12"
+              }
+            ],
+            "rows": [
+              {
+                "id": "summary",
+                "label": "Endsets",
+                "detail": "2 left · 3 right · Right 3 unavailable",
+                "status": "available"
+              }
+            ],
+            "tone": "comment"
+          },
+          {
+            "id": "layers",
+            "title": "Link layers",
+            "kind": "list",
+            "body": [
+              "View emphasis and package enablement are independent. Quiet packages remain reachable from List layers."
+            ],
+            "facts": [
+              {
+                "label": "Enabled",
+                "value": "2 packages"
+              },
+              {
+                "label": "Retained",
+                "value": "3 packages"
+              }
+            ],
+            "rows": [
+              {
+                "id": "pkg12",
+                "label": "Lab review · #12",
+                "detail": "Enabled · normal · 8 links",
+                "status": "available"
+              },
+              {
+                "id": "pkg4",
+                "label": "Methods annotations · #4",
+                "detail": "Enabled · quiet · 14 links",
+                "status": "available"
+              },
+              {
+                "id": "pkg7",
+                "label": "Open discussion · #7",
+                "detail": "Disabled · signature unchecked · 63 links",
+                "status": "unavailable"
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 3,
+              "filtered": 3,
+              "visible": 3
+            }
+          }
+        ],
+        "query": {
+          "id": "query:pressure-literal-01",
+          "text": "pressure",
+          "mode": "literal",
+          "caseFold": true,
+          "stores": [
+            "store:local-lab",
+            "store:orion-pub-17"
+          ],
+          "versions": "reachable",
+          "found": 24,
+          "pendingStores": 3
+        },
+        "linkSession": {
+          "link": {
+            "id": "link:L17",
+            "carrier": "carrier:lab-review-12:sha256:8b6e2d91a407c3f1",
+            "relation": "Comment",
+            "left": [
+              {
+                "ordinal": 1,
+                "subject": "doc:LabNotes",
+                "store": "store:local-lab",
+                "version": "V12",
+                "ranges": [
+                  "prim:LN12:44-83"
+                ],
+                "occurrences": [
+                  "occ:lab-passage-09"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C17",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C17V8:118-142",
+                  "prim:C17V8:151-166"
+                ],
+                "occurrences": [
+                  "occ:c17-pressure-spans-1",
+                  "occ:c17-pressure-spans-2"
+                ]
+              }
+            ],
+            "right": [
+              {
+                "ordinal": 1,
+                "subject": "doc:Review",
+                "store": "store:orion-pub-17",
+                "version": "V4",
+                "ranges": [
+                  "prim:RV4:320-374"
+                ],
+                "occurrences": [
+                  "occ:review-pressure-passage-02"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C24",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C24V8:51-82"
+                ],
+                "occurrences": [
+                  "occ:c24-temperature-01"
+                ]
+              },
+              {
+                "ordinal": 3,
+                "subject": "remote-span:rs-778",
+                "store": "store:remote-lab",
+                "version": "V9",
+                "ranges": [
+                  "prim:RS778V9:700-748"
+                ],
+                "occurrences": [
+                  "occ:rs778-01"
+                ],
+                "availability": "unavailable"
+              }
+            ]
+          },
+          "activeSide": "right",
+          "leftCursor": 2,
+          "rightCursor": 1,
+          "originVisit": "01"
+        },
+        "comparison": {
+          "cell": "C17",
+          "selectedVersion": "V8",
+          "pinnedVersion": "V12",
+          "selectedValue": "3.14 bar",
+          "pinnedValue": "3.16 bar",
+          "pinnedIsSearchHit": false
+        },
+        "view": {
+          "tools": "expanded",
+          "readingAnchor": {
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02",
+            "offset": 1184
+          },
+          "comparisonOpen": false
+        },
+        "pouch": {
+          "id": "pouch:pressure-review",
+          "saved": 3,
+          "items": [
+            "pouch-passage",
+            "pouch-cell",
+            "pouch-query"
+          ]
+        },
+        "packages": {
+          "carrier:lab-review-12:sha256:8b6e2d91a407c3f1": {
+            "enabled": true,
+            "emphasis": "quiet"
+          },
+          "carrier:methods-annotations-4:sha256:62c18aa94bf8de31": {
+            "enabled": true,
+            "emphasis": "quiet"
+          }
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state changed.",
+          "identity": "fixture-effect:none"
+        }
+      ],
+      "action": "Reopen investigation tools",
+      "note": "Tools reopen around the restored origin; saved query, package emphasis and L17 context remain reader state."
+    },
+    {
+      "file": "J22/main/J22-s5-a4.png",
+      "location": "?journey=J22&task=4&action=4",
+      "frame": "J22-s5-a4",
+      "state": {
+        "fixture": "fixture:integrated-pressure-investigation-v12-v4",
+        "reading": {
+          "visit": "01",
+          "subject": "doc:LabNotes",
+          "store": "store:local-lab",
+          "version": "V12",
+          "occurrence": "occ:lab-passage-09",
+          "offset": 44,
+          "body": [
+            "Lab notes · V12",
+            "Pressure stayed stable."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "doc:LabNotes",
+            "version": "V12",
+            "occurrence": "occ:lab-passage-09"
+          },
+          {
+            "id": "02",
+            "parent": "01",
+            "subject": "cell:C17",
+            "version": "V8",
+            "occurrence": "occ:c17-pressure-spans-1"
+          },
+          {
+            "id": "03",
+            "parent": "02",
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02"
+          },
+          {
+            "id": "04",
+            "parent": "02",
+            "subject": "doc:Calibration",
+            "version": "V5",
+            "occurrence": "occ:calibration-page-01"
+          }
+        ],
+        "selection": {
+          "subject": "link:L17",
+          "state": "V8",
+          "locator": "occ:review-pressure-passage-02",
+          "activeSide": "right"
+        },
+        "sourceOps": {
+          "store:local-lab": 1402,
+          "store:orion-pub-17": 0
+        },
+        "readerEffects": {
+          "visits": 3,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Current reading place · Visit 01",
+            "kind": "document",
+            "body": [
+              "Lab notes · V12",
+              "Pressure stayed stable."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "01 · current"
+              },
+              {
+                "label": "Document",
+                "value": "Lab notes · V12"
+              },
+              {
+                "label": "Occurrence",
+                "value": "occ:lab-passage-09"
+              },
+              {
+                "label": "Offset",
+                "value": 44
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "walks",
+            "title": "Reader activity routes",
+            "kind": "history",
+            "body": [
+              "Current place remains visit 01. The route picker exposes both children of visit 02."
+            ],
+            "facts": [
+              {
+                "label": "Current",
+                "value": "01"
+              },
+              {
+                "label": "Selected route",
+                "value": "01 → 02 → 04"
+              },
+              {
+                "label": "Next target",
+                "value": "04 · Calibration plate V5"
+              }
+            ],
+            "rows": [
+              {
+                "id": "r03",
+                "label": "01 → 02 → 03",
+                "detail": "Review V4 · existing route",
+                "status": "available"
+              },
+              {
+                "id": "r04",
+                "label": "01 → 02 → 04",
+                "detail": "Calibration V5 · retained sibling",
+                "status": "selected"
+              }
+            ],
+            "tone": "neutral"
+          },
+          {
+            "id": "link",
+            "title": "L17 · Comment",
+            "kind": "inspector",
+            "body": [
+              "Full members remain available from Inspect all members."
+            ],
+            "facts": [
+              {
+                "label": "Active",
+                "value": "right"
+              },
+              {
+                "label": "Left cursor",
+                "value": "2/2"
+              },
+              {
+                "label": "Right cursor",
+                "value": "1/3"
+              },
+              {
+                "label": "Origin",
+                "value": "Visit 01"
+              },
+              {
+                "label": "Identity",
+                "value": "link:L17 · carrier #12"
+              }
+            ],
+            "rows": [
+              {
+                "id": "summary",
+                "label": "Endsets",
+                "detail": "2 left · 3 right · Right 3 unavailable",
+                "status": "available"
+              }
+            ],
+            "tone": "comment"
+          }
+        ],
+        "query": {
+          "id": "query:pressure-literal-01",
+          "text": "pressure",
+          "mode": "literal",
+          "caseFold": true,
+          "stores": [
+            "store:local-lab",
+            "store:orion-pub-17"
+          ],
+          "versions": "reachable",
+          "found": 24,
+          "pendingStores": 3
+        },
+        "linkSession": {
+          "link": {
+            "id": "link:L17",
+            "carrier": "carrier:lab-review-12:sha256:8b6e2d91a407c3f1",
+            "relation": "Comment",
+            "left": [
+              {
+                "ordinal": 1,
+                "subject": "doc:LabNotes",
+                "store": "store:local-lab",
+                "version": "V12",
+                "ranges": [
+                  "prim:LN12:44-83"
+                ],
+                "occurrences": [
+                  "occ:lab-passage-09"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C17",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C17V8:118-142",
+                  "prim:C17V8:151-166"
+                ],
+                "occurrences": [
+                  "occ:c17-pressure-spans-1",
+                  "occ:c17-pressure-spans-2"
+                ]
+              }
+            ],
+            "right": [
+              {
+                "ordinal": 1,
+                "subject": "doc:Review",
+                "store": "store:orion-pub-17",
+                "version": "V4",
+                "ranges": [
+                  "prim:RV4:320-374"
+                ],
+                "occurrences": [
+                  "occ:review-pressure-passage-02"
+                ]
+              },
+              {
+                "ordinal": 2,
+                "subject": "cell:C24",
+                "store": "store:local-lab",
+                "version": "V8",
+                "ranges": [
+                  "prim:C24V8:51-82"
+                ],
+                "occurrences": [
+                  "occ:c24-temperature-01"
+                ]
+              },
+              {
+                "ordinal": 3,
+                "subject": "remote-span:rs-778",
+                "store": "store:remote-lab",
+                "version": "V9",
+                "ranges": [
+                  "prim:RS778V9:700-748"
+                ],
+                "occurrences": [
+                  "occ:rs778-01"
+                ],
+                "availability": "unavailable"
+              }
+            ]
+          },
+          "activeSide": "right",
+          "leftCursor": 2,
+          "rightCursor": 1,
+          "originVisit": "01"
+        },
+        "comparison": {
+          "cell": "C17",
+          "selectedVersion": "V8",
+          "pinnedVersion": "V12",
+          "selectedValue": "3.14 bar",
+          "pinnedValue": "3.16 bar",
+          "pinnedIsSearchHit": false
+        },
+        "view": {
+          "tools": "expanded",
+          "readingAnchor": {
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02",
+            "offset": 1184
+          },
+          "comparisonOpen": false
+        },
+        "pouch": {
+          "id": "pouch:pressure-review",
+          "saved": 3,
+          "items": [
+            "pouch-passage",
+            "pouch-cell",
+            "pouch-query"
+          ]
+        },
+        "packages": {
+          "carrier:lab-review-12:sha256:8b6e2d91a407c3f1": {
+            "enabled": true,
+            "emphasis": "quiet"
+          },
+          "carrier:methods-annotations-4:sha256:62c18aa94bf8de31": {
+            "enabled": true,
+            "emphasis": "quiet"
+          }
+        },
+        "walk": {
+          "selectedRoute": [
+            "01",
+            "02",
+            "04"
+          ]
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state changed.",
+          "identity": "fixture-effect:none"
+        }
+      ],
+      "action": "Inspect sibling route 02 → 04",
+      "note": "Route inspection does not move the current reading place; entering visit 04 remains explicit."
+    }
+  ]
+}

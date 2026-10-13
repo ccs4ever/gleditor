@@ -1,0 +1,502 @@
+{
+  "journey": "J23",
+  "route": "J23-invalid-signature",
+  "frames": [
+    {
+      "file": "J23/J23-invalid-signature/before.png",
+      "location": "?journey=J23&variant=J23-invalid-signature",
+      "frame": "J23-J23-invalid-signature-s2-before",
+      "state": {
+        "fixture": "fixture:reader-link-packages-v12",
+        "reading": {
+          "visit": "03",
+          "subject": "doc:Review",
+          "store": "store:orion-pub-17",
+          "version": "V4",
+          "occurrence": "occ:review-pressure-passage-02",
+          "offset": 1184,
+          "body": [
+            "Review of the pressure test.",
+            "The recorded pressure remained stable during the run.",
+            "The historical cell reports 3.14 bar."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "doc:LabNotes",
+            "version": "V12",
+            "occurrence": "occ:lab-passage-09"
+          },
+          {
+            "id": "02",
+            "parent": "01",
+            "subject": "cell:C17",
+            "version": "V8",
+            "occurrence": "occ:c17-pressure-spans-1"
+          },
+          {
+            "id": "03",
+            "parent": "02",
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02"
+          },
+          {
+            "id": "04",
+            "parent": "02",
+            "subject": "doc:Calibration",
+            "version": "V5",
+            "occurrence": "occ:calibration-page-01"
+          }
+        ],
+        "selection": {
+          "subject": "link:L17",
+          "state": "Review V4",
+          "locator": "occ:review-pressure-passage-02",
+          "activeSide": "right"
+        },
+        "sourceOps": {
+          "store:local-lab": 1402,
+          "store:orion-pub-17": 0
+        },
+        "readerEffects": {
+          "visits": 3,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "reading",
+            "title": "Current reading place",
+            "kind": "document",
+            "body": [
+              "Review of the pressure test.",
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03 · current"
+              },
+              {
+                "label": "Document",
+                "value": "Review · V4"
+              },
+              {
+                "label": "Occurrence",
+                "value": "occ:review-pressure-passage-02"
+              },
+              {
+                "label": "Offset",
+                "value": 1184
+              },
+              {
+                "label": "Origin",
+                "value": "Visit 01"
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "packages",
+            "title": "Retained link packages",
+            "kind": "list",
+            "body": [
+              "Immutable carriers remain retained independently of enablement and view emphasis."
+            ],
+            "facts": [
+              {
+                "label": "Packages retained",
+                "value": "3"
+              },
+              {
+                "label": "Packages enabled",
+                "value": "2"
+              },
+              {
+                "label": "Enabled links",
+                "value": "22"
+              },
+              {
+                "label": "Retained links",
+                "value": "85"
+              },
+              {
+                "label": "Visible links",
+                "value": "6"
+              }
+            ],
+            "rows": [
+              {
+                "id": "p12",
+                "label": "Lab review · #12",
+                "detail": "carrier:lab-review-12:sha256:8b6e2d91a407c3f1 · Mira Chen · signature valid · identity unverified · 8 links · enabled · normal",
+                "status": "available",
+                "ordinal": 1
+              },
+              {
+                "id": "p4",
+                "label": "Methods annotations · #4",
+                "detail": "carrier:methods-annotations-4:sha256:62c18aa94bf8de31 · Alex Rios · signature valid · identity unverified · 14 links · enabled · quiet",
+                "status": "available",
+                "ordinal": 2
+              },
+              {
+                "id": "p7",
+                "label": "Open discussion · #7",
+                "detail": "carrier:open-discussion-7:sha256:de390b47f2a691c5 · Jordan Lee · signature unchecked · disabled · 63 links",
+                "status": "blocked",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 3,
+              "filtered": 3,
+              "visible": 3
+            }
+          },
+          {
+            "id": "pinned-link",
+            "title": "Pinned selected Link",
+            "kind": "inspector",
+            "body": [
+              "L17 remains selected from carrier #12 even if that carrier is later disabled."
+            ],
+            "facts": [
+              {
+                "label": "Link",
+                "value": "L17"
+              },
+              {
+                "label": "Carrier",
+                "value": "carrier:lab-review-12:sha256:8b6e2d91a407c3f1"
+              },
+              {
+                "label": "Relation",
+                "value": "Comment"
+              },
+              {
+                "label": "Endsets",
+                "value": "2 left · 3 right"
+              }
+            ],
+            "rows": [
+              {
+                "id": "L17",
+                "label": "L17 · Comment",
+                "detail": "Exact Link identity bound to immutable carrier #12",
+                "status": "selected"
+              }
+            ],
+            "tone": "comment"
+          }
+        ],
+        "packages": {
+          "carriers": [
+            {
+              "id": "carrier:lab-review-12:sha256:8b6e2d91a407c3f1",
+              "display": "Lab review #12",
+              "publisher": "Mira Chen",
+              "signature": "valid",
+              "identityTrust": "unverified",
+              "linkCount": 8,
+              "retained": true,
+              "enabled": true,
+              "emphasis": "normal"
+            },
+            {
+              "id": "carrier:methods-annotations-4:sha256:62c18aa94bf8de31",
+              "display": "Methods annotations #4",
+              "publisher": "Alex Rios",
+              "signature": "valid",
+              "identityTrust": "unverified",
+              "linkCount": 14,
+              "retained": true,
+              "enabled": true,
+              "emphasis": "quiet"
+            },
+            {
+              "id": "carrier:open-discussion-7:sha256:de390b47f2a691c5",
+              "display": "Open discussion #7",
+              "publisher": "Jordan Lee",
+              "signature": "unchecked",
+              "identityTrust": "unresolved",
+              "linkCount": 63,
+              "retained": true,
+              "enabled": false,
+              "emphasis": "normal"
+            }
+          ],
+          "candidate": {
+            "id": "carrier:lab-review-13:sha256:a131c92e7704f55b",
+            "display": "Lab review #13",
+            "publisher": "Mira Chen",
+            "signature": "valid",
+            "identityTrust": "unverified",
+            "linkCount": 9,
+            "retained": false,
+            "enabled": false
+          },
+          "selectedLink": {
+            "id": "link:L17",
+            "carrier": "carrier:lab-review-12:sha256:8b6e2d91a407c3f1"
+          },
+          "counts": {
+            "enabledLinks": 22,
+            "retainedLinks": 85,
+            "visibleLinks": 6
+          }
+        },
+        "readerPreferences": {
+          "carrier:lab-review-12:sha256:8b6e2d91a407c3f1": {
+            "enabled": true,
+            "emphasis": "normal"
+          },
+          "carrier:methods-annotations-4:sha256:62c18aa94bf8de31": {
+            "enabled": true,
+            "emphasis": "quiet"
+          },
+          "carrier:open-discussion-7:sha256:de390b47f2a691c5": {
+            "enabled": false,
+            "emphasis": "normal"
+          }
+        }
+      },
+      "effects": [],
+      "action": "Before",
+      "note": ""
+    },
+    {
+      "file": "J23/J23-invalid-signature/J23-invalid-signature-s2-a1.png",
+      "location": "?journey=J23&variant=J23-invalid-signature&task=0&action=1",
+      "frame": "J23-invalid-signature-s2-a1",
+      "state": {
+        "fixture": "fixture:reader-link-packages-v12",
+        "reading": {
+          "visit": "03",
+          "subject": "doc:Review",
+          "store": "store:orion-pub-17",
+          "version": "V4",
+          "occurrence": "occ:review-pressure-passage-02",
+          "offset": 1184,
+          "body": [
+            "Review of the pressure test.",
+            "The recorded pressure remained stable during the run.",
+            "The historical cell reports 3.14 bar."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "doc:LabNotes",
+            "version": "V12",
+            "occurrence": "occ:lab-passage-09"
+          },
+          {
+            "id": "02",
+            "parent": "01",
+            "subject": "cell:C17",
+            "version": "V8",
+            "occurrence": "occ:c17-pressure-spans-1"
+          },
+          {
+            "id": "03",
+            "parent": "02",
+            "subject": "doc:Review",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02"
+          },
+          {
+            "id": "04",
+            "parent": "02",
+            "subject": "doc:Calibration",
+            "version": "V5",
+            "occurrence": "occ:calibration-page-01"
+          }
+        ],
+        "selection": {
+          "subject": "link:L17",
+          "state": "Review V4",
+          "locator": "occ:review-pressure-passage-02",
+          "activeSide": "right"
+        },
+        "sourceOps": {
+          "store:local-lab": 1402,
+          "store:orion-pub-17": 0
+        },
+        "readerEffects": {
+          "visits": 3,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "package-inspector",
+            "title": "Invalid signature · blocked",
+            "kind": "inspector",
+            "body": [
+              "The carrier remains retained and inspectable. Enable is blocked because signature validation failed."
+            ],
+            "facts": [
+              {
+                "label": "Carrier",
+                "value": "carrier:open-discussion-7:sha256:de390b47f2a691c5"
+              },
+              {
+                "label": "Signature",
+                "value": "invalid"
+              },
+              {
+                "label": "Identity trust",
+                "value": "unresolved · separate check"
+              },
+              {
+                "label": "Enable",
+                "value": "Blocked"
+              }
+            ],
+            "rows": [
+              {
+                "id": "inspect",
+                "label": "Inspect",
+                "detail": "Available",
+                "status": "available"
+              },
+              {
+                "id": "enable",
+                "label": "Enable",
+                "detail": "Blocked · invalid signature",
+                "status": "blocked"
+              }
+            ],
+            "tone": "neutral"
+          },
+          {
+            "id": "pinned-link",
+            "title": "Pinned selected Link",
+            "kind": "inspector",
+            "body": [
+              "L17 remains selected from carrier #12 even if that carrier is later disabled."
+            ],
+            "facts": [
+              {
+                "label": "Link",
+                "value": "L17"
+              },
+              {
+                "label": "Carrier",
+                "value": "carrier:lab-review-12:sha256:8b6e2d91a407c3f1"
+              },
+              {
+                "label": "Relation",
+                "value": "Comment"
+              },
+              {
+                "label": "Endsets",
+                "value": "2 left · 3 right"
+              }
+            ],
+            "rows": [
+              {
+                "id": "L17",
+                "label": "L17 · Comment",
+                "detail": "Exact Link identity bound to immutable carrier #12",
+                "status": "selected"
+              }
+            ],
+            "tone": "comment"
+          }
+        ],
+        "packages": {
+          "carriers": [
+            {
+              "id": "carrier:lab-review-12:sha256:8b6e2d91a407c3f1",
+              "display": "Lab review #12",
+              "publisher": "Mira Chen",
+              "signature": "valid",
+              "identityTrust": "unverified",
+              "linkCount": 8,
+              "retained": true,
+              "enabled": true,
+              "emphasis": "normal"
+            },
+            {
+              "id": "carrier:methods-annotations-4:sha256:62c18aa94bf8de31",
+              "display": "Methods annotations #4",
+              "publisher": "Alex Rios",
+              "signature": "valid",
+              "identityTrust": "unverified",
+              "linkCount": 14,
+              "retained": true,
+              "enabled": true,
+              "emphasis": "quiet"
+            },
+            {
+              "id": "carrier:open-discussion-7:sha256:de390b47f2a691c5",
+              "display": "Open discussion #7",
+              "publisher": "Jordan Lee",
+              "signature": "unchecked",
+              "identityTrust": "unresolved",
+              "linkCount": 63,
+              "retained": true,
+              "enabled": false,
+              "emphasis": "normal"
+            }
+          ],
+          "candidate": {
+            "id": "carrier:lab-review-13:sha256:a131c92e7704f55b",
+            "display": "Lab review #13",
+            "publisher": "Mira Chen",
+            "signature": "valid",
+            "identityTrust": "unverified",
+            "linkCount": 9,
+            "retained": false,
+            "enabled": false
+          },
+          "selectedLink": {
+            "id": "link:L17",
+            "carrier": "carrier:lab-review-12:sha256:8b6e2d91a407c3f1"
+          },
+          "counts": {
+            "enabledLinks": 22,
+            "retainedLinks": 85,
+            "visibleLinks": 6
+          },
+          "inspected": "carrier:open-discussion-7:sha256:de390b47f2a691c5",
+          "inspectedSignature": "invalid"
+        },
+        "readerPreferences": {
+          "carrier:lab-review-12:sha256:8b6e2d91a407c3f1": {
+            "enabled": true,
+            "emphasis": "normal"
+          },
+          "carrier:methods-annotations-4:sha256:62c18aa94bf8de31": {
+            "enabled": true,
+            "emphasis": "quiet"
+          },
+          "carrier:open-discussion-7:sha256:de390b47f2a691c5": {
+            "enabled": false,
+            "emphasis": "normal"
+          }
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state changed.",
+          "identity": "fixture-effect:none"
+        }
+      ],
+      "action": "Inspect invalid package carrier",
+      "note": "Trust labels are separate; no carrier is silently substituted."
+    }
+  ]
+}

@@ -1,0 +1,1812 @@
+{
+  "runner": "runner-3",
+  "model": "gpt-6-luna",
+  "mode": "AI visual-support assessment of static concepts; not human behavior or live implementation validation",
+  "journeys": [
+    {
+      "id": "J27",
+      "title": "Assemble one ordered Link with an explicit destination",
+      "step_count": 5
+    },
+    {
+      "id": "J28",
+      "title": "Resume a dense draft through unresolved and unknown outcomes",
+      "step_count": 6
+    },
+    {
+      "id": "J29",
+      "title": "Align mixed-media cues without authoring a relation",
+      "step_count": 5
+    },
+    {
+      "id": "J30",
+      "title": "Investigate exact range and topology effects in the Loom",
+      "step_count": 7
+    },
+    {
+      "id": "J31",
+      "title": "Recover a selected historical passage into a declared new branch",
+      "step_count": 6
+    },
+    {
+      "id": "J32",
+      "title": "Resume an interrupted investigation offline with equivalent access",
+      "step_count": 6
+    }
+  ],
+  "inspected_assets": [
+    {
+      "path": "design/mockups/hypertime-loom-2026-10-12/02-container-thread-tug.png",
+      "sha256": "0e9ffca0c1ebd5b35ba047d9cc7897e2f518e0f58f016a4fb080a981fa6e6a1e",
+      "inspection": "Viewed PNG with image tool; recorded visual regions in step/cross-check evidence."
+    },
+    {
+      "path": "design/mockups/hypertime-loom-2026-10-12/03-parallel-branch-history.png",
+      "sha256": "6ba670ebbb98f3cb3629c5389fd08edca73211962dcdc3186b6a1fb0c20f6f9c",
+      "inspection": "Viewed PNG with image tool; recorded visual regions in step/cross-check evidence."
+    },
+    {
+      "path": "design/mockups/hypertime-loom-2026-10-12/04-dense-overview.png",
+      "sha256": "fb523820e2cee7b22f501c3bc3271a672285f13807dab26d14f2866e371e2d40",
+      "inspection": "Viewed PNG with image tool; recorded visual regions in step/cross-check evidence."
+    },
+    {
+      "path": "design/mockups/hypertime-loom-2026-10-12/05-local-expansion-storyboard.png",
+      "sha256": "2b3a2ddd652d470ce589b933184273fe688c041688c9ac541a3b16b23b424359",
+      "inspection": "Viewed PNG with image tool; recorded visual regions in step/cross-check evidence."
+    },
+    {
+      "path": "design/mockups/hypertime-loom-2026-10-12/10-scenario-3-ten-branches-v2.png",
+      "sha256": "22b9b81cf6d29ad977d0c2af8765781f2b5d0e93d218fa66aedec759b28f0588",
+      "inspection": "Viewed PNG with image tool; recorded visual regions in step/cross-check evidence."
+    },
+    {
+      "path": "design/mockups/hypertime-loom-journeys-2026-10-12/02-span-effects.png",
+      "sha256": "e1cbaf1b257db6a2e0ec9f378f8ceb0265e5292966e46e6fb3a82f78ba44c46c",
+      "inspection": "Viewed PNG with image tool; recorded visual regions in step/cross-check evidence."
+    },
+    {
+      "path": "design/mockups/hypertime-loom-journeys-2026-10-12/04-cell-topology.png",
+      "sha256": "2eb2e9465108f92669003cbf2aa02f776e55bb27aab9a059df7577cdcbd535de",
+      "inspection": "Viewed PNG with image tool; recorded visual regions in step/cross-check evidence."
+    },
+    {
+      "path": "design/mockups/hypertime-loom-journeys-2026-10-12/05-page-footprint.png",
+      "sha256": "45fd86464b116b563bc120096b759c8986e0108554c5f66dceb2144aaaee7ec2",
+      "inspection": "Viewed PNG with image tool; recorded visual regions in step/cross-check evidence."
+    },
+    {
+      "path": "design/mockups/hypertime-loom-journeys-2026-10-12/06-branch-recovery.png",
+      "sha256": "890aaa01303ee0e5e7f9c45eaafe48832725cd5770d1edd541cdd4dec0310e00",
+      "inspection": "Viewed PNG with image tool; recorded visual regions in step/cross-check evidence."
+    },
+    {
+      "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+      "sha256": "c30c4c4837322f5a8ed1a86944e6ce59cbec6f97d8b3344db7fdb0265607a11a",
+      "inspection": "Viewed PNG with image tool; recorded visual regions in step/cross-check evidence."
+    },
+    {
+      "path": "design/mockups/link-forge-pouches-2026-10-12/02-disjoint-link-forge.png",
+      "sha256": "3df5cf895bc50e3b52957fbeed9cfeb2a4839c6678ababc1d61193294222b50c",
+      "inspection": "Viewed PNG with image tool; recorded visual regions in step/cross-check evidence."
+    },
+    {
+      "path": "design/mockups/link-forge-pouches-2026-10-12/03-dense-endsets.png",
+      "sha256": "11d9d43f3be8940a89e1028e3c3ef1c147390cb53b9156cec739cb190a09dbeb",
+      "inspection": "Viewed PNG with image tool; recorded visual regions in step/cross-check evidence."
+    },
+    {
+      "path": "design/mockups/link-forge-pouches-2026-10-12/04-reopen-draft.png",
+      "sha256": "f9dfc57a3195617d3a2829e5ac56703ce2cab8e8968c727a1a890fc90b9ecc91",
+      "inspection": "Viewed PNG with image tool; recorded visual regions in step/cross-check evidence."
+    },
+    {
+      "path": "design/mockups/spatial-elements-2026-10-13/01-walk-compass.png",
+      "sha256": "12454799125d4cce8522ba31070c8861b846d9526e9abde3b18a8c1832e52b2d",
+      "inspection": "Viewed PNG with image tool; recorded visual regions in step/cross-check evidence."
+    },
+    {
+      "path": "design/mockups/spatial-elements-2026-10-13/03-media-cue-bridge.png",
+      "sha256": "140da7782923b2e896cfe43446e41597414c5d2a752e102801aa5d852d5f2132",
+      "inspection": "Viewed PNG with image tool; recorded visual regions in step/cross-check evidence."
+    },
+    {
+      "path": "design/mockups/hypertime-loom-2026-10-12/07-scenario-1-trunk-branches.png",
+      "sha256": "cca0c7df79866eab8471a51cf58f768854e64049a79f598910125d78b4e9c710",
+      "inspection": "Viewed PNG with image tool; recorded visual regions in step/cross-check evidence."
+    }
+  ],
+  "steps": [
+    {
+      "journey": "J27",
+      "step": 1,
+      "prompt": "Select two separated ranges and stage 2 left/3 right members while preserving gap, with no Link created.",
+      "outcome": "Not represented",
+      "affordance": "Pointer selection of two ranges; stage to left/right bays (controls pictured)",
+      "prediction": "I predict two left and three right content members stage while the unmarked gap stays preserved and no Link is authored.",
+      "observed": "The forge frame shows exactly two separated highlighted Lab ranges, a “gap preserved” annotation, left count 2/right count 3, and Draft L7 / No link authored.",
+      "missing": "The final staged state and affordance are represented, but no selection-to-stage transition card is supplied; this static frame cannot show that the selection action produced these members.",
+      "represented_observations": "Two selected disjoint source ranges and explicit no-link-yet status are represented.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/02-disjoint-link-forge.png",
+          "region": "left source page, “2 selected ranges · gap preserved” annotation; center Draft L7 “No link authored”; endset labels"
+        }
+      ]
+    },
+    {
+      "journey": "J27",
+      "step": 2,
+      "prompt": "Inspect, reorder, remove, undo; distinguish packs, groups, order and occurrence choices.",
+      "outcome": "Not represented",
+      "affordance": "Per-member Inspect / Move up / Move down / Remove buttons and lists",
+      "prediction": "I predict each list operation affects only authored order or membership, and Undo restores the removed member.",
+      "observed": "Member rows expose Inspect, Move up, Move down and Remove; occurrence note says occurrence chooses entry context.",
+      "missing": "Undo, source-pack versus capture-group semantics, and an explicit occurrence-choice state are absent.",
+      "represented_observations": "Inspect/reorder/remove affordances and occurrence/context distinction are visible.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/02-disjoint-link-forge.png",
+          "region": "member action rows and center occurrence note"
+        }
+      ]
+    },
+    {
+      "journey": "J27",
+      "step": 3,
+      "prompt": "Pin receiving store/branch/base/author/mode while browsing other documents and older source versions.",
+      "outcome": "Not represented",
+      "affordance": "Center destination controls",
+      "prediction": "I predict browsing source material will leave the pinned destination and authoring identity fixed.",
+      "observed": "Center panel labels Comment, Tier: Author, Write in Review store, Branch Review · base V31, Create child at base.",
+      "missing": "No author identity/status is shown; no browse-away/older-source transition proves destination remains pinned.",
+      "represented_observations": "Destination, branch/base, relation and an authoring tier are represented.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/02-disjoint-link-forge.png",
+          "region": "center panel fields"
+        }
+      ]
+    },
+    {
+      "journey": "J27",
+      "step": 4,
+      "prompt": "Preview relation and inspect one Link, complete ordered endsets, exact anchors, relation/prominence; occurrence does not rewrite anchors.",
+      "outcome": "Not represented",
+      "affordance": "Preview relation button",
+      "prediction": "I predict preview shows one proposed relation with complete endsets and source anchors unchanged by choosing an occurrence.",
+      "observed": "A Preview relation control is visible; current draft summary says one Link and endset counts, and members show source/version/ranges.",
+      "missing": "No preview result frame or prominence control is shown; occurrence-context note does not show anchor invariance through an actual choice.",
+      "represented_observations": "One-Link draft summary, counts and source descriptors are visible.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/02-disjoint-link-forge.png",
+          "region": "center preview button and one-link summary; member cards"
+        }
+      ]
+    },
+    {
+      "journey": "J27",
+      "step": 5,
+      "prompt": "Explicitly forge/discard; separate draft save, source edits and destination effects.",
+      "outcome": "State undefined",
+      "affordance": "Forge link / Discard draft / Save draft to pouch",
+      "prediction": "I predict Forge creates one identified Link at the declared destination; discard only removes the draft, with protocol effects itemized.",
+      "observed": "The frame exposes Forge link, Save draft to pouch, Discard draft and says No link authored before commit.",
+      "missing": "No post-commit result, protocol operation list, discard result, or write/effect ledger is provided; commit semantics remain unspecified.",
+      "represented_observations": "The authoring action boundary and separate save/discard controls are visible.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/02-disjoint-link-forge.png",
+          "region": "center action buttons and “No link authored”"
+        }
+      ]
+    },
+    {
+      "journey": "J28",
+      "step": 1,
+      "prompt": "Reopen Draft L7 with exact endsets/grouping/relation/pinned destination before previews arrive.",
+      "outcome": "Not represented",
+      "affordance": "Select Draft L7 in pouch / reopen",
+      "prediction": "I predict draft identity, member order, relation and pinned destination return before optional preview data.",
+      "observed": "Reopen frame says saved members, order and source states restored; Left 2 / Right 3, Comment and Review store / base V31 are visible before one pending source preview resolves.",
+      "missing": "Grouping is not explicit and exact range/occurrence descriptors are not all expanded in this frame; this supports the represented restore subtask only.",
+      "represented_observations": "Restored member counts/order, relation, destination and pending status are shown alongside No link authored.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/04-reopen-draft.png",
+          "region": "title and central draft card; left/right member stacks; pending source status"
+        }
+      ]
+    },
+    {
+      "journey": "J28",
+      "step": 2,
+      "prompt": "Separate optional preview-not-held from required reference validation pending and destination validation failure.",
+      "outcome": "Not represented",
+      "affordance": "Read validation status and member status",
+      "prediction": "I predict missing preview bytes will be visibly distinct from identity validation required, and destination failure will be separately labeled.",
+      "observed": "Status panel distinguishes “Preview not held · reference may still be valid” from “Identity unresolved · validation required”; C24 says Reference validation pending and Forge link is disabled.",
+      "missing": "A destination validation failure state and resulting recovery action are not pictured.",
+      "represented_observations": "Optional preview absence and required identity/reference validation are explicitly differentiated.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/04-reopen-draft.png",
+          "region": "lower-right Validation status panel; C24 card; disabled Forge link"
+        }
+      ]
+    },
+    {
+      "journey": "J28",
+      "step": 3,
+      "prompt": "Find left member 21 in 40/60 draft, inspect five occurrences, filter/reorder and restore ordinal with complete endsets.",
+      "outcome": "Not represented",
+      "affordance": "Filter left members; select row 21; occurrence strip; Reorder",
+      "prediction": "I predict row 21 remains ordinal 21 after filtering/reordering, all five occurrences stay separately selectable, and both endsets remain complete.",
+      "observed": "Dense frame labels Left 40 and Right 60, shows row 21 selected, five occurrence thumbnails, “Occurrence selection does not change member addresses,” and total/filtered/visible counts.",
+      "missing": "No before/after reorder or restored-ordinal state; occurrence identities only partly labeled and complete post-filter ordering is not demonstrated.",
+      "represented_observations": "Dense indexed rows and bounded six-row windows expose member 21 and five occurrences without pairwise fan drawing.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/03-dense-endsets.png",
+          "region": "left row 21; central five-occurrence strip; left/right totals and visible counts; bottom actions"
+        }
+      ]
+    },
+    {
+      "journey": "J28",
+      "step": 4,
+      "prompt": "Review preflight failure and declared mid-commit failure; determine written/recoverable state and safe retry.",
+      "outcome": "State undefined",
+      "affordance": "No failure-state control visible",
+      "prediction": "I predict preflight failure retains a retryable draft, while a mid-commit failure reports exactly which writes landed and recovery action.",
+      "observed": "No preflight or mid-commit failure card is present.",
+      "missing": "Written effects, recovery and retry semantics are undecided in the supplied concept.",
+      "represented_observations": "Draft remains present in the reopen frame, but this does not depict failure behavior.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/04-reopen-draft.png",
+          "region": "central draft and action row; no failure card shown"
+        }
+      ]
+    },
+    {
+      "journey": "J28",
+      "step": 5,
+      "prompt": "After Commit outcome unknown, Check status before retry and resolve to existing Link or confirmed uncommitted draft.",
+      "outcome": "State undefined",
+      "affordance": "No Check status control shown",
+      "prediction": "I predict status lookup resolves the attempt idempotently before any retry can create another Link.",
+      "observed": "No unknown-outcome or status-check card/control is shown.",
+      "missing": "There is no commit-attempt identity, status lookup, or idempotent retry protocol; a duplicate-prevention claim cannot be made.",
+      "represented_observations": "Forge is visibly disabled while reference validation is pending, but that does not define an unknown commit outcome.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/04-reopen-draft.png",
+          "region": "disabled Forge link and validation panel"
+        }
+      ]
+    },
+    {
+      "journey": "J28",
+      "step": 6,
+      "prompt": "Keep/discard draft separately, reopen again and compare ordered members/destination.",
+      "outcome": "Not represented",
+      "affordance": "Save draft / Discard draft / pouch card",
+      "prediction": "I predict keeping preserves ordered members and destination; discarding removes only the draft; reopening restores the same descriptor.",
+      "observed": "Save draft to pouch, Discard draft and a pouch Draft L7 card are visible; member order and destination are shown.",
+      "missing": "No discard result or second reopen comparison frame is supplied.",
+      "represented_observations": "Separate keep/discard affordances and a reopenable draft card are represented.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/04-reopen-draft.png",
+          "region": "pouch Draft L7 card; bottom Save draft and Discard draft controls"
+        }
+      ]
+    },
+    {
+      "journey": "J29",
+      "step": 1,
+      "prompt": "Identify cached video V9, audio V7, selected document range and image region.",
+      "outcome": "Concept supported",
+      "affordance": "Inspect four media/source panes",
+      "prediction": "I predict each pane identifies its own source/version and selected locator, with cached origin visible.",
+      "observed": "Frame labels Rig test V9 remote cached, Debrief V7 remote cached, Lab notes V12 local with selected passage, and Calibration plate V5 remote cached with image region selected.",
+      "missing": "Identity is displayed, but exact authority/store identities beyond labels and payload integrity are not shown.",
+      "represented_observations": "All four required media kinds, versions, origins and selected locators appear.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/03-media-cue-bridge.png",
+          "region": "upper video/audio panes and lower document/image panes"
+        }
+      ]
+    },
+    {
+      "journey": "J29",
+      "step": 2,
+      "prompt": "Inspect manual cue video 00:38 to audio 02:14–02:18, separate clocks, derived transcript and exact locators before playback.",
+      "outcome": "Concept supported",
+      "affordance": "Inspect Cue 1; Preview alignment is explicit",
+      "prediction": "I predict cue maps separate video and audio positions, labels transcript as derived and does not imply shared source or autoplay.",
+      "observed": "Cue 1 says manual alignment, Video 00:38 ↔ Audio 02:14; waveform selects 02:14–02:18; transcript is labeled derived; footer says alignment does not assert shared source; preview is explicit.",
+      "missing": "No actual playback timing or cue locator rule/seek basis is demonstrated.",
+      "represented_observations": "The two clocks, derived transcript, manual alignment and explicit preview boundary are clearly labeled.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/03-media-cue-bridge.png",
+          "region": "audio/video panes, Cue 1 card, lower alignment rails and Preview alignment button"
+        }
+      ]
+    },
+    {
+      "journey": "J29",
+      "step": 3,
+      "prompt": "Preview alignment, adjust offset, remove/add cue via equivalent list action while preserving independent versions/locators.",
+      "outcome": "Not represented",
+      "affordance": "Preview alignment / Adjust cue / Remove cue / List view",
+      "prediction": "I predict adjustment affects only the cue offset; removing a cue preserves media; list view offers an equivalent add path.",
+      "observed": "Preview alignment, Adjust cue and Remove cue are visible, and a List view button is present.",
+      "missing": "No adjusted offset result or list-based add action is pictured; persistence of source versions/locators through edit is not shown.",
+      "represented_observations": "Preview/adjust/remove controls and a list-mode entry are represented.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/03-media-cue-bridge.png",
+          "region": "lower cue controls and List view"
+        }
+      ]
+    },
+    {
+      "journey": "J29",
+      "step": 4,
+      "prompt": "Save cue set, clear staging and reopen; handle unavailable segment/unsupported seek while preserving descriptor and correction.",
+      "outcome": "Not represented",
+      "affordance": "Save cue set / Clear staging",
+      "prediction": "I predict cue set can reopen with exact locators; unavailable segments retain descriptor and offer correction.",
+      "observed": "Save cue set and Clear staging controls are visible.",
+      "missing": "No saved/reopen state, unavailable segment, unsupported seek-basis variant, or correction policy appears.",
+      "represented_observations": "Cue set save and staging clear are separately available.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/03-media-cue-bridge.png",
+          "region": "top Clear staging and lower Save cue set; no reopen/error card"
+        }
+      ]
+    },
+    {
+      "journey": "J29",
+      "step": 5,
+      "prompt": "Open Forge from cue set; review eligible content/exclusions and cancel without creating Link from view cue.",
+      "outcome": "Not represented",
+      "affordance": "Forge relation action",
+      "prediction": "I predict Forge opens a separate draft; only concrete content spans qualify and cancel leaves the view cue intact.",
+      "observed": "Forge relation says it opens a separate draft; source references show a selected passage and image region; cue panel is labeled view only.",
+      "missing": "No separate draft chooser, eligibility/exclusion list or cancel-result card appears.",
+      "represented_observations": "View-only label and separate Forge relation affordance are explicit.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/03-media-cue-bridge.png",
+          "region": "header “Manual viewing cues · view only”; lower-right Forge relation button"
+        }
+      ]
+    },
+    {
+      "journey": "J30",
+      "step": 1,
+      "prompt": "Inspect declared 100-op trunk/three-branch fixture then ten-path variant; expand coil and find every branch exit in counted pack/list.",
+      "outcome": "Not represented",
+      "affordance": "Open loom study; expand/inspect branch packs",
+      "prediction": "I predict the 100-op/three-branch example and ten-path variant have distinct labeled fixtures, with counted exits reachable in packs/list.",
+      "observed": "The 07 scenario image explicitly depicts Main trunk / 100 ops, Branch A / B / C with 20 each, 160 unique ops, and forks at D001, D050 and D100; the separate 10-path variant is also labeled.",
+      "missing": "The fixture is represented. The required expand-one-coil transition and finding every exit through a counted pack or synchronized list are not pictured.",
+      "represented_observations": "The declared 100-op trunk/three-branch fixture and a separate ten-path fixture are distinctly labeled; counts are not contradictory.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-2026-10-12/10-scenario-3-ten-branches-v2.png",
+          "region": "top “10 paths / 9 side branches + main continuation”; contrast with loomdense 262,144 ops/128 heads and expansion 3,842 ops/7 heads"
+        },
+        {
+          "path": "design/mockups/hypertime-loom-2026-10-12/07-scenario-1-trunk-branches.png",
+          "region": "title/count line; Main trunk/100 ops; Branch A/B/C cards; D001/D050/D100 fork labels"
+        }
+      ]
+    },
+    {
+      "journey": "J30",
+      "step": 2,
+      "prompt": "Tug container into parallel lens without moving source ops; distinguish ancestry, same-op correspondence and filtered view order.",
+      "outcome": "Not represented",
+      "affordance": "Tug to reveal history / keyboard Escape cancel (pictured) / focus state",
+      "prediction": "I predict a local parallel view reuses operation identities at unchanged loom positions and labels correspondence separately from ancestry/order.",
+      "observed": "Tug frame says “Same operation, another context,” shows reachable history and Cancel/Esc; parallel history shows same operations in a parallel context.",
+      "missing": "The three relations (stored ancestry, same-op correspondence, filtered view order) are not simultaneously labeled or contrasted.",
+      "represented_observations": "A tug and parallel context are depicted as view transitions.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-2026-10-12/02-container-thread-tug.png",
+          "region": "right-side tug cue and lower history panel; parallel lower branches and “Same operations · parallel context”"
+        }
+      ]
+    },
+    {
+      "journey": "J30",
+      "step": 3,
+      "prompt": "Run History lens · Touches on exact ABCDEF with insert/delete/move; compare Original source/Evolving passage and occurrence scope.",
+      "outcome": "Not represented",
+      "affordance": "Select passage and History lens · Touches; choose controls at top",
+      "prediction": "I predict exact disjoint ranges/gaps and source occurrence remain stable while insert/delete/move before/after results explain their own coordinate frame.",
+      "observed": "Span-effects frame labels subject ABCDEF, This occurrence, Original source, Context shifts; inspector shows insertion AB→ABxy, deletion before/after with CD recovered, and rearrangement EFABxy.",
+      "missing": "Journey’s explicit Evolving passage option and rule are absent; exact source-address provenance for each event is not exhaustively exposed.",
+      "represented_observations": "The three effect types and before/after content, occurrence and source-follow choices are represented.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/02-span-effects.png",
+          "region": "top subject/follow/occurrence controls; effect inspector and results table"
+        }
+      ]
+    },
+    {
+      "journey": "J30",
+      "step": 4,
+      "prompt": "Exclude unrelated earlier offset shift then include it as context, with owning frame/parent/reason/footprint.",
+      "outcome": "Not represented",
+      "affordance": "Context shifts checkbox",
+      "prediction": "I predict unrelated shift is excluded by default and explicitly appears with its owner and before/after footprint when enabled.",
+      "observed": "Top control offers Context shifts unchecked; the concept notes explain unrelated earlier insertion merely shifts offset and is excluded by default.",
+      "missing": "No pictured result row for the unrelated shift or owning frame/parent/reason/footprint is supplied.",
+      "represented_observations": "Default exclusion control and written rule are represented.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/02-span-effects.png",
+          "region": "top Context shifts checkbox; effects list has no unrelated shift row"
+        }
+      ]
+    },
+    {
+      "journey": "J30",
+      "step": 5,
+      "prompt": "Inspect C24 rewiring C17 neighbor C18 on d.reading; separate own edits/affected topology and preserve reciprocal endpoints.",
+      "outcome": "Not represented",
+      "affordance": "Select Affected topology; Inspect / Enter state",
+      "prediction": "I predict effect is attributed to C24, marks C17 affected, shows before/after reciprocal neighbors and unchanged C17 text.",
+      "observed": "Topology frame says Connect C24 after C17, Edited C24 · affected C17; before C18 follows C17, after C24 follows C17 and C18 detached; C17 text unchanged; separate effects list names connection effect.",
+      "missing": "Full reciprocal endpoint data representation is schematic rather than a complete machine-readable identity descriptor.",
+      "represented_observations": "Authored op versus affected cell, unchanged text, changed topology and detached neighbor are legible.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/04-cell-topology.png",
+          "region": "central C24 operation card; before/after d.reading diagrams; Effects on C17 panel"
+        }
+      ]
+    },
+    {
+      "journey": "J30",
+      "step": 6,
+      "prompt": "Capture page footprint then reflow selected passage across pages while retaining snapshot/layout and exact ranges.",
+      "outcome": "Not represented",
+      "affordance": "Choose Captured page contents; inspect later state",
+      "prediction": "I predict captured Page 4@V12 remains a pinned ordered footprint while follow-passage view can split the passage across Pages 5–6@V19.",
+      "observed": "Page-footprint image offers Captured page contents versus Follow selected passage; shows Page 4@V12 snapshot pinned and passage split across Pages 5 and 6 at V19, with source retained/page number changed.",
+      "missing": "Captured layout-context identity details and exact range tokens are abbreviated in the illustration.",
+      "represented_observations": "Snapshot and evolving passage are separate subjects and reflow is shown without treating page number as identity.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/05-page-footprint.png",
+          "region": "left capture choice and pinned Page contents V12; right Pages 5–6 V19 and page history inspector"
+        }
+      ]
+    },
+    {
+      "journey": "J30",
+      "step": 7,
+      "prompt": "Cancel partial lens, save recipe/results separately and inspect completed-empty scope; local expansion/tug create no ops.",
+      "outcome": "Not represented",
+      "affordance": "Cancel search button; expand/tug gestures",
+      "prediction": "I predict cancellation retains collected results; recipe and captured results save separately; completed empty is distinct from partial coverage.",
+      "observed": "Span frame has Cancel search and “other branches pending”; expansion/tug frames show local unfolding with source context.",
+      "missing": "No saved recipe/results controls or completed-empty state; no explicit no-new-ops ledger in frames.",
+      "represented_observations": "Cancellation and pending coverage are visible; local expansion is presented as a view.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/02-span-effects.png",
+          "region": "bottom Cancel search and pending coverage; expansion local unfolding"
+        }
+      ]
+    },
+    {
+      "journey": "J31",
+      "step": 1,
+      "prompt": "Inspect exact source passage Draft A V27, ranges/state/occurrence.",
+      "outcome": "Not represented",
+      "affordance": "Choose passage to recover; inspect source",
+      "prediction": "I predict source descriptor stays Draft A V27 with exact selected occurrence while target is chosen separately.",
+      "observed": "Recovery frame labels Draft A V27, highlights “Pressure stayed stable,” and offers Choose passage to recover.",
+      "missing": "Source store/version and selected passage are visible, but the exact source ranges and occurrence identity are not expanded.",
+      "represented_observations": "Source state/object and selected content are visible.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/06-branch-recovery.png",
+          "region": "left comparison pane Draft A V27 and selected passage row"
+        }
+      ]
+    },
+    {
+      "journey": "J31",
+      "step": 2,
+      "prompt": "Select Draft B V31 separately as target base, inspect full target state and existing futures.",
+      "outcome": "Not represented",
+      "affordance": "Choose Draft B V31 branch base",
+      "prediction": "I predict the selected source remains Draft A V27, the immutable recovery base is Draft B V31, and existing Draft B V40 remains a future.",
+      "observed": "Recovery panel explicitly selects Draft B V31 as branch base and labels Draft B V40 as an unchanged retained future; the left comparison independently compares A V27 with B V40.",
+      "missing": "The base label and a retained future are shown, but the full target state and all existing futures are not inspectable in this single frame.",
+      "represented_observations": "Target base and retained future are explicitly named in recovery panel.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/06-branch-recovery.png",
+          "region": "right recovery preview: Draft B V31 branch base, Draft B V40 unchanged future; left comparison header A V27 vs B V40"
+        }
+      ]
+    },
+    {
+      "journey": "J31",
+      "step": 3,
+      "prompt": "Open authoring preview; identify inserted/transcluded ranges, destination, branch mode, author verification and written effects.",
+      "outcome": "Not represented",
+      "affordance": "Create recovery branch panel / preview first",
+      "prediction": "I predict uncommitted preview shows exact source ranges, new destination, branch mode, author status and proposed writes.",
+      "observed": "Right panel labels Recovery branch · preview, source A V27, branch base B V31, selected passage only, No change saved, Create recovery branch and Cancel.",
+      "missing": "No author verification/status, exact origin ranges, or detailed effect ledger is shown; preview itself is declared, but not complete enough for this step.",
+      "represented_observations": "Preview/no-change-saved boundary, source/base and branch action are represented.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/06-branch-recovery.png",
+          "region": "right preview graph, create recovery panel and footer “Preview first · old futures retained”"
+        }
+      ]
+    },
+    {
+      "journey": "J31",
+      "step": 4,
+      "prompt": "Cancel without changing sources/futures/draft; repeat unavailable source and advanced branch head while pinned base V31 remains fixed until explicit change.",
+      "outcome": "Not represented",
+      "affordance": "Cancel button; retain pinned base card",
+      "prediction": "I predict cancel leaves all descriptors intact; unavailable source and advanced head are separate validation states; choosing new base is explicit.",
+      "observed": "Cancel button and No change saved are visible.",
+      "missing": "No cancel result card, unavailable-source state, advancing-head state, retain-V31 versus choose-new-base choice, or validation transition appears.",
+      "represented_observations": "Cancel is offered before commit; no outcome is pictured.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/06-branch-recovery.png",
+          "region": "right Create recovery branch panel, Cancel button and No change saved label"
+        }
+      ]
+    },
+    {
+      "journey": "J31",
+      "step": 5,
+      "prompt": "Create separately identified recovery branch only after validation; inspect returned branch ID and origin addresses, preserve futures.",
+      "outcome": "Not represented",
+      "affordance": "Create recovery branch button",
+      "prediction": "I predict validation gates creation, a new branch identity and origin addresses return, and existing futures remain intact.",
+      "observed": "Button says Create recovery branch; note says New child of Draft B V31 and existing futures stay reachable.",
+      "missing": "No post-commit result/branch identity/origin-address card or validation gate state appears.",
+      "represented_observations": "The intended separate child branch and preservation of future are declared in preview.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/06-branch-recovery.png",
+          "region": "right action panel footer and branch preview graph"
+        }
+      ]
+    },
+    {
+      "journey": "J31",
+      "step": 6,
+      "prompt": "Reopen result and distinguish authored branch/source/reader visit; reconcile inconsistent difference counts.",
+      "outcome": "Confusing",
+      "affordance": "No reopen result action shown",
+      "prediction": "I predict result card clearly names new authored branch and source origin, separate from activity visits, and corrects comparison count to fixture.",
+      "observed": "No result/reopen card is pictured. The comparison pane labels one difference for A V27 versus B V40 and also lists wording changed and section reordered rows; the recovery action separately targets B V31.",
+      "missing": "No post-commit identity or reader-visit distinction appears. The “1 difference” badge is ambiguous beside multiple listed change categories; it is not evidence of the recovery delta at B V31.",
+      "represented_observations": "The design names recovery as a branch in the panel, but the count/target juxtaposition risks conflation.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/06-branch-recovery.png",
+          "region": "left “Changes between Draft A · V27 and Draft B · V40 / 1 difference”; right recovery base Draft B · V31"
+        }
+      ]
+    },
+    {
+      "journey": "J32",
+      "step": 1,
+      "prompt": "At integrated visit 03 preserve query/comparison/L17 cursors/companions/packages/pouch/sibling route and save/close via control.",
+      "outcome": "Not represented",
+      "affordance": "Save/close control absent from integrated frame",
+      "prediction": "I predict visible save/close captures the listed reader session descriptor without mutating authored sources.",
+      "observed": "Integrated frame shows visit 03, query, C17 comparison, L17 cursors, packages, pouch, companions and sibling route; no save/close control or saved descriptor is shown.",
+      "missing": "Save/close transition and proposed session ledger are absent.",
+      "represented_observations": "The current integrated state components and sibling route are visible together.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "full frame: header/query, L17 panel, comparison, pouch and reader visits; no save/close action"
+        }
+      ]
+    },
+    {
+      "journey": "J32",
+      "step": 2,
+      "prompt": "Reopen while offline, restore exact identities before previews; cached Review V4 readable and absent media/search surfaces named.",
+      "outcome": "Not represented",
+      "affordance": "No offline reopen card",
+      "prediction": "I predict exact saved identities restore before optional previews; verified cached Review V4 remains readable; remote gaps retain named unavailable/pending status.",
+      "observed": "Integrated frame labels Review V4 remote cached, search 24 found/3 stores pending, and L17 right member 3 unavailable.",
+      "missing": "No offline, reopen, cache-verification or precedence-of-identity-before-preview state is shown.",
+      "represented_observations": "Current frame distinguishes cached, pending and unavailable statuses.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "current visit Review V4 remote cached; query coverage bar; L17 member counts/unavailable label"
+        }
+      ]
+    },
+    {
+      "journey": "J32",
+      "step": 3,
+      "prompt": "Use proposed keyboard/list path to inspect historical C17, cycle Link member and resume visit, with visible equivalent/named focus.",
+      "outcome": "Not represented",
+      "affordance": "No keyboard/list/focus sequence",
+      "prediction": "I predict list and keyboard actions reach the same exact C17 state/member/visit and expose named focus/return targets.",
+      "observed": "Pointer-visible controls include Enter V8, Inspect all members, reader Back/Return and Walks; Walk compass has a List view button.",
+      "missing": "No keyboard bindings, proposed focus sequence, accessibility names/tree, or parity state cards are present.",
+      "represented_observations": "Visible pointer actions and a list-mode entry point exist in related frames.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Enter V8 / Inspect all members / reader route controls; walk"
+        },
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/01-walk-compass.png",
+          "region": "List view and Resume visit 05"
+        }
+      ]
+    },
+    {
+      "journey": "J32",
+      "step": 4,
+      "prompt": "Repeat in narrow layout, enlarged text and reduced motion; reach off-window cards/exits/endsets without pointer-only gestures.",
+      "outcome": "Not represented",
+      "affordance": "No alternate layout, type scale, or motion state",
+      "prediction": "I predict the synchronized list retains both endsets and branch counts under narrow/enlarged/reduced-motion modes with stable focus.",
+      "observed": "Dense draft and branch diagrams show counts and list rows at normal scale; no adaptation frames are supplied.",
+      "missing": "Narrow view, enlarged text, reduced-motion, off-window access and actual focus continuity are absent.",
+      "represented_observations": "Indexed lists and counted branches are candidate design elements, not evidence of alternate layouts.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/03-dense-endsets.png",
+          "region": "normal-scale dense member lists; no narrow/enlarged/reduced-motion variants"
+        }
+      ]
+    },
+    {
+      "journey": "J32",
+      "step": 5,
+      "prompt": "Handle unreadable saved reader data and cancelled request without regeneration; preserve descriptor and offer repair/retry.",
+      "outcome": "Not represented",
+      "affordance": "No corrupt-data or cancelled-request state",
+      "prediction": "I predict corrupt reader history remains preserved with repair options, while a cancelled query remains distinct and retryable.",
+      "observed": "Integrated search has Cancel search; Walk compass provides preview/resume and branches.",
+      "missing": "No unreadable saved data, recovery/repair choice, cancelled-request card, or persistence guarantee is represented.",
+      "represented_observations": "A search cancel affordance and explicit resume action are visible in separate studies.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Cancel search in left query panel; walk preview/resume panel"
+        }
+      ]
+    },
+    {
+      "journey": "J32",
+      "step": 6,
+      "prompt": "Reconnect, refresh query and explicitly acquire missing pinned edition without replacing identities or enabling layers.",
+      "outcome": "Not represented",
+      "affordance": "No reconnect/acquire controls in integrated frame",
+      "prediction": "I predict refresh/acquire are explicit; new results/pointers/package updates preserve saved selected identities and package choices.",
+      "observed": "Integrated query shows pending coverage; package panel shows Lab review #13 available but not enabled; existing selected identities remain labeled.",
+      "missing": "No reconnection, query refresh, remote edition acquisition, pointer update, or post-refresh preservation result is depicted.",
+      "represented_observations": "Pending coverage and separate not-enabled update candidate are visible.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "query coverage and Link/package panels"
+        }
+      ]
+    }
+  ],
+  "variants": [
+    {
+      "journey": "J27",
+      "variant": "Remove versus source edit; staged private data write boundary",
+      "outcome": "State undefined",
+      "observation": "Remove is visible on a member row, but whether it removes only the draft member and whether staging writes private draft metadata is not shown.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/02-disjoint-link-forge.png",
+          "region": "member Remove buttons and draft panel; no effect ledger"
+        }
+      ]
+    },
+    {
+      "journey": "J28",
+      "variant": "Optional preview absent while reference validation is pending",
+      "outcome": "Concept supported",
+      "observation": "The reopen frame explicitly separates preview not held from identity unresolved/reference validation pending and disables Forge.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/04-reopen-draft.png",
+          "region": "C24 member and lower-right Validation status panel"
+        }
+      ]
+    },
+    {
+      "journey": "J28",
+      "variant": "Preflight failure and mid-commit failure",
+      "outcome": "State undefined",
+      "observation": "No failure cards specify landed writes, recovery or retry safety.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/04-reopen-draft.png",
+          "region": "No failure variant is present in the supplied reopen frame"
+        }
+      ]
+    },
+    {
+      "journey": "J28",
+      "variant": "Commit outcome unknown / status check before retry",
+      "outcome": "State undefined",
+      "observation": "No Check status affordance, attempt identity, or duplicate-safe retry protocol is shown.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/04-reopen-draft.png",
+          "region": "No unknown-outcome variant; Forge is merely disabled for validation pending"
+        }
+      ]
+    },
+    {
+      "journey": "J29",
+      "variant": "Unavailable media segment or unsupported seek basis",
+      "outcome": "Not represented",
+      "observation": "No error state or correction path is pictured; cue identity/locator retention under failure cannot be assessed.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/03-media-cue-bridge.png",
+          "region": "No unavailable/unsupported-seek variant"
+        }
+      ]
+    },
+    {
+      "journey": "J30",
+      "variant": "Declared 100-op/three-branch fixture versus ten-path examples",
+      "outcome": "Not represented",
+      "observation": "The declared fixture is explicitly shown in 07: Main trunk 100 plus Branch A/B/C 20 each = 160 unique ops; fork labels D001, D050 and D100 are visible. The separate ten-path image and other count examples belong to distinct, labeled fixtures. The required expanded coil/count list is absent.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-2026-10-12/07-scenario-1-trunk-branches.png",
+          "region": "title/count line; Main trunk; three branch cards; fork labels"
+        },
+        {
+          "path": "design/mockups/hypertime-loom-2026-10-12/10-scenario-3-ten-branches-v2.png",
+          "region": "header “10 paths / 9 side branches + main continuation”"
+        },
+        {
+          "path": "design/mockups/hypertime-loom-2026-10-12/04-dense-overview.png",
+          "region": "header “262,144 ops · 128 heads”"
+        },
+        {
+          "path": "design/mockups/hypertime-loom-2026-10-12/05-local-expansion-storyboard.png",
+          "region": "header “3,842 ops · 7 heads”"
+        }
+      ]
+    },
+    {
+      "journey": "J30",
+      "variant": "Original source versus Evolving passage",
+      "outcome": "Not represented",
+      "observation": "Original source is pictured; the explicit Evolving passage alternative and boundary rule are absent.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/02-span-effects.png",
+          "region": "top Follow control displays Original source; no Evolving passage option"
+        }
+      ]
+    },
+    {
+      "journey": "J30",
+      "variant": "Captured page footprint versus later reflow",
+      "outcome": "Concept supported",
+      "observation": "The page study distinguishes a pinned captured page from following the passage across pages 5 and 6 after reflow.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/05-page-footprint.png",
+          "region": "left captured Page 4@V12; right Pages 5–6@V19"
+        }
+      ]
+    },
+    {
+      "journey": "J31",
+      "variant": "Pinned target base V31 with existing future V40",
+      "outcome": "Concept supported",
+      "observation": "The panel explicitly names B V31 as the recovery base and B V40 as an unchanged retained future; the left panel is a separate comparison of A V27 and B V40. These can coherently coexist.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/06-branch-recovery.png",
+          "region": "right recovery base/future labels and left A V27 vs B V40 comparison header"
+        }
+      ]
+    },
+    {
+      "journey": "J31",
+      "variant": "Unavailable source; target head advances beyond pinned V31",
+      "outcome": "Not represented",
+      "observation": "No availability/head-advance state card or explicit retain-V31/change-base choice appears.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/06-branch-recovery.png",
+          "region": "No unavailable-source or advanced-head variant"
+        }
+      ]
+    },
+    {
+      "journey": "J32",
+      "variant": "Offline reopen and unreadable saved reader data",
+      "outcome": "Not represented",
+      "observation": "No offline restart/corrupt-reader-data card exists; current remote cached/pending/unavailable labels do not prove restoration.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "current integrated state only; no lifecycle card"
+        }
+      ]
+    },
+    {
+      "journey": "J32",
+      "variant": "Keyboard/accessibility, narrow/enlarged/reduced-motion parity",
+      "outcome": "Not represented",
+      "observation": "No input-equivalence or alternate presentation state cards are supplied.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "single normal-scale pointer-oriented integrated frame"
+        }
+      ]
+    }
+  ],
+  "cross_checks": [
+    {
+      "journey": "J27",
+      "check": "Pointer and discoverability",
+      "outcome": "Not represented",
+      "observation": "Visible actions/targets can be assessed in the cited still; actual discoverability, picking and delivery cannot.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/02-disjoint-link-forge.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J27",
+      "check": "List and keyboard",
+      "outcome": "Not represented",
+      "observation": "Some list controls or list-mode affordances are visible; equivalent keyboard route, bindings, focus order and parity are not represented.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/02-disjoint-link-forge.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J27",
+      "check": "Accessibility",
+      "outcome": "Not represented",
+      "observation": "Labels and non-color cues can be inspected visually; no accessibility tree or assistive-technology sequence is supplied.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/02-disjoint-link-forge.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J27",
+      "check": "Density and narrow views",
+      "outcome": "Not represented",
+      "observation": "Counts and compact rows can be inspected at the pictured scale; narrow layout, scrolling/windowing and continuation behavior are absent.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/03-dense-endsets.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J27",
+      "check": "Enlarged text and optics",
+      "outcome": "Not represented",
+      "observation": "Text hierarchy and backing can be visually assessed in the still; enlarged-scale layout and measured contrast are absent.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/02-disjoint-link-forge.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J27",
+      "check": "Reduced motion",
+      "outcome": "Not represented",
+      "observation": "No reduced-motion state card or stable transition result is supplied.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/02-disjoint-link-forge.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J27",
+      "check": "Lifecycle and unavailable states",
+      "outcome": "Not represented",
+      "observation": "Only statuses present in the still can be evaluated; requested restart/retry/unavailable variants are not fully represented.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/04-reopen-draft.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J27",
+      "check": "Storage boundaries",
+      "outcome": "Not represented",
+      "observation": "Visible labels suggest intent, but no before/after state ledger or store diff exists in this static artifact.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/02-disjoint-link-forge.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J27",
+      "check": "Relation language",
+      "outcome": "Not represented",
+      "observation": "Visible labels/relations can be inspected; semantics not explicitly distinguished remain uncertain and no runtime identity validation is possible.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/02-disjoint-link-forge.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J28",
+      "check": "Pointer and discoverability",
+      "outcome": "Not represented",
+      "observation": "Visible actions/targets can be assessed in the cited still; actual discoverability, picking and delivery cannot.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/04-reopen-draft.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J28",
+      "check": "List and keyboard",
+      "outcome": "Not represented",
+      "observation": "Some list controls or list-mode affordances are visible; equivalent keyboard route, bindings, focus order and parity are not represented.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/03-dense-endsets.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J28",
+      "check": "Accessibility",
+      "outcome": "Not represented",
+      "observation": "Labels and non-color cues can be inspected visually; no accessibility tree or assistive-technology sequence is supplied.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/04-reopen-draft.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J28",
+      "check": "Density and narrow views",
+      "outcome": "Not represented",
+      "observation": "Counts and compact rows can be inspected at the pictured scale; narrow layout, scrolling/windowing and continuation behavior are absent.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/03-dense-endsets.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J28",
+      "check": "Enlarged text and optics",
+      "outcome": "Not represented",
+      "observation": "Text hierarchy and backing can be visually assessed in the still; enlarged-scale layout and measured contrast are absent.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/03-dense-endsets.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J28",
+      "check": "Reduced motion",
+      "outcome": "Not represented",
+      "observation": "No reduced-motion state card or stable transition result is supplied.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/04-reopen-draft.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J28",
+      "check": "Lifecycle and unavailable states",
+      "outcome": "Not represented",
+      "observation": "Only statuses present in the still can be evaluated; requested restart/retry/unavailable variants are not fully represented.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/04-reopen-draft.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J28",
+      "check": "Storage boundaries",
+      "outcome": "Not represented",
+      "observation": "Visible labels suggest intent, but no before/after state ledger or store diff exists in this static artifact.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/04-reopen-draft.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J28",
+      "check": "Relation language",
+      "outcome": "Not represented",
+      "observation": "Visible labels/relations can be inspected; semantics not explicitly distinguished remain uncertain and no runtime identity validation is possible.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/02-disjoint-link-forge.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J29",
+      "check": "Pointer and discoverability",
+      "outcome": "Not represented",
+      "observation": "Visible actions/targets can be assessed in the cited still; actual discoverability, picking and delivery cannot.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/03-media-cue-bridge.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J29",
+      "check": "List and keyboard",
+      "outcome": "Not represented",
+      "observation": "Some list controls or list-mode affordances are visible; equivalent keyboard route, bindings, focus order and parity are not represented.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/03-media-cue-bridge.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J29",
+      "check": "Accessibility",
+      "outcome": "Not represented",
+      "observation": "Labels and non-color cues can be inspected visually; no accessibility tree or assistive-technology sequence is supplied.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/03-media-cue-bridge.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J29",
+      "check": "Density and narrow views",
+      "outcome": "Not represented",
+      "observation": "Counts and compact rows can be inspected at the pictured scale; narrow layout, scrolling/windowing and continuation behavior are absent.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/03-media-cue-bridge.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J29",
+      "check": "Enlarged text and optics",
+      "outcome": "Not represented",
+      "observation": "Text hierarchy and backing can be visually assessed in the still; enlarged-scale layout and measured contrast are absent.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/03-media-cue-bridge.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J29",
+      "check": "Reduced motion",
+      "outcome": "Not represented",
+      "observation": "No reduced-motion state card or stable transition result is supplied.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/03-media-cue-bridge.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J29",
+      "check": "Lifecycle and unavailable states",
+      "outcome": "Not represented",
+      "observation": "Only statuses present in the still can be evaluated; requested restart/retry/unavailable variants are not fully represented.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/03-media-cue-bridge.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J29",
+      "check": "Storage boundaries",
+      "outcome": "Not represented",
+      "observation": "Visible labels suggest intent, but no before/after state ledger or store diff exists in this static artifact.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/03-media-cue-bridge.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J29",
+      "check": "Relation language",
+      "outcome": "Not represented",
+      "observation": "Visible labels/relations can be inspected; semantics not explicitly distinguished remain uncertain and no runtime identity validation is possible.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/03-media-cue-bridge.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J30",
+      "check": "Pointer and discoverability",
+      "outcome": "Not represented",
+      "observation": "Visible actions/targets can be assessed in the cited still; actual discoverability, picking and delivery cannot.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-2026-10-12/02-container-thread-tug.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J30",
+      "check": "List and keyboard",
+      "outcome": "Not represented",
+      "observation": "Some list controls or list-mode affordances are visible; equivalent keyboard route, bindings, focus order and parity are not represented.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/02-span-effects.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J30",
+      "check": "Accessibility",
+      "outcome": "Not represented",
+      "observation": "Labels and non-color cues can be inspected visually; no accessibility tree or assistive-technology sequence is supplied.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/02-span-effects.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J30",
+      "check": "Density and narrow views",
+      "outcome": "Not represented",
+      "observation": "Counts and compact rows can be inspected at the pictured scale; narrow layout, scrolling/windowing and continuation behavior are absent.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-2026-10-12/10-scenario-3-ten-branches-v2.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        },
+        {
+          "path": "design/mockups/hypertime-loom-2026-10-12/07-scenario-1-trunk-branches.png",
+          "region": "counted branch cards and fork labels at the pictured scale; no expanded list/narrow view"
+        }
+      ]
+    },
+    {
+      "journey": "J30",
+      "check": "Enlarged text and optics",
+      "outcome": "Not represented",
+      "observation": "Text hierarchy and backing can be visually assessed in the still; enlarged-scale layout and measured contrast are absent.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/02-span-effects.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J30",
+      "check": "Reduced motion",
+      "outcome": "Not represented",
+      "observation": "No reduced-motion state card or stable transition result is supplied.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-2026-10-12/05-local-expansion-storyboard.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J30",
+      "check": "Lifecycle and unavailable states",
+      "outcome": "Not represented",
+      "observation": "Only statuses present in the still can be evaluated; requested restart/retry/unavailable variants are not fully represented.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/04-cell-topology.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J30",
+      "check": "Storage boundaries",
+      "outcome": "Not represented",
+      "observation": "Visible labels suggest intent, but no before/after state ledger or store diff exists in this static artifact.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/02-span-effects.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J30",
+      "check": "Relation language",
+      "outcome": "Not represented",
+      "observation": "Visible labels/relations can be inspected; semantics not explicitly distinguished remain uncertain and no runtime identity validation is possible.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-2026-10-12/03-parallel-branch-history.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J31",
+      "check": "Pointer and discoverability",
+      "outcome": "Not represented",
+      "observation": "Visible actions/targets can be assessed in the cited still; actual discoverability, picking and delivery cannot.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/06-branch-recovery.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J31",
+      "check": "List and keyboard",
+      "outcome": "Not represented",
+      "observation": "Some list controls or list-mode affordances are visible; equivalent keyboard route, bindings, focus order and parity are not represented.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/06-branch-recovery.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J31",
+      "check": "Accessibility",
+      "outcome": "Not represented",
+      "observation": "Labels and non-color cues can be inspected visually; no accessibility tree or assistive-technology sequence is supplied.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/06-branch-recovery.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J31",
+      "check": "Density and narrow views",
+      "outcome": "Not represented",
+      "observation": "Counts and compact rows can be inspected at the pictured scale; narrow layout, scrolling/windowing and continuation behavior are absent.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/06-branch-recovery.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J31",
+      "check": "Enlarged text and optics",
+      "outcome": "Not represented",
+      "observation": "Text hierarchy and backing can be visually assessed in the still; enlarged-scale layout and measured contrast are absent.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/06-branch-recovery.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J31",
+      "check": "Reduced motion",
+      "outcome": "Not represented",
+      "observation": "No reduced-motion state card or stable transition result is supplied.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/06-branch-recovery.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J31",
+      "check": "Lifecycle and unavailable states",
+      "outcome": "Not represented",
+      "observation": "Only statuses present in the still can be evaluated; requested restart/retry/unavailable variants are not fully represented.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/06-branch-recovery.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J31",
+      "check": "Storage boundaries",
+      "outcome": "Not represented",
+      "observation": "Visible labels suggest intent, but no before/after state ledger or store diff exists in this static artifact.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/06-branch-recovery.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J31",
+      "check": "Relation language",
+      "outcome": "Not represented",
+      "observation": "Visible labels/relations can be inspected; semantics not explicitly distinguished remain uncertain and no runtime identity validation is possible.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/06-branch-recovery.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J32",
+      "check": "Pointer and discoverability",
+      "outcome": "Not represented",
+      "observation": "Visible actions/targets can be assessed in the cited still; actual discoverability, picking and delivery cannot.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J32",
+      "check": "List and keyboard",
+      "outcome": "Not represented",
+      "observation": "Some list controls or list-mode affordances are visible; equivalent keyboard route, bindings, focus order and parity are not represented.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/01-walk-compass.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J32",
+      "check": "Accessibility",
+      "outcome": "Not represented",
+      "observation": "Labels and non-color cues can be inspected visually; no accessibility tree or assistive-technology sequence is supplied.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J32",
+      "check": "Density and narrow views",
+      "outcome": "Not represented",
+      "observation": "Counts and compact rows can be inspected at the pictured scale; narrow layout, scrolling/windowing and continuation behavior are absent.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/03-dense-endsets.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J32",
+      "check": "Enlarged text and optics",
+      "outcome": "Not represented",
+      "observation": "Text hierarchy and backing can be visually assessed in the still; enlarged-scale layout and measured contrast are absent.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J32",
+      "check": "Reduced motion",
+      "outcome": "Not represented",
+      "observation": "No reduced-motion state card or stable transition result is supplied.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J32",
+      "check": "Lifecycle and unavailable states",
+      "outcome": "Not represented",
+      "observation": "Only statuses present in the still can be evaluated; requested restart/retry/unavailable variants are not fully represented.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/01-walk-compass.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J32",
+      "check": "Storage boundaries",
+      "outcome": "Not represented",
+      "observation": "Visible labels suggest intent, but no before/after state ledger or store diff exists in this static artifact.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    },
+    {
+      "journey": "J32",
+      "check": "Relation language",
+      "outcome": "Not represented",
+      "observation": "Visible labels/relations can be inspected; semantics not explicitly distinguished remain uncertain and no runtime identity validation is possible.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "entire relevant concept frame; this repeat is not shown as an executed input variant"
+        }
+      ]
+    }
+  ],
+  "findings": [
+    {
+      "id": "R3-01",
+      "severity": "blocker",
+      "references": [
+        "J27/5",
+        "J28/4",
+        "J28/5"
+      ],
+      "attempted": "Forge commit, partial-write and unknown-outcome policies are not represented.",
+      "visible_result_or_gap": "No proposed effect ledger, commit-attempt identity, status lookup, recovery, or idempotent retry behavior.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/02-disjoint-link-forge.png",
+          "region": "center action buttons and “No link authored”"
+        },
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/04-reopen-draft.png",
+          "region": "central draft and action row; no failure card shown"
+        },
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/04-reopen-draft.png",
+          "region": "disabled Forge link and validation panel"
+        }
+      ],
+      "proposed_design_change": "Add explicit preflight failure, mid-commit result, unknown outcome, Check status and resolved-state cards with operation/write ledger; define idempotent retry before implementation.",
+      "readiness_implication": "Resolve or prepare and review this concept before implementation; static concept evidence does not establish runtime behavior."
+    },
+    {
+      "id": "R3-02",
+      "severity": "major",
+      "references": [
+        "J27/1",
+        "J27/2",
+        "J27/3",
+        "J27/4"
+      ],
+      "attempted": "The forge frame shows controls and a draft, but not the complete staging-to-preview transitions requested.",
+      "visible_result_or_gap": "The forge frame shows exactly two separated highlighted Lab ranges, gap preserved, and a 2-left/3-right staged draft with No link authored. The selection-to-stage transition, undo/group semantics, pinned destination while browsing, and preview result remain absent or partly visible.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/02-disjoint-link-forge.png",
+          "region": "left source page, “2 selected ranges · gap preserved” annotation; center Draft L7 “No link authored”; endset labels"
+        },
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/02-disjoint-link-forge.png",
+          "region": "member action rows and center occurrence note"
+        },
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/02-disjoint-link-forge.png",
+          "region": "center panel fields"
+        },
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/02-disjoint-link-forge.png",
+          "region": "center preview button and one-link summary; member cards"
+        }
+      ],
+      "proposed_design_change": "Add state cards for the selection-to-stage transition and gap retention, undo/order/group/occurrence policy, immutable destination while browsing, and preview with both full ordered endsets and exact anchors.",
+      "readiness_implication": "Resolve or prepare and review this concept before implementation; static concept evidence does not establish runtime behavior."
+    },
+    {
+      "id": "R3-03",
+      "severity": "major",
+      "references": [
+        "J28/3",
+        "J28/6"
+      ],
+      "attempted": "Dense member ordinal restoration and a second reopen/discard result are missing.",
+      "visible_result_or_gap": "40/60, member 21 and five occurrences are visible, but filtered/reordered ordinal restoration is not; no discard/reopen comparison follows.",
+      "evidence": [
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/03-dense-endsets.png",
+          "region": "left row 21; central five-occurrence strip; left/right totals and visible counts; bottom actions"
+        },
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/04-reopen-draft.png",
+          "region": "pouch Draft L7 card; bottom Save draft and Discard draft controls"
+        }
+      ],
+      "proposed_design_change": "Add before/after filter-reorder cards preserving ordinal and addresses, plus keep/discard and second-reopen descriptor comparison.",
+      "readiness_implication": "Resolve or prepare and review this concept before implementation; static concept evidence does not establish runtime behavior."
+    },
+    {
+      "id": "R3-04",
+      "severity": "major",
+      "references": [
+        "J29/3",
+        "J29/4",
+        "J29/5"
+      ],
+      "attempted": "Cue editing, saved reopen, unavailable-media recovery and forge eligibility remain incomplete.",
+      "visible_result_or_gap": "Buttons are visible, but no changed cue result, reopen/error state or typed eligible/excluded chooser appears.",
+      "evidence": [
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/03-media-cue-bridge.png",
+          "region": "lower cue controls and List view"
+        },
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/03-media-cue-bridge.png",
+          "region": "top Clear staging and lower Save cue set; no reopen/error card"
+        },
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/03-media-cue-bridge.png",
+          "region": "header “Manual viewing cues · view only”; lower-right Forge relation button"
+        }
+      ],
+      "proposed_design_change": "Add cue-adjust/add/remove result cards, exact locator/version preservation, unavailable/unsupported-seek correction, and a separate Forge chooser with eligible content spans and explicit exclusions.",
+      "readiness_implication": "Resolve or prepare and review this concept before implementation; static concept evidence does not establish runtime behavior."
+    },
+    {
+      "id": "R3-05",
+      "severity": "major",
+      "references": [
+        "J30/1",
+        "J30/2",
+        "J30/3",
+        "J30/4",
+        "J30/7"
+      ],
+      "attempted": "Use the declared 100-op/three-branch fixture, then the distinct ten-path variant; expand a coil and find every branch exit in a counted pack or synchronized list.",
+      "visible_result_or_gap": "The 07 image explicitly represents the declared fixture: Main trunk 100 plus three branches of 20 each, 160 unique ops, with forks D001/D050/D100. The separate ten-path image is labeled independently. The required expand-one-coil transition and finding each exit in a counted pack/list are absent; other relation distinctions and save/empty states are incomplete.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-2026-10-12/07-scenario-1-trunk-branches.png",
+          "region": "title/count line; Main trunk/100 ops; Branch A/B/C cards; D001/D050/D100"
+        },
+        {
+          "path": "design/mockups/hypertime-loom-2026-10-12/07-scenario-1-trunk-branches.png",
+          "region": "title/count line; Main trunk/100 ops; Branch A/B/C 20-op cards; D001/D050/D100"
+        },
+        {
+          "path": "design/mockups/hypertime-loom-2026-10-12/10-scenario-3-ten-branches-v2.png",
+          "region": "top “10 paths / 9 side branches + main continuation”; contrast with loomdense 262,144 ops/128 heads and expansion 3,842 ops/7 heads"
+        },
+        {
+          "path": "design/mockups/hypertime-loom-2026-10-12/02-container-thread-tug.png",
+          "region": "right-side tug cue and lower history panel; parallel lower branches and “Same operations · parallel context”"
+        },
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/02-span-effects.png",
+          "region": "top subject/follow/occurrence controls; effect inspector and results table"
+        },
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/02-span-effects.png",
+          "region": "top Context shifts checkbox; effects list has no unrelated shift row"
+        },
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/02-span-effects.png",
+          "region": "bottom Cancel search and pending coverage; expansion local unfolding"
+        }
+      ],
+      "proposed_design_change": "Keep fixture IDs/counts visible; add an expanded-coil state with every branch exit enumerated in a counted pack or synchronized list; label ancestry/correspondence/filtered order; add the Evolving passage rule, shift-event owner/frame/parent/footprint, and partial/cancel/save/completed-empty result states.",
+      "readiness_implication": "Resolve or prepare and review this concept before implementation; static concept evidence does not establish runtime behavior."
+    },
+    {
+      "id": "R3-06",
+      "severity": "minor",
+      "references": [
+        "J30/5",
+        "J30/6"
+      ],
+      "attempted": "Topology and reflow explanations are represented, with source-range/reciprocal identity detail still schematic.",
+      "visible_result_or_gap": "C24’s affected-topology change and page 4 capture/page 5–6 reflow are legible, while complete reciprocal endpoint/range IDs remain abbreviated.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/04-cell-topology.png",
+          "region": "central C24 operation card; before/after d.reading diagrams; Effects on C17 panel"
+        },
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/05-page-footprint.png",
+          "region": "left capture choice and pinned Page contents V12; right Pages 5–6 V19 and page history inspector"
+        }
+      ],
+      "proposed_design_change": "Expand the inspector with exact endpoint IDs and captured range/layout descriptor while retaining the current before/after diagrams.",
+      "readiness_implication": "Resolve or prepare and review this concept before implementation; static concept evidence does not establish runtime behavior."
+    },
+    {
+      "id": "R3-07",
+      "severity": "blocker",
+      "references": [
+        "J31/3",
+        "J31/4",
+        "J31/5",
+        "J31/6"
+      ],
+      "attempted": "Inspect recovery source identity, separately pinned base and futures, then cancel, validate, commit and reopen.",
+      "visible_result_or_gap": "The image names A V27 source, B V31 recovery base and retained future B V40; the comparison is separately A V27 versus B V40. Exact source ranges/occurrence and full target state are not expanded. Author verification, unavailable/head-advance validation, commit outcome and result/reopen identity are also omitted.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/06-branch-recovery.png",
+          "region": "right recovery preview: Draft B V31 branch base, Draft B V40 unchanged future; left comparison header A V27 vs B V40"
+        },
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/06-branch-recovery.png",
+          "region": "right preview graph, create recovery panel and footer “Preview first · old futures retained”"
+        },
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/06-branch-recovery.png",
+          "region": "right Create recovery branch panel, Cancel button and No change saved label"
+        },
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/06-branch-recovery.png",
+          "region": "right action panel footer and branch preview graph"
+        },
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/06-branch-recovery.png",
+          "region": "left “Changes between Draft A · V27 and Draft B · V40 / 1 difference”; right recovery base Draft B · V31"
+        }
+      ],
+      "proposed_design_change": "Add pinned-base validation (including advancing-head choice), source availability, author verification, proposed write ledger, cancel state, returned branch/origin identity and reopened authored-branch card. Keep the A V27/B V40 comparison delta separate from recovery into B V31.",
+      "readiness_implication": "Resolve or prepare and review this concept before implementation; static concept evidence does not establish runtime behavior."
+    },
+    {
+      "id": "R3-08",
+      "severity": "major",
+      "references": [
+        "J32/1",
+        "J32/2",
+        "J32/3",
+        "J32/4",
+        "J32/5",
+        "J32/6"
+      ],
+      "attempted": "Offline resume and equivalent access are almost entirely unrepresented.",
+      "visible_result_or_gap": "The integrated image shows the proposed session components and statuses, but not save/close, offline reopen, keyboard/accessibility focus, narrow/enlarged/reduced-motion states, corrupt data, or reconnect/acquire result.",
+      "evidence": [
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "full frame: header/query, L17 panel, comparison, pouch and reader visits; no save/close action"
+        },
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "current visit Review V4 remote cached; query coverage bar; L17 member counts/unavailable label"
+        },
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Enter V8 / Inspect all members / reader route controls; walk"
+        },
+        {
+          "path": "design/mockups/spatial-elements-2026-10-13/01-walk-compass.png",
+          "region": "List view and Resume visit 05"
+        },
+        {
+          "path": "design/mockups/link-forge-pouches-2026-10-12/03-dense-endsets.png",
+          "region": "normal-scale dense member lists; no narrow/enlarged/reduced-motion variants"
+        },
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "Cancel search in left query panel; walk preview/resume panel"
+        },
+        {
+          "path": "design/mockups/investigation-workspace-2026-10-13/02-expanded-investigation.png",
+          "region": "query coverage and Link/package panels"
+        }
+      ],
+      "proposed_design_change": "Add a session descriptor/save-close and offline reopen sequence restoring exact identities first, keyboard/list focus map, narrow/enlarged/reduced-motion cards, corrupt/cancel repair states, and explicit refresh/acquisition with identity preservation.",
+      "readiness_implication": "Resolve or prepare and review this concept before implementation; static concept evidence does not establish runtime behavior."
+    },
+    {
+      "id": "R3-09",
+      "severity": "minor",
+      "references": [
+        "J31/6"
+      ],
+      "attempted": "Reconcile the comparison badge with the listed change categories in the recovery study.",
+      "visible_result_or_gap": "The comparison pane shows “1 difference” for A V27 versus B V40 while also listing wording-changed and section-reordered rows. The badge’s counting unit is unclear; this comparison is separate from recovery into B V31.",
+      "evidence": [
+        {
+          "path": "design/mockups/hypertime-loom-journeys-2026-10-12/06-branch-recovery.png",
+          "region": "left comparison pane: A V27 versus B V40, “1 difference” badge and listed wording/reorder rows; right panel separately sets recovery base B V31"
+        }
+      ],
+      "proposed_design_change": "Clarify whether the badge counts top-level difference groups or listed change categories, and label the comparison delta separately from the recovery action.",
+      "readiness_implication": "Resolve or prepare and review this concept before implementation; static concept evidence does not establish runtime behavior."
+    }
+  ]
+}

@@ -1,0 +1,451 @@
+{
+  "journey": "J20",
+  "route": "J20-literal-3140",
+  "frames": [
+    {
+      "file": "J20/J20-literal-3140/before.png",
+      "location": "?journey=J20&variant=J20-literal-3140",
+      "frame": "J20-J20-literal-3140-s2-before",
+      "state": {
+        "fixture": "history-3-14-pressure",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "history-query",
+            "title": "Content history · 3.14",
+            "kind": "history",
+            "body": [
+              "Text mode · whole token selected · all branches · current and historical."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "H1"
+              },
+              {
+                "label": "Query",
+                "value": "3.14"
+              },
+              {
+                "label": "Mode",
+                "value": "Literal"
+              },
+              {
+                "label": "Whole token",
+                "value": "on"
+              },
+              {
+                "label": "Scope",
+                "value": "all branches · current+historical"
+              },
+              {
+                "label": "Coverage",
+                "value": "8/10 paths · 2 pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "m",
+                "label": "Math notes",
+                "detail": "Draft A · B07 · 3.14",
+                "status": "match",
+                "ordinal": 1
+              },
+              {
+                "id": "g",
+                "label": "Gauge G7",
+                "detail": "Run B · B04 · 3.14 bar",
+                "status": "match",
+                "ordinal": 2
+              },
+              {
+                "id": "old",
+                "label": "Math notes · V8",
+                "detail": "present at V8 · absent now",
+                "status": "historical",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 3,
+              "filtered": 3,
+              "visible": 3
+            }
+          },
+          {
+            "id": "variant-query",
+            "title": "Literal substring · 3.140",
+            "kind": "history",
+            "body": [
+              "Text contains the literal sequence 3.14 within 3.140; no numeric normalization occurs."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "J20-literal-3140"
+              },
+              {
+                "label": "Query / target",
+                "value": "3.140"
+              },
+              {
+                "label": "Mode",
+                "value": "literal"
+              },
+              {
+                "label": "Outcome",
+                "value": "2 exact match(es)"
+              },
+              {
+                "label": "Rule",
+                "value": "Text contains the literal sequence 3.14 within 3.140; no numeric normalization occurs."
+              }
+            ],
+            "rows": [
+              {
+                "id": "math",
+                "label": "Math prose · 3.140",
+                "detail": "Literal substring match: “3.14” occurs in “3.140”.",
+                "status": "match",
+                "ordinal": 1
+              },
+              {
+                "id": "gauge",
+                "label": "Gauge cell · 3.140 bar",
+                "detail": "Literal substring match; unit is not parsed in literal mode.",
+                "status": "match",
+                "ordinal": 2
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 2,
+              "filtered": 2,
+              "visible": 2
+            }
+          }
+        ],
+        "query": {
+          "id": "J20-literal-3140",
+          "text": "3.140",
+          "mode": "literal",
+          "caseFold": false,
+          "scope": "math+Rig · all declared branches · current+historical",
+          "results": [
+            "math-A1",
+            "gauge-B4",
+            "math-V8"
+          ],
+          "coverage": "8/10 paths · 2 pending"
+        },
+        "history": {
+          "branches": [
+            {
+              "id": "main",
+              "states": [
+                "V4",
+                "V5",
+                "V6",
+                "V7",
+                "V8"
+              ]
+            },
+            {
+              "id": "branch-b",
+              "states": [
+                "B01",
+                "B02",
+                "B03",
+                "B04"
+              ]
+            },
+            {
+              "id": "branch-c",
+              "states": [
+                "C01",
+                "C02"
+              ]
+            }
+          ],
+          "run": "run-b03-b07",
+          "sameSource": [
+            "P-MATH-001"
+          ],
+          "stateCount": 12,
+          "opCount": 46
+        }
+      },
+      "effects": [],
+      "action": "Before",
+      "note": ""
+    },
+    {
+      "file": "J20/J20-literal-3140/J20-literal-3140-a1.png",
+      "location": "?journey=J20&variant=J20-literal-3140&task=0&action=1",
+      "frame": "J20-literal-3140-a1",
+      "state": {
+        "fixture": "history-3-14-pressure",
+        "reading": {
+          "visit": "01",
+          "subject": "Lab notes",
+          "store": "lab://notes",
+          "version": "V12",
+          "occurrence": "occ-1",
+          "offset": "p.14 · 54.2",
+          "body": [
+            "Pressure stayed stable. Calibration remains under review."
+          ]
+        },
+        "visits": [
+          {
+            "id": "01",
+            "parent": null,
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "Lab:p14:r54.2"
+          }
+        ],
+        "selection": {
+          "subject": "Lab notes",
+          "state": "V12",
+          "locator": "Lab:p14:r54.2"
+        },
+        "sourceOps": {
+          "lab://notes": 42,
+          "rig://lab": 18,
+          "review://remote": 0,
+          "media://calibration": 0,
+          "media://debrief": 0,
+          "media://pressure-video": 0
+        },
+        "readerEffects": {
+          "visits": 0,
+          "collections": [],
+          "annotations": []
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "history-query",
+            "title": "Content history · 3.14",
+            "kind": "history",
+            "body": [
+              "Text mode · whole token selected · all branches · current and historical."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "H1"
+              },
+              {
+                "label": "Query",
+                "value": "3.14"
+              },
+              {
+                "label": "Mode",
+                "value": "Literal"
+              },
+              {
+                "label": "Whole token",
+                "value": "on"
+              },
+              {
+                "label": "Scope",
+                "value": "all branches · current+historical"
+              },
+              {
+                "label": "Coverage",
+                "value": "8/10 paths · 2 pending"
+              }
+            ],
+            "rows": [
+              {
+                "id": "m",
+                "label": "Math notes",
+                "detail": "Draft A · B07 · 3.14",
+                "status": "match",
+                "ordinal": 1
+              },
+              {
+                "id": "g",
+                "label": "Gauge G7",
+                "detail": "Run B · B04 · 3.14 bar",
+                "status": "match",
+                "ordinal": 2
+              },
+              {
+                "id": "old",
+                "label": "Math notes · V8",
+                "detail": "present at V8 · absent now",
+                "status": "historical",
+                "ordinal": 3
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 3,
+              "filtered": 3,
+              "visible": 3
+            }
+          },
+          {
+            "id": "variant",
+            "title": "Literal substring · 3.140",
+            "kind": "history",
+            "body": [
+              "Text contains the literal sequence 3.14 within 3.140; no numeric normalization occurs."
+            ],
+            "facts": [
+              {
+                "label": "Request",
+                "value": "J20-literal-3140"
+              },
+              {
+                "label": "Query / target",
+                "value": "3.140"
+              },
+              {
+                "label": "Mode",
+                "value": "literal"
+              },
+              {
+                "label": "Outcome",
+                "value": "2 exact match(es)"
+              },
+              {
+                "label": "Rule",
+                "value": "Text contains the literal sequence 3.14 within 3.140; no numeric normalization occurs."
+              }
+            ],
+            "rows": [
+              {
+                "id": "math",
+                "label": "Math prose · 3.140",
+                "detail": "Literal substring match: “3.14” occurs in “3.140”.",
+                "status": "match",
+                "ordinal": 1
+              },
+              {
+                "id": "gauge",
+                "label": "Gauge cell · 3.140 bar",
+                "detail": "Literal substring match; unit is not parsed in literal mode.",
+                "status": "match",
+                "ordinal": 2
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 2,
+              "filtered": 2,
+              "visible": 2
+            }
+          }
+        ],
+        "query": {
+          "id": "J20-literal-3140",
+          "text": "3.140",
+          "mode": "literal",
+          "caseFold": false,
+          "scope": "math+Rig · all declared branches · current+historical",
+          "results": [
+            "math",
+            "gauge"
+          ],
+          "coverage": "8/10 paths · 2 pending",
+          "variant": "J20-literal-3140",
+          "counts": {
+            "total": 2,
+            "filtered": 2,
+            "visible": 2
+          }
+        },
+        "history": {
+          "branches": [
+            {
+              "id": "main",
+              "states": [
+                "V4",
+                "V5",
+                "V6",
+                "V7",
+                "V8"
+              ]
+            },
+            {
+              "id": "branch-b",
+              "states": [
+                "B01",
+                "B02",
+                "B03",
+                "B04"
+              ]
+            },
+            {
+              "id": "branch-c",
+              "states": [
+                "C01",
+                "C02"
+              ]
+            }
+          ],
+          "run": "run-b03-b07",
+          "sameSource": [
+            "P-MATH-001"
+          ],
+          "stateCount": 12,
+          "opCount": 46
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "No source or reader state is written.",
+          "identity": ""
+        }
+      ],
+      "action": "Literal substring · 3.140",
+      "note": "Text contains the literal sequence 3.14 within 3.140; no numeric normalization occurs."
+    }
+  ]
+}

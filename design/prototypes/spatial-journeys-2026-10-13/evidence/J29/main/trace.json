@@ -1,0 +1,4001 @@
+{
+  "journey": "J29",
+  "route": "main",
+  "frames": [
+    {
+      "file": "J29/main/before.png",
+      "location": "?journey=J29",
+      "frame": "J29-main-s1-before",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "03",
+            "parent": null,
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "Calibration plate": 17,
+          "Debrief": 21,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J29-reading-initial",
+            "title": "Reading · visit 03 · Review@V4",
+            "kind": "document",
+            "body": [
+              "The recorded pressure remained stable during the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03"
+              },
+              {
+                "label": "Subject",
+                "value": "Review passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "review-o3"
+              },
+              {
+                "label": "Offset",
+                "value": 80
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "m-media",
+            "title": "Source panes · four independent identities",
+            "kind": "media",
+            "body": [
+              "Media bytes, transcript and visual cues remain distinct subjects."
+            ],
+            "facts": [
+              {
+                "label": "Video",
+                "value": "Rig test · V9 · remote cached"
+              },
+              {
+                "label": "Audio",
+                "value": "Debrief · V7 · remote cached"
+              },
+              {
+                "label": "Document",
+                "value": "Lab notes · V12 local"
+              },
+              {
+                "label": "Image",
+                "value": "Calibration plate · V5 · remote cached"
+              }
+            ],
+            "rows": [
+              {
+                "id": "video",
+                "label": "Video V9",
+                "detail": "locator 00:38 / duration 01:26",
+                "status": "cached",
+                "ordinal": 1
+              },
+              {
+                "id": "audio",
+                "label": "Audio V7",
+                "detail": "locator 02:14–02:18; transcript derived",
+                "status": "cached",
+                "ordinal": 2
+              },
+              {
+                "id": "passage",
+                "label": "Lab passage",
+                "detail": "range [12,35) · lab-o6",
+                "status": "selected",
+                "ordinal": 3
+              },
+              {
+                "id": "region",
+                "label": "Image region",
+                "detail": "normalized box [0.31,0.22,0.55,0.41]",
+                "status": "selected",
+                "ordinal": 4
+              }
+            ],
+            "tone": "neutral"
+          },
+          {
+            "id": "m-cue",
+            "title": "Manual viewing cue set · staging",
+            "kind": "inspector",
+            "body": [],
+            "facts": [
+              {
+                "label": "Cue identity",
+                "value": "cue-set:CS1"
+              },
+              {
+                "label": "Relation",
+                "value": "none · view-only"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "media": {
+          "sources": {
+            "video": {
+              "id": "Rig test",
+              "version": "V9",
+              "authority": "remote:rig",
+              "cache": "cached verified"
+            },
+            "audio": {
+              "id": "Debrief",
+              "version": "V7",
+              "authority": "remote:debrief",
+              "cache": "cached verified",
+              "transcript": {
+                "id": "transcript:T7",
+                "derived": true,
+                "text": "Pressure stayed stable.",
+                "wordTimestamps": false
+              }
+            },
+            "document": {
+              "id": "Lab notes",
+              "version": "V12",
+              "authority": "local",
+              "range": [
+                12,
+                35
+              ],
+              "occurrence": "lab-o6"
+            },
+            "image": {
+              "id": "Calibration plate",
+              "version": "V5",
+              "authority": "remote:calibration",
+              "cache": "cached verified",
+              "region": [
+                0.31,
+                0.22,
+                0.55,
+                0.41
+              ]
+            }
+          },
+          "cueSet": {
+            "id": "cue-set:CS1",
+            "cues": [
+              {
+                "id": "cue:C1",
+                "video": {
+                  "source": "Rig test@V9",
+                  "timeSeconds": 38
+                },
+                "audio": {
+                  "source": "Debrief@V7",
+                  "rangeSeconds": [
+                    134,
+                    138
+                  ]
+                },
+                "alignment": "manual",
+                "offsetSeconds": 96,
+                "status": "available"
+              }
+            ],
+            "saved": false,
+            "playback": {
+              "state": "paused",
+              "videoSeconds": 38,
+              "audioSeconds": 134
+            }
+          },
+          "staging": [
+            "cue:C1"
+          ]
+        },
+        "forgeChooser": null
+      },
+      "effects": [],
+      "action": "Before",
+      "note": ""
+    },
+    {
+      "file": "J29/main/J29-s1-a1.png",
+      "location": "?journey=J29&task=0&action=1",
+      "frame": "J29-s1-a1",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "03",
+            "parent": null,
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "Calibration plate": 17,
+          "Debrief": 21,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J29-s1-a1-reading",
+            "title": "Reading · visit 03 · Review@V4",
+            "kind": "document",
+            "body": [
+              "The recorded pressure remained stable during the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03"
+              },
+              {
+                "label": "Subject",
+                "value": "Review passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "review-o3"
+              },
+              {
+                "label": "Offset",
+                "value": 80
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "m-media",
+            "title": "Source panes · four independent identities",
+            "kind": "media",
+            "body": [
+              "Media bytes, transcript and visual cues remain distinct subjects."
+            ],
+            "facts": [
+              {
+                "label": "Video",
+                "value": "Rig test · V9 · remote cached"
+              },
+              {
+                "label": "Audio",
+                "value": "Debrief · V7 · remote cached"
+              },
+              {
+                "label": "Document",
+                "value": "Lab notes · V12 local"
+              },
+              {
+                "label": "Image",
+                "value": "Calibration plate · V5 · remote cached"
+              }
+            ],
+            "rows": [
+              {
+                "id": "video",
+                "label": "Video V9",
+                "detail": "locator 00:38 / duration 01:26",
+                "status": "cached",
+                "ordinal": 1
+              },
+              {
+                "id": "audio",
+                "label": "Audio V7",
+                "detail": "locator 02:14–02:18; transcript derived",
+                "status": "cached",
+                "ordinal": 2
+              },
+              {
+                "id": "passage",
+                "label": "Lab passage",
+                "detail": "range [12,35) · lab-o6",
+                "status": "selected",
+                "ordinal": 3
+              },
+              {
+                "id": "region",
+                "label": "Image region",
+                "detail": "normalized box [0.31,0.22,0.55,0.41]",
+                "status": "selected",
+                "ordinal": 4
+              }
+            ],
+            "tone": "neutral"
+          },
+          {
+            "id": "m-cue",
+            "title": "Manual viewing cue set · staging",
+            "kind": "inspector",
+            "body": [],
+            "facts": [
+              {
+                "label": "Cue identity",
+                "value": "cue-set:CS1"
+              },
+              {
+                "label": "Relation",
+                "value": "none · view-only"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "media": {
+          "sources": {
+            "video": {
+              "id": "Rig test",
+              "version": "V9",
+              "authority": "remote:rig",
+              "cache": "cached verified"
+            },
+            "audio": {
+              "id": "Debrief",
+              "version": "V7",
+              "authority": "remote:debrief",
+              "cache": "cached verified",
+              "transcript": {
+                "id": "transcript:T7",
+                "derived": true,
+                "text": "Pressure stayed stable.",
+                "wordTimestamps": false
+              }
+            },
+            "document": {
+              "id": "Lab notes",
+              "version": "V12",
+              "authority": "local",
+              "range": [
+                12,
+                35
+              ],
+              "occurrence": "lab-o6"
+            },
+            "image": {
+              "id": "Calibration plate",
+              "version": "V5",
+              "authority": "remote:calibration",
+              "cache": "cached verified",
+              "region": [
+                0.31,
+                0.22,
+                0.55,
+                0.41
+              ]
+            }
+          },
+          "cueSet": {
+            "id": "cue-set:CS1",
+            "cues": [
+              {
+                "id": "cue:C1",
+                "video": {
+                  "source": "Rig test@V9",
+                  "timeSeconds": 38
+                },
+                "audio": {
+                  "source": "Debrief@V7",
+                  "rangeSeconds": [
+                    134,
+                    138
+                  ]
+                },
+                "alignment": "manual",
+                "offsetSeconds": 96,
+                "status": "available"
+              }
+            ],
+            "saved": false,
+            "playback": {
+              "state": "paused",
+              "videoSeconds": 38,
+              "audioSeconds": 134
+            }
+          },
+          "staging": [
+            "cue:C1"
+          ],
+          "inspected": true
+        },
+        "forgeChooser": null
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "Inspect four independent media/content identities and selected locators.",
+          "identity": "Rig test@V9; Debrief@V7; Lab notes@V12; Calibration plate@V5"
+        }
+      ],
+      "action": "Inspect video V9, audio V7, Lab passage and image region",
+      "note": "Remote cached is origin/provenance metadata, not local authorship."
+    },
+    {
+      "file": "J29/main/J29-s1-a2.png",
+      "location": "?journey=J29&task=0&action=2",
+      "frame": "J29-s1-a2",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "03",
+            "parent": null,
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "Calibration plate": 17,
+          "Debrief": 21,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J29-s1-a2-reading",
+            "title": "Reading · visit 03 · Review@V4",
+            "kind": "document",
+            "body": [
+              "The recorded pressure remained stable during the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03"
+              },
+              {
+                "label": "Subject",
+                "value": "Review passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "review-o3"
+              },
+              {
+                "label": "Offset",
+                "value": 80
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "m-loc",
+            "title": "Exact selected locators",
+            "kind": "inspector",
+            "body": [],
+            "facts": [
+              {
+                "label": "Video",
+                "value": "Rig test@V9 · 38.000 s / 86.000 s"
+              },
+              {
+                "label": "Audio",
+                "value": "Debrief@V7 · [134.000,138.000) s"
+              },
+              {
+                "label": "Transcript",
+                "value": "derived · no word timestamps"
+              },
+              {
+                "label": "Document",
+                "value": "Lab notes@V12 [12,35) · lab-o6"
+              },
+              {
+                "label": "Image",
+                "value": "Calibration plate@V5 · [0.31,0.22,0.55,0.41]"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          },
+          {
+            "id": "m-media",
+            "title": "Source panes · four independent identities",
+            "kind": "media",
+            "body": [
+              "Media bytes, transcript and visual cues remain distinct subjects."
+            ],
+            "facts": [
+              {
+                "label": "Video",
+                "value": "Rig test · V9 · remote cached"
+              },
+              {
+                "label": "Audio",
+                "value": "Debrief · V7 · remote cached"
+              },
+              {
+                "label": "Document",
+                "value": "Lab notes · V12 local"
+              },
+              {
+                "label": "Image",
+                "value": "Calibration plate · V5 · remote cached"
+              }
+            ],
+            "rows": [
+              {
+                "id": "video",
+                "label": "Video V9",
+                "detail": "locator 00:38 / duration 01:26",
+                "status": "cached",
+                "ordinal": 1
+              },
+              {
+                "id": "audio",
+                "label": "Audio V7",
+                "detail": "locator 02:14–02:18; transcript derived",
+                "status": "cached",
+                "ordinal": 2
+              },
+              {
+                "id": "passage",
+                "label": "Lab passage",
+                "detail": "range [12,35) · lab-o6",
+                "status": "selected",
+                "ordinal": 3
+              },
+              {
+                "id": "region",
+                "label": "Image region",
+                "detail": "normalized box [0.31,0.22,0.55,0.41]",
+                "status": "selected",
+                "ordinal": 4
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "media": {
+          "sources": {
+            "video": {
+              "id": "Rig test",
+              "version": "V9",
+              "authority": "remote:rig",
+              "cache": "cached verified"
+            },
+            "audio": {
+              "id": "Debrief",
+              "version": "V7",
+              "authority": "remote:debrief",
+              "cache": "cached verified",
+              "transcript": {
+                "id": "transcript:T7",
+                "derived": true,
+                "text": "Pressure stayed stable.",
+                "wordTimestamps": false
+              }
+            },
+            "document": {
+              "id": "Lab notes",
+              "version": "V12",
+              "authority": "local",
+              "range": [
+                12,
+                35
+              ],
+              "occurrence": "lab-o6"
+            },
+            "image": {
+              "id": "Calibration plate",
+              "version": "V5",
+              "authority": "remote:calibration",
+              "cache": "cached verified",
+              "region": [
+                0.31,
+                0.22,
+                0.55,
+                0.41
+              ]
+            }
+          },
+          "cueSet": {
+            "id": "cue-set:CS1",
+            "cues": [
+              {
+                "id": "cue:C1",
+                "video": {
+                  "source": "Rig test@V9",
+                  "timeSeconds": 38
+                },
+                "audio": {
+                  "source": "Debrief@V7",
+                  "rangeSeconds": [
+                    134,
+                    138
+                  ]
+                },
+                "alignment": "manual",
+                "offsetSeconds": 96,
+                "status": "available"
+              }
+            ],
+            "saved": false,
+            "playback": {
+              "state": "paused",
+              "videoSeconds": 38,
+              "audioSeconds": 134
+            }
+          },
+          "staging": [
+            "cue:C1"
+          ],
+          "inspected": true,
+          "locatorsExpanded": true
+        },
+        "forgeChooser": null
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "Reading locator metadata adds no visit and no source operation.",
+          "identity": "video 38s; audio [134,138]s; text range; normalized image region"
+        }
+      ],
+      "action": "Expand source identity and locator details",
+      "note": "Video time, audio interval, text range and image geometry use their own locator systems."
+    },
+    {
+      "file": "J29/main/J29-s2-a1.png",
+      "location": "?journey=J29&task=1&action=1",
+      "frame": "J29-s2-a1",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "03",
+            "parent": null,
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "Calibration plate": 17,
+          "Debrief": 21,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J29-s2-a1-reading",
+            "title": "Reading · visit 03 · Review@V4",
+            "kind": "document",
+            "body": [
+              "The recorded pressure remained stable during the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03"
+              },
+              {
+                "label": "Subject",
+                "value": "Review passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "review-o3"
+              },
+              {
+                "label": "Offset",
+                "value": 80
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "m-c1",
+            "title": "Cue C1 · manual alignment",
+            "kind": "inspector",
+            "body": [],
+            "facts": [
+              {
+                "label": "Video source/clock",
+                "value": "Rig test@V9 · 00:38 / 01:26"
+              },
+              {
+                "label": "Audio source/clock",
+                "value": "Debrief@V7 · 02:14–02:18"
+              },
+              {
+                "label": "Offset",
+                "value": "+96 s at cue start"
+              },
+              {
+                "label": "Transcript",
+                "value": "derived text · not authored span"
+              },
+              {
+                "label": "Playback",
+                "value": "paused · explicit preview required"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          },
+          {
+            "id": "m-media",
+            "title": "Source panes · four independent identities",
+            "kind": "media",
+            "body": [
+              "Media bytes, transcript and visual cues remain distinct subjects."
+            ],
+            "facts": [
+              {
+                "label": "Video",
+                "value": "Rig test · V9 · remote cached"
+              },
+              {
+                "label": "Audio",
+                "value": "Debrief · V7 · remote cached"
+              },
+              {
+                "label": "Document",
+                "value": "Lab notes · V12 local"
+              },
+              {
+                "label": "Image",
+                "value": "Calibration plate · V5 · remote cached"
+              }
+            ],
+            "rows": [
+              {
+                "id": "video",
+                "label": "Video V9",
+                "detail": "locator 00:38 / duration 01:26",
+                "status": "cached",
+                "ordinal": 1
+              },
+              {
+                "id": "audio",
+                "label": "Audio V7",
+                "detail": "locator 02:14–02:18; transcript derived",
+                "status": "cached",
+                "ordinal": 2
+              },
+              {
+                "id": "passage",
+                "label": "Lab passage",
+                "detail": "range [12,35) · lab-o6",
+                "status": "selected",
+                "ordinal": 3
+              },
+              {
+                "id": "region",
+                "label": "Image region",
+                "detail": "normalized box [0.31,0.22,0.55,0.41]",
+                "status": "selected",
+                "ordinal": 4
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "media": {
+          "sources": {
+            "video": {
+              "id": "Rig test",
+              "version": "V9",
+              "authority": "remote:rig",
+              "cache": "cached verified"
+            },
+            "audio": {
+              "id": "Debrief",
+              "version": "V7",
+              "authority": "remote:debrief",
+              "cache": "cached verified",
+              "transcript": {
+                "id": "transcript:T7",
+                "derived": true,
+                "text": "Pressure stayed stable.",
+                "wordTimestamps": false
+              }
+            },
+            "document": {
+              "id": "Lab notes",
+              "version": "V12",
+              "authority": "local",
+              "range": [
+                12,
+                35
+              ],
+              "occurrence": "lab-o6"
+            },
+            "image": {
+              "id": "Calibration plate",
+              "version": "V5",
+              "authority": "remote:calibration",
+              "cache": "cached verified",
+              "region": [
+                0.31,
+                0.22,
+                0.55,
+                0.41
+              ]
+            }
+          },
+          "cueSet": {
+            "id": "cue-set:CS1",
+            "cues": [
+              {
+                "id": "cue:C1",
+                "video": {
+                  "source": "Rig test@V9",
+                  "timeSeconds": 38
+                },
+                "audio": {
+                  "source": "Debrief@V7",
+                  "rangeSeconds": [
+                    134,
+                    138
+                  ]
+                },
+                "alignment": "manual",
+                "offsetSeconds": 96,
+                "status": "available"
+              }
+            ],
+            "saved": false,
+            "playback": {
+              "state": "paused",
+              "videoSeconds": 38,
+              "audioSeconds": 134
+            },
+            "activeCue": "cue:C1"
+          },
+          "staging": [
+            "cue:C1"
+          ],
+          "inspected": true,
+          "locatorsExpanded": true
+        },
+        "forgeChooser": null
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "Cue inspection does not play media.",
+          "identity": "cue:C1; manual video 38s ↔ audio 134–138s"
+        }
+      ],
+      "action": "Inspect Cue C1 manual alignment without starting playback",
+      "note": "Two independent clocks are shown; offset is a reader relation, not shared source identity."
+    },
+    {
+      "file": "J29/main/J29-s2-a2.png",
+      "location": "?journey=J29&task=1&action=2",
+      "frame": "J29-s2-a2",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "03",
+            "parent": null,
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "Calibration plate": 17,
+          "Debrief": 21,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J29-s2-a2-reading",
+            "title": "Reading · visit 03 · Review@V4",
+            "kind": "document",
+            "body": [
+              "The recorded pressure remained stable during the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03"
+              },
+              {
+                "label": "Subject",
+                "value": "Review passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "review-o3"
+              },
+              {
+                "label": "Offset",
+                "value": 80
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "m-play",
+            "title": "Alignment preview",
+            "kind": "media",
+            "body": [],
+            "facts": [
+              {
+                "label": "State",
+                "value": "paused preview"
+              },
+              {
+                "label": "Video",
+                "value": "00:38"
+              },
+              {
+                "label": "Audio",
+                "value": "02:14"
+              },
+              {
+                "label": "Automatic start",
+                "value": "no"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          },
+          {
+            "id": "m-cue",
+            "title": "Manual viewing cue set · staging",
+            "kind": "inspector",
+            "body": [],
+            "facts": [
+              {
+                "label": "Cue identity",
+                "value": "cue-set:CS1"
+              },
+              {
+                "label": "Relation",
+                "value": "none · view-only"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "media": {
+          "sources": {
+            "video": {
+              "id": "Rig test",
+              "version": "V9",
+              "authority": "remote:rig",
+              "cache": "cached verified"
+            },
+            "audio": {
+              "id": "Debrief",
+              "version": "V7",
+              "authority": "remote:debrief",
+              "cache": "cached verified",
+              "transcript": {
+                "id": "transcript:T7",
+                "derived": true,
+                "text": "Pressure stayed stable.",
+                "wordTimestamps": false
+              }
+            },
+            "document": {
+              "id": "Lab notes",
+              "version": "V12",
+              "authority": "local",
+              "range": [
+                12,
+                35
+              ],
+              "occurrence": "lab-o6"
+            },
+            "image": {
+              "id": "Calibration plate",
+              "version": "V5",
+              "authority": "remote:calibration",
+              "cache": "cached verified",
+              "region": [
+                0.31,
+                0.22,
+                0.55,
+                0.41
+              ]
+            }
+          },
+          "cueSet": {
+            "id": "cue-set:CS1",
+            "cues": [
+              {
+                "id": "cue:C1",
+                "video": {
+                  "source": "Rig test@V9",
+                  "timeSeconds": 38
+                },
+                "audio": {
+                  "source": "Debrief@V7",
+                  "rangeSeconds": [
+                    134,
+                    138
+                  ]
+                },
+                "alignment": "manual",
+                "offsetSeconds": 96,
+                "status": "available"
+              }
+            ],
+            "saved": false,
+            "playback": {
+              "state": "paused",
+              "videoSeconds": 38,
+              "audioSeconds": 134,
+              "autoplay": false,
+              "explicit": true
+            },
+            "activeCue": "cue:C1"
+          },
+          "staging": [
+            "cue:C1"
+          ],
+          "inspected": true,
+          "locatorsExpanded": true
+        },
+        "forgeChooser": null
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "Preview begins only by explicit user action; it does not assert synchronization accuracy or shared source.",
+          "identity": "cue:C1; video 38s; audio 134s"
+        }
+      ],
+      "action": "Preview alignment explicitly",
+      "note": "The preview state remains paused at the selected locators."
+    },
+    {
+      "file": "J29/main/J29-s2-a3.png",
+      "location": "?journey=J29&task=1&action=3",
+      "frame": "J29-s2-a3",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "03",
+            "parent": null,
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "Calibration plate": 17,
+          "Debrief": 21,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J29-s2-a3-reading",
+            "title": "Reading · visit 03 · Review@V4",
+            "kind": "document",
+            "body": [
+              "The recorded pressure remained stable during the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03"
+              },
+              {
+                "label": "Subject",
+                "value": "Review passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "review-o3"
+              },
+              {
+                "label": "Offset",
+                "value": 80
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "m-play",
+            "title": "Explicit preview playing",
+            "kind": "media",
+            "body": [],
+            "facts": [
+              {
+                "label": "Video cursor",
+                "value": "Rig test@V9 · from 00:38"
+              },
+              {
+                "label": "Audio cursor",
+                "value": "Debrief@V7 · from 02:14"
+              },
+              {
+                "label": "Cue",
+                "value": "manual · +96 s"
+              },
+              {
+                "label": "Source bytes",
+                "value": "unchanged"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          },
+          {
+            "id": "m-cue",
+            "title": "Manual viewing cue set · staging",
+            "kind": "inspector",
+            "body": [],
+            "facts": [
+              {
+                "label": "Cue identity",
+                "value": "cue-set:CS1"
+              },
+              {
+                "label": "Relation",
+                "value": "none · view-only"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "media": {
+          "sources": {
+            "video": {
+              "id": "Rig test",
+              "version": "V9",
+              "authority": "remote:rig",
+              "cache": "cached verified"
+            },
+            "audio": {
+              "id": "Debrief",
+              "version": "V7",
+              "authority": "remote:debrief",
+              "cache": "cached verified",
+              "transcript": {
+                "id": "transcript:T7",
+                "derived": true,
+                "text": "Pressure stayed stable.",
+                "wordTimestamps": false
+              }
+            },
+            "document": {
+              "id": "Lab notes",
+              "version": "V12",
+              "authority": "local",
+              "range": [
+                12,
+                35
+              ],
+              "occurrence": "lab-o6"
+            },
+            "image": {
+              "id": "Calibration plate",
+              "version": "V5",
+              "authority": "remote:calibration",
+              "cache": "cached verified",
+              "region": [
+                0.31,
+                0.22,
+                0.55,
+                0.41
+              ]
+            }
+          },
+          "cueSet": {
+            "id": "cue-set:CS1",
+            "cues": [
+              {
+                "id": "cue:C1",
+                "video": {
+                  "source": "Rig test@V9",
+                  "timeSeconds": 38
+                },
+                "audio": {
+                  "source": "Debrief@V7",
+                  "rangeSeconds": [
+                    134,
+                    138
+                  ]
+                },
+                "alignment": "manual",
+                "offsetSeconds": 96,
+                "status": "available"
+              }
+            ],
+            "saved": false,
+            "playback": {
+              "state": "playing",
+              "videoSeconds": 38,
+              "audioSeconds": 134,
+              "autoplay": false,
+              "explicit": true
+            },
+            "activeCue": "cue:C1"
+          },
+          "staging": [
+            "cue:C1"
+          ],
+          "inspected": true,
+          "locatorsExpanded": true
+        },
+        "forgeChooser": null
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "Transient playback moves reader media cursors only; no content or Link is authored.",
+          "identity": "cue:C1; explicit playback"
+        }
+      ],
+      "action": "Play the preview",
+      "note": "Only the preview transports move; cue locators remain stored."
+    },
+    {
+      "file": "J29/main/J29-s2-a4.png",
+      "location": "?journey=J29&task=1&action=4",
+      "frame": "J29-s2-a4",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "03",
+            "parent": null,
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "Calibration plate": 17,
+          "Debrief": 21,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J29-s2-a4-reading",
+            "title": "Reading · visit 03 · Review@V4",
+            "kind": "document",
+            "body": [
+              "The recorded pressure remained stable during the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03"
+              },
+              {
+                "label": "Subject",
+                "value": "Review passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "review-o3"
+              },
+              {
+                "label": "Offset",
+                "value": 80
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "m-play",
+            "title": "Preview paused",
+            "kind": "media",
+            "body": [],
+            "facts": [
+              {
+                "label": "Video",
+                "value": "00:38"
+              },
+              {
+                "label": "Audio",
+                "value": "02:14"
+              },
+              {
+                "label": "Cue descriptor",
+                "value": "retained"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          },
+          {
+            "id": "m-cue",
+            "title": "Manual viewing cue set · staging",
+            "kind": "inspector",
+            "body": [],
+            "facts": [
+              {
+                "label": "Cue identity",
+                "value": "cue-set:CS1"
+              },
+              {
+                "label": "Relation",
+                "value": "none · view-only"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "media": {
+          "sources": {
+            "video": {
+              "id": "Rig test",
+              "version": "V9",
+              "authority": "remote:rig",
+              "cache": "cached verified"
+            },
+            "audio": {
+              "id": "Debrief",
+              "version": "V7",
+              "authority": "remote:debrief",
+              "cache": "cached verified",
+              "transcript": {
+                "id": "transcript:T7",
+                "derived": true,
+                "text": "Pressure stayed stable.",
+                "wordTimestamps": false
+              }
+            },
+            "document": {
+              "id": "Lab notes",
+              "version": "V12",
+              "authority": "local",
+              "range": [
+                12,
+                35
+              ],
+              "occurrence": "lab-o6"
+            },
+            "image": {
+              "id": "Calibration plate",
+              "version": "V5",
+              "authority": "remote:calibration",
+              "cache": "cached verified",
+              "region": [
+                0.31,
+                0.22,
+                0.55,
+                0.41
+              ]
+            }
+          },
+          "cueSet": {
+            "id": "cue-set:CS1",
+            "cues": [
+              {
+                "id": "cue:C1",
+                "video": {
+                  "source": "Rig test@V9",
+                  "timeSeconds": 38
+                },
+                "audio": {
+                  "source": "Debrief@V7",
+                  "rangeSeconds": [
+                    134,
+                    138
+                  ]
+                },
+                "alignment": "manual",
+                "offsetSeconds": 96,
+                "status": "available"
+              }
+            ],
+            "saved": false,
+            "playback": {
+              "state": "paused",
+              "videoSeconds": 38,
+              "audioSeconds": 134,
+              "autoplay": false,
+              "explicit": true
+            },
+            "activeCue": "cue:C1"
+          },
+          "staging": [
+            "cue:C1"
+          ],
+          "inspected": true,
+          "locatorsExpanded": true
+        },
+        "forgeChooser": null
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "Pause retains independent source locators and adds no source operation.",
+          "identity": "cue:C1"
+        }
+      ],
+      "action": "Pause the preview",
+      "note": "Playback remains explicit; no autoplay on reopen."
+    },
+    {
+      "file": "J29/main/J29-s3-a1.png",
+      "location": "?journey=J29&task=2&action=1",
+      "frame": "J29-s3-a1",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "03",
+            "parent": null,
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "Calibration plate": 17,
+          "Debrief": 21,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J29-s3-a1-reading",
+            "title": "Reading · visit 03 · Review@V4",
+            "kind": "document",
+            "body": [
+              "The recorded pressure remained stable during the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03"
+              },
+              {
+                "label": "Subject",
+                "value": "Review passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "review-o3"
+              },
+              {
+                "label": "Offset",
+                "value": 80
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "m-adjust",
+            "title": "Cue C1 adjusted",
+            "kind": "inspector",
+            "body": [],
+            "facts": [
+              {
+                "label": "Video",
+                "value": "V9 · 38 s"
+              },
+              {
+                "label": "Audio",
+                "value": "V7 · [133,137) s"
+              },
+              {
+                "label": "Manual offset",
+                "value": "+95 s"
+              },
+              {
+                "label": "Cue status",
+                "value": "available"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          },
+          {
+            "id": "m-media",
+            "title": "Source panes · four independent identities",
+            "kind": "media",
+            "body": [
+              "Media bytes, transcript and visual cues remain distinct subjects."
+            ],
+            "facts": [
+              {
+                "label": "Video",
+                "value": "Rig test · V9 · remote cached"
+              },
+              {
+                "label": "Audio",
+                "value": "Debrief · V7 · remote cached"
+              },
+              {
+                "label": "Document",
+                "value": "Lab notes · V12 local"
+              },
+              {
+                "label": "Image",
+                "value": "Calibration plate · V5 · remote cached"
+              }
+            ],
+            "rows": [
+              {
+                "id": "video",
+                "label": "Video V9",
+                "detail": "locator 00:38 / duration 01:26",
+                "status": "cached",
+                "ordinal": 1
+              },
+              {
+                "id": "audio",
+                "label": "Audio V7",
+                "detail": "locator 02:14–02:18; transcript derived",
+                "status": "cached",
+                "ordinal": 2
+              },
+              {
+                "id": "passage",
+                "label": "Lab passage",
+                "detail": "range [12,35) · lab-o6",
+                "status": "selected",
+                "ordinal": 3
+              },
+              {
+                "id": "region",
+                "label": "Image region",
+                "detail": "normalized box [0.31,0.22,0.55,0.41]",
+                "status": "selected",
+                "ordinal": 4
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "media": {
+          "sources": {
+            "video": {
+              "id": "Rig test",
+              "version": "V9",
+              "authority": "remote:rig",
+              "cache": "cached verified"
+            },
+            "audio": {
+              "id": "Debrief",
+              "version": "V7",
+              "authority": "remote:debrief",
+              "cache": "cached verified",
+              "transcript": {
+                "id": "transcript:T7",
+                "derived": true,
+                "text": "Pressure stayed stable.",
+                "wordTimestamps": false
+              }
+            },
+            "document": {
+              "id": "Lab notes",
+              "version": "V12",
+              "authority": "local",
+              "range": [
+                12,
+                35
+              ],
+              "occurrence": "lab-o6"
+            },
+            "image": {
+              "id": "Calibration plate",
+              "version": "V5",
+              "authority": "remote:calibration",
+              "cache": "cached verified",
+              "region": [
+                0.31,
+                0.22,
+                0.55,
+                0.41
+              ]
+            }
+          },
+          "cueSet": {
+            "id": "cue-set:CS1",
+            "cues": [
+              {
+                "id": "cue:C1",
+                "video": {
+                  "source": "Rig test@V9",
+                  "timeSeconds": 38
+                },
+                "audio": {
+                  "source": "Debrief@V7",
+                  "rangeSeconds": [
+                    134,
+                    138
+                  ]
+                },
+                "alignment": "manual",
+                "offsetSeconds": 96,
+                "status": "available"
+              }
+            ],
+            "saved": false,
+            "playback": {
+              "state": "paused",
+              "videoSeconds": 38,
+              "audioSeconds": 134,
+              "autoplay": false,
+              "explicit": true
+            },
+            "activeCue": "cue:C1",
+            "cues[0]": {
+              "offsetSeconds": 95,
+              "audio": {
+                "rangeSeconds": [
+                  133,
+                  137
+                ]
+              }
+            }
+          },
+          "staging": [
+            "cue:C1"
+          ],
+          "inspected": true,
+          "locatorsExpanded": true
+        },
+        "forgeChooser": null
+      },
+      "effects": [
+        {
+          "domain": "private staging",
+          "summary": "Change only the cue descriptor’s manual alignment offset and audio range; keep both source IDs/versions.",
+          "identity": "cue:C1; Rig test@V9; Debrief@V7"
+        }
+      ],
+      "action": "Adjust Cue C1 start offset by −1 second",
+      "note": "Separate clocks remain visible after adjustment; no gold/shared-source relation appears."
+    },
+    {
+      "file": "J29/main/J29-s3-a2.png",
+      "location": "?journey=J29&task=2&action=2",
+      "frame": "J29-s3-a2",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "03",
+            "parent": null,
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "Calibration plate": 17,
+          "Debrief": 21,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J29-s3-a2-reading",
+            "title": "Reading · visit 03 · Review@V4",
+            "kind": "document",
+            "body": [
+              "The recorded pressure remained stable during the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03"
+              },
+              {
+                "label": "Subject",
+                "value": "Review passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "review-o3"
+              },
+              {
+                "label": "Offset",
+                "value": 80
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "m-cues",
+            "title": "Cue list · two independent locators",
+            "kind": "list",
+            "body": [],
+            "facts": [],
+            "rows": [
+              {
+                "id": "cue:C1",
+                "label": "Cue 1",
+                "detail": "V9 00:38 ↔ V7 02:13–02:17 · +95s",
+                "status": "available",
+                "ordinal": 1
+              },
+              {
+                "id": "cue:C2",
+                "label": "Cue 2",
+                "detail": "V9 00:52 ↔ V7 02:30–02:34 · +98s",
+                "status": "available",
+                "ordinal": 2
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 2,
+              "filtered": 2,
+              "visible": 2
+            }
+          },
+          {
+            "id": "m-media",
+            "title": "Source panes · four independent identities",
+            "kind": "media",
+            "body": [
+              "Media bytes, transcript and visual cues remain distinct subjects."
+            ],
+            "facts": [
+              {
+                "label": "Video",
+                "value": "Rig test · V9 · remote cached"
+              },
+              {
+                "label": "Audio",
+                "value": "Debrief · V7 · remote cached"
+              },
+              {
+                "label": "Document",
+                "value": "Lab notes · V12 local"
+              },
+              {
+                "label": "Image",
+                "value": "Calibration plate · V5 · remote cached"
+              }
+            ],
+            "rows": [
+              {
+                "id": "video",
+                "label": "Video V9",
+                "detail": "locator 00:38 / duration 01:26",
+                "status": "cached",
+                "ordinal": 1
+              },
+              {
+                "id": "audio",
+                "label": "Audio V7",
+                "detail": "locator 02:14–02:18; transcript derived",
+                "status": "cached",
+                "ordinal": 2
+              },
+              {
+                "id": "passage",
+                "label": "Lab passage",
+                "detail": "range [12,35) · lab-o6",
+                "status": "selected",
+                "ordinal": 3
+              },
+              {
+                "id": "region",
+                "label": "Image region",
+                "detail": "normalized box [0.31,0.22,0.55,0.41]",
+                "status": "selected",
+                "ordinal": 4
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "media": {
+          "sources": {
+            "video": {
+              "id": "Rig test",
+              "version": "V9",
+              "authority": "remote:rig",
+              "cache": "cached verified"
+            },
+            "audio": {
+              "id": "Debrief",
+              "version": "V7",
+              "authority": "remote:debrief",
+              "cache": "cached verified",
+              "transcript": {
+                "id": "transcript:T7",
+                "derived": true,
+                "text": "Pressure stayed stable.",
+                "wordTimestamps": false
+              }
+            },
+            "document": {
+              "id": "Lab notes",
+              "version": "V12",
+              "authority": "local",
+              "range": [
+                12,
+                35
+              ],
+              "occurrence": "lab-o6"
+            },
+            "image": {
+              "id": "Calibration plate",
+              "version": "V5",
+              "authority": "remote:calibration",
+              "cache": "cached verified",
+              "region": [
+                0.31,
+                0.22,
+                0.55,
+                0.41
+              ]
+            }
+          },
+          "cueSet": {
+            "id": "cue-set:CS1",
+            "cues": [
+              {
+                "id": "cue:C1",
+                "video": {
+                  "source": "Rig test@V9",
+                  "timeSeconds": 38
+                },
+                "audio": {
+                  "source": "Debrief@V7",
+                  "rangeSeconds": [
+                    133,
+                    137
+                  ]
+                },
+                "alignment": "manual",
+                "offsetSeconds": 95,
+                "status": "available"
+              },
+              {
+                "id": "cue:C2",
+                "video": {
+                  "source": "Rig test@V9",
+                  "timeSeconds": 52
+                },
+                "audio": {
+                  "source": "Debrief@V7",
+                  "rangeSeconds": [
+                    150,
+                    154
+                  ]
+                },
+                "alignment": "manual",
+                "offsetSeconds": 98,
+                "status": "available"
+              }
+            ],
+            "saved": false,
+            "playback": {
+              "state": "paused",
+              "videoSeconds": 38,
+              "audioSeconds": 134,
+              "autoplay": false,
+              "explicit": true
+            },
+            "activeCue": "cue:C1",
+            "cues[0]": {
+              "offsetSeconds": 95,
+              "audio": {
+                "rangeSeconds": [
+                  133,
+                  137
+                ]
+              }
+            }
+          },
+          "staging": [
+            "cue:C1",
+            "cue:C2"
+          ],
+          "inspected": true,
+          "locatorsExpanded": true
+        },
+        "forgeChooser": null
+      },
+      "effects": [
+        {
+          "domain": "private staging",
+          "summary": "Append view-only cue descriptor; media objects and source ops unchanged.",
+          "identity": "cue:C2; video V9@52s; audio V7@[150,154)s"
+        }
+      ],
+      "action": "Add independent manual Cue C2 through list action",
+      "note": "List action creates a second cue; it does not combine clocks or sources."
+    },
+    {
+      "file": "J29/main/J29-s3-a3.png",
+      "location": "?journey=J29&task=2&action=3",
+      "frame": "J29-s3-a3",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "03",
+            "parent": null,
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "Calibration plate": 17,
+          "Debrief": 21,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 0,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J29-s3-a3-reading",
+            "title": "Reading · visit 03 · Review@V4",
+            "kind": "document",
+            "body": [
+              "The recorded pressure remained stable during the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03"
+              },
+              {
+                "label": "Subject",
+                "value": "Review passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "review-o3"
+              },
+              {
+                "label": "Offset",
+                "value": 80
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "m-cues",
+            "title": "Cue C1 removed from staging",
+            "kind": "list",
+            "body": [],
+            "facts": [],
+            "rows": [
+              {
+                "id": "cue:C2",
+                "label": "Cue 2",
+                "detail": "V9 00:52 ↔ V7 02:30–02:34 · +98s",
+                "status": "selected",
+                "ordinal": 1
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 1,
+              "filtered": 1,
+              "visible": 1
+            }
+          },
+          {
+            "id": "m-source",
+            "title": "Media sources retained",
+            "kind": "inspector",
+            "body": [],
+            "facts": [
+              {
+                "label": "Video",
+                "value": "Rig test@V9 · retained"
+              },
+              {
+                "label": "Audio",
+                "value": "Debrief@V7 · retained"
+              },
+              {
+                "label": "Removed",
+                "value": "cue descriptor only"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "media": {
+          "sources": {
+            "video": {
+              "id": "Rig test",
+              "version": "V9",
+              "authority": "remote:rig",
+              "cache": "cached verified"
+            },
+            "audio": {
+              "id": "Debrief",
+              "version": "V7",
+              "authority": "remote:debrief",
+              "cache": "cached verified",
+              "transcript": {
+                "id": "transcript:T7",
+                "derived": true,
+                "text": "Pressure stayed stable.",
+                "wordTimestamps": false
+              }
+            },
+            "document": {
+              "id": "Lab notes",
+              "version": "V12",
+              "authority": "local",
+              "range": [
+                12,
+                35
+              ],
+              "occurrence": "lab-o6"
+            },
+            "image": {
+              "id": "Calibration plate",
+              "version": "V5",
+              "authority": "remote:calibration",
+              "cache": "cached verified",
+              "region": [
+                0.31,
+                0.22,
+                0.55,
+                0.41
+              ]
+            }
+          },
+          "cueSet": {
+            "id": "cue-set:CS1",
+            "cues": [
+              {
+                "id": "cue:C2",
+                "video": {
+                  "source": "Rig test@V9",
+                  "timeSeconds": 52
+                },
+                "audio": {
+                  "source": "Debrief@V7",
+                  "rangeSeconds": [
+                    150,
+                    154
+                  ]
+                },
+                "alignment": "manual",
+                "offsetSeconds": 98,
+                "status": "available"
+              }
+            ],
+            "saved": false,
+            "playback": {
+              "state": "paused",
+              "videoSeconds": 38,
+              "audioSeconds": 134,
+              "autoplay": false,
+              "explicit": true
+            },
+            "activeCue": "cue:C1",
+            "cues[0]": {
+              "offsetSeconds": 95,
+              "audio": {
+                "rangeSeconds": [
+                  133,
+                  137
+                ]
+              }
+            }
+          },
+          "staging": [
+            "cue:C2"
+          ],
+          "inspected": true,
+          "locatorsExpanded": true,
+          "removedCue": "cue:C1"
+        },
+        "forgeChooser": null
+      },
+      "effects": [
+        {
+          "domain": "private staging",
+          "summary": "Remove cue:C1 from the staged cue set only; retain both media sources and locators in history.",
+          "identity": "cue:C1 removed; Rig test@V9 and Debrief@V7 unchanged"
+        }
+      ],
+      "action": "Select Cue C1 and remove it from staging",
+      "note": "The media objects remain available; only the view cue membership changes."
+    },
+    {
+      "file": "J29/main/J29-s4-a1.png",
+      "location": "?journey=J29&task=3&action=1",
+      "frame": "J29-s4-a1",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "03",
+            "parent": null,
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "Calibration plate": 17,
+          "Debrief": 21,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 1,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J29-s4-a1-reading",
+            "title": "Reading · visit 03 · Review@V4",
+            "kind": "document",
+            "body": [
+              "The recorded pressure remained stable during the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03"
+              },
+              {
+                "label": "Subject",
+                "value": "Review passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "review-o3"
+              },
+              {
+                "label": "Offset",
+                "value": 80
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "m-saved",
+            "title": "Saved cue set",
+            "kind": "notice",
+            "body": [],
+            "facts": [
+              {
+                "label": "Collection item",
+                "value": "cue-set:CS1"
+              },
+              {
+                "label": "Cue count",
+                "value": 1
+              },
+              {
+                "label": "Source versions",
+                "value": "Rig test@V9; Debrief@V7"
+              },
+              {
+                "label": "Link authored",
+                "value": "no"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          },
+          {
+            "id": "m-media",
+            "title": "Source panes · four independent identities",
+            "kind": "media",
+            "body": [
+              "Media bytes, transcript and visual cues remain distinct subjects."
+            ],
+            "facts": [
+              {
+                "label": "Video",
+                "value": "Rig test · V9 · remote cached"
+              },
+              {
+                "label": "Audio",
+                "value": "Debrief · V7 · remote cached"
+              },
+              {
+                "label": "Document",
+                "value": "Lab notes · V12 local"
+              },
+              {
+                "label": "Image",
+                "value": "Calibration plate · V5 · remote cached"
+              }
+            ],
+            "rows": [
+              {
+                "id": "video",
+                "label": "Video V9",
+                "detail": "locator 00:38 / duration 01:26",
+                "status": "cached",
+                "ordinal": 1
+              },
+              {
+                "id": "audio",
+                "label": "Audio V7",
+                "detail": "locator 02:14–02:18; transcript derived",
+                "status": "cached",
+                "ordinal": 2
+              },
+              {
+                "id": "passage",
+                "label": "Lab passage",
+                "detail": "range [12,35) · lab-o6",
+                "status": "selected",
+                "ordinal": 3
+              },
+              {
+                "id": "region",
+                "label": "Image region",
+                "detail": "normalized box [0.31,0.22,0.55,0.41]",
+                "status": "selected",
+                "ordinal": 4
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "media": {
+          "sources": {
+            "video": {
+              "id": "Rig test",
+              "version": "V9",
+              "authority": "remote:rig",
+              "cache": "cached verified"
+            },
+            "audio": {
+              "id": "Debrief",
+              "version": "V7",
+              "authority": "remote:debrief",
+              "cache": "cached verified",
+              "transcript": {
+                "id": "transcript:T7",
+                "derived": true,
+                "text": "Pressure stayed stable.",
+                "wordTimestamps": false
+              }
+            },
+            "document": {
+              "id": "Lab notes",
+              "version": "V12",
+              "authority": "local",
+              "range": [
+                12,
+                35
+              ],
+              "occurrence": "lab-o6"
+            },
+            "image": {
+              "id": "Calibration plate",
+              "version": "V5",
+              "authority": "remote:calibration",
+              "cache": "cached verified",
+              "region": [
+                0.31,
+                0.22,
+                0.55,
+                0.41
+              ]
+            }
+          },
+          "cueSet": {
+            "id": "cue-set:CS1",
+            "cues": [
+              {
+                "id": "cue:C2",
+                "video": {
+                  "source": "Rig test@V9",
+                  "timeSeconds": 52
+                },
+                "audio": {
+                  "source": "Debrief@V7",
+                  "rangeSeconds": [
+                    150,
+                    154
+                  ]
+                },
+                "alignment": "manual",
+                "offsetSeconds": 98,
+                "status": "available"
+              }
+            ],
+            "saved": true,
+            "playback": {
+              "state": "paused",
+              "videoSeconds": 38,
+              "audioSeconds": 134,
+              "autoplay": false,
+              "explicit": true
+            },
+            "activeCue": "cue:C1",
+            "cues[0]": {
+              "offsetSeconds": 95,
+              "audio": {
+                "rangeSeconds": [
+                  133,
+                  137
+                ]
+              }
+            }
+          },
+          "staging": [
+            "cue:C2"
+          ],
+          "inspected": true,
+          "locatorsExpanded": true,
+          "removedCue": "cue:C1",
+          "savedCueSets": [
+            "cue-set:CS1"
+          ]
+        },
+        "forgeChooser": null
+      },
+      "effects": [
+        {
+          "domain": "reader collection",
+          "summary": "Save one view-only cue-set descriptor. No Link or source operation is written.",
+          "identity": "cue-set:CS1; cue:C2; V9/V7 exact locators"
+        }
+      ],
+      "action": "Save Cue C2 set to reader collection",
+      "note": "Saved cue set retains exact source versions and independent clocks."
+    },
+    {
+      "file": "J29/main/J29-s4-a2.png",
+      "location": "?journey=J29&task=3&action=2",
+      "frame": "J29-s4-a2",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "03",
+            "parent": null,
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "Calibration plate": 17,
+          "Debrief": 21,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 1,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J29-s4-a2-reading",
+            "title": "Reading · visit 03 · Review@V4",
+            "kind": "document",
+            "body": [
+              "The recorded pressure remained stable during the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03"
+              },
+              {
+                "label": "Subject",
+                "value": "Review passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "review-o3"
+              },
+              {
+                "label": "Offset",
+                "value": 80
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "m-clear",
+            "title": "Staging cleared",
+            "kind": "notice",
+            "body": [],
+            "facts": [
+              {
+                "label": "Active cues",
+                "value": 0
+              },
+              {
+                "label": "Saved cue set",
+                "value": "CS1 retained"
+              },
+              {
+                "label": "Source media",
+                "value": "retained"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          },
+          {
+            "id": "m-media",
+            "title": "Source panes · four independent identities",
+            "kind": "media",
+            "body": [
+              "Media bytes, transcript and visual cues remain distinct subjects."
+            ],
+            "facts": [
+              {
+                "label": "Video",
+                "value": "Rig test · V9 · remote cached"
+              },
+              {
+                "label": "Audio",
+                "value": "Debrief · V7 · remote cached"
+              },
+              {
+                "label": "Document",
+                "value": "Lab notes · V12 local"
+              },
+              {
+                "label": "Image",
+                "value": "Calibration plate · V5 · remote cached"
+              }
+            ],
+            "rows": [
+              {
+                "id": "video",
+                "label": "Video V9",
+                "detail": "locator 00:38 / duration 01:26",
+                "status": "cached",
+                "ordinal": 1
+              },
+              {
+                "id": "audio",
+                "label": "Audio V7",
+                "detail": "locator 02:14–02:18; transcript derived",
+                "status": "cached",
+                "ordinal": 2
+              },
+              {
+                "id": "passage",
+                "label": "Lab passage",
+                "detail": "range [12,35) · lab-o6",
+                "status": "selected",
+                "ordinal": 3
+              },
+              {
+                "id": "region",
+                "label": "Image region",
+                "detail": "normalized box [0.31,0.22,0.55,0.41]",
+                "status": "selected",
+                "ordinal": 4
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "media": {
+          "sources": {
+            "video": {
+              "id": "Rig test",
+              "version": "V9",
+              "authority": "remote:rig",
+              "cache": "cached verified"
+            },
+            "audio": {
+              "id": "Debrief",
+              "version": "V7",
+              "authority": "remote:debrief",
+              "cache": "cached verified",
+              "transcript": {
+                "id": "transcript:T7",
+                "derived": true,
+                "text": "Pressure stayed stable.",
+                "wordTimestamps": false
+              }
+            },
+            "document": {
+              "id": "Lab notes",
+              "version": "V12",
+              "authority": "local",
+              "range": [
+                12,
+                35
+              ],
+              "occurrence": "lab-o6"
+            },
+            "image": {
+              "id": "Calibration plate",
+              "version": "V5",
+              "authority": "remote:calibration",
+              "cache": "cached verified",
+              "region": [
+                0.31,
+                0.22,
+                0.55,
+                0.41
+              ]
+            }
+          },
+          "cueSet": {
+            "id": "cue-set:CS1",
+            "cues": [],
+            "saved": true,
+            "playback": {
+              "state": "paused",
+              "videoSeconds": 38,
+              "audioSeconds": 134,
+              "autoplay": false,
+              "explicit": true
+            },
+            "activeCue": "cue:C1",
+            "cues[0]": {
+              "offsetSeconds": 95,
+              "audio": {
+                "rangeSeconds": [
+                  133,
+                  137
+                ]
+              }
+            }
+          },
+          "staging": [],
+          "inspected": true,
+          "locatorsExpanded": true,
+          "removedCue": "cue:C1",
+          "savedCueSets": [
+            "cue-set:CS1"
+          ]
+        },
+        "forgeChooser": null
+      },
+      "effects": [
+        {
+          "domain": "private staging",
+          "summary": "Clear active cue staging; keep saved cue-set descriptor and source media.",
+          "identity": "staging empty; saved cue-set CS1 retained"
+        }
+      ],
+      "action": "Clear staging",
+      "note": "The saved descriptor remains available after clearing the working view."
+    },
+    {
+      "file": "J29/main/J29-s4-a3.png",
+      "location": "?journey=J29&task=3&action=3",
+      "frame": "J29-s4-a3",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "03",
+            "parent": null,
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "Calibration plate": 17,
+          "Debrief": 21,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 1,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J29-s4-a3-reading",
+            "title": "Reading · visit 03 · Review@V4",
+            "kind": "document",
+            "body": [
+              "The recorded pressure remained stable during the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03"
+              },
+              {
+                "label": "Subject",
+                "value": "Review passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "review-o3"
+              },
+              {
+                "label": "Offset",
+                "value": 80
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "m-reopen",
+            "title": "Cue set restored",
+            "kind": "list",
+            "body": [],
+            "facts": [],
+            "rows": [
+              {
+                "id": "cue:C2",
+                "label": "Cue 2",
+                "detail": "V9@52s ↔ V7@[150,154)s · +98s",
+                "status": "available",
+                "ordinal": 1
+              }
+            ],
+            "tone": "neutral"
+          },
+          {
+            "id": "m-play",
+            "title": "Playback state",
+            "kind": "notice",
+            "body": [],
+            "facts": [
+              {
+                "label": "State",
+                "value": "paused"
+              },
+              {
+                "label": "Autoplay",
+                "value": "off"
+              },
+              {
+                "label": "Relation",
+                "value": "view-only"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "media": {
+          "sources": {
+            "video": {
+              "id": "Rig test",
+              "version": "V9",
+              "authority": "remote:rig",
+              "cache": "cached verified"
+            },
+            "audio": {
+              "id": "Debrief",
+              "version": "V7",
+              "authority": "remote:debrief",
+              "cache": "cached verified",
+              "transcript": {
+                "id": "transcript:T7",
+                "derived": true,
+                "text": "Pressure stayed stable.",
+                "wordTimestamps": false
+              }
+            },
+            "document": {
+              "id": "Lab notes",
+              "version": "V12",
+              "authority": "local",
+              "range": [
+                12,
+                35
+              ],
+              "occurrence": "lab-o6"
+            },
+            "image": {
+              "id": "Calibration plate",
+              "version": "V5",
+              "authority": "remote:calibration",
+              "cache": "cached verified",
+              "region": [
+                0.31,
+                0.22,
+                0.55,
+                0.41
+              ]
+            }
+          },
+          "cueSet": {
+            "id": "cue-set:CS1",
+            "cues": [
+              {
+                "id": "cue:C2",
+                "video": {
+                  "source": "Rig test@V9",
+                  "timeSeconds": 52
+                },
+                "audio": {
+                  "source": "Debrief@V7",
+                  "rangeSeconds": [
+                    150,
+                    154
+                  ]
+                },
+                "alignment": "manual",
+                "offsetSeconds": 98,
+                "status": "available"
+              }
+            ],
+            "saved": true,
+            "playback": {
+              "state": "paused",
+              "autoplay": false
+            },
+            "activeCue": "cue:C1",
+            "cues[0]": {
+              "offsetSeconds": 95,
+              "audio": {
+                "rangeSeconds": [
+                  133,
+                  137
+                ]
+              }
+            }
+          },
+          "staging": [
+            "cue:C2"
+          ],
+          "inspected": true,
+          "locatorsExpanded": true,
+          "removedCue": "cue:C1",
+          "savedCueSets": [
+            "cue-set:CS1"
+          ]
+        },
+        "forgeChooser": null
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "Restore reader-owned cue descriptor without autoplay or Link creation.",
+          "identity": "cue-set:CS1; cue:C2"
+        }
+      ],
+      "action": "Reopen saved cue set CS1",
+      "note": "Exact locators return; playback remains paused."
+    },
+    {
+      "file": "J29/main/J29-s5-a1.png",
+      "location": "?journey=J29&task=4&action=1",
+      "frame": "J29-s5-a1",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "03",
+            "parent": null,
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "Calibration plate": 17,
+          "Debrief": 21,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 1,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J29-s5-a1-reading",
+            "title": "Reading · visit 03 · Review@V4",
+            "kind": "document",
+            "body": [
+              "The recorded pressure remained stable during the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03"
+              },
+              {
+                "label": "Subject",
+                "value": "Review passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "review-o3"
+              },
+              {
+                "label": "Offset",
+                "value": 80
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "m-forge",
+            "title": "Separate Link draft chooser",
+            "kind": "list",
+            "body": [
+              "View cues are reader descriptors and are not Link endpoints."
+            ],
+            "facts": [
+              {
+                "label": "Current cue set",
+                "value": "CS1 · view only"
+              },
+              {
+                "label": "Draft",
+                "value": "separate draft:L8 · not authored"
+              }
+            ],
+            "rows": [
+              {
+                "id": "eligible-doc",
+                "label": "Eligible content",
+                "detail": "Lab notes V12 [12,35) · lab-o6",
+                "status": "eligible",
+                "ordinal": 1
+              },
+              {
+                "id": "eligible-review",
+                "label": "Eligible content",
+                "detail": "Review V4 [80,115) · review-o3",
+                "status": "eligible",
+                "ordinal": 2
+              },
+              {
+                "id": "excluded-image",
+                "label": "Excluded locator",
+                "detail": "Calibration plate V5 region",
+                "status": "unsupported type",
+                "ordinal": 3
+              },
+              {
+                "id": "excluded-video",
+                "label": "Excluded locator",
+                "detail": "Rig test V9 time 00:38",
+                "status": "unsupported type",
+                "ordinal": 4
+              },
+              {
+                "id": "excluded-transcript",
+                "label": "Excluded locator",
+                "detail": "derived transcript phrase · no content range",
+                "status": "unsupported type",
+                "ordinal": 5
+              }
+            ],
+            "tone": "neutral"
+          },
+          {
+            "id": "m-cue",
+            "title": "Manual viewing cue set · staging",
+            "kind": "inspector",
+            "body": [],
+            "facts": [
+              {
+                "label": "Cue identity",
+                "value": "cue-set:CS1"
+              },
+              {
+                "label": "Relation",
+                "value": "none · view-only"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "media": {
+          "sources": {
+            "video": {
+              "id": "Rig test",
+              "version": "V9",
+              "authority": "remote:rig",
+              "cache": "cached verified"
+            },
+            "audio": {
+              "id": "Debrief",
+              "version": "V7",
+              "authority": "remote:debrief",
+              "cache": "cached verified",
+              "transcript": {
+                "id": "transcript:T7",
+                "derived": true,
+                "text": "Pressure stayed stable.",
+                "wordTimestamps": false
+              }
+            },
+            "document": {
+              "id": "Lab notes",
+              "version": "V12",
+              "authority": "local",
+              "range": [
+                12,
+                35
+              ],
+              "occurrence": "lab-o6"
+            },
+            "image": {
+              "id": "Calibration plate",
+              "version": "V5",
+              "authority": "remote:calibration",
+              "cache": "cached verified",
+              "region": [
+                0.31,
+                0.22,
+                0.55,
+                0.41
+              ]
+            }
+          },
+          "cueSet": {
+            "id": "cue-set:CS1",
+            "cues": [
+              {
+                "id": "cue:C2",
+                "video": {
+                  "source": "Rig test@V9",
+                  "timeSeconds": 52
+                },
+                "audio": {
+                  "source": "Debrief@V7",
+                  "rangeSeconds": [
+                    150,
+                    154
+                  ]
+                },
+                "alignment": "manual",
+                "offsetSeconds": 98,
+                "status": "available"
+              }
+            ],
+            "saved": true,
+            "playback": {
+              "state": "paused",
+              "autoplay": false
+            },
+            "activeCue": "cue:C1",
+            "cues[0]": {
+              "offsetSeconds": 95,
+              "audio": {
+                "rangeSeconds": [
+                  133,
+                  137
+                ]
+              }
+            }
+          },
+          "staging": [
+            "cue:C2"
+          ],
+          "inspected": true,
+          "locatorsExpanded": true,
+          "removedCue": "cue:C1",
+          "savedCueSets": [
+            "cue-set:CS1"
+          ]
+        },
+        "forgeChooser": {
+          "open": true,
+          "sourceCue": "cue-set:CS1"
+        }
+      },
+      "effects": [
+        {
+          "domain": "none",
+          "summary": "Open a separate draft chooser; no Link is created by navigation.",
+          "identity": "cue-set:CS1"
+        }
+      ],
+      "action": "Open Forge relation from cue bridge",
+      "note": "The cue set remains view-only while eligible endpoint choices are inspected."
+    },
+    {
+      "file": "J29/main/J29-s5-a2.png",
+      "location": "?journey=J29&task=4&action=2",
+      "frame": "J29-s5-a2",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "03",
+            "parent": null,
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "Calibration plate": 17,
+          "Debrief": 21,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 1,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J29-s5-a2-reading",
+            "title": "Reading · visit 03 · Review@V4",
+            "kind": "document",
+            "body": [
+              "The recorded pressure remained stable during the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03"
+              },
+              {
+                "label": "Subject",
+                "value": "Review passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "review-o3"
+              },
+              {
+                "label": "Offset",
+                "value": 80
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "m-forge",
+            "title": "Draft L8 · content-only endpoints",
+            "kind": "list",
+            "body": [],
+            "facts": [],
+            "rows": [
+              {
+                "id": "eligible-doc",
+                "label": "Left content span",
+                "detail": "Lab notes V12 [12,35) · lab-o6",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "eligible-review",
+                "label": "Right content span",
+                "detail": "Review V4 [80,115) · review-o3",
+                "status": "selected",
+                "ordinal": 1
+              },
+              {
+                "id": "excluded-video",
+                "label": "Video time",
+                "detail": "excluded: non-content locator",
+                "status": "unsupported",
+                "ordinal": 1
+              },
+              {
+                "id": "excluded-image",
+                "label": "Image region",
+                "detail": "excluded: non-content locator",
+                "status": "unsupported",
+                "ordinal": 2
+              }
+            ],
+            "tone": "neutral",
+            "count": {
+              "total": 5,
+              "filtered": 2,
+              "visible": 4
+            }
+          },
+          {
+            "id": "m-cue",
+            "title": "Manual viewing cue set · staging",
+            "kind": "inspector",
+            "body": [],
+            "facts": [
+              {
+                "label": "Cue identity",
+                "value": "cue-set:CS1"
+              },
+              {
+                "label": "Relation",
+                "value": "none · view-only"
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          }
+        ],
+        "media": {
+          "sources": {
+            "video": {
+              "id": "Rig test",
+              "version": "V9",
+              "authority": "remote:rig",
+              "cache": "cached verified"
+            },
+            "audio": {
+              "id": "Debrief",
+              "version": "V7",
+              "authority": "remote:debrief",
+              "cache": "cached verified",
+              "transcript": {
+                "id": "transcript:T7",
+                "derived": true,
+                "text": "Pressure stayed stable.",
+                "wordTimestamps": false
+              }
+            },
+            "document": {
+              "id": "Lab notes",
+              "version": "V12",
+              "authority": "local",
+              "range": [
+                12,
+                35
+              ],
+              "occurrence": "lab-o6"
+            },
+            "image": {
+              "id": "Calibration plate",
+              "version": "V5",
+              "authority": "remote:calibration",
+              "cache": "cached verified",
+              "region": [
+                0.31,
+                0.22,
+                0.55,
+                0.41
+              ]
+            }
+          },
+          "cueSet": {
+            "id": "cue-set:CS1",
+            "cues": [
+              {
+                "id": "cue:C2",
+                "video": {
+                  "source": "Rig test@V9",
+                  "timeSeconds": 52
+                },
+                "audio": {
+                  "source": "Debrief@V7",
+                  "rangeSeconds": [
+                    150,
+                    154
+                  ]
+                },
+                "alignment": "manual",
+                "offsetSeconds": 98,
+                "status": "available"
+              }
+            ],
+            "saved": true,
+            "playback": {
+              "state": "paused",
+              "autoplay": false
+            },
+            "activeCue": "cue:C1",
+            "cues[0]": {
+              "offsetSeconds": 95,
+              "audio": {
+                "rangeSeconds": [
+                  133,
+                  137
+                ]
+              }
+            }
+          },
+          "staging": [
+            "cue:C2"
+          ],
+          "inspected": true,
+          "locatorsExpanded": true,
+          "removedCue": "cue:C1",
+          "savedCueSets": [
+            "cue-set:CS1"
+          ]
+        },
+        "forgeChooser": {
+          "open": true,
+          "sourceCue": "cue-set:CS1",
+          "draft": {
+            "id": "draft:L8",
+            "left": [
+              "eligible-doc"
+            ],
+            "right": [
+              "eligible-review"
+            ],
+            "relation": "Comment",
+            "destination": "Review@V31",
+            "status": "discarded"
+          },
+          "excluded": [
+            "excluded-image",
+            "excluded-video",
+            "excluded-transcript"
+          ]
+        }
+      },
+      "effects": [
+        {
+          "domain": "private staging",
+          "summary": "Create a separate in-memory draft from concrete content ranges only; cue set remains unchanged.",
+          "identity": "draft:L8; selected content spans only"
+        }
+      ],
+      "action": "Select only validated content spans for separate draft L8",
+      "note": "Image geometry, media time and derived transcript are excluded without conversion."
+    },
+    {
+      "file": "J29/main/J29-s5-a3.png",
+      "location": "?journey=J29&task=4&action=3",
+      "frame": "J29-s5-a3",
+      "state": {
+        "reading": {
+          "visit": "03",
+          "subject": "Review passage",
+          "store": "Review",
+          "version": "V4",
+          "occurrence": "review-o3",
+          "offset": 80,
+          "body": [
+            "The recorded pressure remained stable during the run."
+          ]
+        },
+        "visits": [
+          {
+            "id": "03",
+            "parent": null,
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "kind": "reader"
+          }
+        ],
+        "selection": {
+          "subject": "doc:review",
+          "state": "Review@V4",
+          "locator": {
+            "range": [
+              80,
+              115
+            ],
+            "occurrence": "review-o3"
+          }
+        },
+        "sourceOps": {
+          "Lab notes": 58,
+          "Review store": 214,
+          "Rig slice": 33,
+          "Calibration plate": 17,
+          "Debrief": 21,
+          "reader activity": 12
+        },
+        "readerEffects": {
+          "visits": 1,
+          "collections": 1,
+          "annotations": 0
+        },
+        "destinationEffects": {},
+        "panels": [
+          {
+            "id": "J29-s5-a3-reading",
+            "title": "Reading · visit 03 · Review@V4",
+            "kind": "document",
+            "body": [
+              "The recorded pressure remained stable during the run."
+            ],
+            "facts": [
+              {
+                "label": "Visit",
+                "value": "03"
+              },
+              {
+                "label": "Subject",
+                "value": "Review passage"
+              },
+              {
+                "label": "Occurrence",
+                "value": "review-o3"
+              },
+              {
+                "label": "Offset",
+                "value": 80
+              }
+            ],
+            "rows": [],
+            "tone": "selected"
+          },
+          {
+            "id": "m-cancel",
+            "title": "Forge chooser cancelled",
+            "kind": "notice",
+            "body": [],
+            "facts": [
+              {
+                "label": "Draft L8",
+                "value": "discarded"
+              },
+              {
+                "label": "Cue set CS1",
+                "value": "retained"
+              },
+              {
+                "label": "Authored Links",
+                "value": 0
+              }
+            ],
+            "rows": [],
+            "tone": "neutral"
+          },
+          {
+            "id": "m-media",
+            "title": "Source panes · four independent identities",
+            "kind": "media",
+            "body": [
+              "Media bytes, transcript and visual cues remain distinct subjects."
+            ],
+            "facts": [
+              {
+                "label": "Video",
+                "value": "Rig test · V9 · remote cached"
+              },
+              {
+                "label": "Audio",
+                "value": "Debrief · V7 · remote cached"
+              },
+              {
+                "label": "Document",
+                "value": "Lab notes · V12 local"
+              },
+              {
+                "label": "Image",
+                "value": "Calibration plate · V5 · remote cached"
+              }
+            ],
+            "rows": [
+              {
+                "id": "video",
+                "label": "Video V9",
+                "detail": "locator 00:38 / duration 01:26",
+                "status": "cached",
+                "ordinal": 1
+              },
+              {
+                "id": "audio",
+                "label": "Audio V7",
+                "detail": "locator 02:14–02:18; transcript derived",
+                "status": "cached",
+                "ordinal": 2
+              },
+              {
+                "id": "passage",
+                "label": "Lab passage",
+                "detail": "range [12,35) · lab-o6",
+                "status": "selected",
+                "ordinal": 3
+              },
+              {
+                "id": "region",
+                "label": "Image region",
+                "detail": "normalized box [0.31,0.22,0.55,0.41]",
+                "status": "selected",
+                "ordinal": 4
+              }
+            ],
+            "tone": "neutral"
+          }
+        ],
+        "media": {
+          "sources": {
+            "video": {
+              "id": "Rig test",
+              "version": "V9",
+              "authority": "remote:rig",
+              "cache": "cached verified"
+            },
+            "audio": {
+              "id": "Debrief",
+              "version": "V7",
+              "authority": "remote:debrief",
+              "cache": "cached verified",
+              "transcript": {
+                "id": "transcript:T7",
+                "derived": true,
+                "text": "Pressure stayed stable.",
+                "wordTimestamps": false
+              }
+            },
+            "document": {
+              "id": "Lab notes",
+              "version": "V12",
+              "authority": "local",
+              "range": [
+                12,
+                35
+              ],
+              "occurrence": "lab-o6"
+            },
+            "image": {
+              "id": "Calibration plate",
+              "version": "V5",
+              "authority": "remote:calibration",
+              "cache": "cached verified",
+              "region": [
+                0.31,
+                0.22,
+                0.55,
+                0.41
+              ]
+            }
+          },
+          "cueSet": {
+            "id": "cue-set:CS1",
+            "cues": [
+              {
+                "id": "cue:C2",
+                "video": {
+                  "source": "Rig test@V9",
+                  "timeSeconds": 52
+                },
+                "audio": {
+                  "source": "Debrief@V7",
+                  "rangeSeconds": [
+                    150,
+                    154
+                  ]
+                },
+                "alignment": "manual",
+                "offsetSeconds": 98,
+                "status": "available"
+              }
+            ],
+            "saved": true,
+            "playback": {
+              "state": "paused",
+              "autoplay": false
+            },
+            "activeCue": "cue:C1",
+            "cues[0]": {
+              "offsetSeconds": 95,
+              "audio": {
+                "rangeSeconds": [
+                  133,
+                  137
+                ]
+              }
+            }
+          },
+          "staging": [
+            "cue:C2"
+          ],
+          "inspected": true,
+          "locatorsExpanded": true,
+          "removedCue": "cue:C1",
+          "savedCueSets": [
+            "cue-set:CS1"
+          ]
+        },
+        "forgeChooser": {
+          "open": false,
+          "sourceCue": "cue-set:CS1",
+          "draft": {
+            "id": "draft:L8",
+            "left": [
+              "eligible-doc"
+            ],
+            "right": [
+              "eligible-review"
+            ],
+            "relation": "Comment",
+            "destination": "Review@V31",
+            "status": "discarded"
+          },
+          "excluded": [
+            "excluded-image",
+            "excluded-video",
+            "excluded-transcript"
+          ]
+        }
+      },
+      "effects": [
+        {
+          "domain": "private staging",
+          "summary": "Discard only separate draft L8; cue set CS1 remains saved.",
+          "identity": "draft:L8 discarded; cue-set:CS1 retained"
+        }
+      ],
+      "action": "Cancel draft L8 and return to cue set",
+      "note": "No Link is authored and the view cue is not converted to a relation."
+    }
+  ]
+}

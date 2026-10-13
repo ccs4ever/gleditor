@@ -1,0 +1,4661 @@
+{
+  "method": "Native DOM clicks and Tab/Enter in headless Chromium; scripted fixture effects only.",
+  "journeys": [
+    {
+      "id": "J17",
+      "title": "Discover and acquire an exact remote edition",
+      "steps": [
+        {
+          "step": 1,
+          "actions": [
+            {
+              "id": "J17-s1-a1",
+              "label": "Browse topic #hypermedia",
+              "kind": "view",
+              "frame": "J17/main/J17-s1-a1.png"
+            },
+            {
+              "id": "J17-s1-a2",
+              "label": "Browse followed author Mira Chen",
+              "kind": "view",
+              "frame": "J17/main/J17-s1-a2.png"
+            },
+            {
+              "id": "J17-s1-a3",
+              "label": "Paste supported publication URI",
+              "kind": "view",
+              "frame": "J17/main/J17-s1-a3.png"
+            },
+            {
+              "id": "J17-s1-a4",
+              "label": "Inspect Spatial notebooks",
+              "kind": "inspect",
+              "frame": "J17/main/J17-s1-a4.png"
+            }
+          ],
+          "checks": [
+            "Scope and publication ID are explicit.",
+            "Inspection does not initiate acquisition or create a visit."
+          ]
+        },
+        {
+          "step": 2,
+          "actions": [
+            {
+              "id": "J17-s2-a1",
+              "label": "Inspect publication identity",
+              "kind": "inspect",
+              "frame": "J17/main/J17-s2-a1.png"
+            },
+            {
+              "id": "J17-s2-a2",
+              "label": "Review verification boundaries",
+              "kind": "view",
+              "frame": "J17/main/J17-s2-a2.png"
+            }
+          ],
+          "checks": [
+            "Publisher/publication/manifest identities remain stable.",
+            "Signature, trust, payload integrity and availability are separately labelled."
+          ]
+        },
+        {
+          "step": 3,
+          "actions": [
+            {
+              "id": "J17-s3-a1",
+              "label": "Request pinned V12",
+              "kind": "fixture",
+              "frame": "J17/main/J17-s3-a1.png"
+            },
+            {
+              "id": "J17-s3-a2",
+              "label": "Advance publisher pointer to V13",
+              "kind": "fixture",
+              "frame": "J17/main/J17-s3-a2.png"
+            },
+            {
+              "id": "J17-s3-a3",
+              "label": "Keep the V12 request",
+              "kind": "view",
+              "frame": "J17/main/J17-s3-a3.png"
+            }
+          ],
+          "checks": [
+            "Request id always retains V12 and mf-v12-7b31.",
+            "V13 appears only under an explicit second request."
+          ]
+        },
+        {
+          "step": 4,
+          "actions": [
+            {
+              "id": "J17-s4-a1",
+              "label": "Inspect interrupted request",
+              "kind": "fixture",
+              "frame": "J17/main/J17-s4-a1.png"
+            },
+            {
+              "id": "J17-s4-a2",
+              "label": "Retry same request",
+              "kind": "fixture",
+              "frame": "J17/main/J17-s4-a2.png"
+            },
+            {
+              "id": "J17-s4-a3",
+              "label": "Complete verification",
+              "kind": "fixture",
+              "frame": "J17/main/J17-s4-a3.png"
+            }
+          ],
+          "checks": [
+            "Retry preserves req-v12-0001.",
+            "Open remains blocked until 96/96 and complete store validation.",
+            "Invalid and unavailable routes remain separately reachable."
+          ]
+        },
+        {
+          "step": 5,
+          "actions": [
+            {
+              "id": "J17-s5-a1",
+              "label": "Open verified V12",
+              "kind": "enter",
+              "frame": "J17/main/J17-s5-a1.png"
+            },
+            {
+              "id": "J17-s5-a2",
+              "label": "Return to origin 01",
+              "kind": "restore",
+              "frame": "J17/main/J17-s5-a2.png"
+            },
+            {
+              "id": "J17-s5-a3",
+              "label": "Reopen cached V12 while offline",
+              "kind": "enter",
+              "frame": "J17/main/J17-s5-a3.png"
+            }
+          ],
+          "checks": [
+            "Only explicit open adds visit 02.",
+            "Offline reopen uses exact V12 manifest.",
+            "Follow and package preferences remain independently unchanged."
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "id": "J17-invalid",
+          "actions": 3,
+          "frames": [
+            "J17/J17-invalid/before.png",
+            "J17/J17-invalid/J17-invalid-a1.png",
+            "J17/J17-invalid/J17-invalid-a2.png",
+            "J17/J17-invalid/J17-invalid-a3.png"
+          ],
+          "errors": []
+        },
+        {
+          "id": "J17-unavailable",
+          "actions": 2,
+          "frames": [
+            "J17/J17-unavailable/before.png",
+            "J17/J17-unavailable/J17-unavailable-a1.png",
+            "J17/J17-unavailable/J17-unavailable-a2.png"
+          ],
+          "errors": []
+        },
+        {
+          "id": "J17-cancel",
+          "actions": 1,
+          "frames": [
+            "J17/J17-cancel/before.png",
+            "J17/J17-cancel/J17-cancel-a1.png"
+          ],
+          "errors": []
+        },
+        {
+          "id": "J17-s3-v13-route",
+          "actions": 1,
+          "frames": [
+            "J17/J17-s3-v13-route/before.png",
+            "J17/J17-s3-v13-route/J17-s3-v13.png"
+          ],
+          "errors": []
+        }
+      ],
+      "crossChecks": {
+        "keyboard": {
+          "tabs": 17,
+          "expected": "J17-s1-a1",
+          "delivered": true,
+          "focusAfter": "<button class=\"action  pending\" data-action=\"J17-s1-a2\" aria-label=\"Browse followed author Mira Chen\">Browse followed author Mira Chen</button>"
+        },
+        "list": {
+          "selected": "true",
+          "sameFrame": true
+        },
+        "accessibility": {
+          "lang": "en",
+          "liveRegions": 1,
+          "unlabelledButtons": 0,
+          "semanticMain": 1,
+          "colorIndependent": true,
+          "nativeTreeNodes": 262,
+          "assistiveTechnologyTested": false
+        },
+        "narrow": {
+          "scrollWidth": 390,
+          "viewport": 390,
+          "text": 20,
+          "reading": {
+            "visit": "01",
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "occ-1",
+            "offset": "p.14 · 54.2",
+            "body": [
+              "Pressure stayed stable. Calibration remains under review."
+            ]
+          }
+        },
+        "reducedMotion": {
+          "enabled": "true",
+          "frame": "J17-s1-a1",
+          "reading": {
+            "visit": "01",
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "occ-1",
+            "offset": "p.14 · 54.2",
+            "body": [
+              "Pressure stayed stable. Calibration remains under review."
+            ]
+          }
+        },
+        "optics": {
+          "bodyText": "rgb(220, 224, 240)",
+          "backing": "rgb(23, 27, 43)",
+          "readingText": "rgb(27, 35, 61)",
+          "readingBacking": "rgb(237, 240, 248)",
+          "panelContrast": 13,
+          "readerContrast": 13.6
+        },
+        "pointer": {
+          "nativeNamedActions": 15,
+          "delivery": "DOM pointer click",
+          "gesturePicking": "Not implemented in the Xuzz engine"
+        },
+        "lifecycle": {
+          "routes": [
+            "J17-invalid",
+            "J17-unavailable",
+            "J17-cancel",
+            "J17-s3-v13-route"
+          ],
+          "evidence": "Base and alternate snapshots and receipts in traces; scripted lifecycle only"
+        },
+        "storage": {
+          "enforced": "All transitions guard immutable sourceOps; Enter adds exactly one reader visit; restore adds none.",
+          "evidence": "Full state/effect trace per route",
+          "productionProof": false
+        },
+        "relations": {
+          "evidence": "Exact descriptors, source occurrences, ancestry and typed records visible in route states",
+          "productionProof": false
+        }
+      },
+      "inventoryChecks": []
+    },
+    {
+      "id": "J18",
+      "title": "Find one term across media and store origins",
+      "steps": [
+        {
+          "step": 1,
+          "actions": [
+            {
+              "id": "J18-s1-a1",
+              "label": "Search pressure across eight stores",
+              "kind": "fixture",
+              "frame": "J18/main/J18-s1-a1.png"
+            },
+            {
+              "id": "J18-s1-a2",
+              "label": "Show passage and cell matches",
+              "kind": "view",
+              "frame": "J18/main/J18-s1-a2.png"
+            },
+            {
+              "id": "J18-s1-a3",
+              "label": "Show image/audio/video evidence",
+              "kind": "view",
+              "frame": "J18/main/J18-s1-a3.png"
+            }
+          ],
+          "checks": [
+            "Query id, scope and partial coverage stay visible.",
+            "All five evidence classes have visible result rows."
+          ]
+        },
+        {
+          "step": 2,
+          "actions": [
+            {
+              "id": "J18-s2-a1",
+              "label": "Inspect Review passage",
+              "kind": "inspect",
+              "frame": "J18/main/J18-s2-a1.png"
+            },
+            {
+              "id": "J18-s2-a2",
+              "label": "Inspect Rig slice C17",
+              "kind": "inspect",
+              "frame": "J18/main/J18-s2-a2.png"
+            },
+            {
+              "id": "J18-s2-a3",
+              "label": "Inspect Calibration plate",
+              "kind": "inspect",
+              "frame": "J18/main/J18-s2-a3.png"
+            },
+            {
+              "id": "J18-s2-a4",
+              "label": "Inspect Debrief recording",
+              "kind": "inspect",
+              "frame": "J18/main/J18-s2-a4.png"
+            },
+            {
+              "id": "J18-s2-a5",
+              "label": "Inspect Pressure rig test",
+              "kind": "inspect",
+              "frame": "J18/main/J18-s2-a5.png"
+            }
+          ],
+          "checks": [
+            "Remote cached results retain remote originating authorities.",
+            "Each inspector exposes exact locator and occurrence ID."
+          ]
+        },
+        {
+          "step": 3,
+          "actions": [
+            {
+              "id": "J18-s3-a1",
+              "label": "Inspect OCR region",
+              "kind": "inspect",
+              "frame": "J18/main/J18-s3-a1.png"
+            },
+            {
+              "id": "J18-s3-a2",
+              "label": "Inspect transcript interval",
+              "kind": "inspect",
+              "frame": "J18/main/J18-s3-a2.png"
+            }
+          ],
+          "checks": [
+            "OCR region is an image-coordinate locator.",
+            "Audio interval has explicit start and end time.",
+            "No shared-source relation is inferred from text similarity."
+          ]
+        },
+        {
+          "step": 4,
+          "actions": [
+            {
+              "id": "J18-s4-a1",
+              "label": "Inspect not-held video title match",
+              "kind": "inspect",
+              "frame": "J18/main/J18-s4-a1.png"
+            },
+            {
+              "id": "J18-s4-a2",
+              "label": "Choose leave untouched",
+              "kind": "view",
+              "frame": "J18/main/J18-s4-a2.png"
+            }
+          ],
+          "checks": [
+            "Title match stays metadata-only until explicit request and payload validation.",
+            "Inspection never autoplays."
+          ]
+        },
+        {
+          "step": 5,
+          "actions": [
+            {
+              "id": "J18-s5-a1",
+              "label": "Enter resolved Review passage occurrence",
+              "kind": "enter",
+              "frame": "J18/main/J18-s5-a1.png"
+            },
+            {
+              "id": "J18-s5-a2",
+              "label": "Return to original reading place",
+              "kind": "restore",
+              "frame": "J18/main/J18-s5-a2.png"
+            },
+            {
+              "id": "J18-s5-a3",
+              "label": "Inspect independent and shared-source references",
+              "kind": "inspect",
+              "frame": "J18/main/J18-s5-a3.png"
+            }
+          ],
+          "checks": [
+            "Enter and return are separate; only Enter appends visit 02.",
+            "A/B equal text has different source addresses.",
+            "A/C share source address but retain occurrence identity."
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "id": "J18-video-not-held",
+          "actions": 1,
+          "frames": [
+            "J18/J18-video-not-held/before.png",
+            "J18/J18-video-not-held/J18-video-not-held-a1.png"
+          ],
+          "errors": []
+        },
+        {
+          "id": "J18-s4-acquire-route",
+          "actions": 1,
+          "frames": [
+            "J18/J18-s4-acquire-route/before.png",
+            "J18/J18-s4-acquire-route/J18-s4-acquire.png"
+          ],
+          "errors": []
+        }
+      ],
+      "crossChecks": {
+        "keyboard": {
+          "tabs": 15,
+          "expected": "J18-s1-a1",
+          "delivered": true,
+          "focusAfter": "<button class=\"action  pending\" data-action=\"J18-s1-a2\" aria-label=\"Show passage and cell matches\">Show passage and cell matches</button>"
+        },
+        "list": {
+          "selected": "true",
+          "sameFrame": true
+        },
+        "accessibility": {
+          "lang": "en",
+          "liveRegions": 1,
+          "unlabelledButtons": 0,
+          "semanticMain": 1,
+          "colorIndependent": true,
+          "nativeTreeNodes": 351,
+          "assistiveTechnologyTested": false
+        },
+        "narrow": {
+          "scrollWidth": 390,
+          "viewport": 390,
+          "text": 20,
+          "reading": {
+            "visit": "01",
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "occ-1",
+            "offset": "p.14 · 54.2",
+            "body": [
+              "Pressure stayed stable. Calibration remains under review."
+            ]
+          }
+        },
+        "reducedMotion": {
+          "enabled": "true",
+          "frame": "J18-s1-a1",
+          "reading": {
+            "visit": "01",
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "occ-1",
+            "offset": "p.14 · 54.2",
+            "body": [
+              "Pressure stayed stable. Calibration remains under review."
+            ]
+          }
+        },
+        "optics": {
+          "bodyText": "rgb(220, 224, 240)",
+          "backing": "rgb(23, 27, 43)",
+          "readingText": "rgb(27, 35, 61)",
+          "readingBacking": "rgb(237, 240, 248)",
+          "panelContrast": 13,
+          "readerContrast": 13.6
+        },
+        "pointer": {
+          "nativeNamedActions": 15,
+          "delivery": "DOM pointer click",
+          "gesturePicking": "Not implemented in the Xuzz engine"
+        },
+        "lifecycle": {
+          "routes": [
+            "J18-video-not-held",
+            "J18-s4-acquire-route"
+          ],
+          "evidence": "Base and alternate snapshots and receipts in traces; scripted lifecycle only"
+        },
+        "storage": {
+          "enforced": "All transitions guard immutable sourceOps; Enter adds exactly one reader visit; restore adds none.",
+          "evidence": "Full state/effect trace per route",
+          "productionProof": false
+        },
+        "relations": {
+          "evidence": "Exact descriptors, source occurrences, ancestry and typed records visible in route states",
+          "productionProof": false
+        }
+      },
+      "inventoryChecks": []
+    },
+    {
+      "id": "J19",
+      "title": "Filter a running query without losing the selected result",
+      "steps": [
+        {
+          "step": 1,
+          "actions": [
+            {
+              "id": "J19-s1-a1",
+              "label": "Apply Cell + native text + historical",
+              "kind": "view",
+              "frame": "J19/main/J19-s1-a1.png"
+            },
+            {
+              "id": "J19-s1-a2",
+              "label": "Apply All media restored",
+              "kind": "view",
+              "frame": "J19/main/J19-s1-a2.png"
+            },
+            {
+              "id": "J19-s1-a3",
+              "label": "Apply Cached-only · Review + Calibration",
+              "kind": "view",
+              "frame": "J19/main/J19-s1-a3.png"
+            }
+          ],
+          "checks": [
+            "Every filter displays its exclusions.",
+            "Selected occurrence remains pinned and no source edits occur."
+          ]
+        },
+        {
+          "step": 2,
+          "actions": [
+            {
+              "id": "J19-s2-a1",
+              "label": "Group by store then sort by version",
+              "kind": "view",
+              "frame": "J19/main/J19-s2-a1.png"
+            },
+            {
+              "id": "J19-s2-a2",
+              "label": "Apply Review-only filter that excludes C17",
+              "kind": "view",
+              "frame": "J19/main/J19-s2-a2.png"
+            },
+            {
+              "id": "J19-s2-a3",
+              "label": "Restore filter",
+              "kind": "view",
+              "frame": "J19/main/J19-s2-a3.png"
+            },
+            {
+              "id": "J19-s2-a4",
+              "label": "Clear selection explicitly",
+              "kind": "view",
+              "frame": "J19/main/J19-s2-a4.png"
+            }
+          ],
+          "checks": [
+            "Selection identity survives grouping and exclusion.",
+            "Clearing selection is distinct from removing results or saved members."
+          ]
+        },
+        {
+          "step": 3,
+          "actions": [
+            {
+              "id": "J19-s3-a1",
+              "label": "Start refined request Q2",
+              "kind": "fixture",
+              "frame": "J19/main/J19-s3-a1.png"
+            },
+            {
+              "id": "J19-s3-a2",
+              "label": "Deliver Q2 response",
+              "kind": "fixture",
+              "frame": "J19/main/J19-s3-a2.png"
+            },
+            {
+              "id": "J19-s3-a3",
+              "label": "Deliver late Q1 response",
+              "kind": "fixture",
+              "frame": "J19/main/J19-s3-a3.png"
+            }
+          ],
+          "checks": [
+            "Current and superseded request IDs are shown.",
+            "Late Q1 reply cannot overwrite Q2.",
+            "Selection persists."
+          ]
+        },
+        {
+          "step": 4,
+          "actions": [
+            {
+              "id": "J19-s4-a1",
+              "label": "Inspect coverage details",
+              "kind": "inspect",
+              "frame": "J19/main/J19-s4-a1.png"
+            },
+            {
+              "id": "J19-s4-a2",
+              "label": "Cancel Q2",
+              "kind": "fixture",
+              "frame": "J19/main/J19-s4-a2.png"
+            },
+            {
+              "id": "J19-s4-a3",
+              "label": "Rerun explicitly as Q3",
+              "kind": "fixture",
+              "frame": "J19/main/J19-s4-a3.png"
+            }
+          ],
+          "checks": [
+            "Pending, unsupported and complete statuses differ.",
+            "Cancel preserves collected results.",
+            "Rerun uses a new request ID."
+          ]
+        },
+        {
+          "step": 5,
+          "actions": [
+            {
+              "id": "J19-s5-a1",
+              "label": "Inspect completed-empty scope",
+              "kind": "fixture",
+              "frame": "J19/main/J19-s5-a1.png"
+            },
+            {
+              "id": "J19-s5-a2",
+              "label": "Inspect incomplete zero-found scope",
+              "kind": "fixture",
+              "frame": "J19/main/J19-s5-a2.png"
+            },
+            {
+              "id": "J19-s5-a3",
+              "label": "Save recipe",
+              "kind": "save",
+              "frame": "J19/main/J19-s5-a3.png"
+            },
+            {
+              "id": "J19-s5-a4",
+              "label": "Capture Q2 results separately",
+              "kind": "save",
+              "frame": "J19/main/J19-s5-a4.png"
+            },
+            {
+              "id": "J19-s5-a5",
+              "label": "Rerun recipe as Q3 and inspect new match",
+              "kind": "fixture",
+              "frame": "J19/main/J19-s5-a5.png"
+            }
+          ],
+          "checks": [
+            "Completion and match count are separate statuses.",
+            "Recipe and snapshot have different IDs, types and effects.",
+            "Rerun does not refresh snapshot or populate a pouch/Link."
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "id": "J19-stale",
+          "actions": 1,
+          "frames": [
+            "J19/J19-stale/before.png",
+            "J19/J19-stale/J19-stale-a1.png"
+          ],
+          "errors": []
+        }
+      ],
+      "crossChecks": {
+        "keyboard": {
+          "tabs": 15,
+          "expected": "J19-s1-a1",
+          "delivered": true,
+          "focusAfter": "<button class=\"action  pending\" data-action=\"J19-s1-a2\" aria-label=\"Apply All media restored\">Apply All media restored</button>"
+        },
+        "list": {
+          "selected": "true",
+          "sameFrame": true
+        },
+        "accessibility": {
+          "lang": "en",
+          "liveRegions": 1,
+          "unlabelledButtons": 0,
+          "semanticMain": 1,
+          "colorIndependent": true,
+          "nativeTreeNodes": 345,
+          "assistiveTechnologyTested": false
+        },
+        "narrow": {
+          "scrollWidth": 390,
+          "viewport": 390,
+          "text": 20,
+          "reading": {
+            "visit": "01",
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "occ-1",
+            "offset": "p.14 · 54.2",
+            "body": [
+              "Pressure stayed stable. Calibration remains under review."
+            ]
+          }
+        },
+        "reducedMotion": {
+          "enabled": "true",
+          "frame": "J19-s1-a1",
+          "reading": {
+            "visit": "01",
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "occ-1",
+            "offset": "p.14 · 54.2",
+            "body": [
+              "Pressure stayed stable. Calibration remains under review."
+            ]
+          }
+        },
+        "optics": {
+          "bodyText": "rgb(220, 224, 240)",
+          "backing": "rgb(23, 27, 43)",
+          "readingText": "rgb(27, 35, 61)",
+          "readingBacking": "rgb(237, 240, 248)",
+          "panelContrast": 13,
+          "readerContrast": 13.6
+        },
+        "pointer": {
+          "nativeNamedActions": 18,
+          "delivery": "DOM pointer click",
+          "gesturePicking": "Not implemented in the Xuzz engine"
+        },
+        "lifecycle": {
+          "routes": [
+            "J19-stale"
+          ],
+          "evidence": "Base and alternate snapshots and receipts in traces; scripted lifecycle only"
+        },
+        "storage": {
+          "enforced": "All transitions guard immutable sourceOps; Enter adds exactly one reader visit; restore adds none.",
+          "evidence": "Full state/effect trace per route",
+          "productionProof": false
+        },
+        "relations": {
+          "evidence": "Exact descriptors, source occurrences, ancestry and typed records visible in route states",
+          "productionProof": false
+        }
+      },
+      "inventoryChecks": []
+    },
+    {
+      "id": "J20",
+      "title": "Search historical occurrences with visible matching rules",
+      "steps": [
+        {
+          "step": 1,
+          "actions": [
+            {
+              "id": "J20-s1-a1",
+              "label": "Search 3.14 across branches and states",
+              "kind": "fixture",
+              "frame": "J20/main/J20-s1-a1.png"
+            },
+            {
+              "id": "J20-s1-a2",
+              "label": "Inspect math and pressure matches",
+              "kind": "inspect",
+              "frame": "J20/main/J20-s1-a2.png"
+            }
+          ],
+          "checks": [
+            "Text and cell results identify authority, state, occurrence and exact source locator.",
+            "Partial coverage remains explicit."
+          ]
+        },
+        {
+          "step": 2,
+          "actions": [
+            {
+              "id": "J20-s2-a1",
+              "label": "Inspect Literal rule",
+              "kind": "inspect",
+              "frame": "J20/main/J20-s2-a1.png"
+            },
+            {
+              "id": "J20-s2-a2",
+              "label": "Switch to Whole token",
+              "kind": "view",
+              "frame": "J20/main/J20-s2-a2.png"
+            },
+            {
+              "id": "J20-s2-a3",
+              "label": "Inspect Number rules and unit facet",
+              "kind": "inspect",
+              "frame": "J20/main/J20-s2-a3.png"
+            },
+            {
+              "id": "J20-s2-a4",
+              "label": "Apply explicit bar unit facet",
+              "kind": "view",
+              "frame": "J20/main/J20-s2-a4.png"
+            },
+            {
+              "id": "J20-s2-a5",
+              "label": "Inspect Related ideas without expansion",
+              "kind": "inspect",
+              "frame": "J20/main/J20-s2-a5.png"
+            },
+            {
+              "id": "J20-s2-a6",
+              "label": "Explicitly expand with π suggestion",
+              "kind": "view",
+              "frame": "J20/main/J20-s2-a6.png"
+            }
+          ],
+          "checks": [
+            "Each mode displays its exact rule and 3.14159/3.140 behavior.",
+            "Units do not silently convert.",
+            "π remains related but not exactly equal; expansion is explicit."
+          ]
+        },
+        {
+          "step": 3,
+          "actions": [
+            {
+              "id": "J20-s3-a1",
+              "label": "Change query from 3.14 to pressure",
+              "kind": "view",
+              "frame": "J20/main/J20-s3-a1.png"
+            },
+            {
+              "id": "J20-s3-a2",
+              "label": "Show integrated C17 V8/V12 results",
+              "kind": "fixture",
+              "frame": "J20/main/J20-s3-a2.png"
+            },
+            {
+              "id": "J20-s3-a3",
+              "label": "Inspect older V8 occurrence",
+              "kind": "inspect",
+              "frame": "J20/main/J20-s3-a3.png"
+            }
+          ],
+          "checks": [
+            "Query switch and case-fold state are visible.",
+            "Integrated fixture shows V8 historical match and V12 no-pressure result.",
+            "Historical occurrence identity is preserved and never falls back to current head."
+          ]
+        },
+        {
+          "step": 4,
+          "actions": [
+            {
+              "id": "J20-s4-a1",
+              "label": "Expand compacted B03–B07 state run",
+              "kind": "view",
+              "frame": "J20/main/J20-s4-a1.png"
+            },
+            {
+              "id": "J20-s4-a2",
+              "label": "Inspect repeated source occurrences",
+              "kind": "inspect",
+              "frame": "J20/main/J20-s4-a2.png"
+            },
+            {
+              "id": "J20-s4-a3",
+              "label": "Inspect independent equal-text source",
+              "kind": "inspect",
+              "frame": "J20/main/J20-s4-a3.png"
+            }
+          ],
+          "checks": [
+            "Counts are separately named and consistent with visible items.",
+            "Repeated uses of one source retain occurrence IDs.",
+            "Equal text at different addresses remains distinct."
+          ]
+        },
+        {
+          "step": 5,
+          "actions": [
+            {
+              "id": "J20-s5-a1",
+              "label": "Inspect partial coverage",
+              "kind": "inspect",
+              "frame": "J20/main/J20-s5-a1.png"
+            },
+            {
+              "id": "J20-s5-a2",
+              "label": "Inspect missing historical state",
+              "kind": "fixture",
+              "frame": "J20/main/J20-s5-a2.png"
+            },
+            {
+              "id": "J20-s5-a3",
+              "label": "Inspect completed branch with no matches",
+              "kind": "fixture",
+              "frame": "J20/main/J20-s5-a3.png"
+            },
+            {
+              "id": "J20-s5-a4",
+              "label": "Save query recipe",
+              "kind": "save",
+              "frame": "J20/main/J20-s5-a4.png"
+            },
+            {
+              "id": "J20-s5-a5",
+              "label": "Capture optional result snapshot",
+              "kind": "save",
+              "frame": "J20/main/J20-s5-a5.png"
+            }
+          ],
+          "checks": [
+            "Partial, missing, completed-empty and pending are different.",
+            "Recipe and snapshot are distinct reader records."
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "id": "J20-literal-3140",
+          "actions": 1,
+          "frames": [
+            "J20/J20-literal-3140/before.png",
+            "J20/J20-literal-3140/J20-literal-3140-a1.png"
+          ],
+          "errors": []
+        },
+        {
+          "id": "J20-token-3140",
+          "actions": 1,
+          "frames": [
+            "J20/J20-token-3140/before.png",
+            "J20/J20-token-3140/J20-token-3140-a1.png"
+          ],
+          "errors": []
+        },
+        {
+          "id": "J20-number-units",
+          "actions": 1,
+          "frames": [
+            "J20/J20-number-units/before.png",
+            "J20/J20-number-units/J20-number-units-a1.png"
+          ],
+          "errors": []
+        },
+        {
+          "id": "J20-missing-state",
+          "actions": 1,
+          "frames": [
+            "J20/J20-missing-state/before.png",
+            "J20/J20-missing-state/J20-missing-state-a1.png"
+          ],
+          "errors": []
+        }
+      ],
+      "crossChecks": {
+        "keyboard": {
+          "tabs": 15,
+          "expected": "J20-s1-a1",
+          "delivered": true,
+          "focusAfter": "<button class=\"action  pending\" data-action=\"J20-s1-a2\" aria-label=\"Inspect math and pressure matches\">Inspect math and pressure matches</button>"
+        },
+        "list": {
+          "selected": "true",
+          "sameFrame": true
+        },
+        "accessibility": {
+          "lang": "en",
+          "liveRegions": 1,
+          "unlabelledButtons": 0,
+          "semanticMain": 1,
+          "colorIndependent": true,
+          "nativeTreeNodes": 332,
+          "assistiveTechnologyTested": false
+        },
+        "narrow": {
+          "scrollWidth": 390,
+          "viewport": 390,
+          "text": 20,
+          "reading": {
+            "visit": "01",
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "occ-1",
+            "offset": "p.14 · 54.2",
+            "body": [
+              "Pressure stayed stable. Calibration remains under review."
+            ]
+          }
+        },
+        "reducedMotion": {
+          "enabled": "true",
+          "frame": "J20-s1-a1",
+          "reading": {
+            "visit": "01",
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "occ-1",
+            "offset": "p.14 · 54.2",
+            "body": [
+              "Pressure stayed stable. Calibration remains under review."
+            ]
+          }
+        },
+        "optics": {
+          "bodyText": "rgb(220, 224, 240)",
+          "backing": "rgb(23, 27, 43)",
+          "readingText": "rgb(27, 35, 61)",
+          "readingBacking": "rgb(237, 240, 248)",
+          "panelContrast": 13,
+          "readerContrast": 13.6
+        },
+        "pointer": {
+          "nativeNamedActions": 19,
+          "delivery": "DOM pointer click",
+          "gesturePicking": "Not implemented in the Xuzz engine"
+        },
+        "lifecycle": {
+          "routes": [
+            "J20-literal-3140",
+            "J20-token-3140",
+            "J20-number-units",
+            "J20-missing-state"
+          ],
+          "evidence": "Base and alternate snapshots and receipts in traces; scripted lifecycle only"
+        },
+        "storage": {
+          "enforced": "All transitions guard immutable sourceOps; Enter adds exactly one reader visit; restore adds none.",
+          "evidence": "Full state/effect trace per route",
+          "productionProof": false
+        },
+        "relations": {
+          "evidence": "Exact descriptors, source occurrences, ancestry and typed records visible in route states",
+          "productionProof": false
+        }
+      },
+      "inventoryChecks": []
+    },
+    {
+      "id": "J21",
+      "title": "Compare pinned states at text and topology changes",
+      "steps": [
+        {
+          "step": 1,
+          "actions": [
+            {
+              "id": "J21-s1-a1",
+              "label": "Pin exact V8 and V12 states",
+              "kind": "view",
+              "frame": "J21/main/J21-s1-a1.png"
+            },
+            {
+              "id": "J21-s1-a2",
+              "label": "Inspect shared and changed source ranges",
+              "kind": "inspect",
+              "frame": "J21/main/J21-s1-a2.png"
+            }
+          ],
+          "checks": [
+            "Both exact versions remain pinned.",
+            "Gold represents only shared pressure prefix.",
+            "Changed numbers and independently equal text have distinct source addresses."
+          ]
+        },
+        {
+          "step": 2,
+          "actions": [
+            {
+              "id": "J21-s2-a1",
+              "label": "Select earlier state before LCA",
+              "kind": "view",
+              "frame": "J21/main/J21-s2-a1.png"
+            },
+            {
+              "id": "J21-s2-a2",
+              "label": "Pin LCA and both branch tips",
+              "kind": "view",
+              "frame": "J21/main/J21-s2-a2.png"
+            }
+          ],
+          "checks": [
+            "Earlier state precedes LCA.",
+            "Both tips connect by declared parent chain.",
+            "Layout order is not interpreted as parenthood."
+          ]
+        },
+        {
+          "step": 3,
+          "actions": [
+            {
+              "id": "J21-s3-a1",
+              "label": "Inspect changed text and typed value",
+              "kind": "inspect",
+              "frame": "J21/main/J21-s3-a1.png"
+            },
+            {
+              "id": "J21-s3-a2",
+              "label": "Inspect cell membership and reciprocal dimension links",
+              "kind": "inspect",
+              "frame": "J21/main/J21-s3-a2.png"
+            }
+          ],
+          "checks": [
+            "Each change has exact range/type and neighborhood.",
+            "Reciprocal edges are shown at both endpoints.",
+            "Comparison inspection does not edit source."
+          ]
+        },
+        {
+          "step": 4,
+          "actions": [
+            {
+              "id": "J21-s4-a1",
+              "label": "Swap comparison sides",
+              "kind": "view",
+              "frame": "J21/main/J21-s4-a1.png"
+            },
+            {
+              "id": "J21-s4-a2",
+              "label": "Choose another difference",
+              "kind": "view",
+              "frame": "J21/main/J21-s4-a2.png"
+            },
+            {
+              "id": "J21-s4-a3",
+              "label": "Inspect unavailable exact region",
+              "kind": "fixture",
+              "frame": "J21/main/J21-s4-a3.png"
+            },
+            {
+              "id": "J21-s4-a4",
+              "label": "Retry same unavailable target",
+              "kind": "fixture",
+              "frame": "J21/main/J21-s4-a4.png"
+            }
+          ],
+          "checks": [
+            "Swap preserves V8/V12 identities.",
+            "Unavailable card names exact target and offers retry/retain.",
+            "No substitute preview is used."
+          ]
+        },
+        {
+          "step": 5,
+          "actions": [
+            {
+              "id": "J21-s5-a1",
+              "label": "Enter chosen V8 occurrence",
+              "kind": "enter",
+              "frame": "J21/main/J21-s5-a1.png"
+            },
+            {
+              "id": "J21-s5-a2",
+              "label": "Return to origin",
+              "kind": "restore",
+              "frame": "J21/main/J21-s5-a2.png"
+            },
+            {
+              "id": "J21-s5-a3",
+              "label": "Save comparison",
+              "kind": "save",
+              "frame": "J21/main/J21-s5-a3.png"
+            },
+            {
+              "id": "J21-s5-a4",
+              "label": "Reopen saved comparison",
+              "kind": "restore",
+              "frame": "J21/main/J21-s5-a4.png"
+            },
+            {
+              "id": "J21-s5-a5",
+              "label": "Open recovery authoring preview",
+              "kind": "view",
+              "frame": "J21/main/J21-s5-a5.png"
+            },
+            {
+              "id": "J21-s5-a6",
+              "label": "Cancel recovery preview",
+              "kind": "view",
+              "frame": "J21/main/J21-s5-a6.png"
+            }
+          ],
+          "checks": [
+            "Only Enter adds a visit; return/reopen do not.",
+            "Saved descriptor restores exact pinned pair.",
+            "Recovery preview and cancellation write no source/destination ops."
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "id": "J21-three-state",
+          "actions": 1,
+          "frames": [
+            "J21/J21-three-state/before.png",
+            "J21/J21-three-state/J21-three-state-a1.png"
+          ],
+          "errors": []
+        },
+        {
+          "id": "J21-topology",
+          "actions": 1,
+          "frames": [
+            "J21/J21-topology/before.png",
+            "J21/J21-topology/J21-topology-a1.png"
+          ],
+          "errors": []
+        },
+        {
+          "id": "J21-unavailable",
+          "actions": 1,
+          "frames": [
+            "J21/J21-unavailable/before.png",
+            "J21/J21-unavailable/J21-unavailable-a1.png"
+          ],
+          "errors": []
+        }
+      ],
+      "crossChecks": {
+        "keyboard": {
+          "tabs": 14,
+          "expected": "J21-s1-a1",
+          "delivered": true,
+          "focusAfter": "<button class=\"action  pending\" data-action=\"J21-s1-a2\" aria-label=\"Inspect shared and changed source ranges\">Inspect shared and changed source ranges</button>"
+        },
+        "list": {
+          "selected": "true",
+          "sameFrame": true
+        },
+        "accessibility": {
+          "lang": "en",
+          "liveRegions": 1,
+          "unlabelledButtons": 0,
+          "semanticMain": 1,
+          "colorIndependent": true,
+          "nativeTreeNodes": 251,
+          "assistiveTechnologyTested": false
+        },
+        "narrow": {
+          "scrollWidth": 390,
+          "viewport": 390,
+          "text": 20,
+          "reading": {
+            "visit": "01",
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "occ-1",
+            "offset": "p.14 · 54.2",
+            "body": [
+              "Pressure stayed stable. Calibration remains under review."
+            ]
+          }
+        },
+        "reducedMotion": {
+          "enabled": "true",
+          "frame": "J21-s1-a1",
+          "reading": {
+            "visit": "01",
+            "subject": "Lab notes",
+            "store": "lab://notes",
+            "version": "V12",
+            "occurrence": "occ-1",
+            "offset": "p.14 · 54.2",
+            "body": [
+              "Pressure stayed stable. Calibration remains under review."
+            ]
+          }
+        },
+        "optics": {
+          "bodyText": "rgb(220, 224, 240)",
+          "backing": "rgb(23, 27, 43)",
+          "readingText": "rgb(27, 35, 61)",
+          "readingBacking": "rgb(237, 240, 248)",
+          "panelContrast": 13,
+          "readerContrast": 13.6
+        },
+        "pointer": {
+          "nativeNamedActions": 16,
+          "delivery": "DOM pointer click",
+          "gesturePicking": "Not implemented in the Xuzz engine"
+        },
+        "lifecycle": {
+          "routes": [
+            "J21-three-state",
+            "J21-topology",
+            "J21-unavailable"
+          ],
+          "evidence": "Base and alternate snapshots and receipts in traces; scripted lifecycle only"
+        },
+        "storage": {
+          "enforced": "All transitions guard immutable sourceOps; Enter adds exactly one reader visit; restore adds none.",
+          "evidence": "Full state/effect trace per route",
+          "productionProof": false
+        },
+        "relations": {
+          "evidence": "Exact descriptors, source occurrences, ancestry and typed records visible in route states",
+          "productionProof": false
+        }
+      },
+      "inventoryChecks": []
+    },
+    {
+      "id": "J22",
+      "title": "Investigate around a stable reading place",
+      "steps": [
+        {
+          "step": 1,
+          "actions": [
+            {
+              "id": "J22-s1-a1",
+              "label": "Show quiet reading context",
+              "kind": "view",
+              "frame": "J22/main/J22-s1-a1.png"
+            },
+            {
+              "id": "J22-s1-a2",
+              "label": "Inspect saved pouch summary",
+              "kind": "inspect",
+              "frame": "J22/main/J22-s1-a2.png"
+            }
+          ],
+          "checks": [
+            "Current visit is 03 at Review V4, occurrence occ:review-pressure-passage-02, offset 1184.",
+            "Query is literal pressure, case-folded, across the named local/remote stores with 24 found and three stores pending.",
+            "L17 is active right, Left 2/2, Right 1/3, origin 01; the saved collection has three typed items."
+          ]
+        },
+        {
+          "step": 2,
+          "actions": [
+            {
+              "id": "J22-s2-a1",
+              "label": "Expand investigation",
+              "kind": "view",
+              "frame": "J22/main/J22-s2-a1.png"
+            },
+            {
+              "id": "J22-s2-a2",
+              "label": "Inspect selected C17 comparison",
+              "kind": "inspect",
+              "frame": "J22/main/J22-s2-a2.png"
+            }
+          ],
+          "checks": [
+            "Reading remains Review V4 / visit 03 / offset 1184.",
+            "Search, comparison, layers, pouch and L17 are visible in bounded panels.",
+            "No source operation or visit is added by expansion or inspection."
+          ]
+        },
+        {
+          "step": 3,
+          "actions": [
+            {
+              "id": "J22-s3-a1",
+              "label": "Open selected C17 V8 result",
+              "kind": "inspect",
+              "frame": "J22/main/J22-s3-a1.png"
+            },
+            {
+              "id": "J22-s3-a2",
+              "label": "Pin C17 V12 for comparison",
+              "kind": "view",
+              "frame": "J22/main/J22-s3-a2.png"
+            },
+            {
+              "id": "J22-s3-a3",
+              "label": "Inspect complete L17 endsets",
+              "kind": "inspect",
+              "frame": "J22/main/J22-s3-a3.png"
+            }
+          ],
+          "checks": [
+            "C17 V8 contains pressure: 3.14 bar and matches the query.",
+            "Pinned C17 V12 reads 3.16 bar and has no pressure hit in this fixture.",
+            "L17 Right 2 is a C24 V8 content span, not C17 V12.",
+            "Comparison inspection changes no visit or source operation."
+          ]
+        },
+        {
+          "step": 4,
+          "actions": [
+            {
+              "id": "J22-s4-a1",
+              "label": "Fold comparison",
+              "kind": "view",
+              "frame": "J22/main/J22-s4-a1.png"
+            },
+            {
+              "id": "J22-s4-a2",
+              "label": "Set Lab review emphasis to quiet",
+              "kind": "view",
+              "frame": "J22/main/J22-s4-a2.png"
+            },
+            {
+              "id": "J22-s4-a3",
+              "label": "Inspect saved passage evidence",
+              "kind": "inspect",
+              "frame": "J22/main/J22-s4-a3.png"
+            },
+            {
+              "id": "J22-s4-a4",
+              "label": "Fold all tools",
+              "kind": "view",
+              "frame": "J22/main/J22-s4-a4.png"
+            }
+          ],
+          "checks": [
+            "Comparison folds independently of other tools.",
+            "Package emphasis does not change enablement or stored Link prominence.",
+            "Saved passage inspection preserves the source and reading place.",
+            "Folding all tools preserves query, Left 2/2, Right 1/3, Review V4 / offset 1184 and return route."
+          ]
+        },
+        {
+          "step": 5,
+          "actions": [
+            {
+              "id": "J22-s5-a1",
+              "label": "Activity Back · visit 02",
+              "kind": "restore",
+              "frame": "J22/main/J22-s5-a1.png"
+            },
+            {
+              "id": "J22-s5-a2",
+              "label": "Return to origin · visit 01",
+              "kind": "restore",
+              "frame": "J22/main/J22-s5-a2.png"
+            },
+            {
+              "id": "J22-s5-a3",
+              "label": "Reopen investigation tools",
+              "kind": "view",
+              "frame": "J22/main/J22-s5-a3.png"
+            },
+            {
+              "id": "J22-s5-a4",
+              "label": "Inspect sibling route 02 → 04",
+              "kind": "inspect",
+              "frame": "J22/main/J22-s5-a4.png"
+            }
+          ],
+          "checks": [
+            "Back restores existing visit 02 without adding a visit.",
+            "Return restores exact origin 01 offset and version.",
+            "Reopening tools preserves query, L17 cursors and package emphasis.",
+            "The 02→04 sibling remains visible and is not rewritten as a child of 03."
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "id": "J22-v12-not-hit",
+          "actions": 1,
+          "frames": [
+            "J22/J22-v12-not-hit/before.png",
+            "J22/J22-v12-not-hit/J22-v12-not-hit-s3-a1.png"
+          ],
+          "errors": []
+        },
+        {
+          "id": "J22-anchor-fold",
+          "actions": 1,
+          "frames": [
+            "J22/J22-anchor-fold/before.png",
+            "J22/J22-anchor-fold/J22-anchor-fold-s4-a1.png"
+          ],
+          "errors": []
+        },
+        {
+          "id": "J22-partial-cancel",
+          "actions": 1,
+          "frames": [
+            "J22/J22-partial-cancel/before.png",
+            "J22/J22-partial-cancel/J22-partial-cancel-s4-a1.png"
+          ],
+          "errors": []
+        }
+      ],
+      "crossChecks": {
+        "keyboard": {
+          "tabs": 23,
+          "expected": "J22-s1-a1",
+          "delivered": true,
+          "focusAfter": "<button class=\"action  pending\" data-action=\"J22-s1-a2\" aria-label=\"Inspect saved pouch summary\">Inspect saved pouch summary</button>"
+        },
+        "list": {
+          "selected": "true",
+          "sameFrame": true
+        },
+        "accessibility": {
+          "lang": "en",
+          "liveRegions": 1,
+          "unlabelledButtons": 0,
+          "semanticMain": 1,
+          "colorIndependent": true,
+          "nativeTreeNodes": 440,
+          "assistiveTechnologyTested": false
+        },
+        "narrow": {
+          "scrollWidth": 390,
+          "viewport": 390,
+          "text": 20,
+          "reading": {
+            "visit": "03",
+            "subject": "doc:Review",
+            "store": "store:orion-pub-17",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02",
+            "offset": 1184,
+            "body": [
+              "Review of the pressure test.",
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ]
+          }
+        },
+        "reducedMotion": {
+          "enabled": "true",
+          "frame": "J22-s1-a1",
+          "reading": {
+            "visit": "03",
+            "subject": "doc:Review",
+            "store": "store:orion-pub-17",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02",
+            "offset": 1184,
+            "body": [
+              "Review of the pressure test.",
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ]
+          }
+        },
+        "optics": {
+          "bodyText": "rgb(220, 224, 240)",
+          "backing": "rgb(23, 27, 43)",
+          "readingText": "rgb(27, 35, 61)",
+          "readingBacking": "rgb(237, 240, 248)",
+          "panelContrast": 13,
+          "readerContrast": 13.6
+        },
+        "pointer": {
+          "nativeNamedActions": 15,
+          "delivery": "DOM pointer click",
+          "gesturePicking": "Not implemented in the Xuzz engine"
+        },
+        "lifecycle": {
+          "routes": [
+            "J22-v12-not-hit",
+            "J22-anchor-fold",
+            "J22-partial-cancel"
+          ],
+          "evidence": "Base and alternate snapshots and receipts in traces; scripted lifecycle only"
+        },
+        "storage": {
+          "enforced": "All transitions guard immutable sourceOps; Enter adds exactly one reader visit; restore adds none.",
+          "evidence": "Full state/effect trace per route",
+          "productionProof": false
+        },
+        "relations": {
+          "evidence": "Exact descriptors, source occurrences, ancestry and typed records visible in route states",
+          "productionProof": false
+        }
+      },
+      "inventoryChecks": []
+    },
+    {
+      "id": "J23",
+      "title": "Control immutable link packages without editing their relations",
+      "steps": [
+        {
+          "step": 1,
+          "actions": [
+            {
+              "id": "J23-s1-a1",
+              "label": "Open layer console",
+              "kind": "view",
+              "frame": "J23/main/J23-s1-a1.png"
+            },
+            {
+              "id": "J23-s1-a2",
+              "label": "Inspect package counts",
+              "kind": "inspect",
+              "frame": "J23/main/J23-s1-a2.png"
+            }
+          ],
+          "checks": [
+            "Three carriers retained; #12 and #4 enabled; #7 disabled.",
+            "Normal and quiet are visual preferences, separate from enablement.",
+            "22/85/6 are enabled/retained/visible counts, respectively."
+          ]
+        },
+        {
+          "step": 2,
+          "actions": [
+            {
+              "id": "J23-s2-a1",
+              "label": "Inspect disabled Open discussion #7",
+              "kind": "inspect",
+              "frame": "J23/main/J23-s2-a1.png"
+            },
+            {
+              "id": "J23-s2-a2",
+              "label": "View signature policy",
+              "kind": "view",
+              "frame": "J23/main/J23-s2-a2.png"
+            }
+          ],
+          "checks": [
+            "Disabled package remains inspectable and does not become enabled.",
+            "Carrier digest, publisher, signature status and identity trust are separate fields.",
+            "Unchecked and invalid signatures cannot be enabled; inspection remains available."
+          ]
+        },
+        {
+          "step": 3,
+          "actions": [
+            {
+              "id": "J23-s3-a1",
+              "label": "Set Methods emphasis to quiet",
+              "kind": "view",
+              "frame": "J23/main/J23-s3-a1.png"
+            },
+            {
+              "id": "J23-s3-a2",
+              "label": "Open List layers · quiet links included",
+              "kind": "view",
+              "frame": "J23/main/J23-s3-a2.png"
+            },
+            {
+              "id": "J23-s3-a3",
+              "label": "Disable Methods annotations #4",
+              "kind": "view",
+              "frame": "J23/main/J23-s3-a3.png"
+            }
+          ],
+          "checks": [
+            "Quiet emphasis retains list reachability.",
+            "Disabling is a separate toggle and removes links from enabled scene/list results.",
+            "After disabling Methods: 8 enabled links, 85 retained links; source operations unchanged."
+          ]
+        },
+        {
+          "step": 4,
+          "actions": [
+            {
+              "id": "J23-s4-a1",
+              "label": "Inspect Lab review #13 candidate",
+              "kind": "inspect",
+              "frame": "J23/main/J23-s4-a1.png"
+            },
+            {
+              "id": "J23-s4-a2",
+              "label": "Compare #13 with enabled #12",
+              "kind": "view",
+              "frame": "J23/main/J23-s4-a2.png"
+            },
+            {
+              "id": "J23-s4-a3",
+              "label": "Switch to #13 explicitly",
+              "kind": "view",
+              "frame": "J23/main/J23-s4-a3.png"
+            }
+          ],
+          "checks": [
+            "#13 has carrier-specific identity, publisher, signature, trust and nine links.",
+            "Review-only does not retain or enable the candidate.",
+            "Switching disables #12, enables #13 and preserves exact old Link L17 identity.",
+            "With Methods disabled and #13 enabled: 9 enabled links, 94 retained links."
+          ]
+        },
+        {
+          "step": 5,
+          "actions": [
+            {
+              "id": "J23-s5-a1",
+              "label": "Close package session",
+              "kind": "save",
+              "frame": "J23/main/J23-s5-a1.png"
+            },
+            {
+              "id": "J23-s5-a2",
+              "label": "Reopen package session",
+              "kind": "restore",
+              "frame": "J23/main/J23-s5-a2.png"
+            },
+            {
+              "id": "J23-s5-a3",
+              "label": "Inspect restored count ledger",
+              "kind": "inspect",
+              "frame": "J23/main/J23-s5-a3.png"
+            }
+          ],
+          "checks": [
+            "Restored state matches explicit enable/emphasis choices for each carrier.",
+            "The #13 nine-link carrier is counted once in retained inventory.",
+            "Initial 22/85 is preserved as historical baseline; resulting ledger is 9/94.",
+            "L17 retains carrier #12 identity while disabled."
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "id": "J23-review-only",
+          "actions": 1,
+          "frames": [
+            "J23/J23-review-only/before.png",
+            "J23/J23-review-only/J23-review-only-s4-a1.png"
+          ],
+          "errors": []
+        },
+        {
+          "id": "J23-retain-only",
+          "actions": 1,
+          "frames": [
+            "J23/J23-retain-only/before.png",
+            "J23/J23-retain-only/J23-retain-only-s4-a1.png"
+          ],
+          "errors": []
+        },
+        {
+          "id": "J23-invalid-signature",
+          "actions": 1,
+          "frames": [
+            "J23/J23-invalid-signature/before.png",
+            "J23/J23-invalid-signature/J23-invalid-signature-s2-a1.png"
+          ],
+          "errors": []
+        }
+      ],
+      "crossChecks": {
+        "keyboard": {
+          "tabs": 17,
+          "expected": "J23-s1-a1",
+          "delivered": true,
+          "focusAfter": "<button class=\"action  pending\" data-action=\"J23-s1-a2\" aria-label=\"Inspect package counts\">Inspect package counts</button>"
+        },
+        "list": {
+          "selected": "true",
+          "sameFrame": true
+        },
+        "accessibility": {
+          "lang": "en",
+          "liveRegions": 1,
+          "unlabelledButtons": 0,
+          "semanticMain": 1,
+          "colorIndependent": true,
+          "nativeTreeNodes": 359,
+          "assistiveTechnologyTested": false
+        },
+        "narrow": {
+          "scrollWidth": 390,
+          "viewport": 390,
+          "text": 20,
+          "reading": {
+            "visit": "03",
+            "subject": "doc:Review",
+            "store": "store:orion-pub-17",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02",
+            "offset": 1184,
+            "body": [
+              "Review of the pressure test.",
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar."
+            ]
+          }
+        },
+        "reducedMotion": {
+          "enabled": "true",
+          "frame": "J23-s1-a1",
+          "reading": {
+            "visit": "03",
+            "subject": "doc:Review",
+            "store": "store:orion-pub-17",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02",
+            "offset": 1184,
+            "body": [
+              "Review of the pressure test.",
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar."
+            ]
+          }
+        },
+        "optics": {
+          "bodyText": "rgb(220, 224, 240)",
+          "backing": "rgb(23, 27, 43)",
+          "readingText": "rgb(27, 35, 61)",
+          "readingBacking": "rgb(237, 240, 248)",
+          "panelContrast": 13,
+          "readerContrast": 13.6
+        },
+        "pointer": {
+          "nativeNamedActions": 13,
+          "delivery": "DOM pointer click",
+          "gesturePicking": "Not implemented in the Xuzz engine"
+        },
+        "lifecycle": {
+          "routes": [
+            "J23-review-only",
+            "J23-retain-only",
+            "J23-invalid-signature"
+          ],
+          "evidence": "Base and alternate snapshots and receipts in traces; scripted lifecycle only"
+        },
+        "storage": {
+          "enforced": "All transitions guard immutable sourceOps; Enter adds exactly one reader visit; restore adds none.",
+          "evidence": "Full state/effect trace per route",
+          "productionProof": false
+        },
+        "relations": {
+          "evidence": "Exact descriptors, source occurrences, ancestry and typed records visible in route states",
+          "productionProof": false
+        }
+      },
+      "inventoryChecks": []
+    },
+    {
+      "id": "J24",
+      "title": "Keep one complete relation through distant and unavailable members",
+      "steps": [
+        {
+          "step": 1,
+          "actions": [
+            {
+              "id": "J24-s1-a1",
+              "label": "Inspect all L17 members",
+              "kind": "inspect",
+              "frame": "J24/main/J24-s1-a1.png"
+            },
+            {
+              "id": "J24-s1-a2",
+              "label": "Cross · preview Right 2 C24",
+              "kind": "view",
+              "frame": "J24/main/J24-s1-a2.png"
+            },
+            {
+              "id": "J24-s1-a3",
+              "label": "Enter selected occurrence · C24 V8",
+              "kind": "enter",
+              "frame": "J24/main/J24-s1-a3.png"
+            }
+          ],
+          "checks": [
+            "Full ordered members: Left 2, Right 3; Right 3 is unavailable but retained.",
+            "Active side and cursors are independent; session origin remains 01.",
+            "Cross previews C24 without changing visit.",
+            "Enter C24 adds one reader visit only."
+          ]
+        },
+        {
+          "step": 2,
+          "actions": [
+            {
+              "id": "J24-s2-a0",
+              "label": "Restore visit 03 before starting the new session",
+              "kind": "restore",
+              "frame": "J24/main/J24-s2-a0.png"
+            },
+            {
+              "id": "J24-s2-a1",
+              "label": "Select Left member 1",
+              "kind": "view",
+              "frame": "J24/main/J24-s2-a1.png"
+            },
+            {
+              "id": "J24-s2-a2",
+              "label": "Select Right member 3",
+              "kind": "view",
+              "frame": "J24/main/J24-s2-a2.png"
+            },
+            {
+              "id": "J24-s2-a3",
+              "label": "Choose repeated occurrence 2 for Left 2",
+              "kind": "view",
+              "frame": "J24/main/J24-s2-a3.png"
+            },
+            {
+              "id": "J24-s2-a4",
+              "label": "Inspect overlapping Link L28",
+              "kind": "inspect",
+              "frame": "J24/main/J24-s2-a4.png"
+            },
+            {
+              "id": "J24-s2-a5",
+              "label": "Reselect L17 · start a new session",
+              "kind": "view",
+              "frame": "J24/main/J24-s2-a5.png"
+            },
+            {
+              "id": "J24-s2-a6",
+              "label": "Choose cursors in new session",
+              "kind": "view",
+              "frame": "J24/main/J24-s2-a6.png"
+            },
+            {
+              "id": "J24-s2-a7",
+              "label": "Restore saved visit-03 link context",
+              "kind": "restore",
+              "frame": "J24/main/J24-s2-a7.png"
+            }
+          ],
+          "checks": [
+            "Left and right cursors change independently; member order remains stable.",
+            "Exact occurrence changes entry context only; disjoint ranges/gap persist.",
+            "L28 has its own Link ID, carrier and cursors.",
+            "New L17 session origin is 03; restored saved context origin is 01 with Left 2/2 and Right 1/3.",
+            "Restore returns to existing visit 03 without adding a visit."
+          ]
+        },
+        {
+          "step": 3,
+          "actions": [
+            {
+              "id": "J24-s3-a1",
+              "label": "Request Right 3 · Remote V9",
+              "kind": "fixture",
+              "frame": "J24/main/J24-s3-a1.png"
+            },
+            {
+              "id": "J24-s3-a2",
+              "label": "Cancel exact request",
+              "kind": "view",
+              "frame": "J24/main/J24-s3-a2.png"
+            },
+            {
+              "id": "J24-s3-a3",
+              "label": "Fixture: remote V9 becomes available",
+              "kind": "fixture",
+              "frame": "J24/main/J24-s3-a3.png"
+            },
+            {
+              "id": "J24-s3-a4",
+              "label": "Retry Right 3 · same exact target",
+              "kind": "fixture",
+              "frame": "J24/main/J24-s3-a4.png"
+            },
+            {
+              "id": "J24-s3-a5",
+              "label": "Enter resolved Right 3",
+              "kind": "enter",
+              "frame": "J24/main/J24-s3-a5.png"
+            }
+          ],
+          "checks": [
+            "Pending/cancelled target retains ordinal 3 and exact V9 descriptor.",
+            "No visit is added while unresolved or after cancellation.",
+            "Retry targets the same member/version/range/occurrence.",
+            "Enter is available only after resolution and then adds one visit."
+          ]
+        },
+        {
+          "step": 4,
+          "actions": [
+            {
+              "id": "J24-s4-a1",
+              "label": "Open temporary neighborhood around C24",
+              "kind": "view",
+              "frame": "J24/main/J24-s4-a1.png"
+            },
+            {
+              "id": "J24-s4-a2",
+              "label": "Enter exact C24 occurrence",
+              "kind": "enter",
+              "frame": "J24/main/J24-s4-a2.png"
+            },
+            {
+              "id": "J24-s4-a3",
+              "label": "Return to original Link origin 01",
+              "kind": "restore",
+              "frame": "J24/main/J24-s4-a3.png"
+            },
+            {
+              "id": "J24-s4-a4",
+              "label": "Fixture: request wrong version V10",
+              "kind": "fixture",
+              "frame": "J24/main/J24-s4-a4.png"
+            },
+            {
+              "id": "J24-s4-a5",
+              "label": "Fixture: target is access locked",
+              "kind": "fixture",
+              "frame": "J24/main/J24-s4-a5.png"
+            }
+          ],
+          "checks": [
+            "Distant neighborhood is temporary and view-only; exact cell/version/range remain named.",
+            "Enter and Return are separate; return restores origin 01.",
+            "Wrong V10 response does not replace requested V9.",
+            "Locked content retains its descriptor and exposes access/dismiss actions without entry."
+          ]
+        },
+        {
+          "step": 5,
+          "actions": [
+            {
+              "id": "J24-s5-a1",
+              "label": "Disable carrier #12 while L17 is selected",
+              "kind": "view",
+              "frame": "J24/main/J24-s5-a1.png"
+            },
+            {
+              "id": "J24-s5-a2",
+              "label": "Keep inspector · choose not to dismiss",
+              "kind": "view",
+              "frame": "J24/main/J24-s5-a2.png"
+            }
+          ],
+          "checks": [
+            "Disabled package hides its drawing but preserves pinned L17 inspector and carrier identity.",
+            "Explicit re-enable and dismiss are separate visible actions.",
+            "No source writes or reader visits are added."
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "id": "J24-cancel-unavailable",
+          "actions": 1,
+          "frames": [
+            "J24/J24-cancel-unavailable/before.png",
+            "J24/J24-cancel-unavailable/J24-cancel-unavailable-s3-a1.png"
+          ],
+          "errors": []
+        },
+        {
+          "id": "J24-wrong-version",
+          "actions": 1,
+          "frames": [
+            "J24/J24-wrong-version/before.png",
+            "J24/J24-wrong-version/J24-wrong-version-s4-a1.png"
+          ],
+          "errors": []
+        },
+        {
+          "id": "J24-overlap-link",
+          "actions": 1,
+          "frames": [
+            "J24/J24-overlap-link/before.png",
+            "J24/J24-overlap-link/J24-overlap-link-s2-a1.png"
+          ],
+          "errors": []
+        },
+        {
+          "id": "J24-reenable-carrier",
+          "actions": 1,
+          "frames": [
+            "J24/J24-reenable-carrier/before.png",
+            "J24/J24-reenable-carrier/J24-reenable-carrier-a1.png"
+          ],
+          "errors": []
+        },
+        {
+          "id": "J24-dismiss-carrier",
+          "actions": 1,
+          "frames": [
+            "J24/J24-dismiss-carrier/before.png",
+            "J24/J24-dismiss-carrier/J24-dismiss-carrier-a1.png"
+          ],
+          "errors": []
+        }
+      ],
+      "crossChecks": {
+        "keyboard": {
+          "tabs": 20,
+          "expected": "J24-s1-a1",
+          "delivered": true,
+          "focusAfter": "<button class=\"action  pending\" data-action=\"J24-s1-a2\" aria-label=\"Cross · preview Right 2 C24\">Cross · preview Right 2 C24</button>"
+        },
+        "list": {
+          "selected": "true",
+          "sameFrame": true
+        },
+        "accessibility": {
+          "lang": "en",
+          "liveRegions": 1,
+          "unlabelledButtons": 0,
+          "semanticMain": 1,
+          "colorIndependent": true,
+          "nativeTreeNodes": 398,
+          "assistiveTechnologyTested": false
+        },
+        "narrow": {
+          "scrollWidth": 390,
+          "viewport": 390,
+          "text": 20,
+          "reading": {
+            "visit": "03",
+            "subject": "doc:Review",
+            "store": "store:orion-pub-17",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02",
+            "offset": 1184,
+            "body": [
+              "Review of the pressure test.",
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ]
+          }
+        },
+        "reducedMotion": {
+          "enabled": "true",
+          "frame": "J24-s1-a1",
+          "reading": {
+            "visit": "03",
+            "subject": "doc:Review",
+            "store": "store:orion-pub-17",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02",
+            "offset": 1184,
+            "body": [
+              "Review of the pressure test.",
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ]
+          }
+        },
+        "optics": {
+          "bodyText": "rgb(220, 224, 240)",
+          "backing": "rgb(23, 27, 43)",
+          "readingText": "rgb(27, 35, 61)",
+          "readingBacking": "rgb(237, 240, 248)",
+          "panelContrast": 13,
+          "readerContrast": 13.6
+        },
+        "pointer": {
+          "nativeNamedActions": 23,
+          "delivery": "DOM pointer click",
+          "gesturePicking": "Not implemented in the Xuzz engine"
+        },
+        "lifecycle": {
+          "routes": [
+            "J24-cancel-unavailable",
+            "J24-wrong-version",
+            "J24-overlap-link",
+            "J24-reenable-carrier",
+            "J24-dismiss-carrier"
+          ],
+          "evidence": "Base and alternate snapshots and receipts in traces; scripted lifecycle only"
+        },
+        "storage": {
+          "enforced": "All transitions guard immutable sourceOps; Enter adds exactly one reader visit; restore adds none.",
+          "evidence": "Full state/effect trace per route",
+          "productionProof": false
+        },
+        "relations": {
+          "evidence": "Exact descriptors, source occurrences, ancestry and typed records visible in route states",
+          "productionProof": false
+        }
+      },
+      "inventoryChecks": []
+    },
+    {
+      "id": "J25",
+      "title": "Preview and resume branching reader visits",
+      "steps": [
+        {
+          "step": 1,
+          "actions": [
+            {
+              "id": "J25-s1-a1",
+              "label": "Open Walk compass · list and graph",
+              "kind": "view",
+              "frame": "J25/main/J25-s1-a1.png"
+            }
+          ],
+          "checks": [
+            "Current visit is 03 Calibration V5.",
+            "The graph has 01→02→03 and 01→02→04→05, with 05 child of 04.",
+            "Reader visits are not source revision ancestry."
+          ]
+        },
+        {
+          "step": 2,
+          "actions": [
+            {
+              "id": "J25-s2-a1",
+              "label": "Preview visit 05",
+              "kind": "view",
+              "frame": "J25/main/J25-s2-a1.png"
+            },
+            {
+              "id": "J25-s2-a2",
+              "label": "Inspect saved visit descriptor",
+              "kind": "inspect",
+              "frame": "J25/main/J25-s2-a2.png"
+            },
+            {
+              "id": "J25-s2-a3",
+              "label": "Resume exact visit 05",
+              "kind": "restore",
+              "frame": "J25/main/J25-s2-a3.png"
+            }
+          ],
+          "checks": [
+            "Current 03 and preview 05 remain distinct before Resume.",
+            "Version V7, exact occurrence and audio position 02:14 are visible.",
+            "Resume restores visit 05 with no new completed visit."
+          ]
+        },
+        {
+          "step": 3,
+          "actions": [
+            {
+              "id": "J25-s3-a1",
+              "label": "Activity Back · restore visit 04 from visit 05",
+              "kind": "restore",
+              "frame": "J25/main/J25-s3-a1.png"
+            },
+            {
+              "id": "J25-s3-a1b",
+              "label": "Activity Back · restore visit 02 from visit 04",
+              "kind": "restore",
+              "frame": "J25/main/J25-s3-a1b.png"
+            },
+            {
+              "id": "J25-s3-a2",
+              "label": "Preview child 03",
+              "kind": "view",
+              "frame": "J25/main/J25-s3-a2.png"
+            },
+            {
+              "id": "J25-s3-a3",
+              "label": "Resume child 03",
+              "kind": "restore",
+              "frame": "J25/main/J25-s3-a3.png"
+            },
+            {
+              "id": "J25-s3-a4",
+              "label": "Activity Back · return to 02",
+              "kind": "restore",
+              "frame": "J25/main/J25-s3-a4.png"
+            },
+            {
+              "id": "J25-s3-a4b",
+              "label": "Preview sibling child 04",
+              "kind": "view",
+              "frame": "J25/main/J25-s3-a4b.png"
+            },
+            {
+              "id": "J25-s3-a5",
+              "label": "Resume selected sibling child 04",
+              "kind": "restore",
+              "frame": "J25/main/J25-s3-a5.png"
+            },
+            {
+              "id": "J25-s3-a6",
+              "label": "Activity Back · return to 02 again",
+              "kind": "restore",
+              "frame": "J25/main/J25-s3-a6.png"
+            },
+            {
+              "id": "J25-s3-a7",
+              "label": "Resume visit 03 and verify no forward child",
+              "kind": "restore",
+              "frame": "J25/main/J25-s3-a7.png"
+            }
+          ],
+          "checks": [
+            "Back restores visit 02 and exposes exactly children 03 and 04.",
+            "Resume of existing children adds no visits.",
+            "Visit 03 remains a leaf; sibling 04 is reachable only through parent 02.",
+            "All original futures are retained."
+          ]
+        },
+        {
+          "step": 4,
+          "actions": [
+            {
+              "id": "J25-s4-a1",
+              "label": "Save reference to visit 03",
+              "kind": "save",
+              "frame": "J25/main/J25-s4-a1.png"
+            },
+            {
+              "id": "J25-s4-a2",
+              "label": "Restore visit 04 and add annotation",
+              "kind": "restore",
+              "frame": "J25/main/J25-s4-a2.png"
+            },
+            {
+              "id": "J25-s4-a3",
+              "label": "Annotate visit 04",
+              "kind": "save",
+              "frame": "J25/main/J25-s4-a3.png"
+            },
+            {
+              "id": "J25-s4-a4",
+              "label": "Restore earlier visit 02",
+              "kind": "restore",
+              "frame": "J25/main/J25-s4-a4.png"
+            },
+            {
+              "id": "J25-s4-a5",
+              "label": "Enter new visit 06 from visit 02",
+              "kind": "enter",
+              "frame": "J25/main/J25-s4-a5.png"
+            }
+          ],
+          "checks": [
+            "Reference saved as reader collection metadata, without source editing or a visit.",
+            "Annotation is reader activity attached to existing visit 04.",
+            "Restore does not create nodes.",
+            "Explicit Enter from earlier visit 02 appends child 06 and preserves children 03/04 and route 04→05."
+          ]
+        },
+        {
+          "step": 5,
+          "actions": [
+            {
+              "id": "J25-s5-a1",
+              "label": "Close Walk compass session",
+              "kind": "save",
+              "frame": "J25/main/J25-s5-a1.png"
+            },
+            {
+              "id": "J25-s5-a2",
+              "label": "Reopen Walk compass",
+              "kind": "restore",
+              "frame": "J25/main/J25-s5-a2.png"
+            },
+            {
+              "id": "J25-s5-a3",
+              "label": "Inspect visit 05 saved target before resume",
+              "kind": "inspect",
+              "frame": "J25/main/J25-s5-a3.png"
+            },
+            {
+              "id": "J25-s5-a4",
+              "label": "Fixture: saved V7 becomes unavailable",
+              "kind": "fixture",
+              "frame": "J25/main/J25-s5-a4.png"
+            },
+            {
+              "id": "J25-s5-a5",
+              "label": "Fixture: availability returns for exact V7",
+              "kind": "fixture",
+              "frame": "J25/main/J25-s5-a5.png"
+            },
+            {
+              "id": "J25-s5-a6",
+              "label": "Retry exact saved visit 05 · Debrief V7",
+              "kind": "view",
+              "frame": "J25/main/J25-s5-a6.png"
+            }
+          ],
+          "checks": [
+            "Reopen restores named targets, notes and branch edges before previews.",
+            "Unavailable V7 is distinct from a missing version; its exact descriptor and saved media position remain.",
+            "Retry resolves the same V7 target; current visit and all sibling futures remain until Resume."
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "id": "J25-preview-no-move",
+          "actions": 1,
+          "frames": [
+            "J25/J25-preview-no-move/before.png",
+            "J25/J25-preview-no-move/J25-preview-no-move-s2-a1.png"
+          ],
+          "errors": []
+        },
+        {
+          "id": "J25-unavailable",
+          "actions": 1,
+          "frames": [
+            "J25/J25-unavailable/before.png",
+            "J25/J25-unavailable/J25-unavailable-s5-a1.png"
+          ],
+          "errors": []
+        }
+      ],
+      "crossChecks": {
+        "keyboard": {
+          "tabs": 18,
+          "expected": "J25-s1-a1",
+          "delivered": true,
+          "focusAfter": "<button id=\"next-step\">Next task</button>"
+        },
+        "list": {
+          "selected": "true",
+          "sameFrame": true
+        },
+        "accessibility": {
+          "lang": "en",
+          "liveRegions": 1,
+          "unlabelledButtons": 0,
+          "semanticMain": 1,
+          "colorIndependent": true,
+          "nativeTreeNodes": 345,
+          "assistiveTechnologyTested": false
+        },
+        "narrow": {
+          "scrollWidth": 390,
+          "viewport": 390,
+          "text": 20,
+          "reading": {
+            "visit": "03",
+            "subject": "cell:Calibration",
+            "store": "store:local-lab",
+            "version": "V5",
+            "occurrence": "occ:calibration-plate-01",
+            "offset": 0,
+            "body": [
+              "System check complete.",
+              "Pressure stayed stable."
+            ]
+          }
+        },
+        "reducedMotion": {
+          "enabled": "true",
+          "frame": "J25-s1-a1",
+          "reading": {
+            "visit": "03",
+            "subject": "cell:Calibration",
+            "store": "store:local-lab",
+            "version": "V5",
+            "occurrence": "occ:calibration-plate-01",
+            "offset": 0,
+            "body": [
+              "System check complete.",
+              "Pressure stayed stable."
+            ]
+          }
+        },
+        "optics": {
+          "bodyText": "rgb(220, 224, 240)",
+          "backing": "rgb(23, 27, 43)",
+          "readingText": "rgb(27, 35, 61)",
+          "readingBacking": "rgb(237, 240, 248)",
+          "panelContrast": 13,
+          "readerContrast": 13.6
+        },
+        "pointer": {
+          "nativeNamedActions": 24,
+          "delivery": "DOM pointer click",
+          "gesturePicking": "Not implemented in the Xuzz engine"
+        },
+        "lifecycle": {
+          "routes": [
+            "J25-preview-no-move",
+            "J25-unavailable"
+          ],
+          "evidence": "Base and alternate snapshots and receipts in traces; scripted lifecycle only"
+        },
+        "storage": {
+          "enforced": "All transitions guard immutable sourceOps; Enter adds exactly one reader visit; restore adds none.",
+          "evidence": "Full state/effect trace per route",
+          "productionProof": false
+        },
+        "relations": {
+          "evidence": "Exact descriptors, source occurrences, ancestry and typed records visible in route states",
+          "productionProof": false
+        }
+      },
+      "inventoryChecks": []
+    },
+    {
+      "id": "J26",
+      "title": "Collect typed evidence without changing what it refers to",
+      "steps": [
+        {
+          "step": 1,
+          "actions": [
+            {
+              "id": "J26-s1-a1",
+              "label": "Inspect saved passage reference",
+              "kind": "inspect",
+              "frame": "J26/main/J26-s1-a1.png"
+            },
+            {
+              "id": "J26-s1-a2",
+              "label": "Inspect whole-cell C17 reference",
+              "kind": "inspect",
+              "frame": "J26/main/J26-s1-a2.png"
+            },
+            {
+              "id": "J26-s1-a3",
+              "label": "Inspect saved search recipe",
+              "kind": "inspect",
+              "frame": "J26/main/J26-s1-a3.png"
+            }
+          ],
+          "checks": [
+            "Passage retains exact ordered source ranges, version and occurrence.",
+            "Whole-cell descriptor does not imply selected content spans.",
+            "Recipe preserves query rules/scope; any captured result snapshot is a separate record.",
+            "The current reading visit/offset remains unchanged through inspection."
+          ]
+        },
+        {
+          "step": 2,
+          "actions": [
+            {
+              "id": "J26-s2-a1",
+              "label": "Save disjoint span bundle",
+              "kind": "save",
+              "frame": "J26/main/J26-s2-a1.png"
+            },
+            {
+              "id": "J26-s2-a2",
+              "label": "Save arbitrary operation reference",
+              "kind": "save",
+              "frame": "J26/main/J26-s2-a2.png"
+            },
+            {
+              "id": "J26-s2-a3",
+              "label": "Save query recipe",
+              "kind": "save",
+              "frame": "J26/main/J26-s2-a3.png"
+            },
+            {
+              "id": "J26-s2-a4",
+              "label": "Save reader walk reference",
+              "kind": "save",
+              "frame": "J26/main/J26-s2-a4.png"
+            },
+            {
+              "id": "J26-s2-a5",
+              "label": "Save link draft",
+              "kind": "save",
+              "frame": "J26/main/J26-s2-a5.png"
+            }
+          ],
+          "checks": [
+            "Five reference cards are saved with distinct types and descriptors.",
+            "The disjoint bundle retains both exact ranges and the intervening gap.",
+            "Operation remains OP O42; recipe and captured results remain separate; walk and draft keep their own actions.",
+            "All saves write reader collection metadata only; sourceOps and reading place do not change."
+          ]
+        },
+        {
+          "step": 3,
+          "actions": [
+            {
+              "id": "J26-s3-a1",
+              "label": "Open searchable pouch list",
+              "kind": "view",
+              "frame": "J26/main/J26-s3-a1.png"
+            },
+            {
+              "id": "J26-s3-a2",
+              "label": "Filter source group · Review",
+              "kind": "view",
+              "frame": "J26/main/J26-s3-a2.png"
+            },
+            {
+              "id": "J26-s3-a3",
+              "label": "Expand Review source group",
+              "kind": "view",
+              "frame": "J26/main/J26-s3-a3.png"
+            },
+            {
+              "id": "J26-s3-a4",
+              "label": "Find off-window item ref:018",
+              "kind": "view",
+              "frame": "J26/main/J26-s3-a4.png"
+            }
+          ],
+          "checks": [
+            "The saved membership contains 146 deterministic records.",
+            "Review filter matches 18 and exposes six in the current viewport.",
+            "Expanded group and list navigation reach ref:018 at position 18.",
+            "Counts are membership=146, matches=18, visible=6; each count has a named meaning."
+          ]
+        },
+        {
+          "step": 4,
+          "actions": [
+            {
+              "id": "J26-s4-a1",
+              "label": "Save exact duplicate of ref:042",
+              "kind": "save",
+              "frame": "J26/main/J26-s4-a1.png"
+            },
+            {
+              "id": "J26-s4-a2",
+              "label": "Choose Keep separate explicitly",
+              "kind": "save",
+              "frame": "J26/main/J26-s4-a2.png"
+            },
+            {
+              "id": "J26-s4-a3",
+              "label": "Save equal text from a different address",
+              "kind": "save",
+              "frame": "J26/main/J26-s4-a3.png"
+            },
+            {
+              "id": "J26-s4-a4",
+              "label": "Save another occurrence of shared source",
+              "kind": "save",
+              "frame": "J26/main/J26-s4-a4.png"
+            }
+          ],
+          "checks": [
+            "Exact duplicate reveals ref:042 by default; Keep separate is explicit.",
+            "Different source ranges with equal excerpt remain distinct.",
+            "Same shared range with a different occurrence remains separately inspectable.",
+            "Saved counts increase only from explicit membership choices; sourceOps unchanged."
+          ]
+        },
+        {
+          "step": 5,
+          "actions": [
+            {
+              "id": "J26-s5-a1",
+              "label": "Dismiss ref:002 membership",
+              "kind": "save",
+              "frame": "J26/main/J26-s5-a1.png"
+            },
+            {
+              "id": "J26-s5-a2",
+              "label": "Recover ref:002 membership",
+              "kind": "restore",
+              "frame": "J26/main/J26-s5-a2.png"
+            },
+            {
+              "id": "J26-s5-a3",
+              "label": "Reopen pouch offline · restore descriptors first",
+              "kind": "restore",
+              "frame": "J26/main/J26-s5-a3.png"
+            },
+            {
+              "id": "J26-s5-a4",
+              "label": "Inspect not-held passage ref:050",
+              "kind": "inspect",
+              "frame": "J26/main/J26-s5-a4.png"
+            },
+            {
+              "id": "J26-s5-a5",
+              "label": "Inspect locked cell and unresolved draft",
+              "kind": "inspect",
+              "frame": "J26/main/J26-s5-a5.png"
+            }
+          ],
+          "checks": [
+            "Dismissed membership is recoverable; subject is never deleted.",
+            "Offline reopen restores descriptors before previews.",
+            "Not-held preview, locked source and unresolved authority are separate statuses.",
+            "Type-specific inspect/enter/rerun/resume actions remain visible and correct for card kind.",
+            "Reader returns at Review V4 / offset 1184; no source operations are added."
+          ]
+        },
+        {
+          "step": 6,
+          "actions": [
+            {
+              "id": "J26-s6-a1",
+              "label": "Open forge eligibility chooser",
+              "kind": "view",
+              "frame": "J26/main/J26-s6-a1.png"
+            },
+            {
+              "id": "J26-s6-a2",
+              "label": "Select span bundle ref:042",
+              "kind": "view",
+              "frame": "J26/main/J26-s6-a2.png"
+            },
+            {
+              "id": "J26-s6-a3",
+              "label": "Choose exact content spans from C17 separately",
+              "kind": "view",
+              "frame": "J26/main/J26-s6-a3.png"
+            }
+          ],
+          "checks": [
+            "Only validated concrete spans are eligible endpoints.",
+            "Whole-cell identity requires an explicit content-range selection; it does not become content automatically.",
+            "Operation/query/walk/draft remain their own reference types and are excluded.",
+            "Disjoint spans and gaps remain exact.",
+            "No authored Link or source operation is created by offering/selection."
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "id": "J26-exact-duplicate-default",
+          "actions": 1,
+          "frames": [
+            "J26/J26-exact-duplicate-default/before.png",
+            "J26/J26-exact-duplicate-default/J26-exact-duplicate-default-s4-a1.png"
+          ],
+          "errors": []
+        },
+        {
+          "id": "J26-equal-text",
+          "actions": 1,
+          "frames": [
+            "J26/J26-equal-text/before.png",
+            "J26/J26-equal-text/J26-equal-text-s4-a1.png"
+          ],
+          "errors": []
+        },
+        {
+          "id": "J26-shared-occurrence",
+          "actions": 1,
+          "frames": [
+            "J26/J26-shared-occurrence/before.png",
+            "J26/J26-shared-occurrence/J26-shared-occurrence-s4-a1.png"
+          ],
+          "errors": []
+        },
+        {
+          "id": "J26-availability",
+          "actions": 1,
+          "frames": [
+            "J26/J26-availability/before.png",
+            "J26/J26-availability/J26-availability-s5-a1.png"
+          ],
+          "errors": []
+        },
+        {
+          "id": "J26-whole-cell-excluded",
+          "actions": 1,
+          "frames": [
+            "J26/J26-whole-cell-excluded/before.png",
+            "J26/J26-whole-cell-excluded/J26-whole-cell-excluded-s6-a1.png"
+          ],
+          "errors": []
+        }
+      ],
+      "crossChecks": {
+        "keyboard": {
+          "tabs": 23,
+          "expected": "J26-s1-a1",
+          "delivered": true,
+          "focusAfter": "<button class=\"action  pending\" data-action=\"J26-s1-a2\" aria-label=\"Inspect whole-cell C17 reference\">Inspect whole-cell C17 reference</button>"
+        },
+        "list": {
+          "selected": "true",
+          "sameFrame": true
+        },
+        "accessibility": {
+          "lang": "en",
+          "liveRegions": 1,
+          "unlabelledButtons": 0,
+          "semanticMain": 1,
+          "colorIndependent": true,
+          "nativeTreeNodes": 414,
+          "assistiveTechnologyTested": false
+        },
+        "narrow": {
+          "scrollWidth": 390,
+          "viewport": 390,
+          "text": 20,
+          "reading": {
+            "visit": "03",
+            "subject": "doc:Review",
+            "store": "store:orion-pub-17",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02",
+            "offset": 1184,
+            "body": [
+              "Review of the pressure test.",
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar."
+            ]
+          }
+        },
+        "reducedMotion": {
+          "enabled": "true",
+          "frame": "J26-s1-a1",
+          "reading": {
+            "visit": "03",
+            "subject": "doc:Review",
+            "store": "store:orion-pub-17",
+            "version": "V4",
+            "occurrence": "occ:review-pressure-passage-02",
+            "offset": 1184,
+            "body": [
+              "Review of the pressure test.",
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar."
+            ]
+          }
+        },
+        "optics": {
+          "bodyText": "rgb(220, 224, 240)",
+          "backing": "rgb(23, 27, 43)",
+          "readingText": "rgb(27, 35, 61)",
+          "readingBacking": "rgb(237, 240, 248)",
+          "panelContrast": 13,
+          "readerContrast": 13.6
+        },
+        "pointer": {
+          "nativeNamedActions": 24,
+          "delivery": "DOM pointer click",
+          "gesturePicking": "Not implemented in the Xuzz engine"
+        },
+        "lifecycle": {
+          "routes": [
+            "J26-exact-duplicate-default",
+            "J26-equal-text",
+            "J26-shared-occurrence",
+            "J26-availability",
+            "J26-whole-cell-excluded"
+          ],
+          "evidence": "Base and alternate snapshots and receipts in traces; scripted lifecycle only"
+        },
+        "storage": {
+          "enforced": "All transitions guard immutable sourceOps; Enter adds exactly one reader visit; restore adds none.",
+          "evidence": "Full state/effect trace per route",
+          "productionProof": false
+        },
+        "relations": {
+          "evidence": "Exact descriptors, source occurrences, ancestry and typed records visible in route states",
+          "productionProof": false
+        }
+      },
+      "inventoryChecks": [
+        {
+          "path": "pouch.items",
+          "count": 146,
+          "last": "ref:146",
+          "found": true,
+          "scroll": {
+            "offset": 0,
+            "height": 22615,
+            "window": 275
+          },
+          "stateRetained": true,
+          "file": "J26/inventory-0.png"
+        }
+      ]
+    },
+    {
+      "id": "J27",
+      "title": "Assemble one ordered Link with an explicit destination",
+      "steps": [
+        {
+          "step": 1,
+          "actions": [
+            {
+              "id": "J27-s1-a1",
+              "label": "Stage two separated Lab ranges on the left",
+              "kind": "author",
+              "frame": "J27/main/J27-s1-a1.png"
+            },
+            {
+              "id": "J27-s1-a2",
+              "label": "Add Review V4 passage as right member 1",
+              "kind": "author",
+              "frame": "J27/main/J27-s1-a2.png"
+            },
+            {
+              "id": "J27-s1-a3",
+              "label": "Add C17 V8 as right member 2",
+              "kind": "author",
+              "frame": "J27/main/J27-s1-a3.png"
+            },
+            {
+              "id": "J27-s1-a4",
+              "label": "Add C24 V8 as right member 3",
+              "kind": "author",
+              "frame": "J27/main/J27-s1-a4.png"
+            }
+          ],
+          "checks": [
+            "Left order L1,L2 and right order R1,R2,R3 are explicit.",
+            "Gap [3167,3200) is unmarked.",
+            "Authored destination effects remain empty."
+          ]
+        },
+        {
+          "step": 2,
+          "actions": [
+            {
+              "id": "J27-s2-a1",
+              "label": "Move L2 above L1",
+              "kind": "author",
+              "frame": "J27/main/J27-s2-a1.png"
+            },
+            {
+              "id": "J27-s2-a2",
+              "label": "Undo member reorder",
+              "kind": "author",
+              "frame": "J27/main/J27-s2-a2.png"
+            },
+            {
+              "id": "J27-s2-a3",
+              "label": "Remove R3 from the draft",
+              "kind": "author",
+              "frame": "J27/main/J27-s2-a3.png"
+            },
+            {
+              "id": "J27-s2-a4",
+              "label": "Undo removal of R3",
+              "kind": "author",
+              "frame": "J27/main/J27-s2-a4.png"
+            },
+            {
+              "id": "J27-s2-a5",
+              "label": "Inspect capture groups and occurrence choices",
+              "kind": "inspect",
+              "frame": "J27/main/J27-s2-a5.png"
+            }
+          ],
+          "checks": [
+            "Reorder changes ordered membership only.",
+            "Remove/Undo changes draft membership only.",
+            "Occurrence IDs are independent of source ranges."
+          ]
+        },
+        {
+          "step": 3,
+          "actions": [
+            {
+              "id": "J27-s3-a1",
+              "label": "Pin Review store, branch/main, base V31 and Create child at pinned base",
+              "kind": "author",
+              "frame": "J27/main/J27-s3-a1.png"
+            },
+            {
+              "id": "J27-s3-a2",
+              "label": "Browse C17 at older V8",
+              "kind": "view",
+              "frame": "J27/main/J27-s3-a2.png"
+            },
+            {
+              "id": "J27-s3-a3",
+              "label": "Return to draft L7 without changing its destination",
+              "kind": "restore",
+              "frame": "J27/main/J27-s3-a3.png"
+            }
+          ],
+          "checks": [
+            "Destination Review@V31, branch, author and mode are visible.",
+            "Source browsing did not change destination or add a visit."
+          ]
+        },
+        {
+          "step": 4,
+          "actions": [
+            {
+              "id": "J27-s4-a1",
+              "label": "Preview one Comment relation with normal prominence",
+              "kind": "view",
+              "frame": "J27/main/J27-s4-a1.png"
+            },
+            {
+              "id": "J27-s4-a2",
+              "label": "Choose occurrence rig-o4 for entry context",
+              "kind": "inspect",
+              "frame": "J27/main/J27-s4-a2.png"
+            }
+          ],
+          "checks": [
+            "Preview contains one Comment Link and complete 2/3 endsets.",
+            "R3 occurrence choice does not change C24 source range.",
+            "Preview adds no source op or visit."
+          ]
+        },
+        {
+          "step": 5,
+          "actions": [
+            {
+              "id": "J27-s5-a1",
+              "label": "Save draft to reader pouch",
+              "kind": "save",
+              "frame": "J27/main/J27-s5-a1.png"
+            },
+            {
+              "id": "J27-s5-a2",
+              "label": "Forge Link · preflight and pin attempt token",
+              "kind": "author",
+              "frame": "J27/main/J27-s5-a2.png"
+            },
+            {
+              "id": "J27-s5-a3",
+              "label": "Publish one Link receipt as a child of V31",
+              "kind": "author",
+              "frame": "J27/main/J27-s5-a3.png"
+            }
+          ],
+          "checks": [
+            "Save writes reader pouch only.",
+            "One stable attempt token binds this intent.",
+            "One receipt publishes Link:L18 at child Review@V32; no source ops are added."
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "id": "J27-discard-draft",
+          "actions": 1,
+          "frames": [
+            "J27/J27-discard-draft/before.png",
+            "J27/J27-discard-draft/J27-discard-draft-a1.png"
+          ],
+          "errors": []
+        }
+      ],
+      "crossChecks": {
+        "keyboard": {
+          "tabs": 13,
+          "expected": "J27-s1-a1",
+          "delivered": true,
+          "focusAfter": "<button class=\"action  pending\" data-action=\"J27-s1-a2\" aria-label=\"Add Review V4 passage as right member 1\">Add Review V4 passage as right member 1</button>"
+        },
+        "list": {
+          "selected": "true",
+          "sameFrame": true
+        },
+        "accessibility": {
+          "lang": "en",
+          "liveRegions": 1,
+          "unlabelledButtons": 0,
+          "semanticMain": 1,
+          "colorIndependent": true,
+          "nativeTreeNodes": 335,
+          "assistiveTechnologyTested": false
+        },
+        "narrow": {
+          "scrollWidth": 390,
+          "viewport": 390,
+          "text": 20,
+          "reading": {
+            "visit": "01",
+            "subject": "Lab notes passage",
+            "store": "Lab notes",
+            "version": "V12",
+            "occurrence": "lab-o7",
+            "offset": 3140,
+            "body": [
+              "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+            ]
+          }
+        },
+        "reducedMotion": {
+          "enabled": "true",
+          "frame": "J27-s1-a1",
+          "reading": {
+            "visit": "01",
+            "subject": "Lab notes passage",
+            "store": "Lab notes",
+            "version": "V12",
+            "occurrence": "lab-o7",
+            "offset": 3140,
+            "body": [
+              "The system was allowed to equilibrate for 30 minutes prior to measurement. Ambient conditions were monitored throughout the run."
+            ]
+          }
+        },
+        "optics": {
+          "bodyText": "rgb(220, 224, 240)",
+          "backing": "rgb(23, 27, 43)",
+          "readingText": "rgb(27, 35, 61)",
+          "readingBacking": "rgb(237, 240, 248)",
+          "panelContrast": 13,
+          "readerContrast": 13.6
+        },
+        "pointer": {
+          "nativeNamedActions": 17,
+          "delivery": "DOM pointer click",
+          "gesturePicking": "Not implemented in the Xuzz engine"
+        },
+        "lifecycle": {
+          "routes": [
+            "J27-discard-draft"
+          ],
+          "evidence": "Base and alternate snapshots and receipts in traces; scripted lifecycle only"
+        },
+        "storage": {
+          "enforced": "All transitions guard immutable sourceOps; Enter adds exactly one reader visit; restore adds none.",
+          "evidence": "Full state/effect trace per route",
+          "productionProof": false
+        },
+        "relations": {
+          "evidence": "Exact descriptors, source occurrences, ancestry and typed records visible in route states",
+          "productionProof": false
+        }
+      },
+      "inventoryChecks": []
+    },
+    {
+      "id": "J28",
+      "title": "Resume a dense draft through unresolved and unknown outcomes",
+      "steps": [
+        {
+          "step": 1,
+          "actions": [
+            {
+              "id": "J28-s1-a1",
+              "label": "Reopen Draft L7 from the reader pouch",
+              "kind": "restore",
+              "frame": "J28/main/J28-s1-a1.png"
+            },
+            {
+              "id": "J28-s1-a2",
+              "label": "Inspect grouping and destination before preview resolution",
+              "kind": "inspect",
+              "frame": "J28/main/J28-s1-a2.png"
+            }
+          ],
+          "checks": [
+            "Restore is a reader-state operation and adds no visit or source op.",
+            "All saved identities and order are visible before optional preview loading."
+          ]
+        },
+        {
+          "step": 2,
+          "actions": [
+            {
+              "id": "J28-s2-a1",
+              "label": "Show optional preview not held for Review V4 thumbnail",
+              "kind": "view",
+              "frame": "J28/main/J28-s2-a1.png"
+            },
+            {
+              "id": "J28-s2-a2",
+              "label": "Mark required C17 reference validation pending",
+              "kind": "fixture",
+              "frame": "J28/main/J28-s2-a2.png"
+            },
+            {
+              "id": "J28-s2-a3",
+              "label": "Resolve reference identity as valid without loading its preview",
+              "kind": "fixture",
+              "frame": "J28/main/J28-s2-a3.png"
+            }
+          ],
+          "checks": [
+            "Optional preview status does not change member identity or Forge eligibility.",
+            "Required reference pending blocks Forge until exact identity resolves.",
+            "Destination failure is a separate gate represented in J28 variant."
+          ]
+        },
+        {
+          "step": 3,
+          "actions": [
+            {
+              "id": "J28-s3-a1",
+              "label": "Open 40-left / 60-right dense member lists",
+              "kind": "view",
+              "frame": "J28/main/J28-s3-a1.png"
+            },
+            {
+              "id": "J28-s3-a2",
+              "label": "Select left ordinal 21 and inspect five occurrences",
+              "kind": "inspect",
+              "frame": "J28/main/J28-s3-a2.png"
+            },
+            {
+              "id": "J28-s3-a3",
+              "label": "Filter left bay to C17 and right bay to R21",
+              "kind": "view",
+              "frame": "J28/main/J28-s3-a3.png"
+            },
+            {
+              "id": "J28-s3-a4",
+              "label": "Clear the left-only filter and reorder the visible left bay; retain the right filter",
+              "kind": "author",
+              "frame": "J28/main/J28-s3-a4.png"
+            },
+            {
+              "id": "J28-s3-a5",
+              "label": "Undo left reorder and restore the original ordinal",
+              "kind": "author",
+              "frame": "J28/main/J28-s3-a5.png"
+            }
+          ],
+          "checks": [
+            "L21 has stable member ID and ordinal 21, with five occurrence IDs.",
+            "Clear only the left filter before reordering; two adjacent left rows show the movement while right R21 remains filtered and unchanged.",
+            "After undo/clear filters, L21 returns to ordinal 21; all 100 members remain.",
+            "No 2,400 pair connections are generated."
+          ]
+        },
+        {
+          "step": 4,
+          "actions": [
+            {
+              "id": "J28-s4-a1",
+              "label": "Run preflight for dense Draft L7",
+              "kind": "author",
+              "frame": "J28/main/J28-s4-a1.png"
+            },
+            {
+              "id": "J28-s4-a2",
+              "label": "Simulate preflight permission rejection",
+              "kind": "fixture",
+              "frame": "J28/main/J28-s4-a2.png"
+            },
+            {
+              "id": "J28-s4-a3",
+              "label": "Repair permission and retry the unchanged intent token",
+              "kind": "author",
+              "frame": "J28/main/J28-s4-a3.png"
+            },
+            {
+              "id": "J28-s4-a4",
+              "label": "Simulate failure before publication",
+              "kind": "fixture",
+              "frame": "J28/main/J28-s4-a4.png"
+            },
+            {
+              "id": "J28-s4-a5",
+              "label": "Check status and resolve the same token as confirmed uncommitted",
+              "kind": "inspect",
+              "frame": "J28/main/J28-s4-a5.png"
+            }
+          ],
+          "checks": [
+            "Preflight permission rejection leaves zero destination ops and retains L7.",
+            "Failure before publication leaves only recoverable private staging.",
+            "Status resolution is read-only and safe retry is bound to the identical token."
+          ]
+        },
+        {
+          "step": 5,
+          "actions": [
+            {
+              "id": "J28-s5-a1",
+              "label": "Retry the unchanged token after confirmed-uncommitted status",
+              "kind": "author",
+              "frame": "J28/main/J28-s5-a1.png"
+            },
+            {
+              "id": "J28-s5-a2",
+              "label": "Simulate publication followed by a lost reply",
+              "kind": "fixture",
+              "frame": "J28/main/J28-s5-a2.png"
+            },
+            {
+              "id": "J28-s5-a3",
+              "label": "Check status for attempt L7-dense:1",
+              "kind": "inspect",
+              "frame": "J28/main/J28-s5-a3.png"
+            }
+          ],
+          "checks": [
+            "After reply loss, Forge and Retry are blocked until Check status.",
+            "Created returns Link:L19 and its receipt; inspection adds no second Link."
+          ]
+        },
+        {
+          "step": 6,
+          "actions": [
+            {
+              "id": "J28-s6-a1",
+              "label": "Archive the committed draft descriptor in the reader pouch",
+              "kind": "save",
+              "frame": "J28/main/J28-s6-a1.png"
+            },
+            {
+              "id": "J28-s6-a2",
+              "label": "Reopen the saved draft descriptor and compare both endsets",
+              "kind": "restore",
+              "frame": "J28/main/J28-s6-a2.png"
+            }
+          ],
+          "checks": [
+            "Keep stores a reader collection descriptor only.",
+            "Reopen restores original ordered arrays and Review@V31 destination.",
+            "Existing receipt is reused; no fresh token or publication is created."
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "id": "J28-destination-failure",
+          "actions": 2,
+          "frames": [
+            "J28/J28-destination-failure/before.png",
+            "J28/J28-destination-failure/J28-destination-failure-a1.png",
+            "J28/J28-destination-failure/J28-destination-failure-a2.png"
+          ],
+          "errors": []
+        },
+        {
+          "id": "J28-unknown-confirmed-uncommitted",
+          "actions": 3,
+          "frames": [
+            "J28/J28-unknown-confirmed-uncommitted/before.png",
+            "J28/J28-unknown-confirmed-uncommitted/J28-unknown-confirmed-uncommitted-a1.png",
+            "J28/J28-unknown-confirmed-uncommitted/J28-unknown-confirmed-uncommitted-a2.png",
+            "J28/J28-unknown-confirmed-uncommitted/J28-unknown-confirmed-uncommitted-a3.png"
+          ],
+          "errors": []
+        },
+        {
+          "id": "J28-status-created-existing",
+          "actions": 2,
+          "frames": [
+            "J28/J28-status-created-existing/before.png",
+            "J28/J28-status-created-existing/J28-status-created-existing-a1.png",
+            "J28/J28-status-created-existing/J28-status-created-existing-a2.png"
+          ],
+          "errors": []
+        },
+        {
+          "id": "J28-status-unavailable",
+          "actions": 2,
+          "frames": [
+            "J28/J28-status-unavailable/before.png",
+            "J28/J28-status-unavailable/J28-status-unavailable-a1.png",
+            "J28/J28-status-unavailable/J28-status-unavailable-a2.png"
+          ],
+          "errors": []
+        },
+        {
+          "id": "J28-discard-confirmed-uncommitted",
+          "actions": 2,
+          "frames": [
+            "J28/J28-discard-confirmed-uncommitted/before.png",
+            "J28/J28-discard-confirmed-uncommitted/J28-discard-confirmed-uncommitted-a1.png",
+            "J28/J28-discard-confirmed-uncommitted/J28-discard-confirmed-uncommitted-a2.png"
+          ],
+          "errors": []
+        }
+      ],
+      "crossChecks": {
+        "keyboard": {
+          "tabs": 18,
+          "expected": "J28-s1-a1",
+          "delivered": true,
+          "focusAfter": "<button class=\"action  pending\" data-action=\"J28-s1-a2\" aria-label=\"Inspect grouping and destination before preview resolution\">Inspect grouping and destination before preview resolution</button>"
+        },
+        "list": {
+          "selected": "true",
+          "sameFrame": true
+        },
+        "accessibility": {
+          "lang": "en",
+          "liveRegions": 1,
+          "unlabelledButtons": 0,
+          "semanticMain": 1,
+          "colorIndependent": true,
+          "nativeTreeNodes": 319,
+          "assistiveTechnologyTested": false
+        },
+        "narrow": {
+          "scrollWidth": 390,
+          "viewport": 390,
+          "text": 20,
+          "reading": {
+            "visit": "03",
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "body": [
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ]
+          }
+        },
+        "reducedMotion": {
+          "enabled": "true",
+          "frame": "J28-s1-a1",
+          "reading": {
+            "visit": "03",
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "body": [
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ]
+          }
+        },
+        "optics": {
+          "bodyText": "rgb(220, 224, 240)",
+          "backing": "rgb(23, 27, 43)",
+          "readingText": "rgb(27, 35, 61)",
+          "readingBacking": "rgb(237, 240, 248)",
+          "panelContrast": 13,
+          "readerContrast": 13.6
+        },
+        "pointer": {
+          "nativeNamedActions": 20,
+          "delivery": "DOM pointer click",
+          "gesturePicking": "Not implemented in the Xuzz engine"
+        },
+        "lifecycle": {
+          "routes": [
+            "J28-destination-failure",
+            "J28-unknown-confirmed-uncommitted",
+            "J28-status-created-existing",
+            "J28-status-unavailable",
+            "J28-discard-confirmed-uncommitted"
+          ],
+          "evidence": "Base and alternate snapshots and receipts in traces; scripted lifecycle only"
+        },
+        "storage": {
+          "enforced": "All transitions guard immutable sourceOps; Enter adds exactly one reader visit; restore adds none.",
+          "evidence": "Full state/effect trace per route",
+          "productionProof": false
+        },
+        "relations": {
+          "evidence": "Exact descriptors, source occurrences, ancestry and typed records visible in route states",
+          "productionProof": false
+        }
+      },
+      "inventoryChecks": [
+        {
+          "path": "draft.dense.left",
+          "count": 40,
+          "last": "L40",
+          "found": true,
+          "scroll": {
+            "offset": 4183,
+            "height": 4459,
+            "window": 275
+          },
+          "stateRetained": true,
+          "file": "J28/inventory-0.png"
+        },
+        {
+          "path": "draft.dense.right",
+          "count": 60,
+          "last": "R60",
+          "found": true,
+          "scroll": {
+            "offset": 0,
+            "height": 6883,
+            "window": 275
+          },
+          "stateRetained": true,
+          "file": "J28/inventory-1.png"
+        }
+      ]
+    },
+    {
+      "id": "J29",
+      "title": "Align mixed-media cues without authoring a relation",
+      "steps": [
+        {
+          "step": 1,
+          "actions": [
+            {
+              "id": "J29-s1-a1",
+              "label": "Inspect video V9, audio V7, Lab passage and image region",
+              "kind": "inspect",
+              "frame": "J29/main/J29-s1-a1.png"
+            },
+            {
+              "id": "J29-s1-a2",
+              "label": "Expand source identity and locator details",
+              "kind": "inspect",
+              "frame": "J29/main/J29-s1-a2.png"
+            }
+          ],
+          "checks": [
+            "All media remain independently versioned and located.",
+            "Cached remote origin does not become a local source."
+          ]
+        },
+        {
+          "step": 2,
+          "actions": [
+            {
+              "id": "J29-s2-a1",
+              "label": "Inspect Cue C1 manual alignment without starting playback",
+              "kind": "inspect",
+              "frame": "J29/main/J29-s2-a1.png"
+            },
+            {
+              "id": "J29-s2-a2",
+              "label": "Preview alignment explicitly",
+              "kind": "view",
+              "frame": "J29/main/J29-s2-a2.png"
+            },
+            {
+              "id": "J29-s2-a3",
+              "label": "Play the preview",
+              "kind": "view",
+              "frame": "J29/main/J29-s2-a3.png"
+            },
+            {
+              "id": "J29-s2-a4",
+              "label": "Pause the preview",
+              "kind": "view",
+              "frame": "J29/main/J29-s2-a4.png"
+            }
+          ],
+          "checks": [
+            "Video and audio locators retain different timebases.",
+            "Transcript is derived and has no word-level seek point.",
+            "No playback begins before the Preview action."
+          ]
+        },
+        {
+          "step": 3,
+          "actions": [
+            {
+              "id": "J29-s3-a1",
+              "label": "Adjust Cue C1 start offset by −1 second",
+              "kind": "author",
+              "frame": "J29/main/J29-s3-a1.png"
+            },
+            {
+              "id": "J29-s3-a2",
+              "label": "Add independent manual Cue C2 through list action",
+              "kind": "author",
+              "frame": "J29/main/J29-s3-a2.png"
+            },
+            {
+              "id": "J29-s3-a3",
+              "label": "Select Cue C1 and remove it from staging",
+              "kind": "author",
+              "frame": "J29/main/J29-s3-a3.png"
+            }
+          ],
+          "checks": [
+            "Adjustment changes cue mapping only.",
+            "Added Cue C2 is separate and listed.",
+            "Removing a cue never deletes media or source content."
+          ]
+        },
+        {
+          "step": 4,
+          "actions": [
+            {
+              "id": "J29-s4-a1",
+              "label": "Save Cue C2 set to reader collection",
+              "kind": "save",
+              "frame": "J29/main/J29-s4-a1.png"
+            },
+            {
+              "id": "J29-s4-a2",
+              "label": "Clear staging",
+              "kind": "author",
+              "frame": "J29/main/J29-s4-a2.png"
+            },
+            {
+              "id": "J29-s4-a3",
+              "label": "Reopen saved cue set CS1",
+              "kind": "restore",
+              "frame": "J29/main/J29-s4-a3.png"
+            }
+          ],
+          "checks": [
+            "Save writes reader collection only and does not forge.",
+            "Reopen restores exact source/version/locators and remains paused.",
+            "Unsupported seek state and correction are represented in variant."
+          ]
+        },
+        {
+          "step": 5,
+          "actions": [
+            {
+              "id": "J29-s5-a1",
+              "label": "Open Forge relation from cue bridge",
+              "kind": "view",
+              "frame": "J29/main/J29-s5-a1.png"
+            },
+            {
+              "id": "J29-s5-a2",
+              "label": "Select only validated content spans for separate draft L8",
+              "kind": "author",
+              "frame": "J29/main/J29-s5-a2.png"
+            },
+            {
+              "id": "J29-s5-a3",
+              "label": "Cancel draft L8 and return to cue set",
+              "kind": "author",
+              "frame": "J29/main/J29-s5-a3.png"
+            }
+          ],
+          "checks": [
+            "Only selected content spans are eligible.",
+            "Media time, image geometry and derived text remain excluded types.",
+            "Cancel does not alter saved cue set or destination."
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "id": "J29-unsupported-word-seek",
+          "actions": 2,
+          "frames": [
+            "J29/J29-unsupported-word-seek/before.png",
+            "J29/J29-unsupported-word-seek/J29-unsupported-word-seek-a1.png",
+            "J29/J29-unsupported-word-seek/J29-unsupported-word-seek-a2.png"
+          ],
+          "errors": []
+        },
+        {
+          "id": "J29-unavailable-segment",
+          "actions": 2,
+          "frames": [
+            "J29/J29-unavailable-segment/before.png",
+            "J29/J29-unavailable-segment/J29-unavailable-segment-a1.png",
+            "J29/J29-unavailable-segment/J29-unavailable-segment-a2.png"
+          ],
+          "errors": []
+        }
+      ],
+      "crossChecks": {
+        "keyboard": {
+          "tabs": 17,
+          "expected": "J29-s1-a1",
+          "delivered": true,
+          "focusAfter": "<button class=\"action  pending\" data-action=\"J29-s1-a2\" aria-label=\"Expand source identity and locator details\">Expand source identity and locator details</button>"
+        },
+        "list": {
+          "selected": "true",
+          "sameFrame": true
+        },
+        "accessibility": {
+          "lang": "en",
+          "liveRegions": 1,
+          "unlabelledButtons": 0,
+          "semanticMain": 1,
+          "colorIndependent": true,
+          "nativeTreeNodes": 307,
+          "assistiveTechnologyTested": false
+        },
+        "narrow": {
+          "scrollWidth": 390,
+          "viewport": 390,
+          "text": 20,
+          "reading": {
+            "visit": "03",
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "body": [
+              "The recorded pressure remained stable during the run."
+            ]
+          }
+        },
+        "reducedMotion": {
+          "enabled": "true",
+          "frame": "J29-s1-a1",
+          "reading": {
+            "visit": "03",
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "body": [
+              "The recorded pressure remained stable during the run."
+            ]
+          }
+        },
+        "optics": {
+          "bodyText": "rgb(220, 224, 240)",
+          "backing": "rgb(23, 27, 43)",
+          "readingText": "rgb(27, 35, 61)",
+          "readingBacking": "rgb(237, 240, 248)",
+          "panelContrast": 13,
+          "readerContrast": 13.6
+        },
+        "pointer": {
+          "nativeNamedActions": 15,
+          "delivery": "DOM pointer click",
+          "gesturePicking": "Not implemented in the Xuzz engine"
+        },
+        "lifecycle": {
+          "routes": [
+            "J29-unsupported-word-seek",
+            "J29-unavailable-segment"
+          ],
+          "evidence": "Base and alternate snapshots and receipts in traces; scripted lifecycle only"
+        },
+        "storage": {
+          "enforced": "All transitions guard immutable sourceOps; Enter adds exactly one reader visit; restore adds none.",
+          "evidence": "Full state/effect trace per route",
+          "productionProof": false
+        },
+        "relations": {
+          "evidence": "Exact descriptors, source occurrences, ancestry and typed records visible in route states",
+          "productionProof": false
+        }
+      },
+      "inventoryChecks": []
+    },
+    {
+      "id": "J30",
+      "title": "Investigate exact range and topology effects in the Loom",
+      "steps": [
+        {
+          "step": 1,
+          "actions": [
+            {
+              "id": "J30-s1-a1",
+              "label": "Inspect the declared scenario-1 history overview",
+              "kind": "view",
+              "frame": "J30/main/J30-s1-a1.png"
+            },
+            {
+              "id": "J30-s1-a2",
+              "label": "Expand the counted branch-exit coil",
+              "kind": "view",
+              "frame": "J30/main/J30-s1-a2.png"
+            }
+          ],
+          "checks": [
+            "All 160 unique operation records are addressable from the complete inventory.",
+            "Main exit and three branch exits name D001, D050 and D100 forks.",
+            "Ten-path variant remains a distinct fixture."
+          ]
+        },
+        {
+          "step": 2,
+          "actions": [
+            {
+              "id": "J30-s2-a1",
+              "label": "Pin operation D050 at original loom placement",
+              "kind": "inspect",
+              "frame": "J30/main/J30-s2-a1.png"
+            },
+            {
+              "id": "J30-s2-a2",
+              "label": "Tug D050 into parallel correspondence lens",
+              "kind": "view",
+              "frame": "J30/main/J30-s2-a2.png"
+            },
+            {
+              "id": "J30-s2-a3",
+              "label": "Sort parallel result by filtered relevance order",
+              "kind": "view",
+              "frame": "J30/main/J30-s2-a3.png"
+            }
+          ],
+          "checks": [
+            "D050 remains at main-trunk position 50 with parent D049.",
+            "Pearl correspondence and seamed filtered order are not ancestry.",
+            "Source op count stays 160."
+          ]
+        },
+        {
+          "step": 3,
+          "actions": [
+            {
+              "id": "J30-s3-a1",
+              "label": "Open History lens · Touches for exact ABCDEF source ranges",
+              "kind": "view",
+              "frame": "J30/main/J30-s3-a1.png"
+            },
+            {
+              "id": "J30-s3-a2",
+              "label": "Inspect insertion xy and exact parent footprint",
+              "kind": "inspect",
+              "frame": "J30/main/J30-s3-a2.png"
+            },
+            {
+              "id": "J30-s3-a3",
+              "label": "Inspect deletion CD from its before-state",
+              "kind": "inspect",
+              "frame": "J30/main/J30-s3-a3.png"
+            },
+            {
+              "id": "J30-s3-a4",
+              "label": "Inspect moved EF fragment",
+              "kind": "inspect",
+              "frame": "J30/main/J30-s3-a4.png"
+            },
+            {
+              "id": "J30-s3-a5",
+              "label": "Switch to Evolving passage and inspect boundary rule",
+              "kind": "view",
+              "frame": "J30/main/J30-s3-a5.png"
+            },
+            {
+              "id": "J30-s3-a6",
+              "label": "Switch from This occurrence to All uses of this source",
+              "kind": "view",
+              "frame": "J30/main/J30-s3-a6.png"
+            }
+          ],
+          "checks": [
+            "Insertion, deletion and move each name owner, parent and before/after footprint.",
+            "Deleted CD is retrieved from parent-state coordinates.",
+            "Evolving includes strict interior insertions and excludes boundaries.",
+            "All uses lists shared source occurrences separately."
+          ]
+        },
+        {
+          "step": 4,
+          "actions": [
+            {
+              "id": "J30-s4-a1",
+              "label": "Exclude unrelated offset-shift operation by default",
+              "kind": "view",
+              "frame": "J30/main/J30-s4-a1.png"
+            },
+            {
+              "id": "J30-s4-a2",
+              "label": "Enable Context shifts and inspect its full ownership footprint",
+              "kind": "view",
+              "frame": "J30/main/J30-s4-a2.png"
+            }
+          ],
+          "checks": [
+            "Off excludes the non-touching event.",
+            "On lists it as context-only with explicit parent and +12 offset effect.",
+            "The original selection remains pinned."
+          ]
+        },
+        {
+          "step": 5,
+          "actions": [
+            {
+              "id": "J30-s5-a1",
+              "label": "Inspect C17 own-edit scope",
+              "kind": "view",
+              "frame": "J30/main/J30-s5-a1.png"
+            },
+            {
+              "id": "J30-s5-a2",
+              "label": "Switch to Affected topology on d.reading",
+              "kind": "view",
+              "frame": "J30/main/J30-s5-a2.png"
+            },
+            {
+              "id": "J30-s5-a3",
+              "label": "Inspect reciprocal neighbor change after C24 operation",
+              "kind": "inspect",
+              "frame": "J30/main/J30-s5-a3.png"
+            }
+          ],
+          "checks": [
+            "C24 operation owns the change; C17 is affected.",
+            "C17 text remains 3.14 bar.",
+            "Reciprocal endpoint ledger identifies C17↔C24 and C18 detachment."
+          ]
+        },
+        {
+          "step": 6,
+          "actions": [
+            {
+              "id": "J30-s6-a1",
+              "label": "Capture Page 4 contents at Lab notebook V12",
+              "kind": "save",
+              "frame": "J30/main/J30-s6-a1.png"
+            },
+            {
+              "id": "J30-s6-a2",
+              "label": "Follow selected pressure passage into V19",
+              "kind": "view",
+              "frame": "J30/main/J30-s6-a2.png"
+            },
+            {
+              "id": "J30-s6-a3",
+              "label": "Return to the captured Page 4 view",
+              "kind": "restore",
+              "frame": "J30/main/J30-s6-a3.png"
+            }
+          ],
+          "checks": [
+            "Captured snapshot/layout/ranges are stable.",
+            "Later pages 5 and 6 do not replace captured Page 4.",
+            "Reflow is not an authored source op."
+          ]
+        },
+        {
+          "step": 7,
+          "actions": [
+            {
+              "id": "J30-s7-a1",
+              "label": "Run lens on partial branch coverage",
+              "kind": "view",
+              "frame": "J30/main/J30-s7-a1.png"
+            },
+            {
+              "id": "J30-s7-a2",
+              "label": "Cancel the partial lens",
+              "kind": "view",
+              "frame": "J30/main/J30-s7-a2.png"
+            },
+            {
+              "id": "J30-s7-a3",
+              "label": "Save lens recipe separately from captured results",
+              "kind": "save",
+              "frame": "J30/main/J30-s7-a3.png"
+            },
+            {
+              "id": "J30-s7-a4",
+              "label": "Inspect completed-empty scope separately",
+              "kind": "view",
+              "frame": "J30/main/J30-s7-a4.png"
+            },
+            {
+              "id": "J30-s7-a5",
+              "label": "Expand and collapse local coil without authoring operations",
+              "kind": "view",
+              "frame": "J30/main/J30-s7-a5.png"
+            }
+          ],
+          "checks": [
+            "Partial/cancelled is distinct from completed empty.",
+            "Recipe and result snapshot have separate IDs and content.",
+            "Loom manipulation adds no source ops or visits."
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "id": "J30-ten-paths",
+          "actions": 2,
+          "frames": [
+            "J30/J30-ten-paths/before.png",
+            "J30/J30-ten-paths/J30-ten-paths-a1.png",
+            "J30/J30-ten-paths/J30-ten-paths-a2.png"
+          ],
+          "errors": []
+        }
+      ],
+      "crossChecks": {
+        "keyboard": {
+          "tabs": 24,
+          "expected": "J30-s1-a1",
+          "delivered": true,
+          "focusAfter": "<button class=\"action  pending\" data-action=\"J30-s1-a2\" aria-label=\"Expand the counted branch-exit coil\">Expand the counted branch-exit coil</button>"
+        },
+        "list": {
+          "selected": "true",
+          "sameFrame": true
+        },
+        "accessibility": {
+          "lang": "en",
+          "liveRegions": 1,
+          "unlabelledButtons": 0,
+          "semanticMain": 1,
+          "colorIndependent": true,
+          "nativeTreeNodes": 334,
+          "assistiveTechnologyTested": false
+        },
+        "narrow": {
+          "scrollWidth": 390,
+          "viewport": 390,
+          "text": 20,
+          "reading": {
+            "visit": "03",
+            "subject": "Lab notebook passage ABCDEF",
+            "store": "Lab notebook",
+            "version": "V12",
+            "occurrence": "occ-abc-1",
+            "offset": 200,
+            "body": [
+              "A B C D E F as a minimal unit for analysis."
+            ]
+          }
+        },
+        "reducedMotion": {
+          "enabled": "true",
+          "frame": "J30-s1-a1",
+          "reading": {
+            "visit": "03",
+            "subject": "Lab notebook passage ABCDEF",
+            "store": "Lab notebook",
+            "version": "V12",
+            "occurrence": "occ-abc-1",
+            "offset": 200,
+            "body": [
+              "A B C D E F as a minimal unit for analysis."
+            ]
+          }
+        },
+        "optics": {
+          "bodyText": "rgb(220, 224, 240)",
+          "backing": "rgb(23, 27, 43)",
+          "readingText": "rgb(27, 35, 61)",
+          "readingBacking": "rgb(237, 240, 248)",
+          "panelContrast": 13,
+          "readerContrast": 13.6
+        },
+        "pointer": {
+          "nativeNamedActions": 24,
+          "delivery": "DOM pointer click",
+          "gesturePicking": "Not implemented in the Xuzz engine"
+        },
+        "lifecycle": {
+          "routes": [
+            "J30-ten-paths"
+          ],
+          "evidence": "Base and alternate snapshots and receipts in traces; scripted lifecycle only"
+        },
+        "storage": {
+          "enforced": "All transitions guard immutable sourceOps; Enter adds exactly one reader visit; restore adds none.",
+          "evidence": "Full state/effect trace per route",
+          "productionProof": false
+        },
+        "relations": {
+          "evidence": "Exact descriptors, source occurrences, ancestry and typed records visible in route states",
+          "productionProof": false
+        }
+      },
+      "inventoryChecks": [
+        {
+          "path": "loom.operationInventory",
+          "count": 160,
+          "last": "C20",
+          "found": true,
+          "scroll": {
+            "offset": 10000,
+            "height": 15535,
+            "window": 275
+          },
+          "stateRetained": true,
+          "file": "J30/inventory-0.png"
+        },
+        {
+          "path": "loom.branchExitRows",
+          "count": 4,
+          "last": "branch:C",
+          "found": true,
+          "scroll": {
+            "offset": 0,
+            "height": 388,
+            "window": 275
+          },
+          "stateRetained": true,
+          "file": "J30/inventory-1.png"
+        }
+      ]
+    },
+    {
+      "id": "J31",
+      "title": "Recover a selected historical passage into a declared new branch",
+      "steps": [
+        {
+          "step": 1,
+          "actions": [
+            {
+              "id": "J31-s1-a1",
+              "label": "Select the exact historical passage in Draft A V27",
+              "kind": "inspect",
+              "frame": "J31/main/J31-s1-a1.png"
+            },
+            {
+              "id": "J31-s1-a2",
+              "label": "Expand source range and occurrence descriptor",
+              "kind": "inspect",
+              "frame": "J31/main/J31-s1-a2.png"
+            }
+          ],
+          "checks": [
+            "Source descriptor names A V27, exact range and occurrence.",
+            "Selecting a source does not set the receiving destination."
+          ]
+        },
+        {
+          "step": 2,
+          "actions": [
+            {
+              "id": "J31-s2-a1",
+              "label": "Choose Draft B V31 as pinned branch base",
+              "kind": "author",
+              "frame": "J31/main/J31-s2-a1.png"
+            },
+            {
+              "id": "J31-s2-a2",
+              "label": "Inspect old future B V40 without moving the pinned base",
+              "kind": "inspect",
+              "frame": "J31/main/J31-s2-a2.png"
+            }
+          ],
+          "checks": [
+            "Pinned destination is B V31; old future B V40 is retained.",
+            "Source A V27 remains separate.",
+            "No caret or source selection redirects target."
+          ]
+        },
+        {
+          "step": 3,
+          "actions": [
+            {
+              "id": "J31-s3-a1",
+              "label": "Preview recovery payload before any write",
+              "kind": "view",
+              "frame": "J31/main/J31-s3-a1.png"
+            },
+            {
+              "id": "J31-s3-a2",
+              "label": "Inspect exact proposed source-origin and receiving ranges",
+              "kind": "inspect",
+              "frame": "J31/main/J31-s3-a2.png"
+            }
+          ],
+          "checks": [
+            "Preview states No change saved.",
+            "Effect ledger names one transclusion and new child; base content is retained.",
+            "Origin ranges/occurrence and destination anchor are exact."
+          ]
+        },
+        {
+          "step": 4,
+          "actions": [
+            {
+              "id": "J31-s4-a1",
+              "label": "Cancel recovery preview",
+              "kind": "author",
+              "frame": "J31/main/J31-s4-a1.png"
+            },
+            {
+              "id": "J31-s4-a2",
+              "label": "Mark source unavailable as a negative variant condition",
+              "kind": "fixture",
+              "frame": "J31/main/J31-s4-a2.png"
+            },
+            {
+              "id": "J31-s4-a3",
+              "label": "Retry exact source and restore availability",
+              "kind": "fixture",
+              "frame": "J31/main/J31-s4-a3.png"
+            },
+            {
+              "id": "J31-s4-a4",
+              "label": "Simulate receiving head advance to B V41 while pinned base stays V31",
+              "kind": "fixture",
+              "frame": "J31/main/J31-s4-a4.png"
+            },
+            {
+              "id": "J31-s4-a5",
+              "label": "Keep pinned V31 and explicitly create a child there",
+              "kind": "author",
+              "frame": "J31/main/J31-s4-a5.png"
+            }
+          ],
+          "checks": [
+            "Cancel writes nothing.",
+            "Unavailable source remains named and blocks commit; exact retry restores it.",
+            "Head V41 does not move pinned V31; Keep V31 is explicit and creates separate child.",
+            "Choose-new-base alternative is covered in variant."
+          ]
+        },
+        {
+          "step": 5,
+          "actions": [
+            {
+              "id": "J31-s5-a1",
+              "label": "Run source, author, permission and pinned-base preflight",
+              "kind": "author",
+              "frame": "J31/main/J31-s5-a1.png"
+            },
+            {
+              "id": "J31-s5-a2",
+              "label": "Prepare destination-private transclusion operations",
+              "kind": "author",
+              "frame": "J31/main/J31-s5-a2.png"
+            },
+            {
+              "id": "J31-s5-a3",
+              "label": "Validate complete operation set and publish recovery receipt",
+              "kind": "author",
+              "frame": "J31/main/J31-s5-a3.png"
+            }
+          ],
+          "checks": [
+            "One separately identified recovery branch and state are returned.",
+            "Transclusion keeps exact origin addresses.",
+            "B V31 base content retained; B V40/V41 existing futures unchanged.",
+            "Only Draft B destination effects change."
+          ]
+        },
+        {
+          "step": 6,
+          "actions": [
+            {
+              "id": "J31-s6-a1",
+              "label": "Reopen recovery result card",
+              "kind": "restore",
+              "frame": "J31/main/J31-s6-a1.png"
+            },
+            {
+              "id": "J31-s6-a2",
+              "label": "Inspect comparison count scope separately",
+              "kind": "inspect",
+              "frame": "J31/main/J31-s6-a2.png"
+            }
+          ],
+          "checks": [
+            "Receipt branch ID, parent base and origin remain inspectable.",
+            "Reader visit count is not changed.",
+            "Comparison badge counts 3 top-level categories; it compares A V27/B V40, not recovery delta at B V31."
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "id": "J31-unavailable-source",
+          "actions": 2,
+          "frames": [
+            "J31/J31-unavailable-source/before.png",
+            "J31/J31-unavailable-source/J31-unavailable-source-a1.png",
+            "J31/J31-unavailable-source/J31-unavailable-source-a2.png"
+          ],
+          "errors": []
+        },
+        {
+          "id": "J31-choose-new-base",
+          "actions": 3,
+          "frames": [
+            "J31/J31-choose-new-base/before.png",
+            "J31/J31-choose-new-base/J31-choose-new-base-a1.png",
+            "J31/J31-choose-new-base/J31-choose-new-base-a2.png",
+            "J31/J31-choose-new-base/J31-choose-new-base-a3.png"
+          ],
+          "errors": []
+        },
+        {
+          "id": "J31-recovery-unknown-created",
+          "actions": 2,
+          "frames": [
+            "J31/J31-recovery-unknown-created/before.png",
+            "J31/J31-recovery-unknown-created/J31-recovery-unknown-created-a1.png",
+            "J31/J31-recovery-unknown-created/J31-recovery-unknown-created-a2.png"
+          ],
+          "errors": []
+        },
+        {
+          "id": "J31-invalid-author-destination",
+          "actions": 4,
+          "frames": [
+            "J31/J31-invalid-author-destination/before.png",
+            "J31/J31-invalid-author-destination/J31-invalid-author-destination-a1.png",
+            "J31/J31-invalid-author-destination/J31-invalid-author-destination-a2.png",
+            "J31/J31-invalid-author-destination/J31-invalid-author-destination-a3.png",
+            "J31/J31-invalid-author-destination/J31-invalid-author-destination-a4.png"
+          ],
+          "errors": []
+        },
+        {
+          "id": "J31-recovery-confirmed-uncommitted",
+          "actions": 4,
+          "frames": [
+            "J31/J31-recovery-confirmed-uncommitted/before.png",
+            "J31/J31-recovery-confirmed-uncommitted/J31-recovery-confirmed-uncommitted-a1.png",
+            "J31/J31-recovery-confirmed-uncommitted/J31-recovery-confirmed-uncommitted-a2.png",
+            "J31/J31-recovery-confirmed-uncommitted/J31-recovery-confirmed-uncommitted-a3.png",
+            "J31/J31-recovery-confirmed-uncommitted/J31-recovery-confirmed-uncommitted-a4.png"
+          ],
+          "errors": []
+        },
+        {
+          "id": "J31-recovery-status-unavailable",
+          "actions": 2,
+          "frames": [
+            "J31/J31-recovery-status-unavailable/before.png",
+            "J31/J31-recovery-status-unavailable/J31-recovery-status-unavailable-a1.png",
+            "J31/J31-recovery-status-unavailable/J31-recovery-status-unavailable-a2.png"
+          ],
+          "errors": []
+        }
+      ],
+      "crossChecks": {
+        "keyboard": {
+          "tabs": 15,
+          "expected": "J31-s1-a1",
+          "delivered": true,
+          "focusAfter": "<button class=\"action  pending\" data-action=\"J31-s1-a2\" aria-label=\"Expand source range and occurrence descriptor\">Expand source range and occurrence descriptor</button>"
+        },
+        "list": {
+          "selected": "true",
+          "sameFrame": true
+        },
+        "accessibility": {
+          "lang": "en",
+          "liveRegions": 1,
+          "unlabelledButtons": 0,
+          "semanticMain": 1,
+          "colorIndependent": true,
+          "nativeTreeNodes": 291,
+          "assistiveTechnologyTested": false
+        },
+        "narrow": {
+          "scrollWidth": 390,
+          "viewport": 390,
+          "text": 20,
+          "reading": {
+            "visit": "03",
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "body": [
+              "The recorded pressure remained stable during the run."
+            ]
+          }
+        },
+        "reducedMotion": {
+          "enabled": "true",
+          "frame": "J31-s1-a1",
+          "reading": {
+            "visit": "03",
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "body": [
+              "The recorded pressure remained stable during the run."
+            ]
+          }
+        },
+        "optics": {
+          "bodyText": "rgb(220, 224, 240)",
+          "backing": "rgb(23, 27, 43)",
+          "readingText": "rgb(27, 35, 61)",
+          "readingBacking": "rgb(237, 240, 248)",
+          "panelContrast": 13,
+          "readerContrast": 13.6
+        },
+        "pointer": {
+          "nativeNamedActions": 16,
+          "delivery": "DOM pointer click",
+          "gesturePicking": "Not implemented in the Xuzz engine"
+        },
+        "lifecycle": {
+          "routes": [
+            "J31-unavailable-source",
+            "J31-choose-new-base",
+            "J31-recovery-unknown-created",
+            "J31-invalid-author-destination",
+            "J31-recovery-confirmed-uncommitted",
+            "J31-recovery-status-unavailable"
+          ],
+          "evidence": "Base and alternate snapshots and receipts in traces; scripted lifecycle only"
+        },
+        "storage": {
+          "enforced": "All transitions guard immutable sourceOps; Enter adds exactly one reader visit; restore adds none.",
+          "evidence": "Full state/effect trace per route",
+          "productionProof": false
+        },
+        "relations": {
+          "evidence": "Exact descriptors, source occurrences, ancestry and typed records visible in route states",
+          "productionProof": false
+        }
+      },
+      "inventoryChecks": []
+    },
+    {
+      "id": "J32",
+      "title": "Resume an interrupted investigation offline with equivalent access",
+      "steps": [
+        {
+          "step": 1,
+          "actions": [
+            {
+              "id": "J32-s1-a1",
+              "label": "Open Save investigation session",
+              "kind": "save",
+              "frame": "J32/main/J32-s1-a1.png"
+            },
+            {
+              "id": "J32-s1-a2",
+              "label": "Close investigation session",
+              "kind": "view",
+              "frame": "J32/main/J32-s1-a2.png"
+            }
+          ],
+          "checks": [
+            "Session descriptor carries exact identities, member cursors, source companions and package states.",
+            "Save writes reader collection only; close writes no source ops."
+          ]
+        },
+        {
+          "step": 2,
+          "actions": [
+            {
+              "id": "J32-s2-a1",
+              "label": "Disconnect network before reopening",
+              "kind": "fixture",
+              "frame": "J32/main/J32-s2-a1.png"
+            },
+            {
+              "id": "J32-s2-a2",
+              "label": "Reopen saved session and restore identities first",
+              "kind": "restore",
+              "frame": "J32/main/J32-s2-a2.png"
+            },
+            {
+              "id": "J32-s2-a3",
+              "label": "Resolve offline source availability from the local cache index",
+              "kind": "fixture",
+              "frame": "J32/main/J32-s2-a3.png"
+            }
+          ],
+          "checks": [
+            "Cached verified Review V4 remains readable.",
+            "Not-held media/unavailable target keep named states.",
+            "Offline incomplete coverage is not completed-empty.",
+            "Restore adds no visit."
+          ]
+        },
+        {
+          "step": 3,
+          "actions": [
+            {
+              "id": "J32-s3-a1",
+              "label": "Switch to synchronized list and keyboard command mode",
+              "kind": "view",
+              "frame": "J32/main/J32-s3-a1.png"
+            },
+            {
+              "id": "J32-s3-a2",
+              "label": "Inspect historical C17 reference",
+              "kind": "inspect",
+              "frame": "J32/main/J32-s3-a2.png"
+            },
+            {
+              "id": "J32-s3-a3",
+              "label": "Cycle L17 right member through the list command",
+              "kind": "view",
+              "frame": "J32/main/J32-s3-a3.png"
+            },
+            {
+              "id": "J32-s3-a4",
+              "label": "Resume existing sibling visit 04",
+              "kind": "restore",
+              "frame": "J32/main/J32-s3-a4.png"
+            }
+          ],
+          "checks": [
+            "List actions preserve exact IDs and return targets.",
+            "Right cursor updates independently; L17 origin and left cursor stay fixed.",
+            "Resume restores visit 04 and does not add a visit."
+          ]
+        },
+        {
+          "step": 4,
+          "actions": [
+            {
+              "id": "J32-s4-a1",
+              "label": "Use narrow reading and list layout",
+              "kind": "view",
+              "frame": "J32/main/J32-s4-a1.png"
+            },
+            {
+              "id": "J32-s4-a2",
+              "label": "Enlarge text and retain locator labels",
+              "kind": "view",
+              "frame": "J32/main/J32-s4-a2.png"
+            },
+            {
+              "id": "J32-s4-a3",
+              "label": "Enable reduced motion for the same inspection path",
+              "kind": "view",
+              "frame": "J32/main/J32-s4-a3.png"
+            }
+          ],
+          "checks": [
+            "Selection/focus target survives each representation.",
+            "All endset members and all three counted branch exits remain list-accessible.",
+            "Reduced motion reaches the same final identity by a cut."
+          ]
+        },
+        {
+          "step": 5,
+          "actions": [
+            {
+              "id": "J32-s5-a1",
+              "label": "Simulate unreadable saved session descriptor",
+              "kind": "fixture",
+              "frame": "J32/main/J32-s5-a1.png"
+            },
+            {
+              "id": "J32-s5-a2",
+              "label": "Copy unreadable descriptor to recovery slot",
+              "kind": "save",
+              "frame": "J32/main/J32-s5-a2.png"
+            },
+            {
+              "id": "J32-s5-a3",
+              "label": "Cancel an incomplete query request and retain results",
+              "kind": "fixture",
+              "frame": "J32/main/J32-s5-a3.png"
+            }
+          ],
+          "checks": [
+            "Original data and checksum remain preserved.",
+            "Repair requires explicit backup-based action; no default state is generated.",
+            "Cancelled query retains 24 matches and incomplete coverage."
+          ]
+        },
+        {
+          "step": 6,
+          "actions": [
+            {
+              "id": "J32-s6-a1",
+              "label": "Reconnect network explicitly",
+              "kind": "fixture",
+              "frame": "J32/main/J32-s6-a1.png"
+            },
+            {
+              "id": "J32-s6-a2",
+              "label": "Rerun saved pressure recipe explicitly as request Q-pressure-18",
+              "kind": "view",
+              "frame": "J32/main/J32-s6-a2.png"
+            },
+            {
+              "id": "J32-s6-a3",
+              "label": "Receive Q-pressure-18 results and retain selected C17 V8 identity",
+              "kind": "fixture",
+              "frame": "J32/main/J32-s6-a3.png"
+            },
+            {
+              "id": "J32-s6-a4",
+              "label": "Acquire pinned publication edition V12 explicitly",
+              "kind": "author",
+              "frame": "J32/main/J32-s6-a4.png"
+            },
+            {
+              "id": "J32-s6-a5",
+              "label": "Verify all 96 of 96 pieces and validate complete-store manifest",
+              "kind": "fixture",
+              "frame": "J32/main/J32-s6-a5.png"
+            },
+            {
+              "id": "J32-s6-a6",
+              "label": "Open verified Review V12 as a separate reader visit",
+              "kind": "enter",
+              "frame": "J32/main/J32-s6-a6.png"
+            }
+          ],
+          "checks": [
+            "Refresh is a new request/generation; selected old occurrence stays pinned until deliberate selection.",
+            "V12 request remains pinned while publisher pointer is V13.",
+            "Ready requires 96/96 and full validation; author trust stays separately labeled.",
+            "Package #13 does not become retained/enabled automatically.",
+            "Only final explicit Enter adds one reader visit; sourceOps unchanged."
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "id": "J32-repair-session",
+          "actions": 3,
+          "frames": [
+            "J32/J32-repair-session/before.png",
+            "J32/J32-repair-session/J32-repair-session-a1.png",
+            "J32/J32-repair-session/J32-repair-session-a2.png",
+            "J32/J32-repair-session/J32-repair-session-a3.png"
+          ],
+          "errors": []
+        },
+        {
+          "id": "J32-cancel-request",
+          "actions": 2,
+          "frames": [
+            "J32/J32-cancel-request/before.png",
+            "J32/J32-cancel-request/J32-cancel-request-a1.png",
+            "J32/J32-cancel-request/J32-cancel-request-a2.png"
+          ],
+          "errors": []
+        }
+      ],
+      "crossChecks": {
+        "keyboard": {
+          "tabs": 17,
+          "expected": "J32-s1-a1",
+          "delivered": true,
+          "focusAfter": "<button class=\"action  pending\" data-action=\"J32-s1-a2\" aria-label=\"Close investigation session\">Close investigation session</button>"
+        },
+        "list": {
+          "selected": "true",
+          "sameFrame": true
+        },
+        "accessibility": {
+          "lang": "en",
+          "liveRegions": 1,
+          "unlabelledButtons": 0,
+          "semanticMain": 1,
+          "colorIndependent": true,
+          "nativeTreeNodes": 280,
+          "assistiveTechnologyTested": false
+        },
+        "narrow": {
+          "scrollWidth": 390,
+          "viewport": 390,
+          "text": 20,
+          "reading": {
+            "visit": "03",
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "body": [
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ]
+          }
+        },
+        "reducedMotion": {
+          "enabled": "true",
+          "frame": "J32-s1-a1",
+          "reading": {
+            "visit": "03",
+            "subject": "Review passage",
+            "store": "Review",
+            "version": "V4",
+            "occurrence": "review-o3",
+            "offset": 80,
+            "body": [
+              "The recorded pressure remained stable during the run.",
+              "The historical cell reports 3.14 bar. Compare the selected state before using a later reading."
+            ]
+          }
+        },
+        "optics": {
+          "bodyText": "rgb(220, 224, 240)",
+          "backing": "rgb(23, 27, 43)",
+          "readingText": "rgb(27, 35, 61)",
+          "readingBacking": "rgb(237, 240, 248)",
+          "panelContrast": 13,
+          "readerContrast": 13.6
+        },
+        "pointer": {
+          "nativeNamedActions": 21,
+          "delivery": "DOM pointer click",
+          "gesturePicking": "Not implemented in the Xuzz engine"
+        },
+        "lifecycle": {
+          "routes": [
+            "J32-repair-session",
+            "J32-cancel-request"
+          ],
+          "evidence": "Base and alternate snapshots and receipts in traces; scripted lifecycle only"
+        },
+        "storage": {
+          "enforced": "All transitions guard immutable sourceOps; Enter adds exactly one reader visit; restore adds none.",
+          "evidence": "Full state/effect trace per route",
+          "productionProof": false
+        },
+        "relations": {
+          "evidence": "Exact descriptors, source occurrences, ancestry and typed records visible in route states",
+          "productionProof": false
+        }
+      },
+      "inventoryChecks": []
+    }
+  ],
+  "failures": []
+}
