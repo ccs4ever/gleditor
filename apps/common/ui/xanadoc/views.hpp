@@ -6,6 +6,7 @@
 #define XUDU_VIEWS_HPP
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <filesystem>
 #include <format>
@@ -29,6 +30,7 @@
 #include <gleditor/state.hpp>
 
 #include "common/ui/hypertime_graph.hpp"
+#include "common/ui/view/page_dim.hpp"
 #include "common/ui/xanadoc/kinetic_tether_overlay.hpp"
 #include "common/ui/xanadoc/pouch_drawer.hpp"
 #include "common/ui/xanadoc/session.hpp"
@@ -62,6 +64,11 @@ public:
   void deviceReady(render::RenderDevice &device,
                    const render::PipelineDesc &documentPipeline) override;
   void drawFrame(gleditor::FrameContext &ctx) override;
+  /// Whether the camera is still being placed: moved on the last frame it
+  /// drew -- which that frame was drawn without -- or waiting for a page to be
+  /// built to place it by. What lets a capture or a profiled run wait for a
+  /// frame the camera has finished moving for.
+  [[nodiscard]] bool busy() const override { return cameraSettling_; }
 
   void cancelReadingFrame() {
     frameTarget_.reset();
@@ -164,6 +171,30 @@ public:
     return finalPlace_ ? *finalPlace_ : currentPlace();
   }
 
+  /// While @p on, the pages keep the share of their own opacity that
+  /// view.page.dim says (setPageDimShare), so a slice drawn over them is the
+  /// brightest thing in the frame. Any thread.
+  void dimPages(const bool on) noexcept { pagesDimmed_.store(on); }
+  void setPageDimShare(const float share) noexcept {
+    pageDimShare_.store(share);
+  }
+  /// How far above the top edge of the page a slice that is not placed beside
+  /// it keeps its focus row, in logical pixels (view.page.clearancePx). Any
+  /// thread.
+  void setPlacementClearancePx(const float px) noexcept {
+    clearancePx_.store(px);
+  }
+  /// Where a slice presented on its own, not beside a page, is placed: the
+  /// world's origin, lifted by the clearance so the page's top edge does not
+  /// cut through the row the reader is on. The page's own scale turns the
+  /// logical clearance into world units; with no page there is nothing to
+  /// clear.
+  [[nodiscard]] std::optional<glm::mat4> soloPlacement() const;
+
+private:
+  [[nodiscard]] glm::vec3 cameraPosition() const;
+
+public:
   void anchorPresentation(std::weak_ptr<Doc> doc) {
     presentationAnchor_ = std::move(doc);
   }
@@ -250,7 +281,13 @@ private:
   bool readingFramed_{false};
   std::weak_ptr<Doc> frameTarget_;
   std::weak_ptr<Doc> presentationAnchor_;
+  std::atomic<bool> pagesDimmed_{false};
+  std::atomic<float> pageDimShare_{1.0F};
+  std::atomic<float> clearancePx_{0.0F};
+  xanadu::view::PageDim pageDim_;
   std::function<bool()> pendingCamera_;
+  bool cameraSettling_{};
+  int cameraSettlingFrames_{};
   std::function<bool()> comparisonCameraReady_;
   std::optional<xanadu::ReadingPlace> finalPlace_;
   std::optional<Pending> pending;

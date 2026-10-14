@@ -247,8 +247,16 @@ SlicePresentationSwitch::setHasKeyboard(const bool has) noexcept {
 
 SlicePresentationSwitch *
 SlicePresentationSwitch::setKeyHints(std::string here, std::string elsewhere) {
-  for (const auto &entry : entries_) {
-    entry.presentation->setKeyHints(here, elsewhere);
+  entries_.front().presentation->setKeyHints(std::move(here),
+                                             std::move(elsewhere));
+  return this;
+}
+
+SlicePresentationSwitch *
+SlicePresentationSwitch::setViewKeyHints(std::string here,
+                                         std::string elsewhere) {
+  for (std::size_t i = 1; i < entries_.size(); ++i) {
+    entries_[i].presentation->setKeyHints(here, elsewhere);
   }
   return this;
 }

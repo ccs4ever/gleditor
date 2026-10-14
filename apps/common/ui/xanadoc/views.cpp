@@ -95,10 +95,21 @@ void Views::drawFrame(gleditor::FrameContext &ctx) {
                          "Update notice delivery failed: {}", error.what());
     }
   }
+  pageDim_.apply(ctx, pagesDimmed_.load() ? pageDimShare_.load() : 1.0F);
+  const auto cameraBefore = cameraPosition();
   if (ctx.state.documentsVisible) frameForReading(ctx);
   if (pendingCamera_ && pendingCamera_()) {
     pendingCamera_ = {};
   }
+  // This frame's scene was drawn before the camera moved, so a frame in which
+  // it moved is not at rest, and neither is one still waiting to place it. A
+  // placement that never comes (no page to place by) must not hold a run for
+  // ever: it counts as busy for as long as a capture would wait for it.
+  const bool placing =
+      cameraBefore != cameraPosition() || static_cast<bool>(pendingCamera_);
+  cameraSettlingFrames_ = placing ? cameraSettlingFrames_ + 1 : 0;
+  cameraSettling_ =
+      placing && cameraSettlingFrames_ < gleditor::anim::captureSettleFrames;
 }
 
 void Views::frameForReading(const gleditor::FrameContext &ctx) {
@@ -337,6 +348,29 @@ std::optional<glm::mat4> Views::presentationTransform() const {
          glm::translate(
              glm::mat4{1.0F},
              glm::vec3{frame->rightPx + frame->marginPx, 0.0F, 0.0F});
+}
+
+glm::vec3 Views::cameraPosition() const {
+  std::scoped_lock locker(state->view);
+  return state->view.pos;
+}
+
+std::optional<glm::mat4> Views::soloPlacement() const {
+  float lift    = 0.0F;
+  auto document = presentationAnchor_.lock();
+  if (!document) {
+    document = primaryDocument_.lock();
+  }
+  if (document) {
+    if (const auto frame = document->pageFrame(0)) {
+      lift =
+          clearancePx_.load() * glm::length(glm::vec3(frame->localToWorld[1]));
+    }
+  }
+  // One layout unit is one canvas pixel, which the world measures as a
+  // document's pixel does.
+  return glm::translate(glm::mat4{1.0F}, glm::vec3{0.0F, lift, 0.0F}) *
+         glm::scale(glm::mat4{1.0F}, glm::vec3{Doc::pixelsToWorld});
 }
 
 void Views::swingBackToSpan(const PouchItem &item) {

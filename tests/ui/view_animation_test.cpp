@@ -11,20 +11,19 @@
 
 #include <choreograph/Easing.h>
 
+#include "allocation_count.hpp"
 #include "common/ui/view/view_animation.hpp"
 
 namespace {
 
 // Allocation is counted only between start and stop on this thread, so the
 // rest of the binary is unaffected by the replacement below.
-thread_local bool countingAllocations    = false;
-thread_local std::size_t allocationCount = 0;
 
 } // namespace
 
 void *operator new(const std::size_t size) {
-  if (countingAllocations) {
-    ++allocationCount;
+  if (allocation_count::counting) {
+    ++allocation_count::count;
   }
   if (void *const block = std::malloc(size == 0 ? 1 : size)) {
     return block;
@@ -377,8 +376,8 @@ TEST(ViewAnimationTest, ASteadyPlacementAllocatesNothingToRetargetOrAdvance) {
     animation.retarget({.layout = layout, .epoch = 1});
     animation.advance(Ms{16.0}, out);
   }
-  allocationCount     = 0;
-  countingAllocations = true;
+  allocation_count::count    = 0;
+  allocation_count::counting = true;
   for (int frame = 0; frame < 20; ++frame) {
     if (frame % 3 == 0) {
       lay(static_cast<float>(frame) * 3.0F);
@@ -386,8 +385,8 @@ TEST(ViewAnimationTest, ASteadyPlacementAllocatesNothingToRetargetOrAdvance) {
     animation.retarget({.layout = layout, .epoch = 1});
     animation.advance(Ms{16.0}, out);
   }
-  countingAllocations = false;
-  EXPECT_EQ(allocationCount, 0U);
+  allocation_count::counting = false;
+  EXPECT_EQ(allocation_count::count, 0U);
   EXPECT_EQ(out.items().size(), static_cast<std::size_t>(kCells));
 }
 

@@ -379,7 +379,9 @@ StretchConfig StretchConfig::fromSettings(const SystemStoreModel &settings) {
     }
     return static_cast<float>(stored);
   };
-  constexpr float kUnbounded = std::numeric_limits<float>::max();
+  // Bounded, not infinite: a gap of 3e38 added to a coordinate of 1e3 is
+  // that coordinate, and the slides that walk past boxes stop advancing.
+  constexpr float kUnbounded = kMaxPresentationLengthPx;
   namespace names            = stretch_settings;
   cfg.gap = read(names::kGap, cfg.gap, 0.0F, kUnbounded, false);
   cfg.minContact =
@@ -396,6 +398,8 @@ StretchConfig StretchConfig::fromSettings(const SystemStoreModel &settings) {
       read(names::kCoarseBelow, cfg.coarseBelow, 0.0F, 1.0F, false);
   cfg.clipMargin =
       read(names::kClipMargin, cfg.clipMargin, 0.0F, kUnbounded, false);
+  cfg.maxCellSpan =
+      read(names::kMaxCellSpan, cfg.maxCellSpan, 1.0F, kUnbounded, false);
   const auto crumbs = settings.getInt64(names::kBreadcrumbs, cfg.breadcrumbs);
   if (crumbs >= 0 && crumbs <= std::numeric_limits<std::uint32_t>::max()) {
     cfg.breadcrumbs = static_cast<std::uint32_t>(crumbs);
@@ -445,6 +449,10 @@ std::vector<SettingSpec> stretchSettingSpecs() {
            "Pixels a hidden cell must clear the pane's edge by to be shown "
            "again",
            defaults.clipMargin),
+      real(names::kMaxCellSpan,
+           "Largest a cell's width or height may be, as a multiple of the "
+           "pane's larger side, at least 1",
+           defaults.maxCellSpan),
       SettingSpec{.name    = std::string(names::kBreadcrumbs),
                   .notes   = "Cells walked that the breadcrumb strip lists",
                   .schemas = {{.expectedTypes = {"integer"},
@@ -554,6 +562,23 @@ struct StretchVanishingView::Workspace {
 
   [[nodiscard]] const StretchConfig &stretch() const noexcept {
     return config->stretch;
+  }
+
+  /// The host's measure of @p subject, made safe to place: a size that is
+  /// negative or not a number is nothing, and one past stretch.maxCellSpan
+  /// panes is that (see StretchConfig::maxCellSpan).
+  [[nodiscard]] ContentExtent measured(const SubjectId subject) const {
+    auto extent      = in->measure(subject, config->cells.contentMaxWidthPx);
+    const float most = stretch().maxCellSpan *
+                       std::max({in->frame.widthPx, in->frame.heightPx, 1.0F});
+    const auto safe = [most](const float length) {
+      return std::isfinite(length) ? std::clamp(length, 0.0F, most)
+                                   : (length > 0.0F ? most : 0.0F);
+    };
+    extent.width      = safe(extent.width);
+    extent.height     = safe(extent.height);
+    extent.lineHeight = safe(extent.lineHeight);
+    return extent;
   }
   [[nodiscard]] float planeZ(const std::int32_t plane) const noexcept {
     return -static_cast<float>(plane) * stretch().layerDepth;
@@ -682,12 +707,11 @@ struct StretchVanishingView::Workspace {
   std::uint32_t placeFrom(const std::uint32_t from, const PlacedAxis &axis,
                           const zigzag::DimVector direction,
                           const zigzag::CellRef cell, const bool immediate) {
-    const auto anchor = grid.rect(placed[from].box);
-    const auto plane  = placed[from].plane;
-    const auto content =
-        in->measure(SubjectId::cell(cell), config->cells.contentMaxWidthPx);
-    auto want        = boxFor(content);
-    const float sign = signOf(direction);
+    const auto anchor  = grid.rect(placed[from].box);
+    const auto plane   = placed[from].plane;
+    const auto content = measured(SubjectId::cell(cell));
+    auto want          = boxFor(content);
+    const float sign   = signOf(direction);
     if (axis.point < kInPlaneAxes) {
       const auto u = static_cast<int>(axis.point);
       want.centre  = anchor.centre;
@@ -731,7 +755,7 @@ struct StretchVanishingView::Workspace {
         axis.shows,
         (cell.point * static_cast<std::uint32_t>(kDirections.size())) +
             (zigzag::DimVector::POS == cell.direction ? 0U : 1U));
-    const auto words   = in->measure(id, config->cells.contentMaxWidthPx);
+    const auto words   = measured(id);
     const auto box     = grid.rect(cell.box);
     const bool inPlane = cell.point < kInPlaneAxes;
     const int u        = inPlane ? static_cast<int>(cell.point) : 0;
@@ -750,9 +774,8 @@ struct StretchVanishingView::Workspace {
   }
 
   void walk(const zigzag::CellRef focus) {
-    const auto &base = in->space.base();
-    const auto content =
-        in->measure(SubjectId::cell(focus), config->cells.contentMaxWidthPx);
+    const auto &base   = in->space.base();
+    const auto content = measured(SubjectId::cell(focus));
     place(focus, content, 0, boxFor(content), false, 0, zigzag::DimVector::POS);
 
     // Radius 1: exactly on the focus's axis lines (V-R17).
@@ -892,7 +915,8 @@ StretchVanishingView::~StretchVanishingView() = default;
 
 StretchVanishingView *
 StretchVanishingView::configure(const StretchVanishingConfig &config) {
-  config_ = config;
+  config_       = config;
+  config_.cells = sanitisedPresentation(config.cells);
   return this;
 }
 
@@ -936,6 +960,15 @@ void StretchVanishingView::layout(const SliceLayoutInput &in,
                                   LayoutSink &out) const noexcept {
   const auto focus = cellAt(in.space, in.cursor);
   if (!focus.has_value() || !in.space.base().contains(*focus)) {
+    return;
+  }
+  // A pane that is not a size cannot be laid out around; nothing is placed
+  // rather than walking for ever (the host's frame is the host's to get
+  // right, and a layout runs on the render thread).
+  if (!std::isfinite(in.frame.widthPx) || !std::isfinite(in.frame.heightPx) ||
+      in.frame.widthPx < 0.0F || in.frame.heightPx < 0.0F) {
+    GLEDITOR_LOG_WARN(kLayoutCategory, "pane {} x {} is not a size; no layout",
+                      in.frame.widthPx, in.frame.heightPx);
     return;
   }
   auto &work = *workspace_;

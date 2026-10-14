@@ -18,6 +18,7 @@
 #include <format>
 #include <functional>
 #include <initializer_list>
+#include <limits>
 #include <map>
 #include <optional>
 #include <set>
@@ -1170,4 +1171,79 @@ TEST(StretchVanishingTest, GoldenRankWithGhosts) {
             "+--------+\n")
       << "\n"
       << golden;
+}
+
+// -- a layout never hangs on what it is given (M2 finding B7) ---------------
+//
+// layout() is noexcept and runs on the render thread: a measure or a pane that
+// is not a size must degrade to something placed or to nothing, never to a
+// walk that does not end. Each case is run under a watchdog by the test's own
+// timeout; a regression shows as the binary not finishing.
+
+namespace {
+
+std::size_t placedWith(const float width, const float height,
+                       const PaneFrame &frame = flatPane()) {
+  Slice slice{"d.x", "d.y", "d.z"};
+  const auto a = slice.cell("a");
+  const auto b = slice.cell("b");
+  const auto c = slice.cell("c");
+  slice.link(a, "d.x", b).link(a, "d.y", c);
+  const auto manifold = slice.manifold();
+  ViewManifold space(manifold);
+  configure(space);
+  EXPECT_TRUE(space.axes().bind(x, slice.dim("d.x")));
+  EXPECT_TRUE(space.axes().bind(y, slice.dim("d.y")));
+  const auto measure = [=](const SubjectId, const float) {
+    return ContentExtent{
+        .width = width, .height = height, .lineHeight = 16.0F, .lines = 1};
+  };
+  StretchVanishingView view;
+  const SliceCursor cursor{.origin = a};
+  EXPECT_TRUE(view.prepare(space, cursor, frame, measure));
+  LayoutSink sink;
+  view.layout(
+      SliceLayoutInput{
+          .space = space, .cursor = cursor, .frame = frame, .measure = measure},
+      sink);
+  return sink.items().size();
+}
+
+} // namespace
+
+TEST(StretchVanishingGuardTest, ASizeThatIsNotANumberIsNothing) {
+  constexpr float nan = std::numeric_limits<float>::quiet_NaN();
+  constexpr float inf = std::numeric_limits<float>::infinity();
+  EXPECT_GT(placedWith(inf, 16.0F), 0U);
+  EXPECT_GT(placedWith(10.0F, nan), 0U);
+  EXPECT_GT(placedWith(-5.0F, -5.0F), 0U);
+  EXPECT_GT(placedWith(1.0e30F, 1.0e30F), 0U);
+}
+
+TEST(StretchVanishingGuardTest, APaneThatIsNotASizeLaysOutNothing) {
+  auto frame    = flatPane();
+  frame.widthPx = std::numeric_limits<float>::infinity();
+  EXPECT_EQ(placedWith(40.0F, 16.0F, frame), 0U);
+  frame          = flatPane();
+  frame.heightPx = std::numeric_limits<float>::quiet_NaN();
+  EXPECT_EQ(placedWith(40.0F, 16.0F, frame), 0U);
+}
+
+TEST(StretchVanishingGuardTest, LayoutLengthsOutOfRangeKeepTheirDefaults) {
+  xanadu::ZigzagPresentationConfig bad;
+  bad.contentMaxWidthPx       = std::numeric_limits<float>::infinity();
+  bad.cellHorizontalPaddingPx = -4.0F;
+  bad.cellVerticalPaddingPx   = 1.0e30F;
+  bad.connectionBeamWidthPx   = std::numeric_limits<float>::quiet_NaN();
+  const auto clean            = xanadu::sanitisedPresentation(bad);
+  const xanadu::ZigzagPresentationConfig defaults;
+  EXPECT_EQ(clean.contentMaxWidthPx, defaults.contentMaxWidthPx);
+  EXPECT_EQ(clean.cellHorizontalPaddingPx, defaults.cellHorizontalPaddingPx);
+  EXPECT_EQ(clean.cellVerticalPaddingPx, defaults.cellVerticalPaddingPx);
+  EXPECT_EQ(clean.connectionBeamWidthPx, defaults.connectionBeamWidthPx);
+  EXPECT_EQ(xanadu::sanitisedPresentation(defaults), defaults);
+
+  StretchVanishingView view;
+  view.configure(StretchVanishingConfig{.cells = bad});
+  SUCCEED();
 }

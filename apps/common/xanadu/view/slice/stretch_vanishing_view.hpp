@@ -57,6 +57,7 @@ inline constexpr std::string_view kAbbreviateBelow = "stretch.abbreviateBelow";
 inline constexpr std::string_view kCoarseBelow     = "stretch.coarseBelow";
 inline constexpr std::string_view kClipMargin      = "stretch.clipMargin";
 inline constexpr std::string_view kBreadcrumbs     = "stretch.breadcrumbs";
+inline constexpr std::string_view kMaxCellSpan     = "stretch.maxCellSpan";
 } // namespace stretch_settings
 
 /**
@@ -92,6 +93,13 @@ struct StretchConfig {
   float clipMargin{6.0F};
   /// Cells in the breadcrumb strip; the chrome's (§9.1.6).
   std::uint32_t breadcrumbs{6};
+  /// Largest a cell's measured width or height may be, as a multiple of the
+  /// pane's larger side. The measurer is the host's: a size that is not
+  /// finite, or large enough that adding a gap to a position changes
+  /// nothing, would make the walk's slides loop for ever on the render
+  /// thread, so a measure is clamped to this (and a negative or NaN one to
+  /// nothing).
+  float maxCellSpan{16.0F};
 
   bool operator==(const StretchConfig &) const = default;
 

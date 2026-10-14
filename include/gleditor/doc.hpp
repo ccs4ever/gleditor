@@ -1138,6 +1138,9 @@ public:
    * arrival rather than retroactively.
    */
   void setRestingOpacity(const float alpha) { restingOpacity = alpha; }
+  /// The alpha this document settles at: what an owner that dims it for a
+  /// while reads, to put it back.
+  [[nodiscard]] float resting() const noexcept { return restingOpacity; }
 
   /**
    * @brief Fade this document out and drift it towards the viewer.

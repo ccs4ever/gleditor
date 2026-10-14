@@ -87,8 +87,14 @@ public:
   SlicePresentationSwitch *
   setExternInspector(ExternInspector inspector) override;
   SlicePresentationSwitch *setHasKeyboard(bool has) noexcept override;
+  /// The legacy visualizer's hint line: the editing keys it has.
   SlicePresentationSwitch *setKeyHints(std::string here,
                                        std::string elsewhere) override;
+  /// The hint line of the other presentations, which run a different set of
+  /// keys (zigzag::viewKeyHints): showing the visualizer's would advertise
+  /// keys they refuse.
+  SlicePresentationSwitch *setViewKeyHints(std::string here,
+                                           std::string elsewhere);
   bool dispatchAction(std::string_view actionName) override;
   bool
   insertConnectedTransclusion(std::span<const PrimediaSpan> spans) override;

@@ -2547,6 +2547,22 @@ int XuzzApp::run(const int argc, char **argv) {
                                 slicePresentations->shownKind(), 1),
                             .subview = {}});
       });
+  // Registered by name so each reads as what it does in the command list and
+  // the key hints, not as a keymap action nobody described.
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapViewSubviewNext),
+      "show the next sub-view of the view showing the slice",
+      [zigzagPresentation] {
+        std::ignore = zigzagPresentation->dispatchAction(
+            xanadu::settings::kKeymapViewSubviewNext);
+      });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapViewSubviewPrev),
+      "show the previous sub-view of the view showing the slice",
+      [zigzagPresentation] {
+        std::ignore = zigzagPresentation->dispatchAction(
+            xanadu::settings::kKeymapViewSubviewPrev);
+      });
   app.commands().registerAction(
       std::string(xanadu::settings::kKeymapViewBind),
       "type which dimension or group a binding point shows",
@@ -2880,14 +2896,20 @@ int XuzzApp::run(const int argc, char **argv) {
                             std::string(xanadu::keymapScope(command.name)));
   }
 
-  const auto showKeyHints = [&app, &renderer, zigzagPresentation] {
+  const auto showKeyHints = [&app, &renderer, slicePresentations] {
     auto [here, elsewhere] = zigzag::zigzagKeyHints(
         app.commands(), xanadu::settings::kKeymapFocusToggle);
-    renderer->runWithState([zigzagPresentation, here = std::move(here),
-                            elsewhere =
-                                std::move(elsewhere)](RenderState &) mutable {
-      zigzagPresentation->setKeyHints(std::move(here), std::move(elsewhere));
-    });
+    auto [viewHere, viewElsewhere] = zigzag::viewKeyHints(
+        app.commands(), xanadu::settings::kKeymapFocusToggle);
+    renderer->runWithState(
+        [slicePresentations, here = std::move(here),
+         elsewhere = std::move(elsewhere), viewHere = std::move(viewHere),
+         viewElsewhere = std::move(viewElsewhere)](RenderState &) mutable {
+          slicePresentations->setKeyHints(std::move(here),
+                                          std::move(elsewhere));
+          slicePresentations->setViewKeyHints(std::move(viewHere),
+                                              std::move(viewElsewhere));
+        });
   };
 
   const auto applyTypography = [state](const xanadu::UIConfig &config) {
@@ -2971,6 +2993,11 @@ int XuzzApp::run(const int argc, char **argv) {
           map.setConfig(uiCfg.hypertimeModal);
           docSwitcher->setVisible(uiCfg.tabBarVisible);
           map.setVisible(uiCfg.hypertimeMapVisible);
+          {
+            const auto draw = xanadu::ViewDrawConfig::fromStore(store);
+            views.setPageDimShare(draw.pageDim);
+            views.setPlacementClearancePx(draw.pageClearancePx);
+          }
           for (const auto &presentation : viewPresentations) {
             presentation->applySettings();
           }
@@ -3016,6 +3043,9 @@ int XuzzApp::run(const int argc, char **argv) {
       map.setConfig(uiCfg.hypertimeModal);
       docSwitcher->setVisible(uiCfg.tabBarVisible);
       map.setVisible(uiCfg.hypertimeMapVisible);
+      const auto draw = xanadu::ViewDrawConfig::fromStore(uiStore);
+      views.setPageDimShare(draw.pageDim);
+      views.setPlacementClearancePx(draw.pageClearancePx);
     }
     const auto loIdx = session->systemStoreIndex(xanadu::SystemDocKind::Layout);
     const auto &loStore = session->store(loIdx);

@@ -654,6 +654,34 @@ TEST(SystemDocsTest, DimensionCueSettingsAreKeyedByTheWholeDimensionName) {
   EXPECT_EQ(colourOf(), std::int64_t{0x8BAAFFFFU});
 }
 
+// The schema page is where the reader looks for what a setting is: every view
+// action and every drawing setting of a slice presentation is on it.
+TEST(SystemDocsTest, SchemaPagesListTheViewActionsAndDrawingSettings) {
+  const auto keymap = xanadu::defaultSystemDocSchema(SystemDocKind::Keymap);
+  for (const auto name : {xanadu::settings::kKeymapViewPalette,
+                          xanadu::settings::kKeymapViewCycle,
+                          xanadu::settings::kKeymapViewSubviewNext,
+                          xanadu::settings::kKeymapViewSubviewPrev,
+                          xanadu::settings::kKeymapViewBind}) {
+    EXPECT_NE(keymap.find(name), std::string::npos) << name;
+  }
+  const auto ui = xanadu::defaultSystemDocSchema(SystemDocKind::UI);
+  for (const auto name :
+       {xanadu::settings::kViewDrawCellBorderPx,
+        xanadu::settings::kViewDrawGhostSeamShare,
+        xanadu::settings::kViewDrawDashDash, xanadu::settings::kViewDrawDashDot,
+        xanadu::settings::kViewDrawDashDashDotDot,
+        xanadu::settings::kViewDrawDashDashDot,
+        xanadu::settings::kViewDrawDashLongShort,
+        xanadu::settings::kViewStrandMinWidthPx,
+        xanadu::settings::kViewStrandOpacityFloor,
+        xanadu::settings::kViewStrandLabelClearPx,
+        xanadu::settings::kViewPageDim,
+        xanadu::settings::kViewPageClearancePx}) {
+    EXPECT_NE(ui.find(name), std::string::npos) << name;
+  }
+}
+
 TEST(SystemDocsTest, SchemaAndNotesNonEmptyAndNoMarkdown) {
   for (const auto kind :
        {SystemDocKind::Keymap, SystemDocKind::Settings, SystemDocKind::Layout,

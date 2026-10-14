@@ -2994,4 +2994,129 @@ TEST(E2EBinaryOrchestrationTest, aSliceViewShowsItsCompassAndIsBoundByTyping) {
   }
 }
 
+/// A slice built to put every mark a slice view draws in one frame (M2
+/// finding B10): a long row that runs off the pane, so cells are cut and
+/// ghosts stand for them; a wide, many-line neighbour of the focus; a column
+/// above it; a third dimension to bind to the depth axis, so a strand runs
+/// off the plane; and, in the same store, a page of text with a link between
+/// two of its passages and a cell that quotes one of them, so a ribbon and a
+/// quotation beam can share a frame with the strands.
+void saveSliceMarksStore(const fs::path &scroll, const fs::path &path) {
+  Store slice(permascrollAt(scroll));
+  auto head         = slice.sliceGenesis({});
+  const auto across = slice.makeDimension(head, "d.across");
+  head              = across.version;
+  const auto down   = slice.makeDimension(head, "d.down");
+  head              = down.version;
+  const auto deep   = slice.makeDimension(head, "d.deep");
+  head              = deep.version;
+  const auto make   = [&](const std::string &words) {
+    head = slice.makeCell(head, words);
+    return slice.cellRefOf(head);
+  };
+  const auto link = [&](const zigzag::CellRef from, const zigzag::DimRef dim,
+                        const zigzag::CellRef to) {
+    head = slice.setLink(head, from, dim, zigzag::DimVector::POS, to);
+  };
+  const std::string text =
+      "Transclusion is quotation without copying: the same words, at the same "
+      "addresses, wherever they are shown. A link joins what a reader "
+      "joins, and neither end is moved by it.";
+  head              = slice.insert(head, 0, text);
+  const auto spanAt = [&](const std::uint32_t start, const std::uint32_t len) {
+    return slice.rebuild(head).spansFor(start, len).front();
+  };
+  xanadu::Link ribbon;
+  ribbon.type  = xanadu::LinkType::Comment;
+  ribbon.owner = "e2e";
+  ribbon.left.push_back(spanAt(0, 12));
+  ribbon.right.push_back(spanAt(80, 28));
+  head             = slice.addLink(head, ribbon);
+  head             = slice.makeCell(head, spanAt(0, 12));
+  const auto quote = slice.cellRefOf(head);
+
+  const auto wide = make(
+      "A neighbour with a good deal to say: the Analytical Engine might act "
+      "upon other things besides number, were objects found whose mutual "
+      "fundamental relations could be expressed by those of the abstract "
+      "science of operations");
+  std::vector<zigzag::CellRef> row{wide};
+  for (const auto *const words :
+       {"Charles Babbage", "Difference Engine No. 2", "Luigi Menabrea",
+        "Notes by the translator", "Bernoulli numbers", "Punched cards",
+        "Jacquard loom", "Mill and store"}) {
+    row.push_back(make(words));
+  }
+  link(slice.homeCell(), across.dim, row.front());
+  for (std::size_t i = 0; i + 1 < row.size(); ++i) {
+    link(row[i], across.dim, row[i + 1]);
+  }
+  zigzag::CellRef above = slice.homeCell();
+  for (const auto *const words : {"Mathematician", "Born 1815, London"}) {
+    const auto cell = make(words);
+    link(above, down.dim, cell);
+    above = cell;
+  }
+  link(slice.homeCell(), deep.dim, make("Behind the plane"));
+  link(row.front(), down.dim, quote);
+  slice.repointCurrentVersion(head);
+  slice.save(path.string());
+}
+
+/**
+ * M2 finding B10: the marks a slice view draws that no earlier capture held,
+ * each looked at. One frame where the row runs off the pane (cut cells stand
+ * as ghosts, the next is a bar of text) beside a wide neighbour of the focus;
+ * one where the depth point is bound, so a strand leaves the plane; one in the
+ * unified view, where the slice stands beside its page with a link's ribbon
+ * and a quotation's beam in the same frame as the strands.
+ */
+TEST(E2EBinaryOrchestrationTest, aSliceViewDrawsGhostsWideNeighboursAndDepth) {
+  const auto binary = findXuduBinary();
+  ASSERT_TRUE(fs::exists(binary)) << "xudu binary not found at " << binary;
+  const auto root = workspaceRoot() / "integration_workspace_slice_marks";
+  const auto screenshotDir = getScreenshotDir();
+  fs::remove_all(root);
+  fs::create_directories(root);
+  fs::create_directories(screenshotDir);
+  const auto scroll = root / "permascroll";
+  const auto path   = root / "store";
+  saveSliceMarksStore(scroll, path);
+  const auto ppm = [&](const std::string &name) {
+    return screenshotDir / ("slice_marks_" + name + ".ppm");
+  };
+  const auto xuzz = [&](const std::string &view, const std::string &steps) {
+    return executeProcess("XDG_CONFIG_HOME=" + (root / "config").string() +
+                          " XDG_DATA_HOME=" + (root / "data").string() +
+                          " timeout 120 " + binary.string() +
+                          permascrollFlag(scroll) + " --backend " +
+                          activeBackend() + " --profile --view " + view +
+                          steps + " " + path.string());
+  };
+
+  const auto chosen =
+      xuzz("zigzag",
+           " --chord Ctrl+Alt+V --key right --key enter"
+           " --do std:nav/zigzag_step_x_pos --do std:nav/zigzag_step_x_neg");
+  ASSERT_EQ(chosen.exitCode, 0) << chosen.output;
+  EXPECT_THAT(
+      chosen.output,
+      testing::HasSubstr("slice presentation -> slice.stretch-vanishing"));
+
+  const auto cut = xuzz("zigzag", " --capture " + ppm("ghosts").string());
+  ASSERT_EQ(cut.exitCode, 0) << cut.output;
+  const auto deepBound =
+      xuzz("zigzag", " --chord Ctrl+Alt+B --type \"z d.deep\" --key enter"
+                     " --capture " +
+                         ppm("depth").string());
+  ASSERT_EQ(deepBound.exitCode, 0) << deepBound.output;
+  const auto unified = xuzz("unified", " --capture " + ppm("unified").string());
+  ASSERT_EQ(unified.exitCode, 0) << unified.output;
+  for (const auto *const name : {"ghosts", "depth", "unified"}) {
+    ASSERT_TRUE(fs::exists(ppm(name))) << name;
+    exportToPng(ppm(name),
+                screenshotDir / ("slice_marks_" + std::string(name) + ".png"));
+  }
+}
+
 } // namespace

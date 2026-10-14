@@ -3057,6 +3057,15 @@ given to the measurer), `rankClearancePx`, `minReadableTextPx` and `connectionBe
 | `stretch.abbreviateBelow`, `coarseBelow`               | 0.75, 0.5    | opacities below which content shortens, then becomes bars (plan D2)       |
 | `stretch.heatSectors`, `stretch.heatFull`              | 16, 24       | directions the edge heat is summed in; count at full glow                 |
 | `stretch.breadcrumbs`                                  | 6            | cells in the breadcrumb strip                                             |
+| `stretch.maxCellSpan`                                  | 16           | most a cell's measured size may be, as a multiple of the pane's longer side |
+| `view.draw.cellBorderPx`, `focusBorderPx`              | 1, 2.5       | a cell's border; the focus's, heavier than any edge                       |
+| `view.draw.ghostStrokePx`, `ghostSeamShare`            | 1, 0.18      | a ghost's outline; the share of its shorter side left open at each corner |
+| `view.draw.tickRulePx`, `coarseBarShare`               | 2, 0.45      | the rule under a tick; the share of a line a coarse bar fills             |
+| `view.draw.dash.dash`, `dot`, `dashDotDot`, `dashDot`, `longShort` | "6 3" ... | each dash style's pattern, in strand widths, drawn then open |
+| `view.strand.minWidthPx`, `opacityFloor`               | 5, 0.7       | least width on the screen, and least opacity against fading cells         |
+| `view.strand.labelClearPx`                             | 2            | room a strand keeps from a label's box                                    |
+| `view.page.dim`                                        | 0.3          | share of its opacity the page keeps while a slice is shown on its own     |
+| `view.page.clearancePx`                                | 64           | how far above the page's top edge a slice shown on its own stands         |
 | `ring.radius`, `ring.radiusStep`                       | 220, 90      | ring 0's least radius; growth per ring                                    |
 | `ring.tiltStep`                                        | 28           | lean added per pair of rings                                              |
 | `ring.slotWidth`, `ring.slotHeight`                    | 140, 44      | a ring cell's box                                                         |
@@ -3109,6 +3118,19 @@ As built (U2): until the host replaces the legacy presentations, which presentat
 it is stored without the store's own name, as `slice.<id>.presentation` beside `bindingPoints`, and
 `<id>` is the slice store's `DocumentId`. It is minted when the reader first chooses from the view
 palette.
+
+As built (M2 closing round, B): the presenter's strokes, dash patterns and strands are
+`view.draw.*` and `view.strand.*` in `system://ui` (`ViewDrawConfig`), read when the presentation
+applies its settings. A canvas draws a quad's colour without its alpha, so the presenter composes a
+fading cell or ghost towards the colour the frame is cleared to, black, and gives only beams their
+alpha. Strokes are laid out in the placement's units and converted so they are that many device
+pixels where they land: a one-pixel line in layout units fell between pixel centres and a cut
+cell's left edge was missing. A strand stops short of a label that lies across its way and keeps
+the dashes it would have had. While a slice is the only thing shown (view mode ZigZag) the pages
+keep `view.page.dim` of their opacity and the placement stands `view.page.clearancePx` above the
+page's top edge. `layout()` guards the host's input: a measure that is negative, not a number or
+huge is clamped (`stretch.maxCellSpan`), a pane that is not a size lays out nothing, and the
+`zigzag.*` lengths it reads are range-checked like `stretch.*` (`sanitisedPresentation`).
 
 ______________________________________________________________________
 
@@ -3822,3 +3844,10 @@ ______________________________________________________________________
   hands any view the settings its descriptor seeded; the message for an action the shown view cannot
   do yet; `layout.slice.<id>.presentation`, which chooses the legacy visualizer or a slice view per
   slice.
+- 2026-10-14 — §9.1, §12.3 and §13 as built (M2 closing round, B): the presenter's constants are
+  `view.draw.*` and `view.strand.*` settings; fades are composed because a canvas ignores a quad's
+  alpha (the edge fade and ghost opacity of §9.1.5 had never been drawn); strokes are device-pixel
+  lengths; strands stop short of labels; the page beside a slice shown on its own is dimmed and the
+  row cleared of its top edge; a layout cannot be hung by a measure, a pane or a `zigzag.*` length
+  that is not a usable size; the presenter allocates nothing while a move animates; and a
+  scripted capture waits for a frame that ends with nothing pending.

@@ -83,6 +83,7 @@ void ViewCoordinator::apply() {
     slice_->setPresentationVisible(true);
     slice_->setPresentationTransformResolver(
         [this] { return views_.presentationTransform(); });
+    views_.dimPages(false);
     if (!bridgeCoordinator_.attached()) {
       bridgeCoordinator_.attach(*slice_);
     }
@@ -98,6 +99,7 @@ void ViewCoordinator::apply() {
   case ViewMode::XanadocOnly: {
     slice_->setPresentationVisible(false);
     slice_->setPresentationTransformResolver({});
+    views_.dimPages(false);
     if (state_) {
       state_->usesDocPages = true;
       state_->showDialog(
@@ -110,8 +112,10 @@ void ViewCoordinator::apply() {
 
   case ViewMode::ZigzagOnly: {
     slice_->setPresentationVisible(true);
-    slice_->setPresentationTransformResolver({});
+    slice_->setPresentationTransformResolver(
+        [this] { return views_.soloPlacement(); });
     slice_->setPresentationOrigin(glm::vec3{0.0F, 0.0F, 0.0F});
+    views_.dimPages(true);
     if (state_) {
       state_->usesDocPages = false;
       state_->showDialog(render::DiagnosticSeverity::Info, "View Mode: ZigZag",

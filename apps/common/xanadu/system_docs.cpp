@@ -10,6 +10,7 @@
 #include <charconv>
 #include <cmath>
 #include <filesystem>
+#include <format>
 #include <functional>
 #include <limits>
 #include <sstream>
@@ -23,6 +24,7 @@
 #include "common/xanadu/ops.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/version.hpp"
+#include <gleditor/logging.hpp>
 #include <gleditor/ranges.hpp>
 
 #include "common/xanadu/zigzag/arena_manifold.hpp"
@@ -105,7 +107,19 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "and previous L and H; cross X; enter Return; return to origin O; "
            "dismiss D; activity back B, which steps back through visits "
            "rather than document versions. overview-toggle: show or hide the "
-           "overview of every open page, Alt+Shift+V.\n";
+           "overview of every open page, Alt+Shift+V.\n"
+           "View actions, which act on the slice shown: std:view/palette "
+           "(Ctrl+Alt+V) opens the palette of views and their sub-views; "
+           "std:view/cycle (Ctrl+Alt+Shift+V) shows the next view; "
+           "std:view/subview_next and std:view/subview_prev (Ctrl+Alt+. and "
+           "Ctrl+Alt+,) show the next and the previous sub-view of the "
+           "view; std:view/bind (Ctrl+Alt+B) asks for a binding point and "
+           "what it shows, as in 'x d.across', and lists the slice's "
+           "dimensions and groups. The slice's own steps, home, hops and "
+           "swap are std:nav/step_x_pos and its kin, std:nav/jump_home, "
+           "std:nav/hop_head, std:nav/hop_tail and std:ui/swap_axes. The "
+           "hint line under a slice lists the ones its view runs, with "
+           "the keys bound here.\n";
   case SystemDocKind::Settings:
     return "Schema and Purpose\n\n"
            "Purpose:\n"
@@ -375,7 +389,35 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "in-cubic, out-cubic or in-out-cubic; hintEase is for moves a "
            "view times itself, such as pages a link brings together. "
            "Defaults are out-cubic, in-cubic, out-cubic, in-out-cubic, "
-           "in-out-cubic and in-out-quad.\n";
+           "in-out-cubic and in-out-quad.\n"
+           "view.draw.cellBorderPx, view.draw.focusBorderPx, "
+           "view.draw.ghostStrokePx and view.draw.tickRulePx: Thickness in "
+           "logical pixels of a cell's border, the focus cell's border, a "
+           "ghost's open outline and the rule under a tick. Positive; "
+           "defaults are 1, 2.5, 1 and 2.\n"
+           "view.draw.ghostSeamShare: Share of a ghost's shorter side left "
+           "open at each corner, above 0 and at most 0.5. Default is 0.18. "
+           "view.draw.coarseBarShare: Share of a text line's height a coarse "
+           "bar fills, above 0 and at most 1. Default is 0.45.\n"
+           "view.draw.dash.dash, view.draw.dash.dot, "
+           "view.draw.dash.dashDotDot, view.draw.dash.dashDot and "
+           "view.draw.dash.longShort: The pattern each dash style is drawn "
+           "with, as positive lengths in strand widths separated by spaces, "
+           "drawn then open, an even number of them. Defaults are '6 3', "
+           "'1 2', '6 2 1 2 1 2', '6 2 1 2' and '10 3 3 3'.\n"
+           "view.strand.minWidthPx: Least width on the screen of a strand "
+           "between cells, in logical pixels, so the shortest strand still "
+           "shows its dimension's colour and dash. Default is 5. "
+           "view.strand.opacityFloor: Least opacity of a strand however "
+           "faint the cells it joins, above 0 and at most 1. Default is "
+           "0.7. view.strand.labelClearPx: Space kept between a strand and "
+           "a label's box, in logical pixels. Default is 2.\n"
+           "view.page.dim: Share of its own opacity the page beside a slice "
+           "presentation keeps while the presentation is shown, 0 to 1; 1 "
+           "leaves the page alone. Default is 0.3. view.page.clearancePx: "
+           "How far above the page's top edge the focus row stands, in "
+           "logical pixels, so the page does not cut through the row. "
+           "Default is 64.\n";
   case SystemDocKind::Pouches:
     return "Schema and Purpose\n\n"
            "Purpose:\n"
@@ -1289,6 +1331,85 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
                        "Thickness of the compass's dash swatches, in logical "
                        "pixels",
                        compass.strokePx),
+        });
+    const ViewDrawConfig draw;
+    const auto dashSpec = [](std::string_view name, const char *notes,
+                             const std::vector<float> &pattern) {
+      return SettingSpec{
+          .name    = std::string(name),
+          .notes   = notes,
+          .schemas = {{.expectedTypes = {"string"},
+                       .defaultValues = {dashPatternText(pattern)}}}};
+    };
+    specs.insert(
+        specs.end(),
+        {
+            lengthSpec(settings::kViewDrawCellBorderPx,
+                       "Thickness of a cell's border in a slice presentation, "
+                       "in logical pixels",
+                       draw.cellBorderPx),
+            lengthSpec(settings::kViewDrawFocusBorderPx,
+                       "Thickness of the focus cell's border, in logical "
+                       "pixels",
+                       draw.focusBorderPx),
+            lengthSpec(settings::kViewDrawGhostStrokePx,
+                       "Thickness of a ghost's open outline, in logical "
+                       "pixels",
+                       draw.ghostStrokePx),
+            lengthSpec(settings::kViewDrawGhostSeamShare,
+                       "Share of a ghost's shorter side left open at each "
+                       "corner, above 0 and at most 0.5",
+                       draw.ghostSeamShare),
+            lengthSpec(settings::kViewDrawTickRulePx,
+                       "Thickness of the rule in a dimension's colour under "
+                       "a tick, in logical pixels",
+                       draw.tickRulePx),
+            lengthSpec(settings::kViewDrawCoarseBarShare,
+                       "Share of a text line's height a coarse bar fills, "
+                       "above 0 and at most 1",
+                       draw.coarseBarShare),
+            dashSpec(settings::kViewDrawDashDash,
+                     "Dash pattern of a dimension drawn dashed: positive "
+                     "lengths in strand widths, drawn then open, separated "
+                     "by spaces, an even number of them",
+                     draw.dashes[0]),
+            dashSpec(settings::kViewDrawDashDot,
+                     "Dash pattern of a dimension drawn dotted, as for "
+                     "view.draw.dash.dash",
+                     draw.dashes[1]),
+            dashSpec(settings::kViewDrawDashDashDotDot,
+                     "Dash pattern of a dimension drawn dash-dot-dot, as for "
+                     "view.draw.dash.dash",
+                     draw.dashes[2]),
+            dashSpec(settings::kViewDrawDashDashDot,
+                     "Dash pattern of a dimension drawn dash-dot, as for "
+                     "view.draw.dash.dash",
+                     draw.dashes[3]),
+            dashSpec(settings::kViewDrawDashLongShort,
+                     "Dash pattern of a dimension drawn long-short, as for "
+                     "view.draw.dash.dash",
+                     draw.dashes[4]),
+            lengthSpec(settings::kViewStrandMinWidthPx,
+                       "Least width on the screen of a strand between cells, "
+                       "in logical pixels",
+                       draw.strandMinWidthPx),
+            lengthSpec(settings::kViewStrandOpacityFloor,
+                       "Least opacity of a strand however faint the cells it "
+                       "joins, above 0 and at most 1",
+                       draw.strandOpacityFloor),
+            lengthSpec(settings::kViewStrandLabelClearPx,
+                       "Space kept between a strand and a label's box, in "
+                       "logical pixels",
+                       draw.strandLabelClearPx),
+            lengthSpec(settings::kViewPageDim,
+                       "Share of its own opacity the page beside a slice "
+                       "presentation keeps while it is shown, 0 to 1; 1 "
+                       "leaves the page alone",
+                       draw.pageDim),
+            lengthSpec(settings::kViewPageClearancePx,
+                       "How far above the page's top edge a slice "
+                       "presentation's focus row stands, in logical pixels",
+                       draw.pageClearancePx),
         });
     for (std::size_t i = 0; i < gleditor::ui::kFontRoleCount; ++i) {
       const auto role  = static_cast<gleditor::ui::FontRole>(i);
@@ -3341,6 +3462,45 @@ WalkRankingConfig WalkRankingConfig::fromStore(const Store &store) {
   return cfg;
 }
 
+ZigzagPresentationConfig
+sanitisedPresentation(const ZigzagPresentationConfig &config) {
+  const ZigzagPresentationConfig defaults;
+  ZigzagPresentationConfig out = config;
+  const auto usable            = [](const float value, const bool zeroOk) {
+    return std::isfinite(value) && value <= kMaxPresentationLengthPx &&
+           (zeroOk ? value >= 0.0F : value > 0.0F);
+  };
+  const auto check = [&](const std::string_view key,
+                         float ZigzagPresentationConfig::*field,
+                         const bool zeroOk) {
+    if (!usable(out.*field, zeroOk)) {
+      GLEDITOR_LOG_WARN("system.layout",
+                        "{} = {} is not a usable length; using {}", key,
+                        out.*field, defaults.*field);
+      out.*field = defaults.*field;
+    }
+  };
+  using Config = ZigzagPresentationConfig;
+  check(settings::kZigzagCellHorizontalPaddingPx,
+        &Config::cellHorizontalPaddingPx, true);
+  check(settings::kZigzagCellVerticalPaddingPx, &Config::cellVerticalPaddingPx,
+        true);
+  check(settings::kZigzagCellBandGapPx, &Config::cellBandGapPx, true);
+  check(settings::kZigzagContentMaxWidthPx, &Config::contentMaxWidthPx, false);
+  check(settings::kZigzagTopologyMaxWidthPx, &Config::topologyMaxWidthPx,
+        false);
+  check(settings::kZigzagRankClearancePx, &Config::rankClearancePx, true);
+  check(settings::kZigzagHudHorizontalPaddingPx,
+        &Config::hudHorizontalPaddingPx, true);
+  check(settings::kZigzagHudVerticalPaddingPx, &Config::hudVerticalPaddingPx,
+        true);
+  check(settings::kZigzagHudColumnGapPx, &Config::hudColumnGapPx, true);
+  check(settings::kZigzagConnectionBeamWidthPx, &Config::connectionBeamWidthPx,
+        true);
+  check(settings::kZigzagMinReadableTextPx, &Config::minReadableTextPx, true);
+  return out;
+}
+
 LayoutConfig LayoutConfig::fromStore(const Store &store) {
   LayoutConfig cfg;
   if (store.opCount() == 0 || store.homeCell() == zigzag::noCell) {
@@ -3498,6 +3658,8 @@ LayoutConfig LayoutConfig::fromStore(const Store &store) {
       model.getDouble(settings::kZigzagMinReadableTextPx,
                       static_cast<double>(cfg.zigzag.minReadableTextPx)));
 
+  cfg.zigzag = sanitisedPresentation(cfg.zigzag);
+
   cfg.bridge = BridgeRuntimeConfig::fromSystemDocs(store);
 
   return cfg;
@@ -3649,6 +3811,103 @@ CompassConfig CompassConfig::fromStore(const Store &store) {
   positive(settings::kViewCompassMarginPx, cfg.marginPx);
   positive(settings::kViewCompassPaddingPx, cfg.paddingPx);
   positive(settings::kViewCompassStrokePx, cfg.strokePx);
+  return cfg;
+}
+
+std::string dashPatternText(const std::span<const float> pattern) {
+  std::string out;
+  for (const auto length : pattern) {
+    out += out.empty() ? "" : " ";
+    out += std::format("{}", length);
+  }
+  return out;
+}
+
+namespace {
+
+/// The lengths in @p text, or nothing when it is not an even number of
+/// positive finite lengths.
+[[nodiscard]] std::optional<std::vector<float>>
+dashPatternFrom(const std::string_view text) {
+  std::vector<float> out;
+  std::istringstream words{std::string{text}};
+  std::string word;
+  while (words >> word) {
+    float value{};
+    const auto end           = word.data() + word.size();
+    const auto [stop, error] = std::from_chars(word.data(), end, value);
+    if (std::errc{} != error || stop != end || !std::isfinite(value) ||
+        value <= 0.0F) {
+      return std::nullopt;
+    }
+    out.push_back(value);
+  }
+  if (out.empty() || 0 != out.size() % 2) {
+    return std::nullopt;
+  }
+  return out;
+}
+
+} // namespace
+
+ViewDrawConfig ViewDrawConfig::fromStore(const Store &store) {
+  ViewDrawConfig cfg;
+  if (store.opCount() == 0 || store.homeCell() == zigzag::noCell) {
+    return cfg;
+  }
+  const auto model = SystemStoreModel::fromStore(store);
+  // A value outside (least, most] -- or [least, most] when @p closed -- keeps
+  // the default.
+  const auto ranged = [&model](const std::string_view key, float &into,
+                               const float least, const float most,
+                               const bool closed) {
+    const auto value = model.getDouble(key, double{into});
+    const bool above = closed ? value >= double{least} : value > double{least};
+    if (std::isfinite(value) && above && value <= double{most}) {
+      into = static_cast<float>(value);
+    } else if (value != double{into}) {
+      GLEDITOR_LOG_WARN("system.ui", "{} = {} is out of range; using {}", key,
+                        value, into);
+    }
+  };
+  constexpr float kMost = kMaxPresentationLengthPx;
+  ranged(settings::kViewDrawCellBorderPx, cfg.cellBorderPx, 0.0F, kMost, false);
+  ranged(settings::kViewDrawFocusBorderPx, cfg.focusBorderPx, 0.0F, kMost,
+         false);
+  ranged(settings::kViewDrawGhostStrokePx, cfg.ghostStrokePx, 0.0F, kMost,
+         false);
+  ranged(settings::kViewDrawGhostSeamShare, cfg.ghostSeamShare, 0.0F, 0.5F,
+         true);
+  ranged(settings::kViewDrawTickRulePx, cfg.tickRulePx, 0.0F, kMost, false);
+  ranged(settings::kViewDrawCoarseBarShare, cfg.coarseBarShare, 0.0F, 1.0F,
+         false);
+  ranged(settings::kViewStrandMinWidthPx, cfg.strandMinWidthPx, 0.0F, kMost,
+         true);
+  ranged(settings::kViewStrandOpacityFloor, cfg.strandOpacityFloor, 0.0F, 1.0F,
+         false);
+  ranged(settings::kViewStrandLabelClearPx, cfg.strandLabelClearPx, 0.0F, kMost,
+         true);
+  ranged(settings::kViewPageDim, cfg.pageDim, 0.0F, 1.0F, true);
+  ranged(settings::kViewPageClearancePx, cfg.pageClearancePx, 0.0F, kMost,
+         true);
+  const std::array<std::string_view, 5> keys{
+      settings::kViewDrawDashDash, settings::kViewDrawDashDot,
+      settings::kViewDrawDashDashDotDot, settings::kViewDrawDashDashDot,
+      settings::kViewDrawDashLongShort};
+  for (std::size_t i = 0; i < keys.size(); ++i) {
+    const auto text = model.getString(keys[i], std::string{});
+    if (text.empty()) {
+      continue;
+    }
+    if (auto pattern = dashPatternFrom(text)) {
+      cfg.dashes[i] = std::move(*pattern);
+    } else {
+      GLEDITOR_LOG_WARN("system.ui",
+                        "{} = \"{}\" is not a dash pattern; "
+                        "using {}",
+                        keys[i], text, dashPatternText(cfg.dashes[i]));
+    }
+  }
   return cfg;
 }
 

@@ -263,9 +263,15 @@ void registerZigzagCommands(gleditor::CommandTable &table,
        "delete currently focused cell", moving("delete-focus-cell"));
 }
 
-std::pair<std::string, std::string>
-zigzagKeyHints(const gleditor::CommandTable &table,
-               const std::string_view toggle) {
+namespace {
+
+using HintEntries = std::initializer_list<
+    std::pair<std::string_view, std::initializer_list<std::string_view>>>;
+
+/// "Label: A/B" for whichever of the named actions are bound; nothing at
+/// all for a hint with none, rather than advertising a key that is not there.
+std::string hintLine(const gleditor::CommandTable &table,
+                     const HintEntries entries) {
   const auto key = [&table](const std::string_view name) -> std::string {
     const auto bound = table.bindingFor(name);
     if (!bound || 0 == bound->first) {
@@ -273,54 +279,100 @@ zigzagKeyHints(const gleditor::CommandTable &table,
     }
     return gleditor::formatKeyCombo(bound->first, bound->second);
   };
-  // "Label: A/B" for whichever of the named actions are bound; nothing at
-  // all for a hint with none, rather than advertising a key that is not there.
-  const auto line =
-      [&key](const std::initializer_list<std::pair<
-                 std::string_view, std::initializer_list<std::string_view>>>
-                 entries) {
-        std::string out;
-        for (const auto &[label, names] : entries) {
-          std::string keys;
-          for (const auto name : names) {
-            if (auto chord = key(name); !chord.empty()) {
-              keys += (keys.empty() ? "" : "/") + chord;
-            }
-          }
-          if (!keys.empty()) {
-            out +=
-                std::format("{}{}: {}", out.empty() ? "" : " | ", label, keys);
-          }
-        }
-        return out;
-      };
-  auto here = line({
-      {"Step",
-       {settings::kKeymapStepXNeg, settings::kKeymapStepXPos,
-        settings::kKeymapStepYPos, settings::kKeymapStepYNeg}},
-      {"Home", {settings::kKeymapJumpHome}},
-      {"Insert",
-       {settings::kKeymapInsertCellXPos, settings::kKeymapInsertCellYPos}},
-      {"Edit", {settings::kKeymapEditCell}},
-      {"Mark", {settings::kKeymapMarkCell}},
-      {"Link", {settings::kKeymapLinkMarkedXPos}},
-      {"Delete", {settings::kKeymapDeleteFocusCell}},
-      {"Omnibar", {settings::kKeymapOpenCommandBarSlash}},
-  });
-  if (!toggle.empty()) {
-    const auto back =
-        line({{"Back to text", {settings::kKeymapDismissOverlay, toggle}}});
-    here += (here.empty() ? "" : " | ") + back;
+  std::string out;
+  for (const auto &[label, names] : entries) {
+    std::string keys;
+    for (const auto name : names) {
+      if (auto chord = key(name); !chord.empty()) {
+        keys += (keys.empty() ? "" : "/") + chord;
+      }
+    }
+    if (!keys.empty()) {
+      out += std::format("{}{}: {}", out.empty() ? "" : " | ", label, keys);
+    }
   }
-  auto elsewhere = line({
-      {"ZigZag", {toggle}},
-      {"New slice", {settings::kKeymapNewSlice}},
-      {"Home", {settings::kKeymapZigzagJumpHome}},
-      {"Step",
-       {settings::kKeymapZigzagStepXNeg, settings::kKeymapZigzagStepXPos,
-        settings::kKeymapZigzagStepYPos, settings::kKeymapZigzagStepYNeg}},
-  });
-  return {std::move(here), std::move(elsewhere)};
+  return out;
+}
+
+/// What a keyboard that is not in the slice can still do, whichever
+/// presentation shows it.
+std::string elsewhereHints(const gleditor::CommandTable &table,
+                           const std::string_view toggle) {
+  return hintLine(
+      table,
+      {
+          {"ZigZag", {toggle}},
+          {"New slice", {settings::kKeymapNewSlice}},
+          {"Home", {settings::kKeymapZigzagJumpHome}},
+          {"Step",
+           {settings::kKeymapZigzagStepXNeg, settings::kKeymapZigzagStepXPos,
+            settings::kKeymapZigzagStepYPos, settings::kKeymapZigzagStepYNeg}},
+      });
+}
+
+std::string backToText(const gleditor::CommandTable &table,
+                       const std::string_view toggle,
+                       const std::string_view hints) {
+  if (toggle.empty()) {
+    return std::string{hints};
+  }
+  const auto back = hintLine(
+      table, {{"Back to text", {settings::kKeymapDismissOverlay, toggle}}});
+  return std::string{hints} + (hints.empty() || back.empty() ? "" : " | ") +
+         back;
+}
+
+} // namespace
+
+std::pair<std::string, std::string>
+zigzagKeyHints(const gleditor::CommandTable &table,
+               const std::string_view toggle) {
+  auto here = hintLine(
+      table,
+      {
+          {"Step",
+           {settings::kKeymapStepXNeg, settings::kKeymapStepXPos,
+            settings::kKeymapStepYPos, settings::kKeymapStepYNeg}},
+          {"Home", {settings::kKeymapJumpHome}},
+          {"Insert",
+           {settings::kKeymapInsertCellXPos, settings::kKeymapInsertCellYPos}},
+          {"Edit", {settings::kKeymapEditCell}},
+          {"Mark", {settings::kKeymapMarkCell}},
+          {"Link", {settings::kKeymapLinkMarkedXPos}},
+          {"Delete", {settings::kKeymapDeleteFocusCell}},
+          {"Omnibar", {settings::kKeymapOpenCommandBarSlash}},
+      });
+  return {backToText(table, toggle, here), elsewhereHints(table, toggle)};
+}
+
+std::pair<std::string, std::string>
+viewKeyHints(const gleditor::CommandTable &table,
+             const std::string_view toggle) {
+  // Only what a view presentation runs: its own step, hop, swap and home,
+  // and the view commands. A key it would refuse is not advertised.
+  // Two lines, since one holds fewer words than a view has keys; the chrome
+  // draws each line of a hint on a row of its own.
+  const auto moving = hintLine(
+      table, {
+                 {"Step",
+                  {settings::kKeymapStepXNeg, settings::kKeymapStepXPos,
+                   settings::kKeymapStepYPos, settings::kKeymapStepYNeg}},
+                 {"Hop", {settings::kKeymapHopHead, settings::kKeymapHopTail}},
+                 {"Swap", {settings::kKeymapSwapXY}},
+                 {"Home", {settings::kKeymapJumpHome}},
+             });
+  const auto views =
+      hintLine(table, {
+                          {"Views", {settings::kKeymapViewPalette}},
+                          {"Bind", {settings::kKeymapViewBind}},
+                          {"Sub-view",
+                           {settings::kKeymapViewSubviewNext,
+                            settings::kKeymapViewSubviewPrev}},
+                          {"Cycle", {settings::kKeymapViewCycle}},
+                      });
+  const auto second = backToText(table, toggle, views);
+  return {moving + (moving.empty() || second.empty() ? "" : "\n") + second,
+          elsewhereHints(table, toggle)};
 }
 
 } // namespace zigzag

@@ -5,6 +5,7 @@
 #ifndef XUDU_SYSTEM_DOCS_H
 #define XUDU_SYSTEM_DOCS_H
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -340,6 +341,39 @@ inline constexpr std::string_view kViewCompassPaddingPx =
     "view.compass.paddingPx";
 inline constexpr std::string_view kViewCompassStrokePx =
     "view.compass.strokePx";
+// How a slice presentation draws (view-system.md §12.3): the stroke
+// vocabulary, the dash patterns, the strands between cells, and how far the
+// page the slice stands beside is dimmed. Lengths are logical pixels; each
+// dash pattern is a string of positive lengths in beam widths, alternating
+// drawn and open, such as "6 3".
+inline constexpr std::string_view kViewDrawCellBorderPx =
+    "view.draw.cellBorderPx";
+inline constexpr std::string_view kViewDrawFocusBorderPx =
+    "view.draw.focusBorderPx";
+inline constexpr std::string_view kViewDrawGhostStrokePx =
+    "view.draw.ghostStrokePx";
+inline constexpr std::string_view kViewDrawGhostSeamShare =
+    "view.draw.ghostSeamShare";
+inline constexpr std::string_view kViewDrawTickRulePx = "view.draw.tickRulePx";
+inline constexpr std::string_view kViewDrawCoarseBarShare =
+    "view.draw.coarseBarShare";
+inline constexpr std::string_view kViewDrawDashDash = "view.draw.dash.dash";
+inline constexpr std::string_view kViewDrawDashDot  = "view.draw.dash.dot";
+inline constexpr std::string_view kViewDrawDashDashDotDot =
+    "view.draw.dash.dashDotDot";
+inline constexpr std::string_view kViewDrawDashDashDot =
+    "view.draw.dash.dashDot";
+inline constexpr std::string_view kViewDrawDashLongShort =
+    "view.draw.dash.longShort";
+inline constexpr std::string_view kViewStrandMinWidthPx =
+    "view.strand.minWidthPx";
+inline constexpr std::string_view kViewStrandOpacityFloor =
+    "view.strand.opacityFloor";
+inline constexpr std::string_view kViewStrandLabelClearPx =
+    "view.strand.labelClearPx";
+inline constexpr std::string_view kViewPageDim = "view.page.dim";
+inline constexpr std::string_view kViewPageClearancePx =
+    "view.page.clearancePx";
 // The overview panel. Colours are RGBA8, most significant byte red.
 inline constexpr std::string_view kOverviewVisible  = "overview.visible";
 inline constexpr std::string_view kOverviewWidthPx  = "overview.widthPx";
@@ -1261,6 +1295,24 @@ struct ZigzagPresentationConfig {
   }
 };
 
+/// Largest length a zigzag.* setting may hold, in logical pixels. Not a
+/// tunable: a layout that adds lengths of this order to float coordinates
+/// stops advancing (a padding of 1e30 added to a position of 1e3 is the
+/// position), and a loop that walks until it clears a box never ends.
+inline constexpr float kMaxPresentationLengthPx = 100000.0F;
+
+/**
+ * @brief @p config with every field that is not a usable length replaced by
+ *        its default, each replacement logged.
+ *
+ * Usable is finite, at most kMaxPresentationLengthPx, at least zero, and above
+ * zero for the two content widths, which a layout divides by. system://layout
+ * is hand-editable, and a cell layout runs on the render thread where a value
+ * it cannot place around must degrade, not hang.
+ */
+[[nodiscard]] ZigzagPresentationConfig
+sanitisedPresentation(const ZigzagPresentationConfig &config);
+
 struct LayoutConfig {
   std::uint32_t columns{2};
   float pageWidthPx{800.0F};
@@ -1466,6 +1518,59 @@ struct CompassConfig {
   /// A length that is not finite and positive keeps its default.
   [[nodiscard]] static CompassConfig fromStore(const Store &store);
 };
+
+/**
+ * @brief How a slice presentation draws what its view placed (view-system.md
+ *        §12.3): strokes, dash patterns, strands and the dimmed page.
+ *
+ * In system://ui with the other chrome. The defaults are the ones
+ * defaultSettingSpecs() seeds, so the two cannot drift. Each field has a
+ * range, and a stored value outside it keeps its default rather than
+ * drawing nonsense.
+ */
+struct ViewDrawConfig {
+  /// A stored cell's edge: the thinnest line that reads as hard.
+  float cellBorderPx{1.0F};
+  /// The focus's border: heavier than any edge.
+  float focusBorderPx{2.5F};
+  float ghostStrokePx{1.0F};
+  /// Share of a ghost's shorter side left open at each corner: the seam that
+  /// says "view-only", at most a half.
+  float ghostSeamShare{0.18F};
+  /// Under a tick, in its dimension's colour.
+  float tickRulePx{2.0F};
+  /// Share of a line's height a coarse bar fills, above 0 and at most 1.
+  float coarseBarShare{0.45F};
+  /// Dash patterns in beam widths, drawn then open, one per dash style that
+  /// has one: Dash, Dot, DashDotDot, DashDot, LongShort.
+  std::array<std::vector<float>, 5> dashes{
+      std::vector<float>{6.0F, 3.0F}, std::vector<float>{1.0F, 2.0F},
+      std::vector<float>{6.0F, 2.0F, 1.0F, 2.0F, 1.0F, 2.0F},
+      std::vector<float>{6.0F, 2.0F, 1.0F, 2.0F},
+      std::vector<float>{10.0F, 3.0F, 3.0F, 3.0F}};
+  /// A strand is never thinner than this on the screen, whatever the
+  /// placement's scale: a link between cells one gap apart is the shortest
+  /// line a view draws and must still show its dimension's hue and dash.
+  float strandMinWidthPx{5.0F};
+  /// A strand is never fainter than this, however faint the cells it joins:
+  /// the cue of a dimension is the strand.
+  float strandOpacityFloor{0.7F};
+  /// Space kept between a strand and a label's box, in logical pixels.
+  float strandLabelClearPx{2.0F};
+  /// Share of its own opacity the xanadoc page the slice stands beside keeps
+  /// while a slice presentation is shown; 1 leaves the page alone.
+  float pageDim{0.3F};
+  /// How far above the page's top edge the focus row stands, in logical
+  /// pixels, so the page never cuts through the row the reader is on.
+  float pageClearancePx{64.0F};
+
+  bool operator==(const ViewDrawConfig &) const = default;
+
+  [[nodiscard]] static ViewDrawConfig fromStore(const Store &store);
+};
+
+/// A dash pattern as the setting stores it: lengths separated by spaces.
+[[nodiscard]] std::string dashPatternText(std::span<const float> pattern);
 
 struct UIConfig {
   float uiScale{1.0F}, uiFontScale{1.0F};

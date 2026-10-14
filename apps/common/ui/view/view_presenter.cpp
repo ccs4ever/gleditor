@@ -11,6 +11,8 @@
 #include <format>
 #include <limits>
 #include <string>
+#include <tuple>
+#include <utility>
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -31,17 +33,42 @@ namespace {
 
 constexpr const char *kCategory = "view.presenter";
 
+/// SubjectIds in the order the shown set is kept in.
+[[nodiscard]] bool subjectBefore(const SubjectId &a,
+                                 const SubjectId &b) noexcept {
+  return std::tie(a.kind, a.slot, a.value, a.epoch) <
+         std::tie(b.kind, b.slot, b.value, b.epoch);
+}
+
 /// One quad per placed thing is an overlay of the picking target; zero there
 /// means nothing was drawn, so the first item is tag one.
 constexpr std::uint32_t kFirstTag = 1;
 
-/// Packed RGBA with its alpha scaled by @p opacity.
-[[nodiscard]] std::uint32_t faded(const std::uint32_t rgba,
-                                  const float opacity) noexcept {
+/// Packed RGBA with its alpha scaled by @p opacity: for what carries alpha,
+/// which is a beam.
+[[nodiscard]] std::uint32_t withAlpha(const std::uint32_t rgba,
+                                      const float opacity) noexcept {
   const auto alpha = static_cast<float>(rgba & 0xFFU) / 255.0F;
   return (rgba & 0xFFFFFF00U) |
          static_cast<std::uint32_t>(
              std::lround(std::clamp(alpha * opacity, 0.0F, 1.0F) * 255.0F));
+}
+
+/// @p rgba faded by @p opacity into the scene behind it, which is black.
+/// A canvas draws a quad's colour without its alpha -- the one opacity it has
+/// is the whole draw's -- so a cell that fades, or a ghost that is faint, is
+/// composed here, towards the colour the frame is cleared to. (The finding
+/// behind this: every cell and ghost was drawn at full strength, the edge fade
+/// of §9.1.5 never seen.)
+[[nodiscard]] std::uint32_t faded(const std::uint32_t rgba,
+                                  const float opacity) noexcept {
+  const float keep  = std::clamp(opacity, 0.0F, 1.0F);
+  std::uint32_t out = rgba & 0xFFU;
+  for (const unsigned shift : {24U, 16U, 8U}) {
+    const auto channel = static_cast<float>((rgba >> shift) & 0xFFU);
+    out |= static_cast<std::uint32_t>(std::lround(channel * keep)) << shift;
+  }
+  return out;
 }
 
 [[nodiscard]] std::uint32_t themed(const glm::vec4 &colour,
@@ -92,28 +119,21 @@ std::string spokenMessage(const ViewMessage message,
   return out;
 }
 
-std::span<const float> dashPattern(const DashStyle style) noexcept {
-  // In beam widths, drawn then open. Each reads apart from its neighbours in
-  // U1's order at the widths edges are drawn at.
-  static constexpr std::array<float, 2> kDash{6.0F, 3.0F};
-  static constexpr std::array<float, 2> kDot{1.0F, 2.0F};
-  static constexpr std::array<float, 6> kDashDotDot{6.0F, 2.0F, 1.0F,
-                                                    2.0F, 1.0F, 2.0F};
-  static constexpr std::array<float, 4> kDashDot{6.0F, 2.0F, 1.0F, 2.0F};
-  static constexpr std::array<float, 4> kLongShort{10.0F, 3.0F, 3.0F, 3.0F};
+std::span<const float> dashPattern(const ViewDrawConfig &draw,
+                                   const DashStyle style) noexcept {
   switch (style) {
   case DashStyle::Solid:
     return {};
   case DashStyle::Dash:
-    return kDash;
+    return draw.dashes[0];
   case DashStyle::Dot:
-    return kDot;
+    return draw.dashes[1];
   case DashStyle::DashDotDot:
-    return kDashDotDot;
+    return draw.dashes[2];
   case DashStyle::DashDot:
-    return kDashDot;
+    return draw.dashes[3];
   case DashStyle::LongShort:
-    return kLongShort;
+    return draw.dashes[4];
   }
   return {};
 }
@@ -142,6 +162,17 @@ void SlicePresenter::deviceReady(render::RenderDevice &device,
   drawnStamp_.reset();
   chromeStamp_.reset();
   compassStamp_.reset();
+}
+
+SlicePresenter *SlicePresenter::setDrawConfig(const ViewDrawConfig &draw) {
+  if (draw == draw_) {
+    return this;
+  }
+  draw_ = draw;
+  drawnStamp_.reset();
+  chromeStamp_.reset();
+  compassStamp_.reset();
+  return this;
 }
 
 bool SlicePresenter::setTypography(const ui::UiMetrics &metrics,
@@ -292,6 +323,8 @@ void SlicePresenter::rebuild(gleditor::FrameContext &ctx,
                              const PresentedPlacement &placement,
                              const PresentedWords &words) {
   ++rebuilds_;
+  toClip_             = toClip;
+  screenWidth_        = static_cast<float>(ctx.screenWidth);
   const auto &records = placement.records;
   const bool first    = !drawnStamp_.has_value();
   for (auto &plane : planes_) {
@@ -308,21 +341,37 @@ void SlicePresenter::rebuild(gleditor::FrameContext &ctx,
   drawnContent_.assign(items.size(), ContentMode::None);
   drawnGhost_.assign(items.size(), false);
   targets_.assign(items.size(), nullptr);
-  picks_.clear();
-  std::unordered_set<SubjectId> shown;
+  shownNext_.clear();
 
-  const auto target = [&](const std::size_t index, const SubjectId subject,
-                          const zigzag::CellRef cell) {
-    auto made = std::make_shared<const render::PickSemanticTarget>(
-        render::PickSemanticTarget{
-            .documentId   = std::string(placement.documentId),
-            .microversion = std::string(placement.version),
-            .cellRef      = cell});
-    picks_.emplace(made.get(), subject);
-    targets_[index] = std::move(made);
+  // Which edge a label names, and where each label lies, found once rather
+  // than by a scan of the edges for every label and every strand.
+  labelRelation_.assign(items.size(), std::nullopt);
+  for (const auto &edge : records.edges()) {
+    if (edge.label && *edge.label < labelRelation_.size()) {
+      labelRelation_[*edge.label] = edge.relation;
+    }
+  }
+  labelBoxes_.clear();
+  for (const auto &item : items) {
+    if (SubjectKind::Label != item.id.kind) {
+      continue;
+    }
+    const float clear = metrics_.px(draw_.strandLabelClearPx);
+    labelBoxes_.push_back({.lo = {item.centre.x - (item.width / 2.0F) - clear,
+                                  item.centre.y - (item.height / 2.0F) - clear},
+                           .hi = {item.centre.x + (item.width / 2.0F) + clear,
+                                  item.centre.y + (item.height / 2.0F) + clear},
+                           .z  = item.centre.z});
+  }
+
+  const auto target = [&](const std::size_t index, const zigzag::CellRef cell) {
+    targets_[index] = targetFor(cell, placement);
   };
   const float pxPerLogical = metrics_.px(1.0F);
-  const auto clears        = [&](const PlacedItem &item) {
+  const auto wasShown      = [this](const SubjectId id) {
+    return std::ranges::binary_search(shownWithContent_, id, subjectBefore);
+  };
+  const auto clears = [&](const PlacedItem &item) {
     // The clip's hysteresis (§9.1.5): a cell not drawn last time must clear
     // the edge by the margin, so one resting there does not flicker.
     const auto mvp = toClip * glm::translate(glm::mat4{1.0F}, item.centre);
@@ -331,7 +380,7 @@ void SlicePresenter::rebuild(gleditor::FrameContext &ctx,
     const float margin =
         perUnit > 0.0F ? placement.clipMarginPx * pxPerLogical / perUnit : 0.0F;
     return insideFrustum(mvp, (item.width / 2.0F) + margin,
-                                (item.height / 2.0F) + margin);
+                         (item.height / 2.0F) + margin);
   };
 
   for (std::size_t i = 0; i < items.size(); ++i) {
@@ -351,11 +400,10 @@ void SlicePresenter::rebuild(gleditor::FrameContext &ctx,
     case SubjectKind::Cell: {
       const bool focus = 0U != (item.flags & itemFocus);
       bool ghost       = isGhost(item);
-      if (!ghost && !focus && !first && !shownWithContent_.contains(item.id) &&
-          !clears(item)) {
+      if (!ghost && !focus && !first && !wasShown(item.id) && !clears(item)) {
         ghost = true;
       }
-      target(i, item.id, static_cast<zigzag::CellRef>(item.id.value));
+      target(i, static_cast<zigzag::CellRef>(item.id.value));
       if (ghost) {
         auto stand =
             ghostOf(item, std::min(item.opacity, placement.ghostOpacity));
@@ -363,7 +411,7 @@ void SlicePresenter::rebuild(gleditor::FrameContext &ctx,
         drawnGhost_[i] = true;
         break;
       }
-      shown.insert(item.id);
+      shownNext_.push_back(item.id);
       const bool marked = std::ranges::any_of(
           placement.highlights, [&](const CellHighlight &highlight) {
             return highlight.cell == item.id.value;
@@ -373,8 +421,7 @@ void SlicePresenter::rebuild(gleditor::FrameContext &ctx,
                                    : ui::rgba(theme_.colours.border);
       drawCell(ctx.state, plane, item, item.content,
                faded(border, item.opacity),
-               focus ? PresenterStrokes::kFocusBorderPx
-                     : PresenterStrokes::kCellBorderPx,
+               focus ? draw_.focusBorderPx : draw_.cellBorderPx,
                words.text(item.id), placement);
       drawnContent_[i] = item.content;
       break;
@@ -382,18 +429,15 @@ void SlicePresenter::rebuild(gleditor::FrameContext &ctx,
     case SubjectKind::Marker:
       if (isGhost(item)) {
         // A ghost marks the cell it stands for: clicking it goes there.
-        target(i, item.id, static_cast<zigzag::CellRef>(item.id.value));
+        target(i, static_cast<zigzag::CellRef>(item.id.value));
         drawGhost(plane, item);
         drawnGhost_[i] = true;
       }
       break;
     case SubjectKind::Label: {
       std::optional<std::uint32_t> rule;
-      for (const auto &edge : records.edges()) {
-        if (edge.label == i) {
-          rule = faded(words.cue(edge.relation).colour, item.opacity);
-          break;
-        }
+      if (labelRelation_[i]) {
+        rule = faded(words.cue(*labelRelation_[i]).colour, item.opacity);
       }
       drawLabel(ctx.state, plane, item, words.text(item.id), rule);
       drawnContent_[i] = ContentMode::Full;
@@ -407,8 +451,10 @@ void SlicePresenter::rebuild(gleditor::FrameContext &ctx,
       break;
     }
   }
+  const float edgeUnits =
+      screenScaleAt(toClip, static_cast<float>(ctx.screenWidth));
   for (const auto &edge : records.edges()) {
-    addEdge(edge, placement, words);
+    addEdge(edge, placement, words, edgeUnits);
   }
 
   for (auto &plane : planes_) {
@@ -418,12 +464,25 @@ void SlicePresenter::rebuild(gleditor::FrameContext &ctx,
     }
   }
   beams_->commit();
-  shownWithContent_ = std::move(shown);
-  drawnStamp_       = placement.stamp;
-  drawnTypography_  = typographyStamp_;
-  projectedWith_    = glm::mat4{0.0F};
+  std::ranges::sort(shownNext_, subjectBefore);
+  shownWithContent_.swap(shownNext_);
+  drawnStamp_      = placement.stamp;
+  drawnTypography_ = typographyStamp_;
+  projectedWith_   = glm::mat4{0.0F};
   GLEDITOR_LOG_DEBUG(kCategory, "rebuilt {} items, {} edges, {} planes",
                      items.size(), records.edges().size(), planes_.size());
+}
+
+float SlicePresenter::deviceStroke(const float px, const glm::vec3 &at) const {
+  // Strokes are laid out in local units and the placement is drawn at
+  // whatever scale the camera and the readable-text rule give it: a one-pixel
+  // line in local units can land on a fraction of a device pixel, and a
+  // vertical one then drops out between pixel centres altogether (M2 finding
+  // B4: a cut cell's left edge was missing). Lengths here are the screen's.
+  const float perUnit = screenScaleAt(
+      toClip_ * glm::translate(glm::mat4{1.0F}, at), screenWidth_);
+  const float wanted = metrics_.px(px);
+  return std::isfinite(perUnit) && perUnit > 0.0F ? wanted / perUnit : wanted;
 }
 
 void SlicePresenter::drawCell(RenderState &state, Plane &plane,
@@ -436,7 +495,7 @@ void SlicePresenter::drawCell(RenderState &state, Plane &plane,
   const float top    = bottom + item.height;
   const auto surface = themed(theme_.colours.surface, item.opacity);
   const auto ink     = themed(theme_.colours.text, item.opacity);
-  const float stroke = metrics_.px(borderPx);
+  const float stroke = deviceStroke(borderPx, item.centre);
   plane.body->addRect(left, bottom, item.width, item.height, surface);
   // Hard edges: a stored cell is a sharp rectangle (principle 1). Four bars
   // inside the box, so the corners meet square at any stroke.
@@ -474,7 +533,7 @@ void SlicePresenter::drawCell(RenderState &state, Plane &plane,
     // Bars where the lines would be: shape without contrast to lose (D2).
     const auto &fitted = contentText(words, placement.contentMaxWidth);
     const float line   = bodyFont_->metrics().lineHeight;
-    const float bar    = line * PresenterStrokes::kCoarseBarShare;
+    const float bar    = line * draw_.coarseBarShare;
     for (const auto &entry : fitted.shaping.lines) {
       const float lineTop   = inner.bottom + inner.height - entry.top;
       const float barBottom = lineTop - ((line + bar) / 2.0F);
@@ -498,17 +557,21 @@ void SlicePresenter::drawGhost(Plane &plane, const PlacedItem &item) {
   const float bottom = item.centre.y - (item.height / 2.0F);
   const float right  = left + item.width;
   const float top    = bottom + item.height;
-  const float seam =
-      std::min(item.width, item.height) * PresenterStrokes::kGhostSeamShare;
-  const float stroke = metrics_.px(PresenterStrokes::kGhostStrokePx);
+  const float seam   = std::min(item.width, item.height) * draw_.ghostSeamShare;
+  GLEDITOR_LOG_TRACE(kCategory,
+                     "ghost {} at {},{} size {}x{} opacity {} seam {}",
+                     item.id.value, item.centre.x, item.centre.y, item.width,
+                     item.height, item.opacity, seam);
+  const float stroke = deviceStroke(draw_.ghostStrokePx, item.centre);
   const auto colour  = themed(theme_.colours.muted, item.opacity);
   // Four sides with their corners left open: soft-edged and seamed, never a
   // square box (plan §5.1 principle 1).
-  plane.body->addLine(left + seam, bottom, right - seam, bottom, stroke,
-                      colour);
-  plane.body->addLine(right, bottom + seam, right, top - seam, stroke, colour);
-  plane.body->addLine(right - seam, top, left + seam, top, stroke, colour);
-  plane.body->addLine(left, top - seam, left, bottom + seam, stroke, colour);
+  const float run  = std::max(0.0F, item.width - (2.0F * seam));
+  const float rise = std::max(0.0F, item.height - (2.0F * seam));
+  plane.body->addRect(left + seam, bottom, run, stroke, colour);
+  plane.body->addRect(left + seam, top - stroke, run, stroke, colour);
+  plane.body->addRect(left, bottom + seam, stroke, rise, colour);
+  plane.body->addRect(right - stroke, bottom + seam, stroke, rise, colour);
 }
 
 void SlicePresenter::drawLabel(RenderState &state, Plane &plane,
@@ -524,35 +587,106 @@ void SlicePresenter::drawLabel(RenderState &state, Plane &plane,
   plane.caption->addText(state, {left, bottom, item.width, item.height}, fitted,
                          themed(theme_.colours.text, item.opacity), 0U);
   if (rule) {
-    const float thick = metrics_.px(PresenterStrokes::kTickRulePx);
+    const float thick = deviceStroke(draw_.tickRulePx, item.centre);
     plane.caption->addRect(left, bottom - thick, item.width, thick, *rule);
   }
 }
 
 void SlicePresenter::addEdge(const PlacedEdge &edge,
                              const PresentedPlacement &placement,
-                             const PresentedWords &words) {
-  const auto cue     = words.cue(edge.relation);
-  const auto colour  = faded(cue.colour, edge.opacity);
-  const float width  = placement.edgeWidth;
+                             const PresentedWords &words,
+                             const float pxPerUnit) {
+  const auto cue = words.cue(edge.relation);
+  // A strand is the cue of its dimension and the shortest line a view draws:
+  // it is held to a least opacity (against the cells it joins fading, not
+  // against a ghost's) and a least width on the screen, whatever the scale
+  // the placement is drawn at.
+  const float opacity = edge.opacity > placement.ghostOpacity
+                            ? std::max(edge.opacity, draw_.strandOpacityFloor)
+                            : edge.opacity;
+  const auto colour   = withAlpha(cue.colour, opacity);
+  float width         = placement.edgeWidth;
+  if (std::isfinite(pxPerUnit) && pxPerUnit > 0.0F) {
+    width = std::max(width, metrics_.px(draw_.strandMinWidthPx) / pxPerUnit);
+  }
+  GLEDITOR_LOG_TRACE(kCategory, "strand width {} (layout {}, px per unit {})",
+                     width, placement.edgeWidth, pxPerUnit);
   const auto run     = edge.b - edge.a;
   const float length = glm::length(run);
   if (length <= 0.0F || width <= 0.0F) {
     return;
   }
-  const auto pattern = dashPattern(cue.dash);
-  if (pattern.empty()) {
-    beams_->add(edge.a, edge.b, width, colour, 0);
+  addStrand(edge, run / length, length, width, colour,
+            dashPattern(draw_, cue.dash), 0.0F, length, 0);
+}
+
+void SlicePresenter::addStrand(const PlacedEdge &edge, const glm::vec3 along,
+                               const float length, const float width,
+                               const std::uint32_t colour,
+                               const std::span<const float> pattern,
+                               const float from, const float to,
+                               const std::size_t label) {
+  if (to <= from) {
     return;
   }
-  const auto along = run / length;
-  float at         = 0.0F;
-  for (std::size_t k = 0; at < length; k = (k + 1) % pattern.size()) {
+  // The strand stops short of every label that lies across its way, on its
+  // own plane: ticks name a link, and a line through the words is no cue.
+  for (std::size_t i = label; i < labelBoxes_.size(); ++i) {
+    const auto &box = labelBoxes_[i];
+    if (box.z != edge.a.z || box.z != edge.b.z) {
+      continue;
+    }
+    float enter  = from;
+    float leave  = to;
+    bool crosses = true;
+    for (int axis = 0; axis < 2 && crosses; ++axis) {
+      const float start = edge.a[axis];
+      const float way   = along[axis];
+      if (0.0F == way) {
+        crosses = start > box.lo[axis] && start < box.hi[axis];
+        continue;
+      }
+      float near = (box.lo[axis] - start) / way;
+      float far  = (box.hi[axis] - start) / way;
+      if (near > far) {
+        std::swap(near, far);
+      }
+      enter   = std::max(enter, near);
+      leave   = std::min(leave, far);
+      crosses = enter < leave;
+    }
+    if (crosses) {
+      addStrand(edge, along, length, width, colour, pattern, from, enter,
+                i + 1);
+      addStrand(edge, along, length, width, colour, pattern, leave, to, i + 1);
+      return;
+    }
+  }
+  addDashed(edge, along, length, width, colour, pattern, from, to);
+}
+
+void SlicePresenter::addDashed(const PlacedEdge &edge, const glm::vec3 along,
+                               const float length, const float width,
+                               const std::uint32_t colour,
+                               const std::span<const float> pattern,
+                               const float from, const float to) {
+  if (pattern.empty()) {
+    beams_->add(edge.a + (along * from), edge.a + (along * to), width, colour,
+                0, from / length, to / length);
+    return;
+  }
+  // The pattern runs from the strand's own start, so a strand cut short of a
+  // label keeps the dashes it would have had.
+  float at = 0.0F;
+  for (std::size_t k = 0; at < to; k = (k + 1) % pattern.size()) {
     const float step = pattern[k] * width;
     if (0 == k % 2) {
-      const float end = std::min(length, at + step);
-      beams_->add(edge.a + (along * at), edge.a + (along * end), width, colour,
-                  0, at / length, end / length);
+      const float begin = std::max(from, at);
+      const float end   = std::min(to, at + step);
+      if (end > begin) {
+        beams_->add(edge.a + (along * begin), edge.a + (along * end), width,
+                    colour, 0, begin / length, end / length);
+      }
     }
     at += step;
   }
@@ -600,9 +734,16 @@ void SlicePresenter::drawChrome(gleditor::FrameContext &ctx,
       std::string_view words;
       glm::vec4 colour;
     };
-    std::array<Line, 3> lines{Line{chrome.notice, theme_.colours.accent},
-                              Line{trail, theme_.colours.text},
-                              Line{chrome.hints, theme_.colours.muted}};
+    std::vector<Line> lines{Line{chrome.notice, theme_.colours.accent},
+                            Line{trail, theme_.colours.text}};
+    // A hint holds as many rows as it has lines.
+    for (std::size_t at = 0; at <= chrome.hints.size();) {
+      const auto cut =
+          std::min(chrome.hints.find('\n', at), chrome.hints.size());
+      lines.push_back(
+          Line{chrome.hints.substr(at, cut - at), theme_.colours.muted});
+      at = cut + 1;
+    }
     const float padX = metrics_.px(chrome.paddingX);
     const float padY = metrics_.px(chrome.paddingY);
     const float line = std::ceil(chromeFont_->metrics().lineHeight);
@@ -615,8 +756,7 @@ void SlicePresenter::drawChrome(gleditor::FrameContext &ctx,
       const auto surface = ui::rgba(theme_.colours.surface);
       chrome_->addRect(0.0F, bottom, width, chromeClaim_, surface);
       chrome_->addLine(0.0F, bottom + chromeClaim_, width,
-                       bottom + chromeClaim_,
-                       metrics_.px(PresenterStrokes::kCellBorderPx),
+                       bottom + chromeClaim_, metrics_.px(draw_.cellBorderPx),
                        ui::rgba(theme_.colours.border));
       float top = bottom + chromeClaim_ - padY;
       for (const auto &each : lines) {
@@ -707,10 +847,11 @@ void addGlyph(gleditor::Canvas &canvas, const CueGlyph glyph, const float left,
 
 /// A line of @p thickness along y = @p middle from @p from to @p to, drawn
 /// with @p style's pattern in units of the thickness; solid when it has none.
-void addDashed(gleditor::Canvas &canvas, const float from, const float to,
-               const float middle, const float thickness, const DashStyle style,
-               const std::uint32_t colour) {
-  const auto pattern = dashPattern(style);
+void addDashedRule(gleditor::Canvas &canvas, const ViewDrawConfig &draw,
+                   const float from, const float to, const float middle,
+                   const float thickness, const DashStyle style,
+                   const std::uint32_t colour) {
+  const auto pattern = dashPattern(draw, style);
   const float bottom = middle - (thickness / 2.0F);
   if (pattern.empty()) {
     canvas.addRect(from, bottom, to - from, thickness, colour);
@@ -794,7 +935,7 @@ void SlicePresenter::drawCompass(gleditor::FrameContext &ctx,
     const auto border  = ui::rgba(theme_.colours.border);
     const auto ink     = ui::rgba(theme_.colours.text);
     const auto muted   = ui::rgba(theme_.colours.muted);
-    const float hair   = metrics_.px(PresenterStrokes::kCellBorderPx);
+    const float hair   = metrics_.px(draw_.cellBorderPx);
     compass_->addRect(left, bottom, panelW, panelH, surface);
     compass_->addRect(left, bottom, panelW, hair, border);
     compass_->addRect(left, top - hair, panelW, hair, border);
@@ -815,7 +956,8 @@ void SlicePresenter::drawCompass(gleditor::FrameContext &ctx,
       const auto colour = arm.cue ? arm.cue->colour : muted;
       const auto dash   = arm.cue ? arm.cue->dash : DashStyle::Dot;
       const auto mark   = arm.cue ? arm.cue->glyph : CueGlyph::Ring;
-      addDashed(*compass_, x, x + swatch, middle, stroke, dash, colour);
+      addDashedRule(*compass_, draw_, x, x + swatch, middle, stroke, dash,
+                    colour);
       x += swatch + gap;
       addGlyph(*compass_, mark, x, middle - (glyph / 2.0F), glyph, colour);
       x += glyph + gap;
@@ -839,18 +981,41 @@ void SlicePresenter::drawCompass(gleditor::FrameContext &ctx,
   }
 }
 
+std::shared_ptr<const render::PickSemanticTarget>
+SlicePresenter::targetFor(const zigzag::CellRef cell,
+                          const PresentedPlacement &placement) {
+  if (targetsDocument_ != placement.documentId ||
+      targetsVersion_ != placement.version) {
+    targetsByCell_.clear();
+    targetsDocument_ = placement.documentId;
+    targetsVersion_  = placement.version;
+  }
+  auto &held = targetsByCell_[cell];
+  if (!held) {
+    held = std::make_shared<const render::PickSemanticTarget>(
+        render::PickSemanticTarget{
+            .documentId   = std::string(placement.documentId),
+            .microversion = std::string(placement.version),
+            .cellRef      = cell});
+  }
+  return held;
+}
+
 std::optional<SubjectId>
 SlicePresenter::subjectOf(const render::PickingResult &pick) const {
   if (render::tagKindOverlay != pick.tag.kind ||
       pick.tag.docIndex != pickScope_ || !pick.semanticTarget) {
     return std::nullopt;
   }
-  const auto found = picks_.find(pick.semanticTarget.get());
-  if (found == picks_.end()) {
-    GLEDITOR_LOG_DEBUG(kCategory, "pick from an earlier layout dropped");
-    return std::nullopt;
+  // The item this frame drew for that cell; a pick requested before the
+  // records changed names what is drawn for the cell now, or nothing.
+  for (std::size_t i = 0; i < targets_.size(); ++i) {
+    if (targets_[i] == pick.semanticTarget) {
+      return drawn_[i].id;
+    }
   }
-  return found->second;
+  GLEDITOR_LOG_DEBUG(kCategory, "pick from an earlier layout dropped");
+  return std::nullopt;
 }
 
 ContentMode SlicePresenter::drawnContent(const std::size_t index) const {

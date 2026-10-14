@@ -10,6 +10,8 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
+#include <cmath>
 #include <deque>
 #include <functional>
 #include <map>
@@ -27,6 +29,7 @@
 #include <gleditor/text/diagnostics.hpp>
 
 #include "../lib/mocks/device.hpp"
+#include "allocation_count.hpp"
 #include "common/ui/slice/zigzag_visualizer.hpp"
 #include "common/ui/view/presentation_palette.hpp"
 #include "common/ui/view/slice_presentation_switch.hpp"
@@ -521,12 +524,14 @@ TEST(ViewPresenterTest, MessagesFillTheirFields) {
        {xanadu::view::DashStyle::Dash, xanadu::view::DashStyle::Dot,
         xanadu::view::DashStyle::DashDotDot, xanadu::view::DashStyle::DashDot,
         xanadu::view::DashStyle::LongShort}) {
-    const auto pattern = xanadu::view::dashPattern(style);
+    const auto pattern =
+        xanadu::view::dashPattern(xanadu::ViewDrawConfig{}, style);
     EXPECT_EQ(pattern.size() % 2, 0U);
     EXPECT_FALSE(pattern.empty());
   }
-  EXPECT_TRUE(
-      xanadu::view::dashPattern(xanadu::view::DashStyle::Solid).empty());
+  EXPECT_TRUE(xanadu::view::dashPattern(xanadu::ViewDrawConfig{},
+                                        xanadu::view::DashStyle::Solid)
+                  .empty());
 }
 
 // -- the compass and the view commands (plan §4.6 U5a, U7a) ------------------
@@ -821,4 +826,191 @@ TEST(SlicePresentationPaletteTest, CyclingStepsThroughPresentationsAndWraps) {
   EXPECT_EQ(xanadu::view::steppedPresentation(kinds, "legacy", -1), "slice.b");
   EXPECT_EQ(xanadu::view::steppedPresentation(kinds, "unknown", 1), "slice.a");
   EXPECT_EQ(xanadu::view::steppedPresentation({}, "legacy", 1), "legacy");
+}
+
+// -- drawing (M2 findings B2, B3, B6) ---------------------------------------
+
+namespace {
+
+using xanadu::view::DashStyle;
+using xanadu::view::DimensionCue;
+using xanadu::view::PlacedEdge;
+using xanadu::view::PlacedItem;
+using xanadu::view::PresentedPlacement;
+using xanadu::view::PresentedWords;
+using xanadu::view::SlicePresenter;
+
+constexpr std::uint32_t kStrandColour = 0xFF0000FFU;
+
+/// Two cells a hundred units either side of the origin joined by one strand,
+/// and optionally a label lying across it.
+struct StrandScene {
+  PresenterDevice device;
+  RenderState state{&device};
+  ch::Timeline timeline;
+  SlicePresenter presenter;
+  xanadu::view::LayoutSink sink;
+
+  explicit StrandScene(const bool withLabel) {
+    presenter.deviceReady(device, {});
+    for (const float at : {-100.0F, 100.0F}) {
+      sink.push(PlacedItem{.id     = SubjectId::cell(at < 0 ? 1U : 2U),
+                           .centre = {at, 0.0F, 0.0F},
+                           .width  = 40.0F,
+                           .height = 20.0F});
+    }
+    std::optional<std::uint32_t> label;
+    if (withLabel) {
+      label = sink.push(PlacedItem{.id     = SubjectId::label(5),
+                                   .centre = {0.0F, 0.0F, 0.0F},
+                                   .width  = 30.0F,
+                                   .height = 12.0F});
+    }
+    sink.push(PlacedEdge{.from     = SubjectId::cell(1),
+                         .to       = SubjectId::cell(2),
+                         .a        = {-80.0F, 0.0F, 0.0F},
+                         .b        = {80.0F, 0.0F, 0.0F},
+                         .relation = 5,
+                         .label    = label});
+  }
+
+  void draw(const DashStyle dash = DashStyle::Solid) {
+    const auto text = [](const SubjectId) { return std::string_view{"x"}; };
+    const auto cue  = [dash](const std::uint64_t) {
+      return DimensionCue{.colour = kStrandColour, .dash = dash};
+    };
+    const auto camera = flatCamera();
+    state.beginPickScene();
+    gleditor::FrameContext ctx{state, camera, kWidth, kHeight, timeline};
+    presenter.drawScene(ctx,
+                        PresentedPlacement{.records      = sink,
+                                           .stamp        = ++stamp_,
+                                           .edgeWidth    = 1.0F,
+                                           .clipMarginPx = 0.0F,
+                                           .ghostOpacity = 0.09F},
+                        PresentedWords{.text = text, .cue = cue});
+  }
+
+private:
+  std::uint64_t stamp_{};
+};
+
+} // namespace
+
+TEST(ViewPresenterTest, AStrandStopsShortOfALabelAcrossItsWay) {
+  StrandScene bare(false);
+  bare.draw();
+  ASSERT_EQ(bare.presenter.strands().size(), 1U);
+
+  StrandScene labelled(true);
+  labelled.draw();
+  const auto strands = labelled.presenter.strands();
+  ASSERT_EQ(strands.size(), 2U) << "one strand either side of the label";
+  const float clear = labelled.presenter.metrics().px(
+      labelled.presenter.drawConfig().strandLabelClearPx);
+  for (const auto &row : strands) {
+    // The label spans x in [-15, 15], and the strand keeps its clearance.
+    const float near = std::min(std::abs(row.from[0]), std::abs(row.to[0]));
+    EXPECT_GE(near, 15.0F + clear - 1.0e-3F);
+  }
+}
+
+TEST(ViewPresenterTest, ADashedStrandKeepsItsDashesAroundALabel) {
+  StrandScene dashed(true);
+  dashed.draw(DashStyle::Dash);
+  StrandScene bare(false);
+  bare.draw(DashStyle::Dash);
+  EXPECT_GT(bare.presenter.strands().size(), 2U);
+  EXPECT_LT(dashed.presenter.strands().size(), bare.presenter.strands().size());
+  EXPECT_GT(dashed.presenter.strands().size(), 2U);
+  for (const auto &row : dashed.presenter.strands()) {
+    const float lo = std::min(row.from[0], row.to[0]);
+    const float hi = std::max(row.from[0], row.to[0]);
+    EXPECT_FALSE(lo < 0.0F && hi > 0.0F) << "a dash crosses the label";
+  }
+}
+
+TEST(ViewPresenterTest, AStrandIsNeverThinnerOrFainterThanItsFloors) {
+  StrandScene scene(false);
+  // A hairline edge between cells that fade: the layout's own opacity.
+  scene.sink.clear();
+  for (const float at : {-100.0F, 100.0F}) {
+    scene.sink.push(PlacedItem{.id      = SubjectId::cell(at < 0 ? 1U : 2U),
+                               .centre  = {at, 0.0F, 0.0F},
+                               .width   = 40.0F,
+                               .height  = 20.0F,
+                               .opacity = 0.3F});
+  }
+  scene.sink.push(PlacedEdge{.from     = SubjectId::cell(1),
+                             .to       = SubjectId::cell(2),
+                             .a        = {-80.0F, 0.0F, 0.0F},
+                             .b        = {80.0F, 0.0F, 0.0F},
+                             .relation = 5,
+                             .opacity  = 0.3F});
+  scene.draw();
+  ASSERT_EQ(scene.presenter.strands().size(), 1U);
+  const auto &row  = scene.presenter.strands().front();
+  const auto &draw = scene.presenter.drawConfig();
+  // One unit a pixel on the flat camera, so the least width is in pixels.
+  EXPECT_GE(row.width,
+            scene.presenter.metrics().px(draw.strandMinWidthPx) - 1.0e-3F);
+  const float alpha = static_cast<float>(row.colour & 0xFFU) / 255.0F;
+  EXPECT_GE(alpha, draw.strandOpacityFloor - 0.01F);
+
+  // A ghost's strand keeps its own faintness: it must not outshine a cell.
+  scene.sink.clear();
+  scene.sink.push(PlacedEdge{.from     = SubjectId::cell(1),
+                             .to       = SubjectId::cell(2),
+                             .a        = {-80.0F, 0.0F, 0.0F},
+                             .b        = {80.0F, 0.0F, 0.0F},
+                             .relation = 5,
+                             .opacity  = 0.05F});
+  scene.draw();
+  ASSERT_EQ(scene.presenter.strands().size(), 1U);
+  EXPECT_LT(
+      static_cast<float>(scene.presenter.strands().front().colour & 0xFFU) /
+          255.0F,
+      draw.strandOpacityFloor);
+}
+
+// Governance: a hot loop allocates nothing. What a frame that animates costs
+// beyond one that does not is what the presenter and the animation add; the
+// picking scene the host owns is rebuilt, node by node, by both.
+TEST(ViewPresenterTest, AnAnimatingFrameAllocatesNoMoreThanASettledOne) {
+  Fixture fixture(6, false);
+  auto &ui = *fixture.system.at(SystemDocKind::UI);
+  ui.repointCurrentVersion(
+      xanadu::setSetting(ui, ui.primaryCurrentVersion(),
+                         xanadu::settings::kViewMotionStepMs, 60000.0));
+  const auto presentation = fixture.presentation();
+  Frame frame;
+  presentation->deviceReady(frame.device, {});
+  for (int i = 0; i < 400 && (i < 2 || presentation->busy()); ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    frame.draw(*presentation);
+  }
+  ASSERT_FALSE(presentation->busy());
+  frame.draw(*presentation);
+  std::size_t settled = 0;
+  {
+    allocation_count::Scope counted;
+    frame.draw(*presentation);
+    settled = allocation_count::Scope::made();
+  }
+
+  ASSERT_TRUE(presentation->dispatchAction("step-x-pos"));
+  // The first frames of a move size what the presenter keeps.
+  for (int i = 0; i < 3; ++i) {
+    frame.draw(*presentation);
+  }
+  ASSERT_TRUE(presentation->busy());
+  const auto rebuilds = presentation->presenter().rebuilds();
+  for (int i = 0; i < 20; ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    allocation_count::Scope counted;
+    frame.draw(*presentation);
+    EXPECT_LE(allocation_count::Scope::made(), settled) << "frame " << i;
+  }
+  EXPECT_GE(presentation->presenter().rebuilds(), rebuilds + 20)
+      << "every one of those frames rebuilt";
 }

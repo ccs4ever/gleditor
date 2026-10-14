@@ -73,6 +73,14 @@ void registerZigzagCommands(gleditor::CommandTable &table,
 [[nodiscard]] std::pair<std::string, std::string>
 zigzagKeyHints(const gleditor::CommandTable &table, std::string_view toggle);
 
+/**
+ * @brief The same for a view presentation: the keys it runs -- step, hop,
+ *        swap and home, and the view commands (palette, bind, sub-view,
+ *        cycle) -- and none of the editing keys it refuses.
+ */
+[[nodiscard]] std::pair<std::string, std::string>
+viewKeyHints(const gleditor::CommandTable &table, std::string_view toggle);
+
 } // namespace zigzag
 
 #endif // ZIGZAG_ZIGZAG_COMMANDS_HPP

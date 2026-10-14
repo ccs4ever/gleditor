@@ -297,6 +297,54 @@ TEST(CompassConfigTest, EverySettingIsSeededInSystemUi) {
   }
 }
 
+// -- how a slice presentation draws (M2 findings B1, B3, B8) -----------------
+
+TEST(ViewDrawConfigTest, ReadsItsSettingsAndKeepsDefaultsForNonsense) {
+  xanadu::Store store;
+  xanadu::initializeSystemStore(store, xanadu::SystemDocKind::UI);
+  EXPECT_EQ(xanadu::ViewDrawConfig::fromStore(store), xanadu::ViewDrawConfig{});
+
+  auto head   = store.primaryCurrentVersion();
+  namespace s = xanadu::settings;
+  head        = xanadu::setSetting(store, head, s::kViewDrawCellBorderPx, 3.0);
+  head = xanadu::setSetting(store, head, s::kViewDrawGhostSeamShare, 0.9);
+  head = xanadu::setSetting(store, head, s::kViewPageDim, 0.5);
+  head =
+      xanadu::setSetting(store, head, s::kViewDrawDashDash, std::string{"4 2"});
+  head = xanadu::setSetting(store, head, s::kViewDrawDashDot,
+                            std::string{"1 2 3"});
+  store.repointCurrentVersion(head);
+  const auto read = xanadu::ViewDrawConfig::fromStore(store);
+  const xanadu::ViewDrawConfig defaults;
+  EXPECT_FLOAT_EQ(read.cellBorderPx, 3.0F);
+  EXPECT_FLOAT_EQ(read.pageDim, 0.5F);
+  // Out of range: a seam is at most half a side.
+  EXPECT_FLOAT_EQ(read.ghostSeamShare, defaults.ghostSeamShare);
+  EXPECT_EQ(read.dashes[0], (std::vector<float>{4.0F, 2.0F}));
+  // An odd count is not drawn then open.
+  EXPECT_EQ(read.dashes[1], defaults.dashes[1]);
+}
+
+TEST(ViewDrawConfigTest, EverySettingIsSeededInSystemUiWithItsDefault) {
+  const auto specs = xanadu::defaultSettingSpecs(xanadu::SystemDocKind::UI);
+  namespace s      = xanadu::settings;
+  for (const auto name :
+       {s::kViewDrawCellBorderPx, s::kViewDrawFocusBorderPx,
+        s::kViewDrawGhostStrokePx, s::kViewDrawGhostSeamShare,
+        s::kViewDrawTickRulePx, s::kViewDrawCoarseBarShare,
+        s::kViewDrawDashDash, s::kViewDrawDashDot, s::kViewDrawDashDashDotDot,
+        s::kViewDrawDashDashDot, s::kViewDrawDashLongShort,
+        s::kViewStrandMinWidthPx, s::kViewStrandOpacityFloor,
+        s::kViewStrandLabelClearPx, s::kViewPageDim, s::kViewPageClearancePx}) {
+    EXPECT_TRUE(std::ranges::any_of(specs, [name](const auto &spec) {
+      return spec.name == name;
+    })) << name;
+  }
+  // The text a pattern is seeded with reads back as the pattern.
+  EXPECT_EQ(xanadu::dashPatternText(xanadu::ViewDrawConfig{}.dashes[2]),
+            "6 2 1 2 1 2");
+}
+
 // -- the commands' chords --------------------------------------------------
 
 TEST(ViewCommandKeymapTest, EveryViewCommandHasADefaultChordInTheKeymap) {

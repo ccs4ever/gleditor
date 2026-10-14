@@ -232,6 +232,7 @@ ViewSlicePresentation *ViewSlicePresentation::applySettings() {
       ++chromeRevision_;
     }
     animation_.configure(MotionConfig::fromStore(*ui));
+    presenter_.setDrawConfig(ViewDrawConfig::fromStore(*ui));
   }
   refreshCompass();
   stale_ = true;
@@ -535,7 +536,9 @@ std::string_view ViewSlicePresentation::textOf(const SubjectId subject) {
 }
 
 DimensionCue ViewSlicePresentation::cueOf(const std::uint64_t relation) {
-  auto name = std::string(textOf(SubjectId::label(relation)));
+  // A view, not a copy: this is asked for every edge on every frame a move
+  // is animated, and a string made here is an allocation each time.
+  const auto name = textOf(SubjectId::label(relation));
   if (const auto cue = cues_.cueOf(name)) {
     return *cue;
   }

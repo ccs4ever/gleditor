@@ -73,31 +73,11 @@ struct MessageField {
 [[nodiscard]] std::string spokenMessage(ViewMessage message,
                                         std::span<const MessageField> fields);
 
-/**
- * @brief The stroke vocabulary, in logical pixels before ui.scale.
- *
- * Facts of how a record is drawn rather than tunables: each is chosen against
- * the others (plan §5.1), so a stored cell's edge is the thinnest line that
- * reads as hard, the focus mark is heavier than any edge, and a ghost's
- * corners stay open so nothing view-only is square.
- */
-struct PresenterStrokes {
-  static constexpr float kCellBorderPx  = 1.0F;
-  static constexpr float kFocusBorderPx = 2.5F;
-  static constexpr float kGhostStrokePx = 1.0F;
-  /// Share of a ghost's shorter side left open at each corner: the seam that
-  /// says "view-only" (principle 1).
-  static constexpr float kGhostSeamShare = 0.18F;
-  /// Under a tick, in its dimension's colour: the tick's words are drawn in
-  /// the theme's text colour for contrast, so the colour rides beneath.
-  static constexpr float kTickRulePx = 2.0F;
-  /// Share of a line's height a coarse bar fills: bars, not blocks.
-  static constexpr float kCoarseBarShare = 0.45F;
-};
-
-/// A dash pattern as alternating drawn and open lengths, in beam widths;
-/// empty for solid. The dash vocabulary of U1, drawn.
-[[nodiscard]] std::span<const float> dashPattern(DashStyle style) noexcept;
+/// @p style's dash pattern as alternating drawn and open lengths, in beam
+/// widths, from @p draw (view.draw.dash.*); empty for solid. The dash
+/// vocabulary of U1, drawn.
+[[nodiscard]] std::span<const float> dashPattern(const ViewDrawConfig &draw,
+                                                 DashStyle style) noexcept;
 
 /// What a placement looks like to the presenter for one frame.
 struct PresentedPlacement {
@@ -171,6 +151,13 @@ public:
                    const render::PipelineDesc &documentPipeline);
   [[nodiscard]] bool ready() const noexcept { return device_ != nullptr; }
 
+  /// How strokes, dashes and strands are drawn (view.draw.*, view.strand.*);
+  /// what was built is rebuilt when it changes. Chains.
+  SlicePresenter *setDrawConfig(const ViewDrawConfig &draw);
+  [[nodiscard]] const ViewDrawConfig &drawConfig() const noexcept {
+    return draw_;
+  }
+
   /// Read the frame's metrics and theme. True when typography changed, which
   /// changes what measure() answers, so the host lays out again.
   bool setTypography(const gleditor::ui::UiMetrics &metrics,
@@ -235,6 +222,13 @@ public:
     return projectionRevision_;
   }
 
+  /// The strands as last committed: one row for each piece drawn, after the
+  /// labels were cut out of them and each dash made its own.
+  [[nodiscard]] std::span<const gleditor::Beams::Row> strands() const {
+    return beams_ ? beams_->committedBeams()
+                  : std::span<const gleditor::Beams::Row>{};
+  }
+
   // -- counters for the tests that hold the presenter to V-R44 ---------------
   [[nodiscard]] std::uint64_t rebuilds() const noexcept { return rebuilds_; }
   [[nodiscard]] gleditor::text::ShapingCache::Stats shapingStats() const {
@@ -263,14 +257,30 @@ private:
   void drawCell(RenderState &state, Plane &plane, const PlacedItem &item,
                 ContentMode content, std::uint32_t border, float borderPx,
                 std::string_view text, const PresentedPlacement &placement);
+  /// @p px logical pixels as a length at @p at, in the units the placement
+  /// is laid out in, so that it is that many device pixels on the screen.
+  [[nodiscard]] float deviceStroke(float px, const glm::vec3 &at) const;
   void drawGhost(Plane &plane, const PlacedItem &item);
   void drawLabel(RenderState &state, Plane &plane, const PlacedItem &item,
                  std::string_view text, std::optional<std::uint32_t> rule);
   void addEdge(const PlacedEdge &edge, const PresentedPlacement &placement,
-               const PresentedWords &words);
+               const PresentedWords &words, float pxPerUnit);
+  /// Add the part of @p edge between lengths @p from and @p to, minus the
+  /// label boxes from index @p label on, which a strand stops short of.
+  void addStrand(const PlacedEdge &edge, glm::vec3 along, float length,
+                 float width, std::uint32_t colour,
+                 std::span<const float> pattern, float from, float to,
+                 std::size_t label);
+  /// A beam of @p edge from length @p from to @p to, dashed by @p pattern.
+  void addDashed(const PlacedEdge &edge, glm::vec3 along, float length,
+                 float width, std::uint32_t colour,
+                 std::span<const float> pattern, float from, float to);
+  [[nodiscard]] std::shared_ptr<const render::PickSemanticTarget>
+  targetFor(zigzag::CellRef cell, const PresentedPlacement &placement);
   void project(const glm::mat4 &toClip, gleditor::ui::Size viewport);
 
   std::string fontOverride_;
+  ViewDrawConfig draw_;
   render::RenderDevice *device_{};
   render::PipelineDesc pipeline_{};
   gleditor::ui::UiMetrics metrics_;
@@ -280,6 +290,8 @@ private:
   std::string bodyName_, captionName_, chromeName_;
   mutable gleditor::text::ShapingCache shaping_;
 
+  glm::mat4 toClip_{1.0F};
+  float screenWidth_{1.0F};
   std::vector<Plane> planes_;
   std::unique_ptr<gleditor::Beams> beams_;
   std::unique_ptr<gleditor::Canvas> chrome_;
@@ -293,10 +305,27 @@ private:
   std::vector<bool> drawnGhost_;
   /// Cells drawn with their content in the last generation, for the clip's
   /// hysteresis: one not among them must clear the margin to show again.
-  std::unordered_set<SubjectId> shownWithContent_;
+  /// Kept sorted by (kind, value), and swapped with shownNext_ so a rebuild
+  /// reuses both vectors' storage.
+  std::vector<SubjectId> shownWithContent_, shownNext_;
   std::uint32_t pickScope_{};
   std::vector<std::shared_ptr<const render::PickSemanticTarget>> targets_;
-  std::unordered_map<const render::PickSemanticTarget *, SubjectId> picks_;
+  /// A pick names the cell it landed on in a document at a version, which
+  /// does not change from one animating frame to the next: one target per
+  /// cell, kept while the document and version stand, so a rebuild makes
+  /// none.
+  std::unordered_map<zigzag::CellRef,
+                     std::shared_ptr<const render::PickSemanticTarget>>
+      targetsByCell_;
+  std::string targetsDocument_, targetsVersion_;
+  /// The relation an edge names with the label at each item index.
+  std::vector<std::optional<std::uint64_t>> labelRelation_;
+  /// Label boxes of the plane being drawn, which strands stop short of.
+  struct LabelBox {
+    glm::vec2 lo, hi;
+    float z{};
+  };
+  std::vector<LabelBox> labelBoxes_;
 
   glm::mat4 projectedWith_{0.0F};
   gleditor::ui::Size projectedViewport_{};
