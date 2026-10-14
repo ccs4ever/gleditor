@@ -5,6 +5,7 @@
 #include "xuzz_app.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
@@ -720,17 +721,34 @@ int XuzzApp::run(const int argc, char **argv) {
   renderer->addPickObserver(&keyboardPane);
 
   xanadu::LinkPanelOverlay linkPanel(linkContext, *session);
+  const auto entryCameraGeneration = std::make_shared<std::atomic_uint64_t>(0);
   linkContext.setDocumentEntryHandler([&views, &keyboardPane, &linkContext,
-                                       &links, &state, &linkPanel,
-                                       &renderer](const std::size_t viewIndex,
-                                                  const xanadu::Extent range,
-                                                  RenderState &rState) {
+                                       &links, &state, &linkPanel, &renderer,
+                                       entryCameraGeneration](
+                                          const std::size_t viewIndex,
+                                          const xanadu::Extent range,
+                                          RenderState &rState) {
+    const auto generation = entryCameraGeneration->fetch_add(1) + 1;
+    {
+      std::scoped_lock lock(state->view);
+      GLEDITOR_LOG_DEBUG(
+          "xudu.links",
+          "document entry view={} range=[{},{}) camera=({:.5f},{:.5f},{:.5f}) "
+          "front=({:.4f},{:.4f},{:.4f}) up=({:.4f},{:.4f},{:.4f}) fov={:.3f} "
+          "screen={}x{}",
+          viewIndex, range.start, range.end, state->view.pos.x,
+          state->view.pos.y, state->view.pos.z, state->view.front.x,
+          state->view.front.y, state->view.front.z, state->view.upward.x,
+          state->view.upward.y, state->view.upward.z, state->view.fov,
+          state->view.screenWidth, state->view.screenHeight);
+    }
     const auto visible = linkPanel.visibleCompanions();
     std::vector<xanadu::DocumentSite> companions(visible.begin(),
                                                  visible.end());
     keyboardPane.leaveZigzag(false);
     links.releaseCamera();
     views.cancelReadingFrame();
+    views.placeCameraWhenReady({});
     views.focusSpanAt(rState, viewIndex, range.start, range.end);
     if (const auto caret = renderer->editCaret())
       linkPanel.noteNavigationSelection(*caret, linkContext.enteredLink());
@@ -739,102 +757,160 @@ int XuzzApp::run(const int argc, char **argv) {
     const auto anchor   = focused.anchorFor(range.start);
     const auto point    = anchor ? focused.worldPoint(*anchor) : std::nullopt;
     const auto selected = linkContext.selection();
-    if (!point || !selected || !selected->occurrences) return;
-    // Keep previously visible companion geometry when a cursor is unchosen.
-    // Framing a page does not choose a navigation occurrence or record a visit.
-    for (const auto side : {xanadu::LinkSide::Left, xanadu::LinkSide::Right}) {
-      const auto &cursor  = selected->cursor(side);
-      const auto &members = selected->occurrences->members(side);
-      if (!cursor.member || !cursor.occurrence ||
-          *cursor.member >= members.size() ||
-          *cursor.occurrence >= members[*cursor.member].occurrences.size())
-        continue;
-      const auto *site = std::get_if<xanadu::DocumentSite>(
-          &members[*cursor.member].occurrences[*cursor.occurrence].site);
-      if (site) {
-        std::erase_if(companions, [&](const auto &visibleSite) {
-          return linkContext.viewIndexOf(visibleSite) ==
-                 linkContext.viewIndexOf(*site);
-        });
-        companions.push_back(*site);
-      }
-    }
-    if (const auto origin = linkContext.originSite();
-        origin && std::ranges::none_of(companions, [&](const auto &site) {
-          return linkContext.viewIndexOf(site) != viewIndex;
-        })) {
-      if (const auto *site = std::get_if<xanadu::DocumentSite>(&*origin))
-        if (std::ranges::find(companions, *site) == companions.end())
+    if (point && selected && selected->occurrences) {
+      // Keep previously visible companion geometry when a cursor is unchosen.
+      // Framing a page does not choose a navigation occurrence or record a
+      // visit.
+      for (const auto side :
+           {xanadu::LinkSide::Left, xanadu::LinkSide::Right}) {
+        const auto &cursor  = selected->cursor(side);
+        const auto &members = selected->occurrences->members(side);
+        if (!cursor.member || !cursor.occurrence ||
+            *cursor.member >= members.size() ||
+            *cursor.occurrence >= members[*cursor.member].occurrences.size())
+          continue;
+        const auto *site = std::get_if<xanadu::DocumentSite>(
+            &members[*cursor.member].occurrences[*cursor.occurrence].site);
+        if (site) {
+          std::erase_if(companions, [&](const auto &visibleSite) {
+            return linkContext.viewIndexOf(visibleSite) ==
+                   linkContext.viewIndexOf(*site);
+          });
           companions.push_back(*site);
-    }
-    for (const auto &site : companions) {
-      const auto other = linkContext.viewIndexOf(site);
-      if (!other || *other == viewIndex || *other >= rState.docs.size() ||
-          !rState.docs[*other])
-        continue;
-      auto &companion        = *rState.docs[*other];
-      const auto otherAnchor = companion.anchorFor(site.range.start);
-      const auto otherPoint =
-          otherAnchor ? companion.worldPoint(*otherAnchor) : std::nullopt;
-      if (!otherPoint) continue;
-      const auto focusedFrame   = focused.pageFrame(anchor->pageIndex);
-      const auto companionFrame = companion.pageFrame(otherAnchor->pageIndex);
-      if (!focusedFrame || !companionFrame) continue;
-      const auto pageEdges = [](const Doc::PageFrame &frame) {
-        return std::array{
-            glm::vec3(frame.localToWorld *
-                      glm::vec4(frame.leftPx, frame.topPx, 0, 1)),
-            glm::vec3(frame.localToWorld *
-                      glm::vec4(frame.rightPx, frame.topPx, 0, 1))};
-      };
-      const auto targetEdges = pageEdges(*focusedFrame);
-      const auto sourceEdges = pageEdges(*companionFrame);
-      const auto gap         = focusedFrame->marginPx *
-                       glm::length(glm::vec3(focusedFrame->localToWorld[0]));
-      auto model = companion.modelMatrix();
-      model[3].y += point->y - otherPoint->y;
-      model[3].x += otherPoint->x >= point->x
-                        ? targetEdges[1].x + gap - sourceEdges[0].x
-                        : targetEdges[0].x - gap - sourceEdges[1].x;
-      const auto delta =
-          glm::vec3(model[3]) - glm::vec3(companion.modelMatrix()[3]);
-      companion.animateMoveTo(*renderer->animTimeline(), glm::vec3(model[3]),
-                              0);
-      const auto paired = *otherPoint + delta;
-      {
-        const auto page      = focused.page(anchor->pageIndex);
-        const auto otherPage = companion.page(otherAnchor->pageIndex);
-        if (page && otherPage) {
-          std::scoped_lock lock(state->view);
-          auto &camera = state->view;
-          const float aspect =
-              camera.screenHeight > 0
-                  ? static_cast<float>(camera.screenWidth) / camera.screenHeight
-                  : 1.F;
-          const std::array movedEdges{sourceEdges[0] + delta,
-                                      sourceEdges[1] + delta};
-          const float left  = std::min(targetEdges[0].x, movedEdges[0].x);
-          const float right = std::max(targetEdges[1].x, movedEdges[1].x);
-          camera.pos.x      = (left + right) * .5F;
-          camera.pos.y      = point->y;
-          auto distance     = gleditor::spatial::framingDistance(
-              right - left, anchor->height * Doc::pixelsToWorld, camera.fov,
-              aspect);
-          if (const auto readable = xanadu::readableCameraDistance(
-                  anchor->height * Doc::pixelsToWorld,
-                  static_cast<float>(camera.screenHeight), camera.fov,
-                  views.readableTextPx()))
-            distance = std::min(distance, *readable);
-          camera.pos.z = std::max(point->z, paired.z) + distance;
+        }
+      }
+      if (const auto origin = linkContext.originSite();
+          origin && std::ranges::none_of(companions, [&](const auto &site) {
+            return linkContext.viewIndexOf(site) != viewIndex;
+          })) {
+        if (const auto *site = std::get_if<xanadu::DocumentSite>(&*origin))
+          if (std::ranges::find(companions, *site) == companions.end())
+            companions.push_back(*site);
+      }
+      for (const auto &site : companions) {
+        const auto other = linkContext.viewIndexOf(site);
+        if (!other || *other == viewIndex || *other >= rState.docs.size() ||
+            !rState.docs[*other])
+          continue;
+        auto &companion        = *rState.docs[*other];
+        const auto otherAnchor = companion.anchorFor(site.range.start);
+        const auto otherPoint =
+            otherAnchor ? companion.worldPoint(*otherAnchor) : std::nullopt;
+        if (!otherPoint) continue;
+        const auto focusedFrame   = focused.pageFrame(anchor->pageIndex);
+        const auto companionFrame = companion.pageFrame(otherAnchor->pageIndex);
+        if (!focusedFrame || !companionFrame) continue;
+        const auto pageEdges = [](const Doc::PageFrame &frame) {
+          return std::array{
+              glm::vec3(frame.localToWorld *
+                        glm::vec4(frame.leftPx, frame.topPx, 0, 1)),
+              glm::vec3(frame.localToWorld *
+                        glm::vec4(frame.rightPx, frame.topPx, 0, 1))};
+        };
+        const auto targetEdges = pageEdges(*focusedFrame);
+        const auto sourceEdges = pageEdges(*companionFrame);
+        const auto gap         = focusedFrame->marginPx *
+                         glm::length(glm::vec3(focusedFrame->localToWorld[0]));
+        auto model = companion.modelMatrix();
+        model[3].y += point->y - otherPoint->y;
+        model[3].x += otherPoint->x >= point->x
+                          ? targetEdges[1].x + gap - sourceEdges[0].x
+                          : targetEdges[0].x - gap - sourceEdges[1].x;
+        const auto delta =
+            glm::vec3(model[3]) - glm::vec3(companion.modelMatrix()[3]);
+        companion.animateMoveTo(*renderer->animTimeline(), glm::vec3(model[3]),
+                                0);
+        const auto paired = *otherPoint + delta;
+        {
+          const auto page      = focused.page(anchor->pageIndex);
+          const auto otherPage = companion.page(otherAnchor->pageIndex);
+          if (page && otherPage) {
+            std::scoped_lock lock(state->view);
+            auto &camera       = state->view;
+            const float aspect = camera.screenHeight > 0
+                                     ? static_cast<float>(camera.screenWidth) /
+                                           camera.screenHeight
+                                     : 1.F;
+            const std::array movedEdges{sourceEdges[0] + delta,
+                                        sourceEdges[1] + delta};
+            const float left  = std::min(targetEdges[0].x, movedEdges[0].x);
+            const float right = std::max(targetEdges[1].x, movedEdges[1].x);
+            camera.pos.x      = (left + right) * .5F;
+            camera.pos.y      = point->y;
+            auto distance     = gleditor::spatial::framingDistance(
+                right - left, anchor->height * Doc::pixelsToWorld, camera.fov,
+                aspect);
+            if (const auto readable = xanadu::readableCameraDistance(
+                    anchor->height * Doc::pixelsToWorld,
+                    static_cast<float>(camera.screenHeight), camera.fov,
+                    views.readableTextPx()))
+              distance = std::min(distance, *readable);
+            camera.pos.z = std::max(point->z, paired.z) + distance;
+          }
         }
       }
     }
     // The readable-distance cap can leave the chosen passage outside a
-    // camera centred on two whole pages. Keep the exact target in view using
-    // the existing caret-follow framing; the companion remains secondary.
-    views.keepInView(focused,
-                     range.end > range.start ? range.end - 1 : range.start);
-    views.keepInView(focused, range.start);
+    // camera centred on two whole pages. Fit its retained range while keeping
+    // the companion secondary; an oversized range lands on its first caret.
+    {
+      std::scoped_lock lock(state->view);
+      GLEDITOR_LOG_DEBUG(
+          "xudu.links",
+          "document entry after pair alignment camera=({:.5f},{:.5f},{:.5f}) "
+          "front=({:.4f},{:.4f},{:.4f}) up=({:.4f},{:.4f},{:.4f}) fov={:.3f} "
+          "screen={}x{}",
+          state->view.pos.x, state->view.pos.y, state->view.pos.z,
+          state->view.front.x, state->view.front.y, state->view.front.z,
+          state->view.upward.x, state->view.upward.y, state->view.upward.z,
+          state->view.fov, state->view.screenWidth, state->view.screenHeight);
+    }
+    const bool framed = views.keepRangeInView(focused, range.start, range.end);
+    {
+      std::scoped_lock lock(state->view);
+      GLEDITOR_LOG_DEBUG("xudu.links",
+                         "document entry range framing returned={} "
+                         "camera=({:.5f},{:.5f},{:.5f})",
+                         framed, state->view.pos.x, state->view.pos.y,
+                         state->view.pos.z);
+    }
+    const std::weak_ptr<Doc> framedDoc = rState.docs[viewIndex];
+    // LinkBeams runs before Views, so this predicate observes at least one
+    // post-entry beam frame. Wait for its document and camera choreography,
+    // then queue the final fit before the next frame is projected.
+    views.placeCameraWhenReady([&views, &links, renderer, framedDoc,
+                                entryCameraGeneration, generation, viewIndex,
+                                start = range.start, end = range.end] {
+      if (entryCameraGeneration->load() != generation) return true;
+      const auto doc = framedDoc.lock();
+      if (!doc) return true;
+      const auto *const caret = renderer->editCaret();
+      if (!caret || !caret->active() || caret->documentIndex() != viewIndex ||
+          !caret->hasSelection() || caret->selectionStart() != start ||
+          caret->selectionEnd() != end)
+        return true;
+      auto *const timeline = renderer->animTimeline();
+      if (links.busy() || (timeline && !timeline->empty())) return false;
+      links.releaseCamera();
+      renderer->runWithState([&views, renderer, framedDoc,
+                              entryCameraGeneration, generation, viewIndex,
+                              start, end](RenderState &readyState) {
+        if (entryCameraGeneration->load() != generation) return;
+        const auto readyDoc = framedDoc.lock();
+        if (!readyDoc || viewIndex >= readyState.docs.size() ||
+            readyState.docs[viewIndex] != readyDoc)
+          return;
+        const auto *const currentCaret = renderer->editCaret();
+        if (!currentCaret || !currentCaret->active() ||
+            currentCaret->documentIndex() != viewIndex ||
+            !currentCaret->hasSelection() ||
+            currentCaret->selectionStart() != start ||
+            currentCaret->selectionEnd() != end)
+          return;
+        views.keepRangeInView(*readyDoc, start, end);
+      });
+      return true;
+    });
   });
   linkContext.setCaretQuery(
       [&renderer]() -> std::optional<xanadu::LinkContext::CaretPosition> {
@@ -907,6 +983,7 @@ int XuzzApp::run(const int argc, char **argv) {
   // Preview changes cursors and markings; explicit entry owns composition.
 
   xanadu::OverviewOverlay overview(state);
+  views.setOverviewBounds([&overview] { return overview.visibleBounds(); });
   const auto chosenPlaces = [&linkContext](const RenderState &rState,
                                            std::vector<glm::vec3> &out) {
     const auto selected = linkContext.selection();

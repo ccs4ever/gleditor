@@ -1,0 +1,33 @@
+{
+  "baselineCommit": "e9726a6b3825e794ab86db6cd54f18d9258e75c0",
+  "currentCommit": "c1ab2314e7bf31db67545aefd8a59f795a0d4756",
+  "currentApplicationSha256": "1054c990a82732a1dcd1fa283eb1f3ad5b22f5857dd54939f60fd52d5b8556e2",
+  "currentLibrarySha256": "e03735947659221fde35e5ed2bb0629f02b88a8a66a91ea99b46d005738df684",
+  "pinnedApplicationSha256": "2e26e05e75298e6c05cc9d77229a34fbaa87463eddd9bc4ebdf68a0cea39fb63",
+  "testSourceSha256": "75419fcd6f49ecfcbe297d20db803ec8b578ad69f25d63fdec1765b52b448e2e",
+  "filter": "E2EBinaryOrchestrationTest.aDraggedSelectionLandsWhereItIsDropped:E2EBinaryOrchestrationTest.ForeignRunDragCreatesAReaderOwnedStore",
+  "backend": "opengl",
+  "nativeInterface": "--profile native keyboard, pointer drag, capture and accessibility dump; no --headless batch substitution",
+  "runner": "/workspace/spatial-build/run.sh",
+  "environment": {
+    "SDL_VIDEODRIVER": "offscreen",
+    "SDL_AUDIODRIVER": "dummy",
+    "LIBGL_ALWAYS_SOFTWARE": "1",
+    "XDG_DATA_HOME": "per-session isolated scratch",
+    "XDG_CONFIG_HOME": "per-session isolated scratch",
+    "XDG_CACHE_HOME": "per-session isolated scratch"
+  },
+  "scratchRoots": [
+    "/workspace/spatial-build/drag-repaired-current",
+    "/workspace/spatial-build/drag-repaired-pinned"
+  ],
+  "imageConversion": "Native P6 captures converted losslessly to PNG using Pillow; originals retained in scratch roots.",
+  "scope": "Two prepared-fixture drag regression checks; not full journey acceptance.",
+  "buildMode": "-O0 -g0 behavior validation; no performance-budget acceptance",
+  "results": {
+    "pinned": "2/2 passed, 234268 ms",
+    "current": "2/2 passed, 238371 ms"
+  },
+  "finalApplicationSha256": "1054c990a82732a1dcd1fa283eb1f3ad5b22f5857dd54939f60fd52d5b8556e2",
+  "currentApplicationUnchangedDuringRun": true
+}

@@ -1,0 +1,6 @@
+profile=/workspace/spatial-build/fourth-raw/profiles/run-COxXZO/data
+runtime_profile_before_archive=/workspace/spatial-build/run-COxXZO/data
+permascroll=/workspace/spatial-build/fourth-raw/profiles/run-COxXZO/data/xuzz/permascroll/default
+size=800,600
+backend=vulkan
+selected_bytes=654

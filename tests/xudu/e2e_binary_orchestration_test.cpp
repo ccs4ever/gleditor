@@ -272,6 +272,35 @@ std::optional<std::array<int, 4>> selectionBounds(const fs::path &path) {
   return bounds;
 }
 
+// Find a visible canvas margin from the captured native frame, rather than
+// assume that a coordinate beside the text is outside the rendered paper.
+// Stay clear of the top/bottom UI and require a solid 9x9 black canvas patch.
+std::optional<std::string> emptyCanvasPoint(const fs::path &path) {
+  std::ifstream in(path, std::ios::binary);
+  std::string magic;
+  int width = 0, height = 0, maximum = 0;
+  in >> magic >> width >> height >> maximum;
+  in.get();
+  if (magic != "P6" || maximum != 255 || width < 32 || height < 64)
+    return std::nullopt;
+  std::vector<unsigned char> rgb(static_cast<std::size_t>(width) * height * 3U);
+  in.read(reinterpret_cast<char *>(rgb.data()), rgb.size());
+  if (!in) return std::nullopt;
+  const auto y = height / 2;
+  for (int offset = 12; offset < width / 4; offset += 8)
+    for (const int x : {offset, width - 1 - offset}) {
+      bool canvas = true;
+      for (int dy = -4; dy <= 4; ++dy)
+        for (int dx = -4; dx <= 4; ++dx) {
+          const auto i =
+              (static_cast<std::size_t>(y + dy) * width + x + dx) * 3;
+          if (rgb[i] != 0 || rgb[i + 1] != 0 || rgb[i + 2] != 0) canvas = false;
+        }
+      if (canvas) return std::to_string(x) + "," + std::to_string(y);
+    }
+  return std::nullopt;
+}
+
 /**
  * @brief The typical distance, in screen rows, between the tops of lines of
  *        text on paper: the median gap between rows where ink starts after a
@@ -1354,29 +1383,40 @@ TEST(E2EBinaryOrchestrationTest, aDraggedSelectionLandsWhereItIsDropped) {
   const auto dumpBin = xuduBin.parent_path() / "xudu-dump";
   const auto testRoot =
       fs::current_path() / "build" / "integration_workspace_selection_drag";
+  fs::remove_all(testRoot);
+  fs::create_directories(testRoot);
+  fs::path sessionRoot;
+  unsigned session = 0;
   std::string start;
-  const auto capture = testRoot / "selection.ppm";
-  const auto dragTo  = [&](const std::string &drop) {
-    fs::remove_all(testRoot);
-    fs::create_directories(testRoot);
-    return executeProcess(
-        "XDG_CONFIG_HOME=" + (testRoot / "config").string() +
-        " XDG_DATA_HOME=" + (testRoot / "data").string() +
-        " XDG_CACHE_HOME=" + (testRoot / "cache").string() + " timeout 120 " +
-        xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
-        " --backend " + activeBackend() +
+  const auto capture     = testRoot / "selection.ppm";
+  const auto lineCapture = testRoot / "whole-line.ppm";
+  const auto dragTo      = [&](const std::string &drop) {
+    sessionRoot = testRoot / ("session-" + std::to_string(session++));
+    fs::create_directories(sessionRoot);
+    const auto result = executeProcess(
+        "XDG_CONFIG_HOME=" + (sessionRoot / "config").string() +
+        " XDG_DATA_HOME=" + (sessionRoot / "data").string() +
+        " XDG_CACHE_HOME=" + (sessionRoot / "cache").string() +
+        " timeout 120 " + xuduBin.string() +
+        permascrollFlag(sessionRoot / "permascroll") + " --backend " +
+        activeBackend() +
         " --profile --chord Ctrl+N --type 'alpha beta gamma' --chord Ctrl+Left"
-         " --chord Ctrl+Left --chord Ctrl+Shift+Right" +
-        (drop.empty() ? " --capture " + capture.string() + " --dump-a11y"
-                       : " --drag " + start + ":" + drop));
+             " --chord Ctrl+Left --chord Ctrl+Shift+Right" +
+        (drop.empty() ? " --capture " + capture.string() +
+                            " --chord Home --chord Shift+End --capture " +
+                            lineCapture.string() + " --dump-a11y"
+                           : " --drag " + start + ":" + drop + " --capture " +
+                            (sessionRoot / "dropped.ppm").string()));
+    std::ofstream(sessionRoot / "transcript.log") << result.output;
+    return result;
   };
   const auto untitledOps = [&] {
     for (const auto &entry :
-         fs::directory_iterator(testRoot / "data" / "xudu" / "xanadocs")) {
+         fs::directory_iterator(sessionRoot / "data" / "xudu" / "xanadocs")) {
       if (entry.path().filename().string().starts_with("untitled-")) {
         return executeProcess(dumpBin.string() +
                               " --section=ops --permascroll=" +
-                              (testRoot / "permascroll").string() + " " +
+                              (sessionRoot / "permascroll").string() + " " +
                               entry.path().string())
             .output;
       }
@@ -1394,13 +1434,19 @@ TEST(E2EBinaryOrchestrationTest, aDraggedSelectionLandsWhereItIsDropped) {
   const auto [left, top, right, bottom] = *selected;
   const auto y                          = (top + bottom) / 2;
   start = std::to_string((left + right) / 2) + "," + std::to_string(y);
-  // Onto the same line, past the final word, using the drawn selection's size.
-  const auto onPage = dragTo(std::to_string(right + right - left + 2) + "," +
-                             std::to_string(y));
+  // Select the entire line in the calibration session to measure its actual
+  // final glyph. The old selection-width estimate landed inside "gamma".
+  const auto line = selectionBounds(lineCapture);
+  ASSERT_TRUE(line) << "No whole-line selection pixels at " << lineCapture;
+  const auto empty = emptyCanvasPoint(capture);
+  ASSERT_TRUE(empty) << "No visible empty canvas in " << capture;
+  const auto onPage =
+      dragTo(std::to_string((*line)[2] + 12) + "," + std::to_string(y));
   ASSERT_EQ(onPage.exitCode, 0) << onPage.output;
   EXPECT_THAT(onPage.output,
               ::testing::HasSubstr("drag " + start + ": doc 1 [6,11)"));
   const auto ops = untitledOps();
+  std::ofstream(testRoot / "on-page-ops.log") << ops;
   // Spliced in at the end, and quoting the very bytes "beta " was typed as:
   // six bytes into the first insert's span.
   std::smatch typed;
@@ -1414,8 +1460,8 @@ TEST(E2EBinaryOrchestrationTest, aDraggedSelectionLandsWhereItIsDropped) {
       << ops;
   EXPECT_EQ(std::stoul(quoted[1].str()), std::stoul(typed[1].str()) + 6U);
 
-  // Into the empty space right of the page.
-  const auto inSpace = dragTo("770,300");
+  // Into a visible canvas patch outside the paper, measured above.
+  const auto inSpace = dragTo(*empty);
   ASSERT_EQ(inSpace.exitCode, 0) << inSpace.output;
   EXPECT_THAT(inSpace.output,
               ::testing::HasSubstr("spawned transcluded document"));
@@ -3009,11 +3055,13 @@ TEST(E2EBinaryOrchestrationTest, ForeignRunDragCreatesAReaderOwnedStore) {
   const auto &[left, top, right, bottom] = *bounds;
   const auto start = std::to_string((left + right) / 2) + "," +
                      std::to_string((top + bottom) / 2);
-  const auto spawned = run("spawn", "--mouse-down " + start +
-                                        " --mouse-move 770,300 --capture " +
-                                        (root / "detached.ppm").string() +
-                                        " --mouse-up 770,300 --capture " +
-                                        (root / "spawned.ppm").string());
+  const auto empty = emptyCanvasPoint(root / "selection.ppm");
+  ASSERT_TRUE(empty) << "No visible empty canvas in calibration frame";
+  const auto spawned =
+      run("spawn", "--mouse-down " + start + " --mouse-move " + *empty +
+                       " --capture " + (root / "detached.ppm").string() +
+                       " --mouse-up " + *empty + " --capture " +
+                       (root / "spawned.ppm").string());
   ASSERT_EQ(spawned.exitCode, 0) << spawned.output;
   EXPECT_THAT(spawned.output,
               testing::HasSubstr("spawned transcluded document"));

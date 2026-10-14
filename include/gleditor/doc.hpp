@@ -255,6 +255,19 @@ public:
   /// text. Coordinates are page-local; no shaping or allocation occurs.
   [[nodiscard]] std::optional<TextBand> textBandFor(std::uint32_t start,
                                                     std::uint32_t end) const;
+  struct TextBounds {
+    float left{};
+    float right{};
+    TextBand band{};
+  };
+  /// Union of every highlighted cluster in the exact nonempty intersection
+  /// with this page, including endpoint highlight fractions and full line
+  /// height. Page-local coordinates; no shaping or allocation occurs.
+  /// Refuses layouts with multiple glyph quads per cluster. This query clips
+  /// to this page: callers needing a complete fit must establish single-page
+  /// coverage separately.
+  [[nodiscard]] std::optional<TextBounds>
+  textBoundsFor(std::uint32_t start, std::uint32_t end) const;
   struct RangeTerminal {
     glm::vec2 point{};
     float corridorY{};

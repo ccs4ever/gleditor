@@ -60,6 +60,7 @@ public:
     markRevision = std::move(revision);
   }
   void toggle();
+  [[nodiscard]] std::optional<gleditor::ui::Rect> visibleBounds() const;
   [[nodiscard]] static gleditor::ui::Rect
   panelBounds(const xanadu::OverviewConfig &, const gleditor::ui::UiMetrics &);
   void describe(gleditor::a11y::Builder &) override;

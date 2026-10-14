@@ -1,0 +1,6 @@
+captured_utc=2026-10-14T14:01:29Z
+git_head=c1ab2314e7bf31db67545aefd8a59f795a0d4756
+git_branch=feat/spatial-ui-overhaul
+xuzz_sha256=05cb2e51d98ef7b55963c6618b18d2d112c224462f6bd57bbf009fb045de5eb3  /workspace/gleditor/build/xuzz
+xudu_dump_sha256=183b63931fdf1bde179633758e17f7409f9270262ac52f5fb22f1c16415feb79  /workspace/gleditor/build/xudu-dump
+matrix=800x600/opengl,800x600/opengles,800x600/vulkan,640x480/opengl,1440x1000/opengl

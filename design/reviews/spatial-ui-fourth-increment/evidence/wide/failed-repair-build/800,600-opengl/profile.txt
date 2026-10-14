@@ -1,0 +1,10 @@
+profile=/workspace/spatial-build/fourth-raw/profiles/run-E1NTC8/data
+runtime_profile_before_archive=/workspace/spatial-build/run-E1NTC8/data
+permascroll=/workspace/spatial-build/fourth-raw/profiles/run-E1NTC8/data/xuzz/permascroll/default
+size=800,600
+backend=opengl
+selected_bytes=654
+0=/workspace/spatial-build/fourth-raw/profiles/run-E1NTC8/data/xudu/xanadocs/untitled-20261014-141134
+runtime_store_path_before_archive_0=/workspace/spatial-build/run-E1NTC8/data/xudu/xanadocs/untitled-20261014-141134
+1=/workspace/spatial-build/fourth-raw/profiles/run-E1NTC8/data/xudu/xanadocs/untitled-20261014-141135
+runtime_store_path_before_archive_1=/workspace/spatial-build/run-E1NTC8/data/xudu/xanadocs/untitled-20261014-141135

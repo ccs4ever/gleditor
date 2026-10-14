@@ -1,0 +1,7 @@
+profile=/workspace/spatial-build/run-vJ7igv/data
+permascroll=/workspace/spatial-build/run-vJ7igv/data/xuzz/permascroll/default
+size=800,600
+backend=opengl
+selected_bytes=654
+0=/workspace/spatial-build/run-vJ7igv/data/xudu/xanadocs/untitled-20261014-143405
+1=/workspace/spatial-build/run-vJ7igv/data/xudu/xanadocs/untitled-20261014-143405-2

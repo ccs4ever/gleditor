@@ -1,0 +1,5 @@
+profile=/workspace/spatial-build/fourth-raw/profiles/run-kFHfhe/data
+runtime_profile_before_archive=/workspace/spatial-build/run-kFHfhe/data
+permascroll=/workspace/spatial-build/fourth-raw/profiles/run-kFHfhe/data/xuzz/permascroll/default
+size=1440,1000
+selected_bytes=654

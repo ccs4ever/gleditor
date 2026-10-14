@@ -1,0 +1,8 @@
+Origin passage starts with the whole selected thought and keeps its context nearby.
+A reader follows the exact words into a distant page, with the same selection intact.
+Each line is part of one continuous passage; the link marks this entire range.
+When the window is narrow, the reader should still land at the first selected words.
+When the window is wide, more of the passage should become readable at once.
+This sixth line checks that line breaks remain ordinary text inside the selection.
+The seventh line gives the frame more real content than the short earlier fixture.
+The eighth line closes the multi-line passage with a distinct final sentence.

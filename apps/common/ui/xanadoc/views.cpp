@@ -5,11 +5,13 @@
 #include "views.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -36,6 +38,7 @@
 #include "common/ui/hypertime_graph.hpp"
 #include "common/ui/xanadoc/beams.hpp"
 #include "common/ui/xanadoc/kinetic_tether_overlay.hpp"
+#include "common/ui/xanadoc/overview_overlay.hpp"
 #include "common/ui/xanadoc/pouch_drawer.hpp"
 #include "common/ui/xanadoc/satelloid.hpp"
 #include "common/ui/xanadoc/session.hpp"
@@ -68,7 +71,11 @@ void Views::deviceReady(render::RenderDevice &device,
 }
 
 void Views::drawFrame(gleditor::FrameContext &ctx) {
-  chromeTopPx_          = std::max(ctx.chrome.top, ctx.settledChrome.top);
+  chromeInsets_ = {
+      .top    = std::max(ctx.chrome.top, ctx.settledChrome.top),
+      .bottom = std::max(ctx.chrome.bottom, ctx.settledChrome.bottom),
+      .left   = std::max(ctx.chrome.left, ctx.settledChrome.left),
+      .right  = std::max(ctx.chrome.right, ctx.settledChrome.right)};
   bool quotationsReady  = false;
   bool quotationsFailed = false;
   for (const auto &result : session.takeContentRetentionNotifications()) {
@@ -194,7 +201,7 @@ void Views::frameNewestComparison() {
           2.0F * halfH / static_cast<float>(view.screenHeight);
       view.pos = glm::vec3(0.5F * (left + right),
                            std::max(oldLeft.y, newLeft.y) - halfH +
-                               chromeTopPx_ * worldPerPx,
+                               chromeInsets_.top * worldPerPx,
                            std::max(oldLeft.z, newLeft.z) + distance);
       return true;
     });
@@ -231,6 +238,245 @@ void Views::keepInView(const Doc &doc, const std::uint32_t offset) {
   };
   follow(view.pos.x, point.x, halfW);
   follow(view.pos.y, point.y, halfH);
+}
+
+bool Views::keepRangeInView(const Doc &doc, const std::uint32_t start,
+                            const std::uint32_t end) {
+  const auto first = doc.anchorFor(start);
+  if (!first) {
+    GLEDITOR_LOG_DEBUG("xudu.links",
+                       "range [{},{}) not ready: first anchor missing", start,
+                       end);
+    return false;
+  }
+  GLEDITOR_LOG_DEBUG("xudu.links",
+                     "range [{},{}) first anchor ready page={} pageBuilt={} "
+                     "local=({:.3f},{:.3f}) height={:.3f}",
+                     start, end, first->pageIndex,
+                     static_cast<bool>(doc.page(first->pageIndex)), first->x,
+                     first->y, first->height);
+
+  struct WorldBounds {
+    std::array<glm::vec3, 4> corners{};
+  };
+  const auto cornersFor =
+      [&](const Doc::Anchor &anchor, const float left, const float right,
+          const float top, const float bottom) -> std::optional<WorldBounds> {
+    const auto frame = doc.pageFrame(anchor.pageIndex);
+    if (!frame) return std::nullopt;
+    const glm::vec3 basisX(frame->localToWorld[0]);
+    const glm::vec3 basisY(frame->localToWorld[1]);
+    const glm::vec3 origin(frame->localToWorld[3]);
+    GLEDITOR_LOG_DEBUG(
+        "xudu.links",
+        "pageFrame page={} basisX=({:.7f},{:.7f},{:.7f}) "
+        "basisY=({:.7f},{:.7f},{:.7f}) origin=({:.5f},{:.5f},{:.5f})",
+        anchor.pageIndex, basisX.x, basisX.y, basisX.z, basisY.x, basisY.y,
+        basisY.z, origin.x, origin.y, origin.z);
+    WorldBounds bounds;
+    const std::array<glm::vec2, 4> local{
+        {{left, top}, {right, top}, {right, bottom}, {left, bottom}}};
+    for (std::size_t i = 0; i < local.size(); ++i) {
+      bounds.corners[i] =
+          glm::vec3(frame->localToWorld * glm::vec4(local[i], 0.0F, 1.0F));
+    }
+    return bounds;
+  };
+  const auto caretBounds = [&]() -> std::optional<WorldBounds> {
+    const float halfWidth  = Caret::widthPixels * 0.5F;
+    const float halfHeight = first->height * 0.5F;
+    return cornersFor(*first, first->x - halfWidth, first->x + halfWidth,
+                      first->y + halfHeight, first->y - halfHeight);
+  };
+
+  std::optional<WorldBounds> selectedBounds;
+  bool hasExactRangeBounds = false;
+  if (end > start) {
+    const auto last = doc.anchorFor(end - 1);
+    if (!last) {
+      GLEDITOR_LOG_DEBUG("xudu.links",
+                         "range [{},{}) not ready: last anchor missing", start,
+                         end);
+      return false;
+    }
+    GLEDITOR_LOG_DEBUG(
+        "xudu.links",
+        "range end anchor page={} local=({:.3f},{:.3f}) height={:.3f}",
+        last->pageIndex, last->x, last->y, last->height);
+    if (first->pageIndex == last->pageIndex) {
+      if (const auto page = doc.page(first->pageIndex)) {
+        if (const auto text = page->textBoundsFor(start, end)) {
+          GLEDITOR_LOG_DEBUG("xudu.links",
+                             "range bounds page={} local-x=[{:.3f},{:.3f}] "
+                             "y=[{:.3f},{:.3f}] line={:.3f}",
+                             first->pageIndex, text->left, text->right,
+                             text->band.bottom, text->band.top,
+                             text->band.lineHeight);
+          selectedBounds      = cornersFor(*first, text->left, text->right,
+                                           text->band.top, text->band.bottom);
+          hasExactRangeBounds = selectedBounds.has_value();
+        } else {
+          GLEDITOR_LOG_DEBUG(
+              "xudu.links",
+              "range [{},{}) bounds unsupported on page={}; use caret", start,
+              end, first->pageIndex);
+        }
+      }
+    } else {
+      GLEDITOR_LOG_DEBUG("xudu.links",
+                         "range [{},{}) crosses pages {}..{}; use caret", start,
+                         end, first->pageIndex, last->pageIndex);
+    }
+  }
+  // A multipage, unsupported, or overlarge range keeps its exact beginning
+  // readable and leaves the existing scrolling/typing camera policy intact.
+  if (!selectedBounds) selectedBounds = caretBounds();
+  if (!selectedBounds) return false;
+  const auto overview = overviewBounds_ ? overviewBounds_() : std::nullopt;
+
+  std::scoped_lock locker(state->view);
+  auto &view = state->view;
+  if (view.screenWidth <= 0 || view.screenHeight <= 0) {
+    GLEDITOR_LOG_DEBUG("xudu.links",
+                       "range [{},{}) camera viewport not ready: {}x{}", start,
+                       end, view.screenWidth, view.screenHeight);
+    return false;
+  }
+  const glm::vec3 oldCamera = view.pos;
+  const auto readingArea =
+      gleditor::ui::UiMetrics{.screenWidth  = view.screenWidth,
+                              .screenHeight = view.screenHeight,
+                              .chrome       = chromeInsets_,
+                              .marginShare  = state->uiSafeMarginShare.load()}
+          .pixelSafeArea();
+  const float minX       = readingArea.left;
+  const float maxX       = readingArea.left + readingArea.width;
+  const float chromeMinY = readingArea.bottom;
+  const float maxY       = readingArea.bottom + readingArea.height;
+  const auto fitBounds   = [&](const WorldBounds &bounds, const float minY,
+                             float &cameraX, float &cameraY) {
+    const float midX = static_cast<float>(view.screenWidth) * 0.5F;
+    const float midY = static_cast<float>(view.screenHeight) * 0.5F;
+    float lowerX     = std::numeric_limits<float>::lowest();
+    float upperX     = std::numeric_limits<float>::max();
+    float lowerY     = std::numeric_limits<float>::lowest();
+    float upperY     = std::numeric_limits<float>::max();
+    for (const auto &corner : bounds.corners) {
+      const float scale = 2.0F * (view.pos.z - corner.z) *
+                          std::tan(glm::radians(view.fov) * 0.5F) /
+                          static_cast<float>(view.screenHeight);
+      if (scale <= 0.0F) return false;
+      lowerX = std::max(lowerX, corner.x - (maxX - midX) * scale);
+      upperX = std::min(upperX, corner.x - (minX - midX) * scale);
+      lowerY = std::max(lowerY, corner.y - (maxY - midY) * scale);
+      upperY = std::min(upperY, corner.y - (minY - midY) * scale);
+    }
+    if (lowerX > upperX || lowerY > upperY) return false;
+    cameraX = std::clamp(cameraX, lowerX, upperX);
+    cameraY = std::clamp(cameraY, lowerY, upperY);
+    return true;
+  };
+  const auto overlapsOverview = [&](const WorldBounds &bounds,
+                                    const float cameraX) {
+    if (!overview) return false;
+    float projectedLeft  = std::numeric_limits<float>::max();
+    float projectedRight = std::numeric_limits<float>::lowest();
+    const float midX     = static_cast<float>(view.screenWidth) * 0.5F;
+    for (const auto &corner : bounds.corners) {
+      const float scale = 2.0F * (view.pos.z - corner.z) *
+                          std::tan(glm::radians(view.fov) * 0.5F) /
+                          static_cast<float>(view.screenHeight);
+      if (scale <= 0.0F) continue;
+      const float x  = midX + (corner.x - cameraX) / scale;
+      projectedLeft  = std::min(projectedLeft, x);
+      projectedRight = std::max(projectedRight, x);
+    }
+    return projectedRight >= overview->left &&
+           projectedLeft <= overview->left + overview->width;
+  };
+  const auto fitVisible = [&](const WorldBounds &bounds, float &cameraX,
+                              float &cameraY) {
+    if (!fitBounds(bounds, chromeMinY, cameraX, cameraY)) {
+      GLEDITOR_LOG_DEBUG("xudu.links",
+                         "range bounds cannot fit chrome rectangle "
+                         "x=[{:.1f},{:.1f}] y=[{:.1f},{:.1f}]",
+                         minX, maxX, chromeMinY, maxY);
+      return false;
+    }
+    if (overlapsOverview(bounds, cameraX)) {
+      const float overviewMinY =
+          std::max(chromeMinY, overview->bottom + overview->height);
+      GLEDITOR_LOG_DEBUG("xudu.links",
+                         "projected range overlaps overview x=[{:.1f},{:.1f}], "
+                         "reserve y>={:.1f}",
+                         overview->left, overview->left + overview->width,
+                         overviewMinY);
+      if (!fitBounds(bounds, overviewMinY, cameraX, cameraY)) {
+        GLEDITOR_LOG_DEBUG("xudu.links",
+                           "range bounds cannot fit overview-safe rectangle");
+        return false;
+      }
+    }
+    return true;
+  };
+
+  float cameraX        = view.pos.x;
+  float cameraY        = view.pos.y;
+  const bool rangeFits = fitVisible(*selectedBounds, cameraX, cameraY);
+  std::optional<WorldBounds> fallbackBounds;
+  if (!rangeFits) {
+    GLEDITOR_LOG_DEBUG("xudu.links",
+                       "range fit failed; retry first caret rect "
+                       "camera=({:.5f},{:.5f},{:.5f})",
+                       oldCamera.x, oldCamera.y, oldCamera.z);
+    const auto caret = caretBounds();
+    fallbackBounds   = caret;
+    cameraX          = view.pos.x;
+    cameraY          = view.pos.y;
+    if (!caret || !fitVisible(*caret, cameraX, cameraY)) {
+      if (!caret) return false;
+      const float centerX = (minX + maxX) * 0.5F;
+      const auto frame    = doc.pageFrame(first->pageIndex);
+      if (!frame) return false;
+      const glm::vec3 caretCenter(frame->localToWorld *
+                                  glm::vec4(first->x, first->y, 0.0F, 1.0F));
+      const float scale = 2.0F * (view.pos.z - caretCenter.z) *
+                          std::tan(glm::radians(view.fov) * 0.5F) /
+                          static_cast<float>(view.screenHeight);
+      if (scale <= 0.0F) return false;
+      cameraX = caretCenter.x -
+                (centerX - static_cast<float>(view.screenWidth) * 0.5F) * scale;
+      const float minY =
+          overlapsOverview(*caret, cameraX)
+              ? std::max(chromeMinY, overview->bottom + overview->height)
+              : chromeMinY;
+      const float centerY = (minY + maxY) * 0.5F;
+      cameraY =
+          caretCenter.y -
+          (centerY - static_cast<float>(view.screenHeight) * 0.5F) * scale;
+    }
+  }
+  view.pos.x         = cameraX;
+  view.pos.y         = cameraY;
+  const auto &bounds = rangeFits ? *selectedBounds : *fallbackBounds;
+  glm::vec3 worldLo(std::numeric_limits<float>::max());
+  glm::vec3 worldHi(std::numeric_limits<float>::lowest());
+  for (const auto &corner : bounds.corners) {
+    worldLo = glm::min(worldLo, corner);
+    worldHi = glm::max(worldHi, corner);
+  }
+  GLEDITOR_LOG_DEBUG(
+      "xudu.links",
+      "range framing outcome={} camera "
+      "({:.5f},{:.5f},{:.5f})->({:.5f},{:.5f},{:.5f}) worldBounds "
+      "x=[{:.5f},{:.5f}] y=[{:.5f},{:.5f}] z=[{:.5f},{:.5f}] "
+      "insets=({:.1f},{:.1f},{:.1f},{:.1f}) overview={}",
+      rangeFits && hasExactRangeBounds ? "range" : "caret", oldCamera.x,
+      oldCamera.y, oldCamera.z, view.pos.x, view.pos.y, view.pos.z, worldLo.x,
+      worldHi.x, worldLo.y, worldHi.y, worldLo.z, worldHi.z, chromeInsets_.left,
+      chromeInsets_.right, chromeInsets_.bottom, chromeInsets_.top,
+      static_cast<bool>(overview));
+  return true;
 }
 
 std::optional<Doc::Anchor>

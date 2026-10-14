@@ -1,0 +1,52 @@
+{
+  "status": "failed_visual_landing",
+  "case": {
+    "size_px": [800, 600],
+    "backend": "opengl",
+    "shader_optimization": "O0",
+    "binary_sha256": "49e1a068f69d73aed7fbe0a498db338d2cf02d7a5554e1f70bc405c928ac9935",
+    "entry_frame": "800,600-opengl/01-enter.png",
+    "entry_frame_raw": "/workspace/spatial-build/fourth-raw/wide/failed-isolated-build/800,600-opengl/01-enter.ppm"
+  },
+  "link_and_reading_state": {
+    "source_range_bytes": [0, 654],
+    "source_explicit_lines": 8,
+    "destination_range_bytes": [0, 23],
+    "selected_document": "Doc 2",
+    "reading_side": "left",
+    "source_text_in_a11y": true,
+    "a11y_caret_byte_reported": 77
+  },
+  "entry_action": {
+    "ui_control": "Enter",
+    "screen_click_px": [320, 464],
+    "await_result": "Doc 2 selected",
+    "pick_tag": {
+      "kind": 1,
+      "doc": 0,
+      "page": 6,
+      "cluster": 15,
+      "interpretation": "overlay pick scope"
+    }
+  },
+  "frame_bounds_px": {
+    "screen": [0, 0, 799, 599],
+    "source_side_visible_white_pixel_extent": [0, 277, 261, 405],
+    "source_side_clipped_at_left_screen_edge": true,
+    "selected_blue_ink_and_connector_exact_color_extent": [0, 294, 538, 401],
+    "destination_page_white_pixel_extent": [538, 333, 799, 405],
+    "destination_highlight_exact_color_extent": [555, 349, 711, 362],
+    "link_panel_background_exact_color_extent": [0, 406, 799, 564],
+    "large_empty_black_band_above_pages": [0, 136, 799, 276]
+  },
+  "interpretation_limits": {
+    "complete_source_range_visible": false,
+    "world_space_camera_position_at_entry_logged": false,
+    "pixel_bounds_method": "Exact RGB pixel extents in the saved 800x600 PNG; they describe visible raster, not inferred world-space page bounds.",
+    "camera_state_note": "activity-after records the final saved reading place after later Origin/Back/fold steps, not the camera at 01-enter; it is not used as entry camera data."
+  },
+  "source_invariants": {
+    "source_store_sha256_before_after": "4791c441b9b88f3913fa6c76e17df5d96cee1f5b51b587235d494f97991514c8",
+    "destination_store_sha256_before_after": "319740fd1d2ec050b0bd4a7938405fd2fbd4980d780a37e234b5050cfb2bcc19"
+  }
+}

@@ -1,0 +1,11 @@
+captured_utc=2026-10-14T14:51:01Z
+git_head=c1ab2314e7bf31db67545aefd8a59f795a0d4756
+git_branch=feat/spatial-ui-overhaul
+xuzz_sha256=a8df8fdac6b4124159b0a63aedd258e1dfdb15b0680ff0a259e7313e894b9d7d  /workspace/gleditor/build/xuzz
+xudu_dump_sha256=183b63931fdf1bde179633758e17f7409f9270262ac52f5fb22f1c16415feb79  /workspace/gleditor/build/xudu-dump
+matrix=800x600/opengl,800x600/opengles,800x600/vulkan,640x480/opengl,1440x1000/opengl
+shader_optimization=O0
+purpose=visual UI validation; no performance claim
+actual_cases=800,600/opengl,800,600/opengles
+not_run=800,600/vulkan,640,480/opengl,1440,1000/opengl (held for UI safe-margin repair)
+candidate_status=pre-margin; vertical eight-line block fits, but leading W on lines 4 and 5 is clipped at x=0

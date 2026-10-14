@@ -272,6 +272,16 @@ void OverviewOverlay::toggle() {
   ++revision;
 }
 
+std::optional<gleditor::ui::Rect> OverviewOverlay::visibleBounds() const {
+  const std::scoped_lock lock(guard);
+  if (!isVisible() || !lastFit || panelSize.x <= 0.0F || panelSize.y <= 0.0F)
+    return std::nullopt;
+  return gleditor::ui::Rect{.left   = panelMin.x,
+                            .bottom = panelMin.y,
+                            .width  = panelSize.x,
+                            .height = panelSize.y};
+}
+
 gleditor::ui::Rect
 OverviewOverlay::panelBounds(const xanadu::OverviewConfig &config,
                              const gleditor::ui::UiMetrics &metrics) {

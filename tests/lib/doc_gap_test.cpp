@@ -13,9 +13,12 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <memory>
+#include <ranges>
 #include <set>
 #include <string>
 #include <utility>
@@ -284,6 +287,125 @@ TEST_F(DocGapTest, InteriorTextBandDoesNotNeedTheStartPageBuilt) {
   EXPECT_FLOAT_EQ(exact->bottom, covering->bottom);
   EXPECT_GT(covering->top, covering->bottom);
   EXPECT_EQ(doc->builtPageCount(), 1U);
+}
+
+TEST_F(DocGapTest, TextBoundsUnionWideIntermediateLinesWithoutReshaping) {
+  const std::string middle(24, 'M');
+  const std::string contents = "x\n" + middle + "\nx\n";
+  doc = Doc::create(renderer, device.get(), glm::mat4(1.0F),
+                    MemoryTextSource(contents, "retained-text-bounds"));
+  doc->makePages();
+  buildPageDirectly(0);
+  const auto page = doc->page(0);
+  ASSERT_TRUE(page);
+
+  gleditor::text::ShapingStatsScope shaping;
+  const auto end    = static_cast<std::uint32_t>(contents.size());
+  const auto bounds = page->textBoundsFor(0, end);
+  ASSERT_TRUE(bounds);
+  const auto band = page->textBandFor(0, end);
+  ASSERT_TRUE(band);
+  EXPECT_FLOAT_EQ(bounds->band.top, band->top);
+  EXPECT_FLOAT_EQ(bounds->band.bottom, band->bottom);
+  EXPECT_FLOAT_EQ(bounds->band.lineHeight, band->lineHeight);
+
+  float expectedLeft     = std::numeric_limits<float>::infinity();
+  float expectedRight    = -std::numeric_limits<float>::infinity();
+  float middleRight      = -std::numeric_limits<float>::infinity();
+  float outerRight       = -std::numeric_limits<float>::infinity();
+  const auto middleStart = std::uint32_t{2};
+  const auto middleEnd =
+      middleStart + static_cast<std::uint32_t>(middle.size());
+  for (const auto &cluster : page->clusterBoxes()) {
+    if (cluster.byteStart >= contents.size()) continue;
+    const float width = static_cast<float>((cluster.quad >> 20U) & 4095U);
+    const float left  = cluster.quadCentre[0] - width / 2;
+    const float right = cluster.quadCentre[0] + width / 2;
+    expectedLeft      = std::min(expectedLeft, left);
+    expectedRight     = std::max(expectedRight, right);
+    if (cluster.byteStart >= middleStart && cluster.byteStart < middleEnd)
+      middleRight = std::max(middleRight, right);
+    else
+      outerRight = std::max(outerRight, right);
+  }
+  EXPECT_FLOAT_EQ(bounds->left, expectedLeft);
+  EXPECT_FLOAT_EQ(bounds->right, expectedRight);
+  EXPECT_FLOAT_EQ(bounds->right, middleRight);
+  EXPECT_GT(middleRight, outerRight);
+
+  EXPECT_FALSE(page->textBoundsFor(10, 10));
+  EXPECT_FALSE(page->textBoundsFor(end, end + 1));
+  EXPECT_EQ(shaping.stats().layoutCalls, 0U);
+  EXPECT_EQ(shaping.stats().harfbuzzCalls, 0U);
+}
+
+TEST_F(DocGapTest, TextBoundsClipToAnInteriorBuiltPage) {
+  doc->makePages();
+  const auto hit  = buildPageDirectly(5);
+  const auto page = doc->page(5);
+  ASSERT_TRUE(page);
+  const auto pageEnd = hit.startByte + page->textLength();
+
+  gleditor::text::ShapingStatsScope shaping;
+  const auto exact   = page->textBoundsFor(hit.startByte, pageEnd);
+  const auto clipped = page->textBoundsFor(hit.startByte - 50, pageEnd + 50);
+  ASSERT_TRUE(exact);
+  ASSERT_TRUE(clipped);
+  EXPECT_FLOAT_EQ(clipped->left, exact->left);
+  EXPECT_FLOAT_EQ(clipped->right, exact->right);
+  EXPECT_FLOAT_EQ(clipped->band.top, exact->band.top);
+  EXPECT_FLOAT_EQ(clipped->band.bottom, exact->band.bottom);
+  EXPECT_EQ(doc->builtPageCount(), 1U);
+  EXPECT_FALSE(doc->page(0));
+  EXPECT_EQ(shaping.stats().layoutCalls, 0U);
+  EXPECT_EQ(shaping.stats().harfbuzzCalls, 0U);
+}
+
+TEST_F(DocGapTest, TextBoundsKeepPartialLigatureEndpointFractions) {
+  appState->defaultFontName  = "DejaVu Serif 18";
+  const std::string contents = "office ffi";
+  doc = Doc::create(renderer, device.get(), glm::mat4(1.0F),
+                    MemoryTextSource(contents, "partial-ligature-bounds"));
+  doc->makePages();
+  buildPageDirectly(0);
+  const auto page = doc->page(0);
+  ASSERT_TRUE(page);
+
+  const auto cluster =
+      std::ranges::find_if(page->clusterBoxes(), [&](const auto &box) {
+        if (box.charCount < 2) return false;
+        const auto text = contents.substr(box.byteStart, box.byteLength);
+        return text.find("ff") != std::string::npos ||
+               text.find("fi") != std::string::npos;
+      });
+  if (cluster == page->clusterBoxes().end()) {
+    GTEST_SKIP() << "font shaping produced no multi-character ligature";
+  }
+
+  const auto start     = cluster->byteStart;
+  const auto end       = start + 1;
+  const auto highlight = page->highlightFor(start, end, 0);
+  ASSERT_TRUE(highlight);
+  ASSERT_EQ(highlight->firstCluster, highlight->lastCluster);
+  ASSERT_GT(highlight->endFraction, highlight->startFraction);
+  ASSERT_LT(highlight->endFraction, 1.F);
+
+  const float width     = static_cast<float>((cluster->quad >> 20U) & 4095U);
+  const float fullLeft  = cluster->quadCentre[0] - width / 2;
+  const float fullRight = cluster->quadCentre[0] + width / 2;
+  const float expectedLeft =
+      std::lerp(fullLeft, fullRight, highlight->startFraction);
+  const float expectedRight =
+      std::lerp(fullLeft, fullRight, highlight->endFraction);
+
+  gleditor::text::ShapingStatsScope shaping;
+  const auto bounds = page->textBoundsFor(start, end);
+  ASSERT_TRUE(bounds);
+  EXPECT_FLOAT_EQ(bounds->left, expectedLeft);
+  EXPECT_FLOAT_EQ(bounds->right, expectedRight);
+  EXPECT_LT(bounds->right, fullRight);
+  EXPECT_EQ(shaping.stats().layoutCalls, 0U);
+  EXPECT_EQ(shaping.stats().harfbuzzCalls, 0U);
 }
 
 TEST_F(DocGapTest, FacingHighlightContourUsesUploadedQuads) {

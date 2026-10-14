@@ -77,6 +77,11 @@ public:
     pendingCamera_ = std::move(place);
   }
   void keepInView(const Doc &doc, std::uint32_t offset);
+  bool keepRangeInView(const Doc &doc, std::uint32_t start, std::uint32_t end);
+  void
+  setOverviewBounds(std::function<std::optional<gleditor::ui::Rect>()> bounds) {
+    overviewBounds_ = std::move(bounds);
+  }
   void setComparisonCameraReady(std::function<bool()> ready) {
     comparisonCameraReady_ = std::move(ready);
   }
@@ -263,11 +268,12 @@ private:
   std::shared_ptr<gleditor::DocumentSwitcher> switcher;
   std::weak_ptr<Doc> primaryDocument_;
   float readableTextPx_{xanadu::LayoutConfig{}.readableTextPx};
-  float chromeTopPx_{};
+  gleditor::ScreenInsets chromeInsets_{};
   bool readingFramed_{false};
   std::weak_ptr<Doc> frameTarget_;
   std::weak_ptr<Doc> presentationAnchor_;
   std::function<bool()> pendingCamera_;
+  std::function<std::optional<gleditor::ui::Rect>()> overviewBounds_;
   std::function<bool()> comparisonCameraReady_;
   std::optional<xanadu::ReadingPlace> finalPlace_;
   std::optional<Pending> pending;

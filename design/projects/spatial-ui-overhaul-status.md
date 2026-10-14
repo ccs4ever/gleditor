@@ -7,6 +7,34 @@ session.
 
 ## Current checkpoint
 
+Fourth checkpoint (2026-10-14), validation complete: multiline Link landing uses retained page-range
+bounds and the existing camera placement seam. The fit accounts for live and settled chrome on all
+edges and the visible overview with a shared safe margin. After existing LinkBeams and timeline
+motion settle, it queues one final fit before projection; generation, weak document, view index and
+exact selection guards cancel stale work. Complete fitting is bounded to a built single page with
+supported glyph geometry; oversized, multipage or unsupported ranges prioritize the exact beginning
+with its full line height. No new page poses, camera, view host, source operations or visits were
+introduced. The existing source page pose, exact selection and activity command boundary remain
+unchanged.
+
+Independent native review accepts five cases: 800×600 on OpenGL, OpenGL ES and Vulkan shows all
+eight selected lines with a clear 30 px first-glyph inset; 1440×1000 OpenGL shows the full source
+and target; 640×480 OpenGL shows a readable prefix of roughly two lines without claiming the whole
+selection fits. The five before/after source-operation snapshots are byte-identical. The final
+785-test library suite passed, including the three new retained-geometry checks for wide
+intermediate lines, clipping to an interior page and partial ligature fractions; no tests were
+skipped. The 233-test UI suite and 99-test Xuzz suite passed. Link travel passed on all three
+backends and both repaired drag E2Es passed on OpenGL. The core renderer comparison has exact
+OpenGL/OpenGL ES equality and 0.2471% Vulkan pixel difference. The full evidence index is
+`design/reviews/spatial-ui-fourth-increment/validation.md`; raw native captures remain outside Git
+in `/workspace/spatial-build/fourth-raw/`.
+
+The stale broad E2E drag target assumptions were corrected from native calibration frames. The final
+safe-margin application passes both repaired strict cases on OpenGL (2/2), preserving exact byte
+insertion, primedia provenance, reader ownership and unchanged author operations. These two tests
+are closed findings, not future work. The historical whole-page ink threshold remains open, and
+these bounded validations do not establish full J1–J16 preservation.
+
 Third checkpoint (2026-10-14): short cross-document Link landings now keep the complete selected
 passage readable and synchronize the selected tab with document focus. Exact-range focus reuses
 `Views::activateDocument()` and cancels its ordinary page-zero frame; after existing companion
@@ -161,7 +189,34 @@ reviews pass.
 - Commit only tested increments, push the feature branch, update this status with exact evidence,
   implemented steps, checks and remaining gaps. Do not report prototype success as a native pass.
 
-## Validation checkpoint (2026-10-14)
+## Fourth-checkpoint validation (2026-10-14)
+
+- Final safe-margin build: `/workspace/spatial-build/fourth-build-margin.log`, exit 0. Source
+  revision `c1ab2314e7bf31db67545aefd8a59f795a0d4756`, product diff SHA-256 at build time
+  `17cfb9755b64a65a0829a38e813565303073da3a1b535161345e56950fdb5e06`, `build/xuzz` SHA-256
+  `52dadabe6cfee1e5994a5e2e297ea35b6e9e6eef150f7f68012e9ff3a949cdf7`.
+- Full UI suite: 233/233. Full library suite: 785/785, no skips; the retained-geometry tests for
+  wide intermediate lines, interior-page clipping, and partial ligature fractions all pass. Full
+  Xuzz suite: 99/99. Native runs used fresh XDG roots and Xvfb/x11 where Vulkan required it.
+- Five independent safe-margin native cases pass: 800×600 on OpenGL/OpenGL ES/Vulkan, 1440×1000
+  OpenGL, and 640×480 OpenGL. The first three show all eight source lines from x=30 above the
+  chrome; the 1440 frame also shows the complete target; 640 shows a prefix, not the complete
+  selection. Source operations remain byte-identical before and after each run.
+- Final link-travel E2E passes on OpenGL, OpenGL ES and Vulkan. The two repaired drag E2Es pass on
+  OpenGL (2/2). Their full logs and exact binary hashes are in
+  [`fourth-increment validation`](../reviews/spatial-ui-fourth-increment/validation.md).
+- Core backend renderer comparison passes: OpenGL/OpenGL ES have 0 differing pixels; Vulkan differs
+  by 0.2471% (0.010 mean channel delta). It reused the unchanged core binary. Raw PPMs and private
+  XDG profiles are outside Git under `/workspace/spatial-build/fourth-raw/`; lossless PNGs and their
+  hashes are indexed in the validation document.
+- Current incremental resize measurement is 854.6 ns/update in the O0 test build, below the 1000 ns
+  test threshold. This is a test-build result, not optimized-build performance acceptance. Preserve
+  the earlier 4625 ns O0 measurement as historical evidence; no performance budget is accepted.
+- Open gates remain: native AT-SPI, an accessible enlarged-text control and enlarged-text captures,
+  multipage/cell/history endpoints, unavailable/cancel/reopen variants, whole-page ink threshold and
+  the complete 16+16 journey set. Do not promote bounded cases to full J24/J25 or J1–J16 acceptance.
+
+## Earlier validation checkpoint (2026-10-14)
 
 - Owning checks: 13 PDF/SVG library checks, 4 ReadingPlace checks, 49 exact-reference/navigation/
   panel/activity checks and 34 native panel/package UI checks pass (100 total).
@@ -206,17 +261,17 @@ reviews pass.
 
 ## Exact next task
 
-Extend readable landing to multi-line/long selections, tighter windows and enlarged text, then cell
-and exact historical endpoints through the existing rendering seams. Complete J24 source/activity
-invariants for unavailable/cancel and repeated occurrences, then J25 branching Back/Return/reopen.
-Keep same-profile before/after source snapshots and per-backend native captures. The short fixture
-passes at 1440×1000 on three backends and at 800×600 in the independent Luna run; that does not
-establish all ranges or layouts.
+Continue from the accepted bounded landing into enlarged-text and multipage ranges, then cell and
+historical endpoints through the existing rendering seams. Complete the pending J24 variants:
+repeated occurrences, unavailable targets and cancellation with same-profile source/activity
+snapshots. Then complete J25 branching Back/Return and reopen behavior. Keep per-backend native
+captures and exact state/source evidence. The safe-margin sizes and backends above do not establish
+these journeys.
 
-Correct the two broader E2E drag tests from actual drawn targets and investigate the whole-page ink
-threshold without weakening it. Resolve legacy J3 pouch insertion, J11 stale drag authoring and J15
-stale version-selection findings against the pinned baseline. Preserve the Luna reports and open
-AT/optimized-performance gates.
+Investigate the whole-page ink threshold without weakening it, and resolve the legacy J3, J11 and
+J15 findings against the pinned baseline. The two stale drag tests are repaired and pass on the
+final build; do not list them as outstanding work. Keep native AT-SPI, discovery of a UI text-scale
+control, optimized-build performance acceptance, and the full 16+16 journey set open.
 
 The next spatial service package is the publication/pin-lifecycle audit followed by D2 branch/frame
 enumeration, per the dependency map above. Do not substitute raw primedia search for historical

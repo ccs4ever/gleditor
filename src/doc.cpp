@@ -43,6 +43,14 @@
 #include <glm/trigonometric.hpp> // for radians
 
 namespace {
+// Decode the retained upload quad once for range bounds and route terminals.
+std::array<float, 4> clusterQuadBounds(const ClusterBox &box) {
+  const float width  = (box.quad >> 20U) & 4095U;
+  const float height = (box.quad >> 8U) & 4095U;
+  return {box.quadCentre[0] - width / 2, box.quadCentre[1] - height / 2,
+          box.quadCentre[0] + width / 2, box.quadCentre[1] + height / 2};
+}
+
 /// @p ranges clipped to [@p pageStart, @p pageEnd) and rebased to the page's
 /// own coordinates, dropping those that miss it: what layoutPage() is handed
 /// for a page, since it only ever sees that page's slice of the text.
@@ -886,6 +894,31 @@ Page::highlightFor(const std::uint32_t selStart, const std::uint32_t selEnd,
   return range;
 }
 
+std::optional<Page::TextBounds>
+Page::textBoundsFor(const std::uint32_t start, const std::uint32_t end) const {
+  if (!singleQuadClusters) return std::nullopt;
+  const auto range = highlightFor(start, end, 0);
+  const auto band  = textBandFor(start, end);
+  if (!range || !band) return std::nullopt;
+  std::optional<TextBounds> result;
+  for (std::size_t i = range->firstCluster; i <= range->lastCluster; ++i) {
+    const auto rect = clusterQuadBounds(clusters[i]);
+    if (rect[0] >= rect[2] || rect[1] >= rect[3]) continue;
+    const float from = i == range->firstCluster ? range->startFraction : 0;
+    const float to   = i == range->lastCluster ? range->endFraction : 1;
+    const auto left  = std::lerp(rect[0], rect[2], from);
+    const auto right = std::lerp(rect[0], rect[2], to);
+    if (left >= right) continue;
+    if (!result)
+      result = TextBounds{left, right, *band};
+    else {
+      result->left  = std::min(result->left, left);
+      result->right = std::max(result->right, right);
+    }
+  }
+  return result;
+}
+
 std::optional<Page::RangeTerminal>
 Page::rangeTerminal(const std::uint32_t start, const std::uint32_t end,
                     const bool first, const bool towardsRight,
@@ -900,13 +933,6 @@ Page::rangeTerminal(const std::uint32_t start, const std::uint32_t end,
   const auto band  = textBandFor(start, end);
   if (!range || !band || !std::isfinite(clearancePx) || clearancePx < 0)
     return std::nullopt;
-  const auto bounds = [](const ClusterBox &box) {
-    const float width  = (box.quad >> 20U) & 4095U;
-    const float height = (box.quad >> 8U) & 4095U;
-    return std::array{
-        box.quadCentre[0] - width / 2, box.quadCentre[1] - height / 2,
-        box.quadCentre[0] + width / 2, box.quadCentre[1] + height / 2};
-  };
   auto index      = first ? range->firstCluster : range->lastCluster;
   const auto line = std::ranges::find_if(lines, [&](const auto &entry) {
     return clusters[index].byteStart >= entry.byteStart &&
@@ -914,7 +940,7 @@ Page::rangeTerminal(const std::uint32_t start, const std::uint32_t end,
   });
   if (line == lines.end()) return std::nullopt;
   const auto edgeX = [&](const std::size_t i) {
-    const auto rect = bounds(clusters[i]);
+    const auto rect = clusterQuadBounds(clusters[i]);
     const float lo  = i == range->firstCluster ? range->startFraction : 0;
     const float hi  = i == range->lastCluster ? range->endFraction : 1;
     return std::lerp(rect[0], rect[2], towardsRight ? hi : lo);
@@ -928,7 +954,7 @@ Page::rangeTerminal(const std::uint32_t start, const std::uint32_t end,
     if (towardsRight ? edgeX(i) > edgeX(index) : edgeX(i) < edgeX(index))
       index = i;
   }
-  const auto rect = bounds(clusters[index]);
+  const auto rect = clusterQuadBounds(clusters[index]);
   if (rect[0] >= rect[2] || rect[1] >= rect[3]) return std::nullopt;
   const float x = edgeX(index);
   const float y = first ? rect[3] : rect[1];
@@ -939,7 +965,7 @@ Page::rangeTerminal(const std::uint32_t start, const std::uint32_t end,
   // the whitespace between lines remains available without crossing text.
   for (std::size_t i = 0; i < clusters.size(); ++i) {
     if (i >= range->firstCluster && i <= range->lastCluster) continue;
-    auto other = bounds(clusters[i]);
+    auto other = clusterQuadBounds(clusters[i]);
     if (clusters[i].inkRows[0] == clusters[i].inkRows[1]) continue;
     const float top = other[3];
     other[3]        = top - clusters[i].inkRows[0];

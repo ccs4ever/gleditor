@@ -1,0 +1,7 @@
+profile=/workspace/spatial-build/run-ZPy5JJ/data
+permascroll=/workspace/spatial-build/run-ZPy5JJ/data/xuzz/permascroll/default
+size=800,600
+backend=vulkan
+selected_bytes=654
+0=/workspace/spatial-build/run-ZPy5JJ/data/xudu/xanadocs/untitled-20261014-143512
+1=/workspace/spatial-build/run-ZPy5JJ/data/xudu/xanadocs/untitled-20261014-143512-2
