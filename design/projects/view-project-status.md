@@ -4,16 +4,16 @@ The running record of the view project that [`start-view-project.md`](start-view
 Updated with every package. A session that picks the project up reads this first and continues from
 **Next**.
 
-Last updated: 2026-10-09.
+Last updated: 2026-10-14.
 
 ## Where it stands
 
-| Milestone                 | State                                  |
-| ------------------------- | -------------------------------------- |
-| M0, the tree in its shape | A1 and A2 done; closed                 |
-| M1, spikes                | done; closed                           |
-| M2, the spine             | in progress: E0 to E6, E8, U0, U1 done |
-| M3 onward                 | not started                            |
+| Milestone                 | State                            |
+| ------------------------- | -------------------------------- |
+| M0, the tree in its shape | A1 and A2 done; closed           |
+| M1, spikes                | done; closed                     |
+| M2, the spine             | every package in; gate under way |
+| M3 onward                 | not started                      |
 
 ## Done
 
@@ -36,6 +36,12 @@ Last updated: 2026-10-09.
 | U1                             | `65983bd`                                  | The colour rule of §3.1 in the engine, colour maths in `<gleditor/color_space.hpp>`. Each band's open arcs are also cut where its colour comes within ΔE₀₀ 10 of a reserved colour, which the V1 rule failed for 7 of 40. The band constants are `constexpr`, not settings: the reader overrides a dimension's colour, not the rule.            |
 | P3                             | `3e228de`, `b4b6c5a`                       | The base view, with `documents` (parity) and `pages` (the default) sub-views. The tension engine no longer allocates per step.                                                                                                                                                                                                                  |
 | L5, R5, L9                     | `8a8eb1b`                                  | `PipelineDesc::depthWrite`; `TranslucentList` sorted by camera depth with beams cut at sheets (R5's scene: 0 of 480,000 pixels wrong from either side); beam width from the view ray. Off-axis head-on beams draw slightly wider, contrary to R3's "unchanged". The UI's own beams still draw after the list until their contributors adopt it. |
+| R4's test                      | `9cf6aa2`                                  | `tests/lib/doc_page_pose_test.cpp`, L7's first test, disabled until L7; forced to run, all three fail as F2 says.                                                                                                                                                                                                                               |
+| E9                             | `a71458b`, `0554121`                       | Stretch vanishing with ghosts, the two-axis rule (G5), D1 and D2, and the shared marks helper. Edge heat deferred (§4.1). Its 10⁶-cell test compares 10⁴ with 10³: minting is O(N²) (see Findings).                                                                                                                                             |
+| U6a                            | `1ca38df`                                  | `ViewAnimation`: tweens by `SubjectId`, the toss fade from a snapshot, the held-key rule as a timing rule (no repeat flag reaches commands), reduced motion, no allocation at steady state. `view.motion.*` in `system://ui`. `PlacedFrame` gains `opacity`.                                                                                    |
+| Translucent list in the UI     | `8ba9428`, `9a61f9c`                       | `LinkBeams`, the visualizer, tethers and satelloids draw in `drawScene()` and hand beams and sheets to the list. Two visible changes beyond occlusion, kept: chrome draws over beams, and a visualizer beam stops at the cards it joins. Library world widgets and translucent images are not in the list yet.                                  |
+| U2                             | `bf465b0`, `353d61a`, `5f63e3d`            | The second slice presentation beside the visualizer, chosen from the palette and kept across a restart; steps and home; every other action says it is not supported. Found and fixed `Views::frameForReading()` framing against the page mid-arrival, which varied run to run.                                                                  |
+| U5a, U7a                       | `c26bd5e`                                  | The compass (rows, not the rose; display only), the palette with sub-views, and the commands: steps, hop, swap, sub-view next and previous, cycle, and binding by typing (`std:view/bind`, Ctrl+Alt+B). A "plain" sub-view without ghosts. Typed bindings last only the session; no binding undo yet.                                           |
 
 What the A1 remainder changed:
 
@@ -71,13 +77,11 @@ changed.
 
 ## Next
 
-1. **M2**: E9 (stretch vanishing) and U6a (animation) are with workers, their work saved in their
-   worktrees after the API session limit stopped them. Then U2, U5a, U7a; then the red team, the
-   frame inspector (re-check colours 0, 6 and 27, and the off-axis beam width), the UX validator and
-   go or no-go.
-1. The UI adopts the translucent list: `LinkBeams`, the visualizer, tethers and world panels draw in
-   `drawScene()` and hand beams to `ctx.translucent`.
-1. Ahead of their milestones: L10, L6 (after L3), L7 with R4's test, P4.
+1. **M2's gate**: the red team, the frame inspector (colours 0, 6 and 27; off-axis beam width; the
+   xanadoc page behind the new slice presentation; wide neighbours fading to bars), the UX validator
+   on the M2 journey, then go or no-go here.
+1. After M2: M3 (packs), one milestone at a time, finished before the next starts (owner,
+   2026-10-14).
 
 ## Fixed along the way
 
@@ -118,6 +122,8 @@ None. After the fixes under "Fixed along the way", a full `make -k test` exits 0
 743, `xudu_test` 1301, `xuzz_test` 61, `ui_test` 193, both swarm runs) and `compare-backends.sh`
 exits 0, every image check and every E2E scenario agreeing between OpenGL and GLES.
 
+`E2EBinaryOrchestrationTest.aSliceViewIsChosenFromThePaletteAndKept` failed once in a worker's run
+and passed alone and in the next full run.
 `PublicationUiTest.aSliceCanBeAddedToTheCurrentTextStoreAndReopened` failed once under four
 concurrent builds (it runs `xuzz` under a 120-second timeout) and passed alone and in a whole run.
 Two speedup benchmarks failed once each under a loaded `make -k test` and passed in every run alone:
@@ -149,13 +155,27 @@ What a fresh Ubuntu 24.04 container needs, beyond the submodules:
 
 ## Findings for the owner
 
+- **Minting cells is O(N²).** `Store::putOp` walks the parent chain back to each operation's context
+  for every `makeCell`, so building 10⁶ cells does not finish in ten minutes (2·10⁴ take 2.4 s).
+  E9's 10⁶ acceptance test runs at 10⁴ against 10³ until this is fixed.
+
+- **`zigzag::OptionalCell` converts implicitly to `CellRef`**, so assigning one to a
+  `std::optional<CellRef>` gives an engaged optional holding `noCell`.
+
+- **The compiler cache lived under each checkout's `build/xdg/cache`**, because the Makefile
+  redirects `XDG_CACHE_HOME`, so every worktree built cold and kept its own cache; the disk filled.
+  Workers now share `CCACHE_DIR=/root/.cache/ccache-shared` (8 GB).
+
 - **`make test` stopped at the first red binary**, so `gleditor_test`'s font failure kept the other
   three, and the swarm tests, from running. `make -k test` now runs them all (the recipe reads `-k`
   itself) and fails at the end if any did.
+
 - **CI's build job installs neither Poppler, libmagic, libvlc nor librnp**, all of which the
   Makefile requires, so it most likely fails at pkg-config. Not checked against a CI run.
+
 - **The `config.h` race.** `apps/xuzz/xuzz_app.cpp` includes the generated `config.h`, but only the
   two `main.o` files are ordered after it (`Makefile:781-782`), so a fresh parallel build can fail.
+
 - **The engine includes more of the library than the governance rule allows.** The rule names
   `cpp26*`, `spatial.hpp` and `draw_budget.hpp`; the engine also includes, among others,
   `frame_contributor.hpp`, `pick_observer.hpp` and `a11y/tree.hpp`
