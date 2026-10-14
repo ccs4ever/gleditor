@@ -6,7 +6,8 @@
  *
  * Lists today's visualizer and every slice view in the registry, built-in or
  * third-party alike, so a view is reachable the day it is installed (V-R1),
- * and under each view that has them its sub-views, indented. A choice is
+ * and under each view that has them its sub-views, each named "View:
+ * Sub-view" so the closed combo says whose it is. A choice is
  * the value of a row: the view's kind, which keeps the sub-view the slice
  * already shows, or "kind#id" which names one.
  */
@@ -14,6 +15,7 @@
 #define COMMON_UI_VIEW_PRESENTATION_PALETTE_HPP
 
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -22,6 +24,7 @@
 
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/view/view.hpp"
+#include "common/xanadu/view/view_commands.hpp"
 
 namespace xanadu {
 class Store;
@@ -58,10 +61,26 @@ void openSlicePresentationPalette(
     std::string_view current, std::string_view currentSubview,
     std::function<void(const PaletteChoice &)> chosen);
 
-/// The binding command: one line, a point and what it shows ('x d.across').
-/// @p typed is called with the line the reader accepted.
-void openBindingCommand(gleditor::Form &form,
-                        std::function<void(std::string)> typed);
+/// Made with a line the reader accepted: it calls the second argument, from
+/// any thread and when it knows, with nothing for a binding made or the reason
+/// for one that was not.
+using BindingResult = std::function<void(const std::optional<std::string> &)>;
+using BindingAttempt =
+    std::function<void(const std::string &typed, BindingResult done)>;
+
+/// The words under the binding dialog's field: @p reason first when there is
+/// one, then the points, the dimensions and the groups a reader can name.
+[[nodiscard]] std::string bindingNote(const BindingChoices &choices,
+                                      std::string_view reason = {});
+
+/// The binding command: one line, a point and what it shows ('x d.across'),
+/// with what can be named listed under it. @p attempt is called with the line
+/// the reader accepted; when it gives a reason the dialog comes back up, with
+/// the line as typed and the reason shown (@p typed and @p reason are how it
+/// comes back).
+void openBindingCommand(gleditor::Form &form, BindingChoices choices,
+                        BindingAttempt attempt, std::string typed = {},
+                        std::string_view reason = {});
 
 /// Record @p choice as the presentation of the slice @p sliceId in the
 /// system://layout store @p layout, and its sub-view when it names one.

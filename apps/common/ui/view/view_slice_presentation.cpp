@@ -34,6 +34,7 @@ constexpr std::uint64_t kRootNode    = 1;
 constexpr std::uint64_t kTrailNode   = 2;
 constexpr std::uint64_t kNoticeNode  = 3;
 constexpr std::uint64_t kCompassNode = 4;
+constexpr std::uint64_t kStatusNode  = 5;
 constexpr std::uint64_t kFirstNode   = 16;
 /// The breadcrumbs' items, by place in the strip, clear of placed things.
 constexpr std::uint64_t kFirstCrumbNode = std::uint64_t{1} << 40U;
@@ -214,8 +215,10 @@ ViewSlicePresentation *ViewSlicePresentation::applySettings() {
       dirty_         = nullptr != store_;
     }
     if (nullptr != store_) {
-      const auto id = model.getString(
-          settings::sliceSubviewKey(store_->documentId().str()), std::string{});
+      const auto id =
+          model.getString(settings::sliceSubviewKey(store_->documentId().str(),
+                                                    descriptor_.kind),
+                          std::string{});
       if (const auto found = subviewIndexOf(descriptor_, id);
           found && *found != subview_) {
         subview_ = *found;
@@ -234,6 +237,7 @@ ViewSlicePresentation *ViewSlicePresentation::applySettings() {
     animation_.configure(MotionConfig::fromStore(*ui));
   }
   refreshCompass();
+  refreshStatus();
   stale_ = true;
   ++stamp_;
   return this;
@@ -253,7 +257,7 @@ ZigzagPresentationConfig ViewSlicePresentation::cellsInPixels() const {
 ViewSlicePresentation *
 ViewSlicePresentation::adoptAxes(const zigzag::ViewAxisBinding &names) {
   legacyView_ = names;
-  axisNames_  = {names.x_dimension, names.y_dimension, names.z_dimension};
+  adopted_    = {names.x_dimension, names.y_dimension, names.z_dimension};
   dirty_      = nullptr != store_;
   return this;
 }
@@ -301,22 +305,18 @@ void ViewSlicePresentation::ensureSpace() const {
 }
 
 void ViewSlicePresentation::buildSpace() {
-  if (space_) {
-    for (ViewAxisId axis = 0; axis < space_->axes().axisCount(); ++axis) {
-      if (const auto name = shownName(axis); !name.empty()) {
-        if (axis < axisNames_.size()) {
-          axisNames_[axis] = name;
-        } else {
-          axisNames_.push_back(name);
-        }
-      }
-    }
+  // What the reader has set is carried across a re-fold of the same slice by
+  // name, groups included; a different slice starts from what was kept for it.
+  std::optional<SavedBindings> carried;
+  if (space_ && nullptr != store_ && builtFrom_ == store_) {
+    carried = saveBindings(*space_, *store_);
     if (cursor_.origin != zigzag::noCell && !wantedFocus_) {
       wantedFocus_ = cursor_.origin;
     }
   }
   space_.reset();
   manifold_.reset();
+  builtFrom_ = nullptr;
   cellText_.clear();
   labelText_.clear();
   if (nullptr == store_) {
@@ -325,7 +325,8 @@ void ViewSlicePresentation::buildSpace() {
   }
   manifold_ =
       std::make_unique<zigzag::Manifold>(store_->rebuildManifold(head_));
-  space_ = std::make_unique<ViewManifold>(*manifold_);
+  space_     = std::make_unique<ViewManifold>(*manifold_);
+  builtFrom_ = store_;
 
   std::vector<BindingPoint> points;
   if (host_.systemStore) {
@@ -335,8 +336,11 @@ void ViewSlicePresentation::buildSpace() {
     }
   }
   if (points.empty()) {
-    for (const auto *const name : {"x", "y", "z"}) {
-      points.push_back(BindingPoint{.name = name, .role = spatialRole()});
+    // No layout to ask: the points the setting itself defaults to.
+    for (const auto &spec : defaultSettingSpecs(SystemDocKind::Layout)) {
+      if (settings::kBindingPoints == spec.name && !spec.schemas.empty()) {
+        points = bindingPointsFrom(spec.schemas.front().defaultValues);
+      }
     }
   }
   if (!space_->axes().configure(points)) {
@@ -344,6 +348,15 @@ void ViewSlicePresentation::buildSpace() {
   }
 
   auto origin = wantedFocus_.value_or(manifold_->home());
+  if (!carried && !wantedFocus_ && host_.systemStore) {
+    if (auto *const layout = host_.systemStore(SystemDocKind::Layout)) {
+      const auto kept = SystemStoreModel::fromStore(*layout).getInt64List(
+          settings::sliceFocusKey(store_->documentId().str()));
+      if (!kept.empty() && kept.front() >= 0) {
+        origin = static_cast<zigzag::CellRef>(kept.front());
+      }
+    }
+  }
   if (!manifold_->contains(origin)) {
     origin = manifold_->home();
   }
@@ -352,12 +365,99 @@ void ViewSlicePresentation::buildSpace() {
   }
   wantedFocus_.reset();
   cursor_ = SliceCursor{.origin = origin};
-  bindAxes(axisNames_);
+  if (!restoreBindings(carried)) {
+    seedAxes(adopted_);
+  }
+  syncLegacyView();
+  mintCues();
+  refreshCompass();
   cause_ = MotionCause::Rebind;
   stale_ = true;
 }
 
-void ViewSlicePresentation::bindAxes(const std::vector<std::string> &wanted) {
+std::optional<SavedBindings> ViewSlicePresentation::keptBindings() const {
+  if (nullptr == store_ || !host_.systemStore) {
+    return std::nullopt;
+  }
+  const auto *const layout = host_.systemStore(SystemDocKind::Layout);
+  if (nullptr == layout) {
+    return std::nullopt;
+  }
+  const auto model = SystemStoreModel::fromStore(*layout);
+  const auto id    = store_->documentId().str();
+  SavedBindingCells cells{
+      .axes      = model.getStringList(settings::sliceAxesKey(id)),
+      .groups    = model.getStringList(settings::sliceGroupsKey(id)),
+      .ringOrder = model.getStringList(settings::sliceRingOrderKey(id))};
+  // Nothing is kept for a slice whose reader has not bound anything: the
+  // first thing saved is the axes, which are never empty once there are any.
+  if (cells.axes.empty()) {
+    return std::nullopt;
+  }
+  auto saved = bindingsFromCells(cells);
+  if (!saved) {
+    GLEDITOR_LOG_WARN(kCategory,
+                      "the bindings kept for slice {} are not in a shape this "
+                      "program writes; ignored",
+                      id);
+  }
+  return saved;
+}
+
+bool ViewSlicePresentation::restoreBindings(
+    const std::optional<SavedBindings> &carried) {
+  const auto saved = carried ? carried : keptBindings();
+  if (!saved) {
+    return false;
+  }
+  // A restore that loses nothing says nothing; a name that has gone is said.
+  announce(replayBindings(*space_, *saved, *store_));
+  return true;
+}
+
+void ViewSlicePresentation::announce(const ReplayReport &report) {
+  if (report.unresolved.empty()) {
+    return;
+  }
+  const auto missing  = std::to_string(report.unresolved.size());
+  const auto restored = std::to_string(report.restored);
+  const std::array summary{MessageField{"restored", restored},
+                           MessageField{"missing", missing}};
+  std::string words = spokenMessage(report.summary, summary);
+  for (const auto &notice : report.unresolved) {
+    // Each notice names its place under the field its words use.
+    const std::array fields{MessageField{"name", notice.name},
+                            MessageField{"axis", notice.where},
+                            MessageField{"group", notice.where},
+                            MessageField{"where", notice.where},
+                            MessageField{"inner", notice.name},
+                            MessageField{"outer", notice.where}};
+    words += " " + spokenMessage(notice.message, fields);
+  }
+  notice_ = std::move(words);
+  ++chromeRevision_;
+  ++revision_;
+}
+
+std::optional<std::string>
+ViewSlicePresentation::spatialPoint(const std::size_t ordinal) const {
+  if (!space_) {
+    return std::nullopt;
+  }
+  std::size_t seen = 0;
+  for (ViewAxisId axis = 0; axis < space_->axes().axisCount(); ++axis) {
+    const auto role = space_->axes().role(axis);
+    if (!role || !role->spatial()) {
+      continue;
+    }
+    if (seen++ == ordinal) {
+      return space_->axes().pointName(axis);
+    }
+  }
+  return std::nullopt;
+}
+
+void ViewSlicePresentation::seedAxes(const std::vector<std::string> &wanted) {
   auto &axes = space_->axes();
   const auto exists =
       [this](const std::string &name) -> std::optional<zigzag::DimRef> {
@@ -379,15 +479,17 @@ void ViewSlicePresentation::bindAxes(const std::vector<std::string> &wanted) {
     }
   }
   std::vector<zigzag::DimRef> chosen;
+  std::size_t ordinal = 0;
   for (ViewAxisId axis = 0; axis < axes.axisCount(); ++axis) {
     const auto role = axes.role(axis);
     if (!role || !role->spatial()) {
       continue;
     }
     std::optional<zigzag::DimRef> dim;
-    if (axis < wanted.size()) {
-      dim = exists(wanted[axis]);
+    if (ordinal < wanted.size()) {
+      dim = exists(wanted[ordinal]);
     }
+    ++ordinal;
     if (!dim) {
       const auto next = std::ranges::find_if(used, [&](const auto candidate) {
         return !std::ranges::contains(chosen, candidate);
@@ -401,20 +503,30 @@ void ViewSlicePresentation::bindAxes(const std::vector<std::string> &wanted) {
     }
   }
   axes.forgetHistory();
-  syncLegacyView();
-  mintCues();
-  refreshCompass();
 }
 
 void ViewSlicePresentation::syncLegacyView() {
-  // The legacy binding, for the satelloid and for a switch back.
+  // The legacy binding, for the satelloid and for a switch back: its three
+  // fields are the plane and depth, so they take the spatial points in order.
   std::array<std::string *, 3> legacy{&legacyView_.x_dimension,
                                       &legacyView_.y_dimension,
                                       &legacyView_.z_dimension};
-  for (ViewAxisId axis = 0; axis < legacy.size(); ++axis) {
-    if (auto name = shownName(axis); !name.empty()) {
-      *legacy[axis] = std::move(name);
+  if (!space_) {
+    return;
+  }
+  std::size_t next = 0;
+  for (ViewAxisId axis = 0; axis < space_->axes().axisCount(); ++axis) {
+    const auto role = space_->axes().role(axis);
+    if (!role || !role->spatial()) {
+      continue;
     }
+    if (next == legacy.size()) {
+      break;
+    }
+    if (auto name = shownName(axis); !name.empty()) {
+      *legacy[next] = std::move(name);
+    }
+    ++next;
   }
 }
 
@@ -670,6 +782,11 @@ void ViewSlicePresentation::drawScene(gleditor::FrameContext &ctx) {
     ++stamp_;
   }
 
+  // Written once the walk comes to rest, so a held key is one write.
+  if (focusDirty_ && !animation_.animating()) {
+    persistFocus();
+  }
+
   const auto documentId = store_ ? store_->documentId().str() : std::string{};
   const auto version    = head_.str();
   const auto px         = cellsInPixels();
@@ -703,7 +820,7 @@ void ViewSlicePresentation::drawFrame(gleditor::FrameContext &ctx) {
   }
   presenter_.drawChrome(
       ctx, PresentedChrome{.breadcrumbs = breadcrumbs_,
-                           .notice      = notice_,
+                           .notice      = notice_.empty() ? status_ : notice_,
                            .hints       = keyboardHere_.load() ? hintsHere_
                                                                : hintsElsewhere_,
                            .paddingX    = cells_.hudHorizontalPaddingPx,
@@ -744,7 +861,7 @@ bool ViewSlicePresentation::dispatchAction(const std::string_view actionName) {
     return true;
   }
   if (const auto hopping = hopNamed(name)) {
-    runOnOwner([this, direction = *hopping] { hop("x", direction); });
+    runOnOwner([this, direction = *hopping] { hop(direction); });
     return true;
   }
   if (isSwapAxes(name)) {
@@ -781,10 +898,17 @@ void ViewSlicePresentation::step(const std::string &point,
   if (!space_) {
     return;
   }
-  const auto axis = space_->axes().axisNamed(point);
+  const auto axis = bindingPointNamed(space_->axes(), point);
   if (!axis) {
     const std::array fields{MessageField{"axis", point}};
     say(ViewMessage::AxisUnknown, fields);
+    return;
+  }
+  if (!space_->axes().shown(*axis)) {
+    // Not a dead end of the slice but of the binding: said as what to do.
+    const auto name = space_->axes().pointName(*axis).value_or(point);
+    const std::array fields{MessageField{"axis", name}};
+    say(ViewMessage::PointShowsNothing, fields);
     return;
   }
   const auto outcome = view_->move(*space_, cursor_,
@@ -804,29 +928,35 @@ void ViewSlicePresentation::step(const std::string &point,
   arrive(outcome, true);
 }
 
-void ViewSlicePresentation::hop(const std::string &point,
-                                const zigzag::DimVector direction) {
+void ViewSlicePresentation::hop(const zigzag::DimVector direction) {
   ensureSpace();
   if (!space_) {
     return;
   }
-  const auto axis = space_->axes().axisNamed(point);
+  // Along the first point of the plane, whatever the points are called.
+  const auto point = spatialPoint(0);
+  const auto axis  = point ? space_->axes().axisNamed(*point) : std::nullopt;
   if (!axis) {
-    const std::array fields{MessageField{"axis", point}};
+    const std::array fields{MessageField{"axis", "of the plane"}};
     say(ViewMessage::AxisUnknown, fields);
     return;
   }
-  // As many steps as there are cells is more than any rank can hold, so a
-  // rank that loops back on itself still ends.
-  auto at     = cursor_;
-  bool moved  = false;
-  bool origin = false;
-  for (std::size_t i = 0; i < manifold_->cellCount(); ++i) {
+  // A rank is a path or a ring (a cell has one neighbour each way), so the
+  // walk ends at the rank's end or on coming back to where it began; in a
+  // ring the head and the tail are the cells either side of the start, and a
+  // hop from the start goes round to the one behind it. The step count is
+  // the rank's length, not the slice's.
+  const auto start = cursor_.origin;
+  auto at          = cursor_;
+  bool moved       = false;
+  bool origin      = false;
+  for (;;) {
     const auto outcome = view_->move(*space_, at,
                                      MoveRequest{.kind = MoveKind::AlongAxis,
                                                  .axis = axis,
                                                  .direction = direction});
-    if (!outcome.moved || outcome.cursor == at) {
+    if (!outcome.moved || outcome.cursor == at ||
+        outcome.cursor.origin == start) {
       break;
     }
     at     = outcome.cursor;
@@ -836,7 +966,7 @@ void ViewSlicePresentation::hop(const std::string &point,
   if (!moved) {
     const auto name = shownName(*axis);
     const std::array fields{
-        MessageField{"dimension", name.empty() ? point : name},
+        MessageField{"dimension", name.empty() ? *point : name},
         MessageField{"direction", zigzag::DimVector::POS == direction
                                       ? "posward"
                                       : "negward"}};
@@ -859,11 +989,14 @@ void ViewSlicePresentation::swapAxes() {
   if (!space_) {
     return;
   }
-  auto &axes   = space_->axes();
-  const auto x = axes.axisNamed("x");
-  const auto y = axes.axisNamed("y");
+  // The first two points of the plane, whatever the points are called.
+  auto &axes        = space_->axes();
+  const auto first  = spatialPoint(0);
+  const auto second = spatialPoint(1);
+  const auto x      = first ? axes.axisNamed(*first) : std::nullopt;
+  const auto y      = second ? axes.axisNamed(*second) : std::nullopt;
   if (!x || !y) {
-    const std::array fields{MessageField{"axis", x ? "y" : "x"}};
+    const std::array fields{MessageField{"axis", "of the plane"}};
     say(ViewMessage::AxisUnknown, fields);
     return;
   }
@@ -872,6 +1005,7 @@ void ViewSlicePresentation::swapAxes() {
     return;
   }
   rebound(MotionCause::Rebind);
+  persistBindings();
 }
 
 void ViewSlicePresentation::rebound(const MotionCause cause) {
@@ -919,10 +1053,37 @@ bool ViewSlicePresentation::bindTyped(const std::string_view command) {
     return false;
   }
   rebound(MotionCause::Rebind);
-  const std::array fields{MessageField{"target", bound->shows},
-                          MessageField{"axis", bound->point}};
-  say(ViewMessage::AxisShows, fields);
+  persistBindings();
+  // One dimension on two points is allowed (§7.3): a step on either moves
+  // along it. Saying so keeps the reader who did it by accident informed.
+  std::string others;
+  if (const auto shown = space_->axes().shown(bound->axis)) {
+    space_->axes().forEachAxisShowing(*shown, [&](const ViewAxisId other) {
+      if (other != bound->axis) {
+        others += (others.empty() ? "" : ", ") +
+                  space_->axes().pointName(other).value_or("?");
+      }
+    });
+  }
+  if (others.empty()) {
+    const std::array fields{MessageField{"target", bound->shows},
+                            MessageField{"axis", bound->point}};
+    say(ViewMessage::AxisShows, fields);
+  } else {
+    const std::array fields{MessageField{"target", bound->shows},
+                            MessageField{"axis", bound->point},
+                            MessageField{"other", others}};
+    say(ViewMessage::AxisAlsoShown, fields);
+  }
   return true;
+}
+
+BindingChoices ViewSlicePresentation::bindingChoices() const {
+  ensureSpace();
+  if (!space_ || nullptr == store_) {
+    return {};
+  }
+  return bindingChoicesOf(*space_, *store_);
 }
 
 std::string_view ViewSlicePresentation::subviewId() const noexcept {
@@ -952,6 +1113,7 @@ void ViewSlicePresentation::showSubview() {
       MessageField{"subview", descriptor_.subviews[subview_].name},
       MessageField{"place", place}, MessageField{"count", count}};
   say(ViewMessage::SubviewShown, fields);
+  refreshStatus();
   cause_ = MotionCause::SubViewSwitch;
   stale_ = true;
   changed();
@@ -967,11 +1129,83 @@ void ViewSlicePresentation::persistSubview() {
   }
   const auto id     = store_->documentId().str();
   const auto before = layout->primaryCurrentVersion();
-  auto head = ensureSetting(*layout, before, sliceSubviewSettingSpec(id));
-  head      = setSetting(*layout, head, settings::sliceSubviewKey(id),
-                         std::string(subviewId()));
+  auto head         = ensureSetting(*layout, before,
+                                    sliceSubviewSettingSpec(id, descriptor_.kind));
+  head =
+      setSetting(*layout, head, settings::sliceSubviewKey(id, descriptor_.kind),
+                 std::string(subviewId()));
   if (head != before && host_.repoint) {
     host_.repoint(SystemDocKind::Layout, head);
+  }
+}
+
+void ViewSlicePresentation::persistBindings() {
+  if (!space_ || nullptr == store_ || !host_.systemStore) {
+    return;
+  }
+  auto *const layout = host_.systemStore(SystemDocKind::Layout);
+  if (nullptr == layout) {
+    return;
+  }
+  const auto id     = store_->documentId().str();
+  const auto cells  = cellsOf(saveBindings(*space_, *store_));
+  const auto model  = SystemStoreModel::fromStore(*layout);
+  const auto before = layout->primaryCurrentVersion();
+  auto head         = before;
+  const auto specs  = sliceBindingSettingSpecs(id);
+  const auto write  = [&](const SettingSpec &spec,
+                         const std::vector<std::string> &strings) {
+    if (model.find(spec.name) && model.getStringList(spec.name) == strings) {
+      return;
+    }
+    head = ensureSetting(*layout, head, spec);
+    std::vector<CellValue> values(strings.begin(), strings.end());
+    head = setSetting(*layout, head, spec.name,
+                       std::span<const CellValue>{values});
+  };
+  write(specs[0], cells.axes);
+  write(specs[1], cells.groups);
+  write(specs[2], cells.ringOrder);
+  if (head != before && host_.repoint) {
+    host_.repoint(SystemDocKind::Layout, head);
+  }
+}
+
+void ViewSlicePresentation::persistFocus() {
+  focusDirty_ = false;
+  if (nullptr == store_ || !host_.systemStore ||
+      zigzag::noCell == cursor_.origin) {
+    return;
+  }
+  auto *const layout = host_.systemStore(SystemDocKind::Layout);
+  if (nullptr == layout) {
+    return;
+  }
+  const auto id    = store_->documentId().str();
+  const auto cell  = static_cast<std::int64_t>(cursor_.origin);
+  const auto model = SystemStoreModel::fromStore(*layout);
+  const auto kept  = model.getInt64List(settings::sliceFocusKey(id));
+  if (!kept.empty() && kept.front() == cell) {
+    return;
+  }
+  const auto before = layout->primaryCurrentVersion();
+  const auto spec   = sliceFocusSettingSpec(id);
+  auto head         = ensureSetting(*layout, before, spec);
+  head              = setSetting(*layout, head, spec.name, cell);
+  if (head != before && host_.repoint) {
+    host_.repoint(SystemDocKind::Layout, head);
+  }
+}
+
+void ViewSlicePresentation::refreshStatus() {
+  auto words = std::string(descriptor_.name);
+  if (subview_ < descriptor_.subviews.size()) {
+    words += ": " + descriptor_.subviews[subview_].name;
+  }
+  if (words != status_) {
+    status_ = std::move(words);
+    ++chromeRevision_;
+    ++revision_;
   }
 }
 
@@ -987,24 +1221,13 @@ ViewAxisSet *ViewSlicePresentation::axisSet() const {
 
 void ViewSlicePresentation::arrive(const MoveOutcome &outcome,
                                    const bool recorded) {
-  const bool newOrigin = outcome.originChanged;
-  cursor_              = outcome.cursor;
-  if (newOrigin) {
+  cursor_ = outcome.cursor;
+  if (outcome.originChanged) {
+    // Only the derived arena goes: the bindings are the reader's, and a point
+    // that shows nothing here stays so until the reader binds it (§7.3).
     space_->toss();
-    // An axis left showing nothing -- the slice opened on a home cell that
-    // links along nothing but d.dims -- takes what the new origin links
-    // along, so arriving somewhere never leaves the reader with a lone cell.
-    std::vector<std::string> names;
-    bool unbound = false;
-    for (ViewAxisId axis = 0; axis < space_->axes().axisCount(); ++axis) {
-      names.push_back(shownName(axis));
-      const auto role = space_->axes().role(axis);
-      unbound = unbound || (role && role->spatial() && names.back().empty());
-    }
-    if (unbound) {
-      bindAxes(names);
-    }
   }
+  focusDirty_ = true;
   if (recorded) {
     if (const auto cell = cellAt(*space_, cursor_)) {
       record(*cell);
@@ -1014,9 +1237,45 @@ void ViewSlicePresentation::arrive(const MoveOutcome &outcome,
     notice_.clear();
     ++chromeRevision_;
   }
+  if (outcome.originChanged) {
+    bindWhatIsLeftUnbound();
+  }
   cause_ = MotionCause::Move;
   stale_ = true;
   changed();
+}
+
+void ViewSlicePresentation::bindWhatIsLeftUnbound() {
+  // The one case where arriving binds anything: no spatial point shows
+  // anything, as in a slice that opened on a cell linking along nothing. With
+  // a single point bound there is a choice of the reader's to keep, so
+  // nothing is filled in beside it. What is bound is said.
+  auto &axes = space_->axes();
+  for (ViewAxisId axis = 0; axis < axes.axisCount(); ++axis) {
+    const auto role = axes.role(axis);
+    if (role && role->spatial() && axes.shown(axis)) {
+      return;
+    }
+  }
+  seedAxes({});
+  syncLegacyView();
+  mintCues();
+  refreshCompass();
+  std::string words;
+  for (ViewAxisId axis = 0; axis < axes.axisCount(); ++axis) {
+    if (const auto name = shownName(axis); !name.empty()) {
+      const auto point = axes.pointName(axis).value_or("?");
+      const std::array fields{MessageField{"target", name},
+                              MessageField{"axis", point}};
+      words += (words.empty() ? "" : " ") +
+               spokenMessage(ViewMessage::AxisShows, fields);
+    }
+  }
+  if (!words.empty()) {
+    notice_ = std::move(words);
+    ++chromeRevision_;
+    ++revision_;
+  }
 }
 
 void ViewSlicePresentation::goTo(const zigzag::CellRef cell,
@@ -1217,6 +1476,11 @@ void ViewSlicePresentation::describe(gleditor::a11y::Builder &into) {
     rose.label    = "Binding points";
     rose.children = std::move(arms);
     children.push_back(into.id(kCompassNode));
+  }
+  if (!status_.empty()) {
+    auto &status = into.add(kStatusNode, Role::Label);
+    status.label = status_;
+    children.push_back(into.id(kStatusNode));
   }
   if (!notice_.empty()) {
     auto &notice = into.add(kNoticeNode, Role::Label);

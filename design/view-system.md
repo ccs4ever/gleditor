@@ -767,6 +767,24 @@ cursor; all-dim walk shows its neighbours on the rings, badged with the point's 
 When one dimension is bound to two points, stepping on either moves along it; its immediate
 neighbours are placed once per point, so a placement's identity includes the point (§8.4).
 
+As built (M2 closing round, A2, A4, A5, A7, A10, A12): **the reader's bindings are the reader's.** A
+placement is bound once, when its slice is first folded: from what the reader kept for the slice
+(§7.5), else from the legacy visualizer's axes, else from what the home cell links along. After that
+nothing binds a point but the reader and the host acting for them: moving to a new origin never
+rebinds, never fills a point that shows nothing, and never discards the undo history. The one
+exception is a slice that opened with *no* spatial point showing anything (its home links along
+nothing a view can look along): arriving at the first cell that links along something binds the
+points as opening would, and says so (`AxisShows`, announced), because a pane of one lone cell is
+not a choice anyone made. Nothing is filled in beside a point that already shows something. A
+re-fold of the same slice carries every binding over by name, groups included (`saveBindings()` and
+`replayBindings()`, §7.5), and a name that no longer resolves is said. Where a view or a command
+needs "the plane" — the hop, the swap, the legacy visualizer's three fields — it takes the first
+spatial points in the order `layout.bindingPoints` lists them, never points called `x` and `y`. A
+point's name must be non-empty and unused (`BadPointName`). Binding one dimension to two points is
+allowed, as above; the status line says which other point shows it too (`AxisAlsoShown`), so it is
+never done unawares. A typed point name is matched exactly, then without regard to case when only
+one point fits (`X` for `x`).
+
 ### 7.4 The rebind sequence
 
 ```text
@@ -800,12 +818,25 @@ an axis, `SavedMemberGone` for a group member, `GroupInsideItself` for a cycle, 
 a binding point, the ring order or the pouch. Replaying, like configuring the binding points, is not
 an edit, so it leaves nothing to undo.
 
-Undo keeps each edit as the links and texts it changed, applied backwards; a ring move alone is kept
-as two places, because `ringPlace()` appends at the ring's tail between edits without an undo entry
-of its own, which would leave a recorded link stale. Cells are never unminted: undo leaves an
-occurrence on no rank, unreachable, and redo links the same cell again, so a later entry that names
-a group still names it. They are not written to the slice's own store — how a reader looks is not a
-fact about the document (R8) — and not to `system://activity`, which records visits.
+As built (M2 closing round, A8, A9): a typed binding and a swap are written at once, as three
+settings of `system://layout`, each a flat list of strings with the repeated type `string*` ("any
+number of strings", which `matchShape` reads as a type whose last element repeats):
+`slice.<id>.axes` (three cells a point: its name, `dimension`, `group` or `nothing`, then the
+dimension's name or the group's place in the groups), `slice.<id>.groups` (a group's name, its
+member count, then a kind and a value for each) and `slice.<id>.ringOrder` (names). `cellsOf()` and
+`bindingsFromCells()` turn `SavedBindings` into those lists and back, and a list in another shape is
+refused whole and said, not half read. The focus is `slice.<id>.focus`, the cell's operation index
+(`integer*`, empty for none), written when a walk comes to rest so a held key is one write. They are
+read when the slice is first bound in a session; the reader's saved bindings win over the legacy
+visualizer's axes. The pouch stays with `system://pouches` (§7.7, unbuilt). A sub-view is kept per
+slice **and per view kind**, as `slice.<id>.<kind>.subview`, because an id means something only to
+the view that has it. Undo keeps each edit as the links and texts it changed, applied backwards; a
+ring move alone is kept as two places, because `ringPlace()` appends at the ring's tail between
+edits without an undo entry of its own, which would leave a recorded link stale. Cells are never
+unminted: undo leaves an occurrence on no rank, unreachable, and redo links the same cell again, so
+a later entry that names a group still names it. They are not written to the slice's own store — how
+a reader looks is not a fact about the document (R8) — and not to `system://activity`, which records
+visits.
 
 ### 7.6 Ways to bind
 
@@ -2933,8 +2964,15 @@ names, focus order, minimum touch size, safe-area clamping and live response to 
 A pane's chrome is clipped to the pane with `Canvas::pushClip`.
 
 The palette lists the views whose subject matches the focused placement, from the registry, built-in
-and third-party alike, and under the current view its sub-views. The dimension selector (§7.7) is
-not chrome: it is drawn in the world round the accursed cell.
+and third-party alike, and under the current view its sub-views, each named "View: Sub-view" so the
+closed combo says whose it is. The dimension selector (§7.7) is not chrome: it is drawn in the world
+round the accursed cell.
+
+As built (M2 closing round, A10, A11): the status line always names the view and the sub-view
+showing ("Stretch vanishing: Plain"), and is also a node of the accessibility tree; a message
+replaces it until the next move, and it comes back. The bind dialog lists the points, the slice's
+dimensions and its groups under its field, and on a refusal comes back up with what was typed and
+the reason, instead of closing on a message the reader must reopen it to read.
 
 ______________________________________________________________________
 
@@ -2981,6 +3019,13 @@ conflict is then resolved in the table, not in code.
 | `pack.retrieve`      | `std:view/pack_retrieve`        | `Shift+Return`                               | PV                   |
 | `pack.keep`          | `std:view/pack_keep`            | `Ctrl+Alt+K` †                               | PV                   |
 
+As built (M2 closing round, A5): `hop_head` and `hop_tail` walk the first spatial point's rank to
+its end. A rank is a path or a ring, since a cell has one neighbour each way. In a path the end is
+the head or the tail. In a ring there is no end, so the walk stops where the next cell would be the
+one it began on: the tail is the cell just before the start, the head is the cell just after it, and
+the cost is the length of the rank, not of the slice. A cell linked to itself has nowhere to go: a
+step from it is not a move and is not recorded as a visit.
+
 `view.select(n)` picks the n-th installed view for the focused placement's subject, so the same
 chord serves slice and page placements and a third-party view gets a number without a new row.
 Movement along axes, next and previous page, and next and previous link keep their existing actions
@@ -2991,21 +3036,24 @@ a page (click, or page and link actions); scrub a deck (drag or wheel, or hold n
 
 ### 12.2 Messages
 
-| Situation                        | Text                                                           | Error              |
-| -------------------------------- | -------------------------------------------------------------- | ------------------ |
-| Nothing that way                 | "No cell further along *dimension* *direction*."               | none               |
-| No pack that way                 | "*group* has nothing further *direction* from here."           | none               |
-| Rebind tossed view cells         | "Showing *target* on axis *n*. Discarded *N* view-only cells." | none               |
-| Binding an empty group           | "Group '*name*' has no dimensions yet."                        | `EmptyGroupBind`   |
-| A group inside itself            | "'*inner*' already contains '*outer*'."                        | `GroupCycle`       |
-| A saved binding no longer exists | "Dimension '*name*' is gone; axis *n* is unbound."             | none               |
-| A saved group member is gone     | "'*name*' is gone; group '*group*' no longer contains it."     | none               |
-| Another saved name is gone       | "'*name*' is gone; it is no longer in *where*."                | none               |
-| Saved bindings replayed          | "Restored *N* bindings and groups; *M* saved names are gone."  | none               |
-| Deleting a group in use          | "Removed '*name*' from axes *…* and groups *…*."               | none               |
-| Keeping a pack refused           | "This pack is too large to keep (*N* cells)."                  | `PromotionRefused` |
-| Pages still arriving             | "*document*: *N* pages so far, still paginating."              | none               |
-| An action this view cannot do    | "*view* cannot *action* yet; the ZigZag visualizer can, …"     | none               |
+| Situation                         | Text                                                           | Error              |
+| --------------------------------- | -------------------------------------------------------------- | ------------------ |
+| Nothing that way                  | "No cell further along *dimension* *direction*."               | none               |
+| No pack that way                  | "*group* has nothing further *direction* from here."           | none               |
+| Rebind tossed view cells          | "Showing *target* on axis *n*. Discarded *N* view-only cells." | none               |
+| Binding an empty group            | "Group '*name*' has no dimensions yet."                        | `EmptyGroupBind`   |
+| A group inside itself             | "'*inner*' already contains '*outer*'."                        | `GroupCycle`       |
+| A saved binding no longer exists  | "Dimension '*name*' is gone; axis *n* is unbound."             | none               |
+| A saved group member is gone      | "'*name*' is gone; group '*group*' no longer contains it."     | none               |
+| Another saved name is gone        | "'*name*' is gone; it is no longer in *where*."                | none               |
+| Saved bindings replayed           | "Restored *N* bindings and groups; *M* saved names are gone."  | none               |
+| Deleting a group in use           | "Removed '*name*' from axes *…* and groups *…*."               | none               |
+| Keeping a pack refused            | "This pack is too large to keep (*N* cells)."                  | `PromotionRefused` |
+| Pages still arriving              | "*document*: *N* pages so far, still paginating."              | none               |
+| An action this view cannot do     | "*view* cannot *action* yet; the ZigZag visualizer can, …"     | none               |
+| A view action in the visualizer   | "The ZigZag visualizer cannot *action*; choose a slice view …" | none               |
+| One dimension on two points       | "Showing *target* on axis *n*; axis *m* shows it too."         | none               |
+| A step on a point showing nothing | "*n* shows nothing; bind a dimension to it first."             | none               |
 
 Each is also an accessibility announcement. The refusals below are faults of a view or of the host
 rather than of the reader, but a third-party view can still surface them, so each has words:
@@ -3017,6 +3065,7 @@ rather than of the reader, but a third-party view can still surface them, so eac
 | A view cell from a tossed generation   | "That view-only cell was discarded when the view changed."                  | `StaleEpoch`         |
 | An occurrence of nothing               | "That is neither a cell of the slice nor a group of this view."             | `UnknownTarget`      |
 | No such axis                           | "There is no axis *n*."                                                     | `UnknownAxis`        |
+| A binding point with no usable name    | "A binding point needs a name of its own; '*name*' will not do."            | `BadPointName`       |
 | A view kind installed twice            | "A view of kind '*kind*' is already installed."                             | `DuplicateViewKind`  |
 | A view's default chord is taken        | "*chord* already runs *action*; '*kind*' was not installed."                | `ChordCollision`     |
 | The arena refused                      | "The view space refused the change."                                        | `ArenaRefused`       |
@@ -3101,8 +3150,8 @@ Each group of settings has its Schema and Notes pages (V-R41). The binding point
 `layout.bindingPoints`. A dimension's colour is `ui.dimension.<name>.colour`, assigned from a
 palette when first seen and the reader's to change; it is the one colour that dimension has
 everywhere. The dimension pouch is kept in `system://pouches`. Per-slice state —
-`layout.slice.<id>.view`, `.subview`, `.axes`, `.groups`, `.ringOrder` — and per-document-set state
-— `layout.pages.<id>.view` — live in `system://layout`.
+`layout.slice.<id>.view`, `.<kind>.subview`, `.axes`, `.groups`, `.ringOrder`, `.focus` — and
+per-document-set state — `layout.pages.<id>.view` — live in `system://layout`.
 
 As built (U2): until the host replaces the legacy presentations, which presentation shows a slice is
 `layout.slice.<id>.presentation`: `legacy`, the default, or a slice view's kind. Like the keys above
@@ -3818,6 +3867,11 @@ ______________________________________________________________________
   sink; `PlacedFrame` gains `opacity` so a frame fades with its contents; the held-key rule measured
   from the steps' own timing. `view.motion.*` — `reduced` and the step, toss, view-switch,
   sub-view-switch and hint timings and curves — are in `system://ui`.
+- 2026-10-14 — M2 closing round, section A: §7.3 decides that the reader's bindings are the reader's
+  (A2, with A1's carrying by name, A4's first-spatial-points rule, A7's point names, A10's two
+  points and A12's case); §7.5 records the persisted bindings, groups, ring order, focus and the
+  per-view-kind sub-view (A8, A9); §12.1 defines the hop in a ring and the self-step (A5, A6); §12.2
+  gains `AxisAlsoShown`, `VisualizerCannot` and `BadPointName`.
 - 2026-10-14 — §8.5, §12.2 and §12.3 as built (U2): `SliceView::applySettings`, through which a host
   hands any view the settings its descriptor seeded; the message for an action the shown view cannot
   do yet; `layout.slice.<id>.presentation`, which chooses the legacy visualizer or a slice view per

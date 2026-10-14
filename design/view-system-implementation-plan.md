@@ -325,9 +325,10 @@ As built (U5a, U7a), in `apps/common/xanadu/view/` and `apps/common/ui/view/`:
   `view.compass.*` in `system://ui` (`CompassConfig`). It is rows rather than the rose of §7.9
   because `Canvas::addLine` is exact only for horizontal and vertical lines; the rose, with arms
   that take a drop, is U5b's.
-- The palette lists a view's sub-views indented under it; a row's value is the view's kind or
-  `kind#subview`, and `recordSlicePresentation()` writes `slice.<id>.presentation` and, for a
-  sub-view row, `slice.<id>.subview` in `system://layout`.
+- The palette lists a view's sub-views under it, each named "View: Sub-view"; a row's value is the
+  view's kind or `kind#subview`, and `recordSlicePresentation()` writes `slice.<id>.presentation`
+  and, for a sub-view row, `slice.<id>.<kind>.subview` in `system://layout` (per view kind since the
+  M2 closing round: an id means something only to the view that has it).
 - The commands are keymap actions the presentation receives by name through `dispatchAction()`: the
   existing steps, jump home, `hop_head`/`hop_tail` along x and `swap_axes`, plus new
   `std:view/subview_next` (`Ctrl+Alt+.`), `std:view/subview_prev` (`Ctrl+Alt+,`), `std:view/bind`
@@ -335,8 +336,9 @@ As built (U5a, U7a), in `apps/common/xanadu/view/` and `apps/common/ui/view/`:
   presentation). A call may carry one argument after a space. The sub-view is an input to the layout
   (V-R49), persisted per slice; stretch vanishing gains a second sub-view, `plain`, which withholds
   ghosts, so there is something to switch between (edge heat remains deferred).
-- Not built: `view.select(n)`, `bind.undo`, `axis.cycle`, and saving the typed bindings under
-  `layout.slice.<id>.axes` (G9's writer), so a binding lasts the session.
+- Not built: `view.select(n)`, `bind.undo`, `axis.cycle`. Typed bindings are kept under
+  `slice.<id>.axes`, `.groups` and `.ringOrder` and the focus under `.focus` (M2 closing round; G9's
+  writer), so a binding and the cell in focus last the restart.
 
 Two choices the spec left open: a placement standing on its own takes `Doc::pixelsToWorld` as the
 legacy visualizer does, and it is enlarged in quarter steps until a line of cell text reaches
@@ -662,3 +664,6 @@ Three challengers attacked the first draft. What each said that mattered, and wh
   the legacy visualizer; the per-slice presentation setting; the palette as a form until U5a; the
   scale a standalone placement takes, and real cells announced as list items for want of a cell
   role.
+- 2026-10-14 — §4.6: M2 closing round, section A. The reader's bindings stay theirs (arrival never
+  rebinds), bindings and focus are kept per slice, the sub-view per slice and view kind, the bind
+  dialog lists what can be named and stays open on a refusal; see view-system.md §7.3 and §7.5.

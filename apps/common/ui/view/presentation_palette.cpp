@@ -16,8 +16,9 @@ namespace {
 
 /// Between a view's kind and a sub-view's id in a row's value.
 constexpr char kSubviewMark = '#';
-/// How far a sub-view row is set in under its view's.
-constexpr std::string_view kSubviewIndent = "    ";
+/// Between a view's name and its sub-view's in a row: the whole is what the
+/// closed combo reads, so a sub-view row says whose it is.
+constexpr std::string_view kSubviewJoin = ": ";
 
 } // namespace
 
@@ -71,7 +72,7 @@ slicePresentationChoice(const ViewRegistry &registry,
         std::ranges::contains(view.subviews, currentSubview, &SubviewSpec::id);
     offer(view.name, view.kind, view.description, showing && !onSubview);
     for (const auto &subview : view.subviews) {
-      offer(std::string(kSubviewIndent) + subview.name,
+      offer(view.name + std::string(kSubviewJoin) + subview.name,
             paletteValue({.presentation = view.kind, .subview = subview.id}),
             "A sub-view of " + view.name,
             onSubview && subview.id == currentSubview);
@@ -95,22 +96,69 @@ void openSlicePresentationPalette(
             });
 }
 
-void openBindingCommand(gleditor::Form &form,
-                        std::function<void(std::string)> typed) {
+namespace {
+
+/// "Label: a, b, c." -- nothing at all for a list with nothing in it.
+[[nodiscard]] std::string listed(const std::string_view label,
+                                 const std::vector<std::string> &names) {
+  if (names.empty()) {
+    return {};
+  }
+  std::string out = std::string(label) + ": ";
+  for (std::size_t i = 0; i < names.size(); ++i) {
+    out += names[i];
+    out += i + 1 < names.size() ? ", " : ".";
+  }
+  return out;
+}
+
+} // namespace
+
+std::string bindingNote(const BindingChoices &choices,
+                        const std::string_view reason) {
+  std::string note;
+  const auto add = [&note](const std::string &part) {
+    if (!part.empty()) {
+      note += note.empty() ? "" : " ";
+      note += part;
+    }
+  };
+  add(std::string(reason));
+  add(listed("Points", choices.points));
+  add(listed("Dimensions", choices.dimensions));
+  add(listed("Groups", choices.groups));
+  return note;
+}
+
+void openBindingCommand(gleditor::Form &form, BindingChoices choices,
+                        BindingAttempt attempt, std::string typed,
+                        const std::string_view reason) {
   gleditor::Form::Field field;
   field.label    = "Bind";
   field.hint     = "a point, then what it shows: x d.across";
+  field.value    = std::move(typed);
   field.required = true;
   field.kind     = gleditor::Form::Kind::Text;
+  auto note      = bindingNote(choices, reason);
   std::vector<gleditor::Form::Field> fields{std::move(field)};
-  form.open("Bind a dimension",
-            "Name a binding point and a dimension or group of this slice",
-            std::move(fields),
-            [typed = std::move(typed)](
+  form.open("Bind a dimension", std::move(note), std::move(fields),
+            [&form, choices = std::move(choices), attempt = std::move(attempt)](
                 const std::vector<gleditor::Form::Field> &answers) {
-              if (!answers.empty() && typed) {
-                typed(answers.front().answer());
+              if (answers.empty() || !attempt) {
+                return;
               }
+              auto text = answers.front().answer();
+              // A refusal is not the end of the reader's sentence: the form
+              // comes back with what was typed and why it did not work, rather
+              // than closing on a message they must reopen it to read. The
+              // binding is made on another thread, so the answer arrives when
+              // it arrives.
+              attempt(text, [&form, choices, attempt,
+                             text](const std::optional<std::string> &refusal) {
+                if (refusal) {
+                  openBindingCommand(form, choices, attempt, text, *refusal);
+                }
+              });
             });
 }
 
@@ -122,9 +170,13 @@ MicroversionId recordSlicePresentation(Store &layout,
       ensureSetting(layout, before, slicePresentationSettingSpec(sliceId));
   head = setSetting(layout, head, settings::slicePresentationKey(sliceId),
                     choice.presentation);
+  // A sub-view is the view's own: its id means nothing to another view, so it
+  // is kept under the kind that offered it.
   if (!choice.subview.empty()) {
-    head = ensureSetting(layout, head, sliceSubviewSettingSpec(sliceId));
-    head = setSetting(layout, head, settings::sliceSubviewKey(sliceId),
+    head = ensureSetting(layout, head,
+                         sliceSubviewSettingSpec(sliceId, choice.presentation));
+    head = setSetting(layout, head,
+                      settings::sliceSubviewKey(sliceId, choice.presentation),
                       choice.subview);
   }
   return head;

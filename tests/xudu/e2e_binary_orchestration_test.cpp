@@ -2900,6 +2900,41 @@ TEST(E2EBinaryOrchestrationTest, aSliceViewIsChosenFromThePaletteAndKept) {
 }
 
 /**
+ * M2 closing round, A3: with the ZigZag visualizer in front, the view
+ * actions say they cannot rather than being accepted and ignored.
+ */
+TEST(E2EBinaryOrchestrationTest,
+     theVisualizerSaysItCannotBindOrSwitchSubviews) {
+  const auto binary = findXuduBinary();
+  ASSERT_TRUE(fs::exists(binary)) << "xudu binary not found at " << binary;
+  const auto root = workspaceRoot() / "integration_workspace_visualizer_views";
+  fs::remove_all(root);
+  fs::create_directories(root);
+  const auto scroll = root / "permascroll";
+  const auto path   = root / "store";
+  saveSliceViewStore(scroll, path);
+  const auto xuzz = [&](const std::string &steps) {
+    return executeProcess("XDG_CONFIG_HOME=" + (root / "config").string() +
+                          " XDG_DATA_HOME=" + (root / "data").string() +
+                          " timeout 120 " + binary.string() +
+                          permascrollFlag(scroll) + " --backend " +
+                          activeBackend() + " --profile --view zigzag" + steps +
+                          " " + path.string());
+  };
+  const auto bind = xuzz(" --chord Ctrl+Alt+B");
+  ASSERT_EQ(bind.exitCode, 0) << bind.output;
+  EXPECT_THAT(bind.output,
+              testing::HasSubstr("The ZigZag visualizer cannot bind a "
+                                 "dimension; choose a slice view from the "
+                                 "view palette first."));
+  const auto subview = xuzz(" --chord Ctrl+Alt+.");
+  ASSERT_EQ(subview.exitCode, 0) << subview.output;
+  EXPECT_THAT(subview.output,
+              testing::HasSubstr("The ZigZag visualizer cannot show a "
+                                 "sub-view"));
+}
+
+/**
  * U5a and U7a (view-system-implementation-plan.md §4.6): the compass shows
  * what each binding point is bound to; a binding is made by typing it; the
  * sub-view is switched; and each of those is reached by its default chord from
@@ -2949,6 +2984,8 @@ TEST(E2EBinaryOrchestrationTest, aSliceViewShowsItsCompassAndIsBoundByTyping) {
   EXPECT_THAT(read.output, testing::HasSubstr("x  d.across"));
   EXPECT_THAT(read.output, testing::HasSubstr("y  d.down"));
   EXPECT_THAT(read.output, testing::HasSubstr("z  nothing"));
+  // The view and its sub-view are shown without waiting for a message.
+  EXPECT_THAT(read.output, testing::HasSubstr("Stretch vanishing: Ghosts"));
 
   // A binding typed into the command the keymap opens.
   const auto bound =
@@ -2957,7 +2994,14 @@ TEST(E2EBinaryOrchestrationTest, aSliceViewShowsItsCompassAndIsBoundByTyping) {
            ppm("bound").string() + " --dump-a11y");
   ASSERT_EQ(bound.exitCode, 0) << bound.output;
   EXPECT_THAT(bound.output, testing::HasSubstr("z  d.across"));
-  EXPECT_THAT(bound.output, testing::HasSubstr("Showing d.across on axis z."));
+  // x already shows d.across: allowed, and said.
+  EXPECT_THAT(
+      bound.output,
+      testing::HasSubstr("Showing d.across on axis z; axis x shows it too."));
+  // It was kept with the slice: a program started afterwards finds it.
+  const auto kept = xuzz(" --dump-a11y");
+  ASSERT_EQ(kept.exitCode, 0) << kept.output;
+  EXPECT_THAT(kept.output, testing::HasSubstr("z  d.across"));
 
   // What cannot be bound is said, not swallowed.
   const auto refused = xuzz(" --chord Ctrl+Alt+B --type \"x d.nothing\""
@@ -2967,6 +3011,8 @@ TEST(E2EBinaryOrchestrationTest, aSliceViewShowsItsCompassAndIsBoundByTyping) {
               testing::HasSubstr("There is no dimension or group called "
                                  "'d.nothing' in this slice."));
   EXPECT_THAT(refused.output, testing::HasSubstr("x  d.across"));
+  // The dialog stays up with what can be named and why it did not work.
+  EXPECT_THAT(refused.output, testing::HasSubstr("Dimensions: d.across"));
 
   // The next sub-view by its chord; kept for the slice.
   const auto switched = xuzz(" --chord Ctrl+Alt+. --dump-a11y");

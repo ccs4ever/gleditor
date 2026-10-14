@@ -2547,17 +2547,79 @@ int XuzzApp::run(const int argc, char **argv) {
                                 slicePresentations->shownKind(), 1),
                             .subview = {}});
       });
+  // The slice view in front, for what only a slice view can do; none while
+  // the visualizer is.
+  const auto shownView =
+      [slicePresentations,
+       viewPresentations]() -> xanadu::view::ViewSlicePresentation * {
+    for (const auto &presentation : viewPresentations) {
+      if (presentation->viewKind() == slicePresentations->shownKind()) {
+        return presentation.get();
+      }
+    }
+    return nullptr;
+  };
+  // An action of the slice views while the visualizer is in front is said,
+  // not swallowed: the visualizer has no views to bind and no sub-views.
+  const auto visualizerCannot = [&state](const std::string_view spoken) {
+    const std::array fields{xanadu::view::MessageField{"action", spoken}};
+    state->showDialog(render::DiagnosticSeverity::Info,
+                      "The ZigZag visualizer cannot do that",
+                      xanadu::view::spokenMessage(
+                          xanadu::view::ViewMessage::VisualizerCannot, fields));
+  };
+  const auto subviewAction = [&renderer, slicePresentations, shownView,
+                              visualizerCannot](const std::string_view name,
+                                                const std::string_view spoken) {
+    return [&renderer, slicePresentations, shownView, visualizerCannot,
+            action = std::string(name), words = std::string(spoken)] {
+      renderer->runWithState([slicePresentations, shownView, visualizerCannot,
+                              action, words](RenderState &) {
+        if (nullptr == shownView()) {
+          visualizerCannot(words);
+          return;
+        }
+        std::ignore = slicePresentations->dispatchAction(action);
+      });
+    };
+  };
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapViewSubviewNext),
+      "show the next sub-view of the slice's view",
+      subviewAction(xanadu::settings::kKeymapViewSubviewNext,
+                    "show a sub-view"));
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapViewSubviewPrev),
+      "show the previous sub-view of the slice's view",
+      subviewAction(xanadu::settings::kKeymapViewSubviewPrev,
+                    "show a sub-view"));
   app.commands().registerAction(
       std::string(xanadu::settings::kKeymapViewBind),
       "type which dimension or group a binding point shows",
-      [&renderer, &publishForm, zigzagPresentation] {
-        renderer->runWithState([&publishForm,
-                                zigzagPresentation](RenderState &) {
-          xanadu::view::openBindingCommand(publishForm, [zigzagPresentation](
-                                                            std::string typed) {
-            std::ignore = zigzagPresentation->dispatchAction(
-                std::string(xanadu::settings::kKeymapViewBind) + " " + typed);
-          });
+      [&renderer, &publishForm, shownView, visualizerCannot] {
+        renderer->runWithState([&renderer, &publishForm, shownView,
+                                visualizerCannot](RenderState &) {
+          auto *const view = shownView();
+          if (nullptr == view) {
+            visualizerCannot("bind a dimension");
+            return;
+          }
+          // The binding is made on the render thread, which owns the view,
+          // and a refusal brings the dialog back with its reason.
+          xanadu::view::openBindingCommand(
+              publishForm, view->bindingChoices(),
+              [&renderer, shownView](const std::string &typed,
+                                     xanadu::view::BindingResult done) {
+                renderer->runWithState(
+                    [shownView, typed, done = std::move(done)](RenderState &) {
+                      auto *const bound = shownView();
+                      if (nullptr == bound || bound->bindTyped(typed)) {
+                        done(std::nullopt);
+                      } else {
+                        done(bound->notice());
+                      }
+                    });
+              });
         });
       });
 
