@@ -228,6 +228,20 @@ public:
   void draw(RenderState &state, const glm::mat4 &transform,
             float opacity = 1.0F) const;
 
+  /**
+   * @brief The committed text and rectangles as one batch, for a caller that
+   *        draws them among other things rather than through draw().
+   *
+   * What a TranslucentList takes as a sheet, so that a faded canvas standing
+   * in the world is blended in depth order with the frame's other translucent
+   * draws instead of over whatever was drawn before it. Images are not in it:
+   * they have a pipeline and an atlas of their own.
+   *
+   * @return Nothing when there is no committed geometry of that kind.
+   */
+  [[nodiscard]] std::optional<render::GlyphBatch>
+  batch(const glm::mat4 &transform, float opacity = 1.0F) const;
+
 private:
   /// A row of the instance buffer. Declared as the document's, because the
   /// pipeline the canvas borrows is described by Doc::vertexLayout().

@@ -548,4 +548,17 @@ void Canvas::draw(RenderState &state, const glm::mat4 &transform,
   }
 }
 
+std::optional<render::GlyphBatch> Canvas::batch(const glm::mat4 &transform,
+                                                const float opacity) const {
+  if (0 == committedInstances) {
+    return std::nullopt;
+  }
+  return render::GlyphBatch{.uniforms         = {.mvp      = toArray(transform),
+                                                 .opacity  = opacity,
+                                                 .identity = identity},
+                            .vertices         = pool->buffer(),
+                            .vertexByteOffset = pool->byteOffset(backing),
+                            .instanceCount    = committedInstances};
+}
+
 } // namespace gleditor

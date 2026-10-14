@@ -3003,7 +3003,7 @@ ImageOverlay::bottomLeftOf(const Placement &p) {
   return Corner{.pageIndex = box->pageIndex, .x = box->x, .y = box->y};
 }
 
-void ImageOverlay::drawFrame(gleditor::FrameContext &ctx) {
+void ImageOverlay::drawScene(gleditor::FrameContext &ctx) {
   if (!canvas || !ctx.state.documentsVisible) {
     return;
   }

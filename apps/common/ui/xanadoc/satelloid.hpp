@@ -200,6 +200,12 @@ public:
   // -- FrameContributor implementation ---------------------------------------
   void deviceReady(render::RenderDevice &device,
                    const render::PipelineDesc &documentPipeline) override;
+  /// The cards stand in the world, so they are placed and handed to the
+  /// frame's translucent list here, to be blended in depth order with the
+  /// faded pages and the beams.
+  void drawScene(gleditor::FrameContext &ctx) override;
+  /// Draws nothing; notes the chrome claimed before this overlay's turn,
+  /// which the cards keep clear of on the next frame.
   void drawFrame(gleditor::FrameContext &ctx) override;
   [[nodiscard]] bool busy() const override;
 
@@ -222,6 +228,11 @@ private:
   std::string fontName_;
   render::RenderDevice *device_{};
   render::PipelineDesc pipeline_;
+  /// The chrome claimed ahead of this overlay in the last drawFrame(). The
+  /// cards are placed in drawScene(), before anything claims chrome this
+  /// frame, and keep clear of what was claimed by then rather than of all of
+  /// it, as they did when they were placed in drawFrame().
+  gleditor::ScreenInsets chromeBefore_{};
 
   std::vector<CellSatelloid> satelloids_;
   NavigationCallback navigationCb_;

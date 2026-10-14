@@ -6,6 +6,7 @@
 #include "common/ui/xanadoc/satelloid.hpp"
 #include "world_card_presentation.hpp"
 #include <gleditor/render_state.hpp>
+#include <gleditor/translucent_list.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -224,6 +225,10 @@ void SatelloidOverlay::synchronizeSelection() {
 }
 
 void SatelloidOverlay::drawFrame(gleditor::FrameContext &ctx) {
+  chromeBefore_ = ctx.chrome;
+}
+
+void SatelloidOverlay::drawScene(gleditor::FrameContext &ctx) {
   if (!visible_ || !device_) {
     return;
   }
@@ -280,7 +285,7 @@ void SatelloidOverlay::drawFrame(gleditor::FrameContext &ctx) {
   auto metrics         = ctx.metrics;
   metrics.screenWidth  = ctx.screenWidth;
   metrics.screenHeight = ctx.screenHeight;
-  metrics.chrome       = ctx.chrome;
+  metrics.chrome       = chromeBefore_;
   if (!presentation.ready || presentation.metrics != metrics ||
       presentation.theme != ctx.theme) {
     presentation.metrics = metrics;
@@ -513,11 +518,16 @@ void SatelloidOverlay::drawFrame(gleditor::FrameContext &ctx) {
     slot.matrix = matrix;
     slot.id     = s.presentationId;
     slot.drawn  = true;
-    slot.panel.draw(ctx.state, matrix, presentation.viewport,
-                    {.kind         = render::tagKindOverlay,
-                     .docIndex     = presentation.scope,
-                     .clusterIndex = static_cast<std::uint32_t>(drawIndex + 1)},
-                    s.alpha);
+    const render::PickingTag tag{.kind     = render::tagKindOverlay,
+                                 .docIndex = presentation.scope,
+                                 .clusterIndex =
+                                     static_cast<std::uint32_t>(drawIndex + 1)};
+    if (nullptr != ctx.translucent) {
+      slot.panel.addTo(*ctx.translucent, ctx.state.translucentGlyphPipeline,
+                       ctx.state, matrix, presentation.viewport, tag, s.alpha);
+    } else {
+      slot.panel.draw(ctx.state, matrix, presentation.viewport, tag, s.alpha);
+    }
     if (s.pulseAlpha > .01F) {
       if (!slot.pulse) {
         slot.pulse = std::make_unique<gleditor::Canvas>(
@@ -541,7 +551,11 @@ void SatelloidOverlay::drawFrame(gleditor::FrameContext &ctx) {
                             metrics.px(2), s.accentColor);
       }
       slot.pulse->commit();
-      slot.pulse->draw(ctx.state, matrix, s.pulseAlpha);
+      if (nullptr == ctx.translucent) {
+        slot.pulse->draw(ctx.state, matrix, s.pulseAlpha);
+      } else if (const auto ring = slot.pulse->batch(matrix, s.pulseAlpha)) {
+        ctx.translucent->addSheet(ctx.state.translucentGlyphPipeline, *ring);
+      }
     }
   }
 }

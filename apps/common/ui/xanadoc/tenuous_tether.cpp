@@ -13,6 +13,7 @@
 #include <gleditor/paths.hpp>
 #include <gleditor/render/types.hpp>
 #include <gleditor/render_state.hpp>
+#include <gleditor/translucent_list.hpp>
 
 #include <gleditor/cpp26_inplace_vector.hpp>
 
@@ -59,11 +60,14 @@ void TenuousTetherOverlay::deviceReady(
   beams_  = std::make_unique<gleditor::Beams>(&device, 256);
   // Through assetDir(), as every other pipeline is: a path relative to the
   // working directory found the shaders only when run from the source tree.
+  // Neither tested nor written: a tether is drawn through whatever it
+  // crosses, and it is drawn among the faded pages, back to front, so that
+  // one in front of it still blends over it.
   beams_->createPipeline(gleditor::assetPath("shaders"),
-                         gleditor::assetPath("shaders/vulkan"), false);
+                         gleditor::assetPath("shaders/vulkan"), false, false);
 }
 
-void TenuousTetherOverlay::drawFrame(gleditor::FrameContext &ctx) {
+void TenuousTetherOverlay::drawScene(gleditor::FrameContext &ctx) {
   if (!ctx.state.documentsVisible || !visible_ || tethers_.empty() || !beams_ ||
       !beams_->ready()) {
     return;
@@ -121,7 +125,11 @@ void TenuousTetherOverlay::drawFrame(gleditor::FrameContext &ctx) {
   }
 
   beams_->commit();
-  beams_->draw(ctx.state, ctx.viewProjection, 1.0F, 0);
+  if (nullptr != ctx.translucent) {
+    ctx.translucent->addBeams(*beams_, ctx.viewProjection, 1.0F, 0);
+  } else {
+    beams_->draw(ctx.state, ctx.viewProjection, 1.0F, 0);
+  }
 }
 
 } // namespace xanadu

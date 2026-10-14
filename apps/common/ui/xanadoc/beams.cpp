@@ -26,6 +26,7 @@
 #include <gleditor/render/constants.hpp>
 #include <gleditor/render_state.hpp>
 #include <gleditor/spatial.hpp>
+#include <gleditor/translucent_list.hpp>
 
 #include "common/ui/xanadoc/link_context.hpp"
 #include "common/ui/xanadoc/satelloid.hpp"
@@ -89,7 +90,7 @@ constexpr float framingMarginFloorY   = 6.0F;
 
 /// How near the camera has to be to where it is being taken before the ease is
 /// treated as arrived, in world units. It is then put exactly there and handed
-/// back; see the snap in drawFrame() for why exactly matters.
+/// back; see the snap in drawScene() for why exactly matters.
 constexpr float cameraArrived = 0.05F;
 
 } // namespace
@@ -121,9 +122,11 @@ void LinkBeams::deviceReady(render::RenderDevice &device,
   beams = std::make_unique<gleditor::Beams>(&device);
   // Depth tested, so a beam passing behind a page is behind it. A beam that
   // was always in front would be a beam nothing could be occluded by, and the
-  // arrangement of the documents in space is what it is drawn to show.
+  // arrangement of the documents in space is what it is drawn to show. Not
+  // written: the beams are drawn among the faded pages, back to front, and a
+  // beam that wrote its depth would cut itself out of a page drawn after it.
   beams->createPipeline(gleditor::assetPath("shaders"),
-                        documentPipeline.spirvDir, true);
+                        documentPipeline.spirvDir, true, false);
 }
 
 void LinkBeams::rebuildStrands(RenderState &state) {
@@ -1407,7 +1410,7 @@ bool LinkBeams::picked(const render::PickingResult &pick,
   return true;
 }
 
-void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
+void LinkBeams::drawScene(gleditor::FrameContext &ctx) {
   session.tick();
   if (nullptr == beams || !visible || !ctx.state.documentsVisible) {
     // Nothing will be drawn and so nothing will be moved. Saying so rather
@@ -2055,8 +2058,12 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
 
   // Document and page zero, with no kind: the kind is the beam pipeline's,
   // and which beam it is rides in the beam's own tag.
-  beams->draw(state, ctx.viewProjection, 1.0F,
-              render::packTagIdentity(0, 0, 0));
+  const auto identity = render::packTagIdentity(0, 0, 0);
+  if (nullptr != ctx.translucent) {
+    ctx.translucent->addBeams(*beams, ctx.viewProjection, 1.0F, identity);
+  } else {
+    beams->draw(state, ctx.viewProjection, 1.0F, identity);
+  }
 }
 
 namespace {

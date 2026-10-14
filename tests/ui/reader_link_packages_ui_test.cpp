@@ -88,13 +88,13 @@ TEST_F(
                                .screenWidth    = 800,
                                .screenHeight   = 600,
                                .timeline       = timeline};
-  beams.drawFrame(frame);
+  beams.drawScene(frame);
   gleditor::a11y::Tree tree;
   gleditor::a11y::Builder builder(tree, 27);
   beams.describe(builder);
   EXPECT_TRUE(
       beams.performAction(renderId + 1, gleditor::a11y::Action::Click, {}));
-  beams.drawFrame(frame);
+  beams.drawScene(frame);
   ASSERT_TRUE(navigation.selection());
   EXPECT_EQ(navigation.selection()->key, key);
   EXPECT_FALSE(focused);
@@ -116,7 +116,7 @@ TEST_F(
       beams.performAction(renderId + 1, gleditor::a11y::Action::Click, {}));
   ASSERT_TRUE(session.setLinkPackageEnabled(status, false));
   navigation.packageVisibilityChanged();
-  beams.drawFrame(frame);
+  beams.drawScene(frame);
   EXPECT_FALSE(navigation.selection());
   EXPECT_EQ(session.activityForNavigation()->opCount(), activityOps);
   EXPECT_THROW(session.addStore(std::make_unique<Store>(perma, key.authority),

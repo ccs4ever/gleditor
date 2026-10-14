@@ -99,7 +99,9 @@ public:
   // -- FrameContributor implementation ---------------------------------------
   void deviceReady(render::RenderDevice &device,
                    const render::PipelineDesc &documentPipeline) override;
-  void drawFrame(gleditor::FrameContext &ctx) override;
+  /// The tethers are in the world: they go to the frame's translucent list.
+  void drawScene(gleditor::FrameContext &ctx) override;
+  void drawFrame(gleditor::FrameContext & /*ctx*/) override {}
   [[nodiscard]] bool busy() const override { return false; }
 
   /// Evaluate quadratic Bezier arc at parameter t in [0, 1].
