@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 
 #include <gleditor/logging.hpp>
@@ -10,6 +11,47 @@
 
 namespace common_ui {
 namespace ui = gleditor::ui;
+
+namespace {
+std::vector<ui::Rect>
+unoccupiedAreas(ui::Rect safe, float gap,
+                std::optional<ui::Rect> protectedContent,
+                std::span<const ui::Rect> additionalProtectedContent) {
+  std::vector<ui::Rect> candidates{safe};
+  const auto exclude = [&](const ui::Rect &at) {
+    std::vector<ui::Rect> next;
+    for (const auto &area : candidates) {
+      const auto right = area.left + area.width;
+      const auto top   = area.bottom + area.height;
+      if (at.left - gap >= right || at.left + at.width + gap <= area.left ||
+          at.bottom - gap >= top ||
+          at.bottom + at.height + gap <= area.bottom) {
+        next.push_back(area);
+        continue;
+      }
+      const auto leftCut = std::clamp(at.left - gap, area.left, right);
+      const auto rightCut =
+          std::clamp(at.left + at.width + gap, area.left, right);
+      const auto bottomCut = std::clamp(at.bottom - gap, area.bottom, top);
+      const auto topCut =
+          std::clamp(at.bottom + at.height + gap, area.bottom, top);
+      for (const auto &remaining : std::array{
+               ui::Rect{area.left, area.bottom, leftCut - area.left,
+                        area.height},
+               ui::Rect{rightCut, area.bottom, right - rightCut, area.height},
+               ui::Rect{area.left, area.bottom, area.width,
+                        bottomCut - area.bottom},
+               ui::Rect{area.left, topCut, area.width, top - topCut}})
+        if (remaining.width > 0 && remaining.height > 0)
+          next.push_back(remaining);
+    }
+    candidates = std::move(next);
+  };
+  if (protectedContent) exclude(*protectedContent);
+  for (const auto &area : additionalProtectedContent) exclude(area);
+  return candidates;
+}
+} // namespace
 
 const LinkPanelAction *LinkPanelPresentation::find(ui::WidgetId id) const {
   const auto found = std::ranges::find(actions, id, &LinkPanelAction::id);
@@ -127,39 +169,9 @@ LinkPanelPresentation linkPanelPresentation(
   auto panelArea = safe;
   if (protectedContent || !additionalProtectedContent.empty()) {
     result.safePlacement = false;
-    std::vector<ui::Rect> candidates{safe};
-    const float gap    = metrics.px(config.marginPx);
-    const auto exclude = [&](const ui::Rect &at) {
-      std::vector<ui::Rect> next;
-      for (const auto &area : candidates) {
-        const auto right = area.left + area.width;
-        const auto top   = area.bottom + area.height;
-        if (at.left - gap >= right || at.left + at.width + gap <= area.left ||
-            at.bottom - gap >= top ||
-            at.bottom + at.height + gap <= area.bottom) {
-          next.push_back(area);
-          continue;
-        }
-        const auto leftCut = std::clamp(at.left - gap, area.left, right);
-        const auto rightCut =
-            std::clamp(at.left + at.width + gap, area.left, right);
-        const auto bottomCut = std::clamp(at.bottom - gap, area.bottom, top);
-        const auto topCut =
-            std::clamp(at.bottom + at.height + gap, area.bottom, top);
-        for (const auto &remaining : std::array{
-                 ui::Rect{area.left, area.bottom, leftCut - area.left,
-                          area.height},
-                 ui::Rect{rightCut, area.bottom, right - rightCut, area.height},
-                 ui::Rect{area.left, area.bottom, area.width,
-                          bottomCut - area.bottom},
-                 ui::Rect{area.left, topCut, area.width, top - topCut}})
-          if (remaining.width > 0 && remaining.height > 0)
-            next.push_back(remaining);
-      }
-      candidates = std::move(next);
-    };
-    if (protectedContent) exclude(*protectedContent);
-    for (const auto &area : additionalProtectedContent) exclude(area);
+    const auto candidates =
+        unoccupiedAreas(safe, metrics.px(config.marginPx), protectedContent,
+                        additionalProtectedContent);
     float best = 0;
     for (const auto &candidate : candidates) {
       if (candidate.width < metrics.px(sourceTheme.type.minTouchPx) * 3 ||
@@ -440,7 +452,8 @@ inspectorPresentation(std::span<const xanadu::PanelLine> lines,
                       LinkPanelPageRequest request,
                       const ui::UiMetrics &metrics, const ui::Theme &theme,
                       const xanadu::LinkPanelConfig &config,
-                      gleditor::text::ShapingCache &cache) {
+                      gleditor::text::ShapingCache &cache,
+                      std::optional<ui::Rect> available = {}) {
   auto local            = metrics;
   local.marginShare     = 0;
   auto sizing           = config;
@@ -464,6 +477,7 @@ inspectorPresentation(std::span<const xanadu::PanelLine> lines,
       std::max(0.F, metrics.screenHeight -
                         std::max(metrics.chrome.top, local.px(config.topPx)) -
                         metrics.chrome.bottom)};
+  if (available) result.bounds = *available;
   const auto width       = std::max(0.F, result.bounds.width - pad * 2);
   const auto captionSlot = std::ceil(caption->metrics().lineHeight) + 2;
   const auto actionSlot  = std::ceil(font->metrics().lineHeight) + pad * 2;
@@ -530,7 +544,8 @@ inspectorPresentation(std::span<const xanadu::PanelLine> lines,
   };
   footer.push_back(addButton(request.previousId, "Previous", true));
   footer.push_back(addButton(request.nextId, "Next", true));
-  footer.push_back(addButton(toggleId, "Read", true));
+  footer.push_back(
+      addButton(toggleId, available ? "Fold investigation" : "Read", true));
   for (std::size_t i = 0; i < buttons.size(); ++i)
     if (std::holds_alternative<xanadu::nav::Dismiss>(buttons[i].command) ||
         std::holds_alternative<xanadu::nav::CancelEntry>(buttons[i].command)) {
@@ -548,6 +563,11 @@ inspectorPresentation(std::span<const xanadu::PanelLine> lines,
         longest, cache.fitted(std::get<ui::Button>(button.model).text, font, {})
                          .widthPx +
                      pad * 2);
+  // Individually reachable member/occurrence labels can be longer than the
+  // footer. Use their measured widths before choosing shared columns.
+  for (const auto &button : buttons)
+    longest = std::max(longest,
+                       cache.fitted(button.label, font, {}).widthPx + pad * 2);
   const auto columns      = static_cast<std::size_t>(std::clamp(
       std::floor((width + gap) / std::max(1.F, longest + gap)), 1.F, 3.F));
   const auto footerRows   = (footer.size() + columns - 1) / columns;
@@ -569,7 +589,8 @@ inspectorPresentation(std::span<const xanadu::PanelLine> lines,
     const auto firstBreak = entry.text.find('\n');
     const auto sideEnd    = entry.text.find(' ');
     auto core =
-        firstBreak == std::string::npos || firstBreak >= entry.requiredBytes
+        firstBreak == std::string::npos || firstBreak >= entry.requiredBytes ||
+                entry.requiredBytes == entry.text.size()
             ? entry.text.substr(0, entry.requiredBytes)
             : entry.text.substr(0, sideEnd) + ": bytes " +
                   entry.text.substr(firstBreak + 1,
@@ -600,14 +621,21 @@ inspectorPresentation(std::span<const xanadu::PanelLine> lines,
     if (!std::holds_alternative<xanadu::nav::Dismiss>(buttons[i].command) &&
         !std::holds_alternative<xanadu::nav::CancelEntry>(buttons[i].command))
       ordinary.push_back(i);
+  auto layoutId = std::max(
+      {toggleId, request.previousId, request.nextId, ui::WidgetId{70}});
+  for (const auto id : ids) layoutId = std::max(layoutId, id);
   for (std::size_t start = 0; start < ordinary.size(); start += columns) {
+    if (layoutId == std::numeric_limits<ui::WidgetId>::max())
+      throw std::length_error("Link inspector layout identities exhausted");
     Block block{
-        {.id        = static_cast<ui::WidgetId>(40 + start),
+        {.id        = ++layoutId,
          .model     = ui::ButtonFlow{},
          .preferred = {local.logical(width), local.logical(actionSlot)}},
         actionSlot,
         {}};
-    const auto cellWidth = (width - (columns - 1) * gap) / columns;
+    // Pixel rounding must not wrap the final control into a clipped second
+    // row when the panel occupies a fractional free-canvas rectangle.
+    const auto cellWidth = std::floor((width - (columns - 1) * gap) / columns);
     for (auto j = start; j < std::min(start + columns, ordinary.size()); ++j) {
       const auto i = ordinary[j];
       auto button  = addButton(ids[i], buttons[i].label, buttons[i].enabled);
@@ -647,9 +675,9 @@ inspectorPresentation(std::span<const xanadu::PanelLine> lines,
   result.pages          = LinkPanelPages{request, pages.size()};
   result.toggleControls = toggleId;
   std::get<ui::Label>(pinned.front().model).text =
-      "Controls " + std::to_string(request.page + 1) + "/" +
-      std::to_string(pages.size()) + " · " +
-      std::get<ui::Label>(pinned.front().model).text;
+      (available ? "Investigation " : "Controls ") +
+      std::to_string(request.page + 1) + "/" + std::to_string(pages.size()) +
+      " · " + std::get<ui::Label>(pinned.front().model).text;
   auto &previous           = std::get<ui::Button>(footer[0].model);
   auto &next               = std::get<ui::Button>(footer[1].model);
   previous.enabled         = request.page > 0;
@@ -692,22 +720,51 @@ inspectorPresentation(std::span<const xanadu::PanelLine> lines,
       .preferred = {local.logical(width), local.logical(footerHeight)}};
   for (auto &button : footer) {
     button.preferred.width =
-        local.logical((width - (columns - 1) * gap) / columns);
+        local.logical(std::floor((width - (columns - 1) * gap) / columns));
     flow.children.push_back(std::move(button));
   }
   append(std::move(flow), {pad, pad, width, footerHeight});
   // PositionedPanel is a transparent diagram; the existing Panel supplies the
   // inspector's continuous configured surface without changing diagram widgets.
-  auto content          = std::move(result.model);
-  const auto preferred  = content.preferred;
-  result.model          = {.id        = 70,
-                           .model     = ui::Panel{},
-                           .children  = {std::move(content)},
-                           .preferred = preferred};
-  result.reservedBottom = result.bounds.bottom + result.bounds.height;
+  auto content         = std::move(result.model);
+  const auto preferred = content.preferred;
+  result.model         = {.id        = 70,
+                          .model     = ui::Panel{},
+                          .children  = {std::move(content)},
+                          .preferred = preferred};
+  if (!available)
+    result.reservedBottom = result.bounds.bottom + result.bounds.height;
   return result;
 }
 } // namespace
+LinkPanelPresentation linkPanelInvestigationPresentation(
+    std::span<const xanadu::PanelLine> lines,
+    std::span<const xanadu::PanelButton> buttons,
+    std::span<const ui::WidgetId> ids, ui::WidgetId toggleId,
+    LinkPanelPageRequest paging, const ui::UiMetrics &metrics,
+    const ui::Theme &theme, const xanadu::LinkPanelConfig &config,
+    gleditor::text::ShapingCache &cache,
+    std::span<const ui::Rect> protectedContent) {
+  auto candidates =
+      unoccupiedAreas(metrics.pixelSafeArea(), metrics.px(config.marginPx), {},
+                      protectedContent);
+  std::ranges::sort(candidates, std::greater{},
+                    [](const auto &rect) { return rect.width * rect.height; });
+  const auto safe = metrics.pixelSafeArea();
+  for (auto area : candidates) {
+    area.width  = std::min(area.width, safe.width * config.maxWidthShare);
+    area.height = std::min(area.height, safe.height * config.maxHeightShare);
+    const auto next =
+        inspectorPresentation(lines, buttons, ids, toggleId, paging, metrics,
+                              theme, config, cache, area);
+    if (next.completeContent) return next;
+  }
+  LinkPanelPresentation unavailable;
+  unavailable.safePlacement   = false;
+  unavailable.completeContent = false;
+  return unavailable;
+}
+
 LinkPanelPresentation linkPanelDockPresentation(
     std::span<const xanadu::PanelLine> sourceLines,
     std::span<const xanadu::PanelButton> sourceButtons,

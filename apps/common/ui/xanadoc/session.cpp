@@ -38,6 +38,7 @@
 #include "common/xanadu/format_resolver.hpp"
 #include "common/xanadu/link_layout.hpp"
 #include "common/xanadu/provenance.hpp"
+#include "common/xanadu/store_activity_log.hpp"
 
 namespace xanadu {
 
@@ -1417,6 +1418,10 @@ Store *Session::activity() {
   try {
     if (std::filesystem::exists(dir)) {
       opened->load(dir.string());
+      // Refuse unsupported payloads before any navigation or shutdown writer
+      // can append to the activity that must be preserved for inspection.
+      const StoreActivityLog validated(opened.get(), dir);
+      std::ignore = latestPlace(*opened);
     }
     activityStore = std::move(opened);
   } catch (const std::exception &err) {

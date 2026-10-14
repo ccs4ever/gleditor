@@ -11,6 +11,7 @@
 #include <gleditor/text_source.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <gtest/gtest.h>
+#include <iterator>
 
 namespace {
 using namespace xanadu;
@@ -437,4 +438,107 @@ TEST_F(ReaderPackageUiTest, NativeFormattingIsNotAReaderNavigationCandidate) {
   const auto presented = navigation.presentationLinks(-1);
   ASSERT_EQ(presented.size(), 1U);
   EXPECT_EQ(presented.front().link.type, LinkType::Comment);
+}
+
+TEST_F(ReaderPackageUiTest,
+       CaretMovementAndLinkExplorationDoNotCreateCompletedVisits) {
+  auto perma = std::make_shared<UserPermascroll>();
+  Session session((root / "workspace").string(), perma);
+  auto &store       = session.store();
+  const auto text   = store.insert({}, 0, "origin destination");
+  const auto pieces = store.rebuild(text);
+  const auto head   = store.addLink(text, Link{.left  = pieces.spansFor(0, 6),
+                                               .right = pieces.spansFor(7, 11)});
+  store.repointCurrentVersion(head);
+  session.viewOpened(head);
+  const LinkKey key{store.documentId(), store.links().begin()->first};
+  LinkContext navigation(session);
+  std::uint32_t caret{};
+  navigation.setCaretQuery([&] {
+    return std::optional{
+        LinkContext::CaretPosition{.view = 0, .offset = caret}};
+  });
+  navigation.setFocusDocument([&](std::size_t view, Extent range) {
+    EXPECT_EQ(view, 0U);
+    caret = range.start;
+  });
+  WorldRecordingDevice device;
+  RenderState state{&device};
+  navigation.advanceFrame(state);
+  const auto opened = navigation.currentVisit();
+  ASSERT_TRUE(opened);
+  ASSERT_EQ(navigation.walkEntries().size(), 1U);
+  const auto activityOps = session.activityForNavigation()->opCount();
+  const auto documentOps = store.opCount();
+  caret                  = 3;
+  navigation.advanceFrame(state);
+  ASSERT_TRUE(navigation.execute(nav::SelectLink{.key = key}));
+  const OccurrenceSite checkpoint =
+      DocumentSite{store.documentId(), head, {3, 3}};
+  EXPECT_EQ(navigation.originSite(), checkpoint);
+  caret = 5;
+  ASSERT_TRUE(navigation.execute(nav::SelectLink{.key = key}));
+  EXPECT_EQ(navigation.originSite(), checkpoint);
+  ASSERT_TRUE(navigation.execute(nav::SelectOccurrence{
+      .key = key, .side = LinkSide::Right, .member = 0, .occurrence = 0}));
+  ASSERT_TRUE(navigation.execute(nav::Cross{}));
+  ASSERT_TRUE(navigation.execute(nav::Cross{}));
+  // The source navigation callback must not record eye movement either.
+  navigation.recordReadingOrigin();
+  EXPECT_EQ(navigation.walkEntries().size(), 1U);
+  EXPECT_EQ(session.activityForNavigation()->opCount(), activityOps);
+  EXPECT_EQ(navigation.currentVisit(), opened);
+  ASSERT_TRUE(navigation.execute(nav::Enter{}));
+  EXPECT_EQ(caret, 7U);
+  ASSERT_EQ(navigation.walkEntries().size(), 2U);
+  const auto entered = navigation.currentVisit();
+  ASSERT_TRUE(entered);
+  ASSERT_TRUE(navigation.execute(nav::ActivityBack{}));
+  EXPECT_EQ(caret, 0U);
+  ASSERT_TRUE(navigation.execute(nav::ActivityForward{*entered}));
+  ASSERT_TRUE(navigation.execute(nav::ReturnToOrigin{}));
+  EXPECT_EQ(caret, 3U);
+  EXPECT_EQ(navigation.currentVisit(), opened);
+  EXPECT_EQ(navigation.walkEntries().size(), 2U);
+  EXPECT_EQ(store.opCount(), documentOps);
+}
+
+TEST_F(ReaderPackageUiTest, UnsupportedActivityPayloadsRemainUntouched) {
+  auto perma           = std::make_shared<UserPermascroll>();
+  const auto directory = activityDirectory();
+  const auto fileBytes = [](const std::filesystem::path &path) {
+    std::ifstream in(path, std::ios::binary);
+    return std::string{std::istreambuf_iterator<char>{in},
+                       std::istreambuf_iterator<char>{}};
+  };
+  for (const bool savedSelection : {false, true}) {
+    std::filesystem::remove_all(directory);
+    Store stale(perma);
+    auto at         = stale.sliceGenesis({});
+    const auto rank = stale.makeDimension(
+        at, savedSelection ? "d.places" : "d.activity-visits");
+    at =
+        stale.makeCell(rank.version, savedSelection ? "place" : "visit1 0 doc");
+    const auto record = stale.cellRefOf(at);
+    at = stale.setLink(at, stale.homeCell(), rank.dim, zigzag::DimVector::POS,
+                       record);
+    if (savedSelection) {
+      const auto selection = stale.makeDimension(at, "d.selection");
+      at = stale.makeCell(selection.version, "selection1 unsupported");
+      at = stale.setLink(at, record, selection.dim, zigzag::DimVector::POS,
+                         stale.cellRefOf(at));
+    }
+    stale.save(directory.string());
+    const auto nodes  = fileBytes(directory / "ops.nodes");
+    const auto tables = fileBytes(directory / "store.tables");
+    Session session((root / "workspace").string(), perma);
+    EXPECT_EQ(session.activityForNavigation(), nullptr);
+    EXPECT_FALSE(session.lastPlace());
+    LinkContext navigation(session);
+    EXPECT_NO_THROW(navigation.recordSourceArrival(
+        DocumentSite{session.store().documentId(), {}, {0, 0}}));
+    EXPECT_NO_THROW(session.rememberPlace({}));
+    EXPECT_EQ(fileBytes(directory / "ops.nodes"), nodes);
+    EXPECT_EQ(fileBytes(directory / "store.tables"), tables);
+  }
 }

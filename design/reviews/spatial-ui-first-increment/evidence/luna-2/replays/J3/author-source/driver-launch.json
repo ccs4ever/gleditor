@@ -1,0 +1,27 @@
+{
+  "command": [
+    "/workspace/gleditor/build/xuzz",
+    "--backend",
+    "opengl",
+    "--resize",
+    "1440,1000",
+    "--profile",
+    "--type",
+    "Harbor source passage.\nMeadow second passage.\nSurrounding text remains.\n",
+    "--dump-a11y",
+    "--capture",
+    "/workspace/gleditor/design/reviews/spatial-ui-first-increment/evidence/luna-2/replays/J3/author-source/source.ppm",
+    "--chord",
+    "Ctrl+Q"
+  ],
+  "cwd": "/workspace/gleditor",
+  "profile_root": "/workspace/gleditor/design/reviews/spatial-ui-first-increment/luna-2-profiles/j3",
+  "headless_environment": {
+    "SDL_VIDEODRIVER": "offscreen",
+    "SDL_AUDIODRIVER": "dummy",
+    "LIBGL_ALWAYS_SOFTWARE": "1",
+    "XDG_DATA_HOME": "/workspace/gleditor/design/reviews/spatial-ui-first-increment/luna-2-profiles/j3/data",
+    "XDG_CONFIG_HOME": "/workspace/gleditor/design/reviews/spatial-ui-first-increment/luna-2-profiles/j3/config",
+    "XDG_CACHE_HOME": "/workspace/gleditor/design/reviews/spatial-ui-first-increment/luna-2-profiles/j3/cache"
+  }
+}

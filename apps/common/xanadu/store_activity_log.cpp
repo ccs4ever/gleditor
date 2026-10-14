@@ -63,7 +63,8 @@ std::pair<VisitId, std::string> annotationOf(std::string_view record) {
 std::string bytesOf(const DocumentId &id) { return id.str().substr(6); }
 
 DocumentId parseId(const std::string &hex) {
-  if (hex.size() != 32) throw std::runtime_error("activity: bad document id");
+  if (hex.size() != 32)
+    throw ActivityRecordUnreadable("activity: bad document id");
   std::array<char, 16> bytes{};
   for (std::size_t i = 0; i < bytes.size(); ++i) {
     unsigned int high{};
@@ -71,7 +72,7 @@ DocumentId parseId(const std::string &hex) {
     const auto parse = [](const char digit) -> unsigned int {
       if (digit >= '0' && digit <= '9') return digit - '0';
       if (digit >= 'a' && digit <= 'f') return digit - 'a' + 10;
-      throw std::runtime_error("activity: bad document id");
+      throw ActivityRecordUnreadable("activity: bad document id");
     };
     high     = parse(hex[2 * i]);
     low      = parse(hex[2 * i + 1]);
@@ -79,7 +80,7 @@ DocumentId parseId(const std::string &hex) {
   }
   DocumentId id;
   if (!DocumentId::fromBytes({bytes.data(), bytes.size()}, id)) {
-    throw std::runtime_error("activity: bad document id");
+    throw ActivityRecordUnreadable("activity: bad document id");
   }
   return id;
 }
@@ -89,88 +90,134 @@ std::int64_t indexOf(const std::optional<std::uint32_t> index) {
 }
 
 std::optional<std::uint32_t> cursorIndex(const std::int64_t value) {
-  if (value < 0) return std::nullopt;
+  if (value == -1) return std::nullopt;
+  if (value < -1)
+    throw ActivityRecordUnreadable("activity: invalid unset cursor");
   if (value > std::numeric_limits<std::uint32_t>::max()) {
-    throw std::runtime_error("activity: cursor out of range");
+    throw ActivityRecordUnreadable("activity: cursor out of range");
   }
   return static_cast<std::uint32_t>(value);
 }
 
-std::string encode(const Visit &visit) {
-  std::ostringstream out;
-  const auto parent = visit.parent ? visit.parent->value : 0;
-  out << "visit1 " << parent << ' ';
+// Versioned activity payloads carry the exact selection-start place. They
+// remain primedia-backed records; CompactOpNode and its disk layout do not
+// change.
+void writeSite(std::ostream &out, const OccurrenceSite &target) {
   std::visit(
       [&out](const auto &site) {
         using Site = std::decay_t<decltype(site)>;
         if constexpr (std::is_same_v<Site, DocumentSite>) {
           out << "doc " << bytesOf(site.store) << ' ' << site.version.str()
-              << ' ' << site.range.start << ' ' << site.range.end << " 0 ";
+              << ' ' << site.range.start << ' ' << site.range.end << " 0";
         } else {
           out << "cell " << bytesOf(site.store) << ' ' << site.version.str()
               << ' ' << site.range.start << ' ' << site.range.end << ' '
-              << site.cell << ' ';
+              << site.cell;
         }
       },
-      visit.target);
-  out << static_cast<unsigned int>(visit.arrival) << ' '
+      target);
+}
+
+std::uint64_t readNumber(
+    std::istream &in, const std::string_view field,
+    const std::uint64_t maximum = std::numeric_limits<std::uint64_t>::max()) {
+  std::string token;
+  if (!(in >> token))
+    throw ActivityRecordUnreadable("activity: missing " + std::string{field});
+  const auto value = recordNumber(token, field);
+  if (value > maximum)
+    throw ActivityRecordUnreadable("activity: " + std::string{field} +
+                                   " out of range");
+  return value;
+}
+
+OccurrenceSite readSite(std::istream &in) {
+  std::string kind, storeId, version;
+  if (!(in >> kind >> storeId >> version) || (kind != "doc" && kind != "cell"))
+    throw ActivityRecordUnreadable("activity: malformed occurrence site");
+  const auto start = static_cast<std::uint32_t>(
+      readNumber(in, "range start", std::numeric_limits<std::uint32_t>::max()));
+  const auto end = static_cast<std::uint32_t>(
+      readNumber(in, "range end", std::numeric_limits<std::uint32_t>::max()));
+  const auto cell =
+      readNumber(in, "cell", std::numeric_limits<zigzag::CellRef>::max());
+  if (end < start || (kind == "doc" && cell != 0))
+    throw ActivityRecordUnreadable("activity: malformed occurrence site");
+  const auto store = parseId(storeId);
+  MicroversionId at;
+  try {
+    at = MicroversionId::parse(version);
+  } catch (const std::exception &error) {
+    throw ActivityRecordUnreadable("activity: invalid occurrence version: " +
+                                   std::string{error.what()});
+  }
+  if (kind == "doc") return DocumentSite{store, at, {start, end}};
+  return CellSite{store, at, static_cast<zigzag::CellRef>(cell), {start, end}};
+}
+
+void writeContext(std::ostream &out, const LinkVisitContext &link) {
+  out << bytesOf(link.key.authority) << ' ' << link.key.id << ' '
+      << static_cast<unsigned int>(link.active) << ' '
+      << indexOf(link.left.member) << ' ' << indexOf(link.left.occurrence)
+      << ' ' << indexOf(link.right.member) << ' '
+      << indexOf(link.right.occurrence) << ' '
+      << (link.origin ? link.origin->value : 0) << ' '
+      << static_cast<bool>(link.originCheckpoint);
+  if (link.originCheckpoint) {
+    out << ' ';
+    writeSite(out, *link.originCheckpoint);
+  }
+}
+
+LinkVisitContext readContext(std::istream &in) {
+  std::string authority;
+  if (!(in >> authority))
+    throw ActivityRecordUnreadable("activity: missing link authority");
+  const auto id =
+      readNumber(in, "link id", std::numeric_limits<zigzag::CellRef>::max());
+  const auto side = readNumber(in, "link side", 1);
+  std::int64_t lm{}, lo{}, rm{}, ro{};
+  if (!(in >> lm >> lo >> rm >> ro))
+    throw ActivityRecordUnreadable("activity: malformed link cursors");
+  const auto origin     = readNumber(in, "origin visit");
+  const auto checkpoint = readNumber(in, "origin checkpoint flag", 1);
+  LinkVisitContext link{
+      .key    = {parseId(authority), static_cast<zigzag::CellRef>(id)},
+      .active = static_cast<LinkSide>(side),
+      .left   = {cursorIndex(lm), cursorIndex(lo)},
+      .right  = {cursorIndex(rm), cursorIndex(ro)},
+      .origin = origin ? std::optional{VisitId{origin}} : std::nullopt};
+  if (checkpoint) link.originCheckpoint = readSite(in);
+  return link;
+}
+
+std::string encode(const Visit &visit) {
+  std::ostringstream out;
+  out << "visit2 " << (visit.parent ? visit.parent->value : 0) << ' ';
+  writeSite(out, visit.target);
+  out << ' ' << static_cast<unsigned int>(visit.arrival) << ' '
       << static_cast<bool>(visit.link);
   if (visit.link) {
-    const auto &link = *visit.link;
-    out << ' ' << bytesOf(link.key.authority) << ' ' << link.key.id << ' '
-        << static_cast<unsigned int>(link.active) << ' '
-        << indexOf(link.left.member) << ' ' << indexOf(link.left.occurrence)
-        << ' ' << indexOf(link.right.member) << ' '
-        << indexOf(link.right.occurrence) << ' '
-        << (link.origin ? link.origin->value : 0);
+    out << ' ';
+    writeContext(out, *visit.link);
   }
   return out.str();
 }
 
 Visit decode(const std::string &data) {
   std::istringstream in(data);
-  std::string signature, kind, storeId, version;
-  std::uint64_t parent{}, cell{}, linkId{}, origin{};
-  std::uint32_t start{}, end{};
-  unsigned int arrival{}, linked{}, side{};
-  if (!(in >> signature >> parent >> kind >> storeId >> version >> start >>
-        end >> cell >> arrival >> linked) ||
-      signature != "visit1" || (kind != "doc" && kind != "cell") ||
-      arrival > 1 || linked > 1 || end < start) {
-    throw std::runtime_error("activity: malformed visit");
-  }
-  const auto siteStore = parseId(storeId);
-  const auto at        = MicroversionId::parse(version);
-  Visit visit;
+  std::string signature, extra;
+  if (!(in >> signature) || signature != "visit2")
+    throw ActivityRecordUnreadable("activity: expected visit2");
+  const auto parent = readNumber(in, "parent visit");
+  Visit visit{.target = readSite(in)};
+  const auto arrival = readNumber(in, "arrival", 1);
+  const auto linked  = readNumber(in, "link flag", 1);
   if (parent) visit.parent = VisitId{parent};
-  if (kind == "doc") {
-    visit.target = DocumentSite{siteStore, at, {start, end}};
-  } else {
-    if (cell > std::numeric_limits<zigzag::CellRef>::max()) {
-      throw std::runtime_error("activity: cell out of range");
-    }
-    visit.target = CellSite{
-        siteStore, at, static_cast<zigzag::CellRef>(cell), {start, end}};
-  }
   visit.arrival = static_cast<Arrival>(arrival);
-  if (linked) {
-    std::string authority;
-    std::int64_t lm{}, lo{}, rm{}, ro{};
-    if (!(in >> authority >> linkId >> side >> lm >> lo >> rm >> ro >>
-          origin) ||
-        side > 1 || linkId > std::numeric_limits<zigzag::CellRef>::max()) {
-      throw std::runtime_error("activity: malformed link context");
-    }
-    visit.link = LinkVisitContext{
-        .key    = {parseId(authority), static_cast<zigzag::CellRef>(linkId)},
-        .active = static_cast<LinkSide>(side),
-        .left   = {cursorIndex(lm), cursorIndex(lo)},
-        .right  = {cursorIndex(rm), cursorIndex(ro)},
-        .origin =
-            origin ? std::optional<VisitId>{VisitId{origin}} : std::nullopt};
-  }
-  std::string extra;
-  if (in >> extra) throw std::runtime_error("activity: trailing visit data");
+  if (linked) visit.link = readContext(in);
+  if (in >> extra)
+    throw ActivityRecordUnreadable("activity: trailing visit2 data");
   return visit;
 }
 
@@ -178,32 +225,20 @@ Visit decode(const std::string &data) {
 
 std::string encodeLinkContext(const LinkVisitContext &link) {
   std::ostringstream out;
-  out << "selection1 " << bytesOf(link.key.authority) << ' ' << link.key.id
-      << ' ' << static_cast<unsigned int>(link.active) << ' '
-      << indexOf(link.left.member) << ' ' << indexOf(link.left.occurrence)
-      << ' ' << indexOf(link.right.member) << ' '
-      << indexOf(link.right.occurrence) << ' '
-      << (link.origin ? link.origin->value : 0);
+  out << "selection2 ";
+  writeContext(out, link);
   return out.str();
 }
 
 LinkVisitContext decodeLinkContext(const std::string_view text) {
   std::istringstream in{std::string{text}};
-  std::string signature, authority, extra;
-  std::uint64_t id{}, origin{};
-  unsigned int side{};
-  std::int64_t lm{}, lo{}, rm{}, ro{};
-  if (!(in >> signature >> authority >> id >> side >> lm >> lo >> rm >> ro >>
-        origin) ||
-      signature != "selection1" || side > 1 ||
-      id > std::numeric_limits<zigzag::CellRef>::max() || (in >> extra))
-    throw ActivityRecordUnreadable("activity: malformed saved selection");
-  return {.key    = {parseId(authority), static_cast<zigzag::CellRef>(id)},
-          .active = static_cast<LinkSide>(side),
-          .left   = {cursorIndex(lm), cursorIndex(lo)},
-          .right  = {cursorIndex(rm), cursorIndex(ro)},
-          .origin =
-              origin ? std::optional<VisitId>{VisitId{origin}} : std::nullopt};
+  std::string signature, extra;
+  if (!(in >> signature) || signature != "selection2")
+    throw ActivityRecordUnreadable("activity: expected selection2");
+  auto link = readContext(in);
+  if (in >> extra)
+    throw ActivityRecordUnreadable("activity: trailing selection2 data");
+  return link;
 }
 
 StoreActivityLog::StoreActivityLog(Store *aStore,

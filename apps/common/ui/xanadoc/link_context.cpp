@@ -232,19 +232,10 @@ void LinkContext::recordSourceArrival(const OccurrenceSite &site) {
 }
 
 void LinkContext::noteOrigin() {
-  const auto here = caretSite();
-  if (!here) {
-    return;
-  }
-  // Only when the reader has moved since the last visit: a selection made
-  // where a trip ended starts from that visit, not from a copy of it.
-  if (const auto current = navigator.currentVisit()) {
-    if (const auto visit = activity.find(*current);
-        visit && visit->target == *here) {
-      return;
-    }
-  }
-  navigator.recordArrival(*here);
+  // Opening the first reading place is a completed arrival. Later caret and
+  // camera movement never manufacture an edge before a semantic transition.
+  if (navigator.currentVisit()) return;
+  if (const auto here = reading().here) navigator.recordArrival(*here);
 }
 
 std::string LinkContext::previewVisit(const VisitId id) const {
@@ -408,7 +399,7 @@ LinkContext::execute(const xanadu::NavigationCommand &command) {
       std::holds_alternative<xanadu::nav::StepLink>(command) ||
       (named && (!selected || selected->key != *named));
   if (starting) {
-    noteOrigin();
+    navigator.checkpointOrigin(reading().here);
   }
 
   auto result = navigator.dispatch(command);
@@ -423,6 +414,7 @@ LinkContext::execute(const xanadu::NavigationCommand &command) {
 
 void LinkContext::advanceFrame(RenderState &state) {
   renderState_ = &state;
+  noteOrigin();
   if (!pendingEntry) return;
   const auto &request = *pendingEntry;
   if (request.views != session.generation() ||
@@ -493,6 +485,7 @@ std::optional<xanadu::OccurrenceSite> LinkContext::originSite() const {
   if (!selected || !selected->origin) {
     return std::nullopt;
   }
+  if (selected->originCheckpoint) return selected->originCheckpoint;
   if (const auto visit = activity.find(*selected->origin)) {
     return visit->target;
   }
@@ -509,6 +502,34 @@ LinkContext::viewIndexOf(const xanadu::DocumentSite &site) const {
     }
   }
   return std::nullopt;
+}
+
+std::expected<ContentReference, ContentReferenceError>
+LinkContext::reference(const LinkKey &key, const LinkMember &member,
+                       std::uint32_t occurrence) const {
+  const auto *registry = nativeStoreOf(key);
+  if (!registry)
+    return std::unexpected(ContentReferenceError::SourceRegistryMismatch);
+  if (occurrence >= member.occurrences.size())
+    return std::unexpected(ContentReferenceError::OccurrenceNotFound);
+  const auto &site = member.occurrences[occurrence].site;
+  if (const auto *cell = std::get_if<CellSite>(&site))
+    return contentReferenceFor(*registry, key, member, occurrence,
+                               CellFrame{cell->cell});
+  const auto &document = std::get<DocumentSite>(site);
+  const auto view      = viewIndexOf(document);
+  if (!view) return std::unexpected(ContentReferenceError::WrongFrame);
+  const auto birth = session.views()[*view].focusedBirth;
+  // DocumentSite does not yet distinguish births at one store/state. Refuse
+  // that ambiguity instead of assigning the first open frame to a reference.
+  for (const auto &opened : session.views())
+    if (opened.version == document.version &&
+        session.store(opened.storeIndex).documentId() == document.store &&
+        opened.focusedBirth != birth)
+      return std::unexpected(ContentReferenceError::WrongFrame);
+  return contentReferenceFor(
+      *registry, key, member, occurrence,
+      DocumentFrame{birth ? std::optional{birth} : std::nullopt});
 }
 
 std::string LinkContext::describe(const xanadu::OccurrenceSite &site) const {

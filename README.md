@@ -210,6 +210,13 @@ Native and reader-enabled package links share exact member and occurrence naviga
 link context. The wider interaction contract is described in the
 [Xuzz navigation workflow](design/ui_workflow_xuzz_navigation.md).
 
+Select a Link, then use **Inspect members** or `Ctrl+Alt+I` to expand its retained investigation
+tablet. Its paged list previews every member and the chosen member's occurrences independently;
+**Enter** travels and **Origin** returns to the selection-start checkpoint. Folding preserves the
+reading place and both cursors. The inspector uses free canvas around readable source text and
+reports when it needs more space. Native full byte references show exact source and occurrence
+identities; partial and package source references explicitly remain unavailable in this increment.
+
 Publication signs an authorship record, seals content and operations for sharing, and can publish
 mutable names through BEP 46. Global spans and operation references map published identities back to
 local stores. A Merkle identity ledger and BEP 10 extensions support author lookup and peer

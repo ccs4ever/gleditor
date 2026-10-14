@@ -1,0 +1,57 @@
+# Native first-increment validation · Luna 3
+
+## Native first-increment validation addendum · J11–J15 and J27–J32
+
+This report records the native build check against the first-increment brief. I used only visible
+Xuzz controls/default chords and actual VQuery, VProlog and VPL PTY prompts as journey evidence.
+Curated stage exit codes are not counted as passes by themselves.
+
+| Journey/step | Affordance and observed outcome                                                                                                                                                                                                                                                                                    | Evidence                                                                                                                                                                                                               |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| J11/1        | Keyboard link-forge attempt (`Ctrl+Alt+[`, `Ctrl+Alt+]`, `Ctrl+Alt+L`). **Fail:** the captured result does not establish one selected Link with both full endsets and a 2×3 member list; the old drag replay targeted empty space.                                                                                 | [capture](evidence/luna-3-native/j11-forged.png); raw stage `/workspace/spatial-build/luna-authoring/run-j11-author/J11/author/`                                                                                       |
+| J11/2–3      | **Harness gap / not run:** native navigation replay could not launch because `dbus-run-session` is absent. This blocks the AT-SPI session; it does not establish that navigation itself fails.                                                                                                                     | [launch error](evidence/luna-3-native/j11-atspi-environment-error.log); `/workspace/spatial-build/luna-authoring/run-j11-native-A/J11/native-forward-A/`                                                               |
+| J12/1        | Chord-driven creation was exercised (`Ctrl+Alt+N`, `Ctrl+Alt+2`, `Ctrl+Alt+3`). **Missing:** captured frames do not establish the complete Slices-only → Both setup and required accessibility state.                                                                                                              | raw plan and frames `/workspace/spatial-build/luna-authoring/j12-author/J12/transclude-edit-close-ui/`                                                                                                                 |
+| J12/2–3      | **Missing evidence:** `Ctrl+Alt+T` and `Alt+Shift+T` were replayed and source-return controls appeared, but the saved frames do not establish a readable destination occurrence, same-primedia spans, durable edits, or close/reopen across all three locations.                                                   | [document state](evidence/luna-3-native/j12-document-state.png), [source return](evidence/luna-3-native/j12-source-return.png); raw store/artifacts remain under `/workspace/spatial-build/luna-authoring/j12-author/` |
+| J13/1        | **Pass for the prompt query/export subset:** VQuery accepted two queries at `vql>` over the authored issue data and saved 11 rows. The source-cell identity trail is not shown, so provenance remains unvalidated.                                                                                                 | [VQuery transcript](evidence/luna-3-native/j13-vquery-transcript.txt)                                                                                                                                                  |
+| J13/2        | **Pass for the prompt decision/handoff subset:** VProlog loaded those rows with `:open`, listed facts, returned `false` for the issue missing a gate, returned two ready issues, and exported a three-solution status store. VPL opened that result rather than retyping it.                                       | [VProlog transcript](evidence/luna-3-native/j13-vprolog-transcript.txt), [VPL transcript](evidence/luna-3-native/j13-vpl-transcript.txt)                                                                               |
+| J13/3        | **Missing at full journey scope:** VPL calculated `2 1 3`, saved the report, reopened it and recomputed the total as `3`. Opening the report in Xuzz, accessible inspection, source-cell provenance, and the full route back to VQuery were not captured.                                                          | [VPL reopen transcript](evidence/luna-3-native/j13-vpl-reopen-transcript.txt)                                                                                                                                          |
+| J14/1–4      | **Missing evidence:** a six-kind rank and foreign reference were attempted through the graphical stage, but the captured frame does not show the required six cells or typed values. Native AT-SPI validation was blocked by the missing `dbus-run-session`; no store dumps or reopen check establish persistence. | [attempt frame](evidence/luna-3-native/j14-six-kinds-attempt.png); raw stage `/workspace/spatial-build/luna-authoring/j14-author/` and blocked run `/workspace/spatial-build/luna-authoring/j14-native/`               |
+| J15/1        | **Missing at full journey scope:** visible chord-driven authoring captured a base, ancestor and branch-A stage. It does not establish two complete retained branches or the required change-site inventory.                                                                                                        | [branch map](evidence/luna-3-native/j15-branch-map.png); raw stage `/workspace/spatial-build/luna-authoring/j15-author/`                                                                                               |
+| J15/2        | **Fail:** the requested visible control `S · Version a14` was absent when the run tried to select it. The version-selection path therefore did not reach a three-version map selection.                                                                                                                            | [selection error](evidence/luna-3-native/j15-version-selection-error.log); raw run `/workspace/spatial-build/luna-authoring/run-j15-reopen/J15/reopened-comparison/`                                                   |
+| J15/3–5      | **Missing:** no evidence establishes text and slice comparison at change sites, unchanged store operations, or persistence after reopen.                                                                                                                                                                           | same J15 run directory above                                                                                                                                                                                           |
+
+### J27–J32 native scope
+
+The native inventory/status check finds first-increment support for ordered Link authoring and
+existing search/comparison seams, but not the complete services these journeys require. These are
+**Missing** at the requested journey scope, rather than concept passes. Specifically, the visible
+native interface does not establish a durable typed draft, explicit pinned receiving base and author
+mode, retry/status receipt protocol, media cue clocks and seek capability, complete parent-state
+effect footprints, selected historical recovery into a new branch, or the full offline/accessibility
+restoration contract.
+
+| Journey/step | Outcome | Native affordance / limitation                                                                                                                                                                                                                |
+| ------------ | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| J27/1–5      | Missing | Basic Link authoring exists; the complete disjoint capture-group editor, durable private staging, reorder/undo contract, pinned destination/base/author declaration, preview ledger and explicit commit/discard sequence are not established. |
+| J28/1–6      | Missing | No durable draft resume and validation/unknown-outcome/status/retry lifecycle is available as a demonstrated native flow.                                                                                                                     |
+| J29/1–5      | Missing | No native cue-set workflow with independent media clocks, locator validation, save/reopen and unsupported-seek recovery was demonstrated.                                                                                                     |
+| J30/1–7      | Missing | Existing history/search/comparison seams do not provide the requested complete branch/frame inventory and exact parent-state range/topology-effect coverage.                                                                                  |
+| J31/1–6      | Missing | No native selected-history recovery workflow with a separately pinned receiving base, effect preview, receipt, and retained existing futures was demonstrated.                                                                                |
+| J32/1–6      | Missing | Existing session and reader controls do not demonstrate the complete typed-pouch, offline identity-first restore, equivalent keyboard/list access, corrupt-session repair, cancellation, and explicit refresh/acquisition path.               |
+
+### Limits and next runnable increment
+
+This run establishes a small terminal handoff in J13 and attempted UI paths for J11, J12, J14 and
+J15. It does not pass any complete spatial journey. The `dbus-run-session` absence prevented native
+AT-SPI runs; AccessKit is not built in this environment, so accessibility-tree and
+assistive-technology parity remain unvalidated. The Docker runner was not used for additional stages
+in this addendum. Raw stores, plans and logs remain outside the repository under
+`/workspace/spatial-build/luna-authoring`; only selected PNGs and PTY/error transcripts were copied
+into the evidence directory.
+
+For the next runnable increment, keep scope to: a verified UI-authored 2×3 Link with member
+selection and navigation; exact cell-to-document transclusion with store/permascroll dumps; six-kind
+typed-cell support only if the visible value inspector and store dump expose it; and three-version
+comparison only after selecting actual visible version entries. Capture the visible default chord
+per action and verify each saved result with a reopened interface/store dump. The remaining J27–J32
+services stay outstanding until their native commands and persistence evidence exist.

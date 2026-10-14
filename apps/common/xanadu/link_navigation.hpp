@@ -23,6 +23,7 @@
 #include <expected>
 #include <optional>
 #include <string_view>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -57,6 +58,8 @@ struct LinkVisitContext {
   SideCursor right;
   /// Where the reader was when the link was selected.
   std::optional<VisitId> origin;
+  /// Frozen reading place at selection, without making a completed visit.
+  std::optional<OccurrenceSite> originCheckpoint{};
 
   bool operator==(const LinkVisitContext &) const = default;
 };
@@ -285,6 +288,8 @@ struct SelectedLink {
   SideCursor right{};
   /// Where the reader was when the link was selected.
   std::optional<VisitId> origin;
+  /// Frozen reading place at selection, without making a completed visit.
+  std::optional<OccurrenceSite> originCheckpoint{};
   /// Settled against the occurrences when they arrive.
   SelectionHint hint{};
 
@@ -324,6 +329,13 @@ public:
   /// Record arriving at @p site by some means other than a link.
   VisitId recordArrival(const OccurrenceSite &site);
 
+  /// Supply the live reading place for the next fresh link selection.
+  /// This native model checkpoint changes no completed visit or activity.
+  LinkNavigator *checkpointOrigin(std::optional<OccurrenceSite> site) {
+    nextOriginCheckpoint = std::move(site);
+    return this;
+  }
+
   /// The links StepLink walks, in the host's stable order.
   void setCandidates(std::vector<LinkKey> keys) {
     candidates = std::move(keys);
@@ -358,6 +370,7 @@ private:
   ActivityLog &activity;
   std::optional<SelectedLink> selected;
   std::optional<VisitId> current;
+  std::optional<OccurrenceSite> nextOriginCheckpoint;
   std::vector<LinkKey> candidates;
   std::uint64_t generations{};
 };

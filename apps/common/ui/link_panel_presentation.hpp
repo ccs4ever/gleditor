@@ -30,6 +30,7 @@ struct LinkPanelPresentation {
   bool safePlacement{true};
   bool completeContent{true};
   std::optional<gleditor::ui::WidgetId> toggleControls;
+  std::optional<gleditor::ui::WidgetId> investigationToggle;
   std::optional<float> reservedBottom;
   std::optional<LinkPanelPages> pages;
   [[nodiscard]] const LinkPanelAction *find(gleditor::ui::WidgetId) const;
@@ -43,6 +44,14 @@ struct LinkPanelPresentation {
     std::optional<gleditor::ui::Rect> protectedContent             = {},
     std::span<const gleditor::ui::Rect> additionalProtectedContent = {},
     std::optional<std::string_view> controlsLabel                  = {});
+/// Paged investigation fits only unoccupied canvas; it cannot hide readable
+/// source content or reframe the camera. An insufficient area is reported.
+[[nodiscard]] LinkPanelPresentation linkPanelInvestigationPresentation(
+    std::span<const xanadu::PanelLine>, std::span<const xanadu::PanelButton>,
+    std::span<const gleditor::ui::WidgetId>, gleditor::ui::WidgetId,
+    LinkPanelPageRequest, const gleditor::ui::UiMetrics &,
+    const gleditor::ui::Theme &, const xanadu::LinkPanelConfig &,
+    gleditor::text::ShapingCache &, std::span<const gleditor::ui::Rect>);
 [[nodiscard]] LinkPanelPresentation linkPanelDockPresentation(
     std::span<const xanadu::PanelLine>, std::span<const xanadu::PanelButton>,
     std::span<const gleditor::ui::WidgetId> actionIds,

@@ -5,6 +5,7 @@
 #include "link_panel_overlay.hpp"
 
 #include <algorithm>
+#include <format>
 #include <limits>
 #include <stdexcept>
 #include <tuple>
@@ -171,6 +172,10 @@ LinkPanelOverlay::selectionStyle(const Doc &doc, const Caret &caret) {
 void LinkPanelOverlay::queueAction(gleditor::ui::WidgetId id) {
   const std::scoped_lock lock(actionGuard);
   if (!currentPresentation) return;
+  if (currentPresentation->investigationToggle == id) {
+    pendingInvestigations.push_back(presentationSelection);
+    return;
+  }
   if (currentPresentation->toggleControls == id) {
     pendingToggles.push_back(presentationSelection);
     return;
@@ -192,6 +197,12 @@ void LinkPanelOverlay::toggleControls() {
     pendingToggles.push_back(presentationSelection);
 }
 
+void LinkPanelOverlay::toggleInvestigation() {
+  const std::scoped_lock lock(actionGuard);
+  if (currentPresentation)
+    pendingInvestigations.push_back(presentationSelection);
+}
+
 void LinkPanelOverlay::pageControls(int direction) {
   const std::scoped_lock lock(actionGuard);
   if (currentPresentation && currentPresentation->pages)
@@ -200,19 +211,26 @@ void LinkPanelOverlay::pageControls(int direction) {
 
 void LinkPanelOverlay::executePending() {
   std::vector<PendingAction> actions;
-  std::vector<std::uint64_t> toggles;
+  std::vector<std::uint64_t> toggles, investigations;
   std::vector<std::pair<std::uint64_t, int>> pages;
   std::optional<common_ui::LinkPanelPages> paging;
   {
     const std::scoped_lock lock(actionGuard);
     actions.swap(pending);
     toggles.swap(pendingToggles);
+    investigations.swap(pendingInvestigations);
     pages.swap(pendingPages);
     if (currentPresentation) paging = currentPresentation->pages;
   }
   for (const auto selection : toggles)
     if (selection == context.revision()) {
       controlsCollapsed = !controlsCollapsed;
+      panelBuiltFor.reset();
+    }
+  for (const auto selection : investigations)
+    if (selection == context.revision()) {
+      investigationExpanded = !investigationExpanded;
+      controlsPage          = 0;
       panelBuiltFor.reset();
     }
   for (const auto &[selection, direction] : pages)
@@ -230,12 +248,87 @@ void LinkPanelOverlay::executePending() {
   }
 }
 
+void LinkPanelOverlay::appendInvestigation(std::vector<PanelLine> &lines) {
+  const auto selected = context.selection();
+  if (!selected) return;
+  const auto append = [&](std::string text) {
+    const auto required = text.size();
+    lines.push_back({.text = std::move(text), .requiredBytes = required});
+  };
+  lines.front().text = "Master Link Tablet · " + lines.front().text;
+  if (const auto visit = context.currentVisit())
+    lines.front().text += std::format(" · visit {}", visit->value);
+  lines.front().compactIdentity = lines.front().text;
+  append("Link authority: " + selected->key.authority.str());
+  const auto place = [&](std::string_view label, const OccurrenceSite &site) {
+    std::visit(
+        [&](const auto &at) {
+          append(std::format("{} store: {}\nState: {} · bytes {}–{}", label,
+                             at.store.str(), at.version.str(), at.range.start,
+                             at.range.end));
+        },
+        site);
+  };
+  if (const auto here = context.reading().here) place("Current reading", *here);
+  if (const auto origin = context.originSite())
+    place("Return checkpoint", *origin);
+  append(context.currentVisit()
+             ? std::format(
+                   "Current reader visit {} · inspection keeps reading place",
+                   context.currentVisit()->value)
+             : "Current reader visit unavailable · inspection keeps reading "
+               "place");
+  if (!selected->occurrences) return;
+  for (const auto side : {LinkSide::Left, LinkSide::Right}) {
+    const auto &cursor  = selected->cursor(side);
+    const auto &members = selected->occurrences->members(side);
+    if (!cursor.member || *cursor.member >= members.size()) continue;
+    const auto label   = side == LinkSide::Left ? "Left" : "Right";
+    const auto &member = members[*cursor.member];
+    if (!cursor.occurrence) {
+      append(std::format(
+          "{} member {} · {} · choose a place for exact identity", label,
+          *cursor.member + 1,
+          member.inView() ? "occurrence not chosen" : "not in open views"));
+      continue;
+    }
+    const auto exact =
+        context.reference(selected->key, member, *cursor.occurrence);
+    if (!exact) {
+      append(std::format("{} exact source reference unavailable: {}", label,
+                         name(exact.error())));
+      continue;
+    }
+    append(std::format("{} occurrence store: {}\nPinned state: {} · {}", label,
+                       exact->store.str(), exact->version.str(),
+                       std::visit(
+                           [](const auto &frame) {
+                             using Frame = std::decay_t<decltype(frame)>;
+                             if constexpr (std::is_same_v<Frame, CellFrame>)
+                               return std::format("cell {}", frame.cell);
+                             else
+                               return frame.birth
+                                          ? std::format("document birth {}",
+                                                        *frame.birth)
+                                          : std::string{"top-level document"};
+                           },
+                           exact->frame)));
+    for (const auto &range : exact->ranges)
+      append(std::format(
+          "{} source: {}\nScroll {} · bytes {}–{}\nOccurrence bytes {}–{}",
+          label, exact->authority.str(), range.source.scroll,
+          range.source.start, range.source.start + range.source.length,
+          range.range.start, range.range.end));
+  }
+}
+
 void LinkPanelOverlay::rebuildPanel(gleditor::FrameContext &ctx) {
   const auto selected = context.selection();
   if (!selected) {
     panel.setVisible(false);
     dockLink.reset();
-    controlsCollapsed = false;
+    controlsCollapsed     = false;
+    investigationExpanded = false;
     buttons.clear();
     const std::scoped_lock lock(actionGuard);
     currentPresentation.reset();
@@ -248,6 +341,11 @@ void LinkPanelOverlay::rebuildPanel(gleditor::FrameContext &ctx) {
                                return context.describe(site);
                              });
   buttons = xanadu::linkPanelButtons(*selected, origin.has_value());
+  if (investigationExpanded) {
+    appendInvestigation(lines);
+    auto members = linkMemberButtons(*selected);
+    buttons.insert(buttons.end(), members.begin(), members.end());
+  }
   if (!context.entryStatus().empty()) {
     lines.push_back(
         {.text = context.entryStatus(), .tone = PanelLine::Tone::Muted});
@@ -275,7 +373,16 @@ void LinkPanelOverlay::rebuildPanel(gleditor::FrameContext &ctx) {
     identifiedButtons   = buttons;
     identifiedSelection = context.revision();
   }
-  const auto &ids = buttonIds;
+  if (!toggleId) {
+    if (nextActionId > std::numeric_limits<std::uint32_t>::max() - 3)
+      throw std::length_error("Link panel action identities exhausted");
+    toggleId            = ++nextActionId;
+    const auto previous = ++nextActionId;
+    const auto next     = ++nextActionId;
+    pageIds             = std::pair{previous, next};
+  }
+  auto ids = buttonIds;
+  ids.push_back(*toggleId);
   std::optional<gleditor::ui::Rect> anchor;
   if (panelAnchors) {
     const auto &points = *panelAnchors;
@@ -288,12 +395,47 @@ void LinkPanelOverlay::rebuildPanel(gleditor::FrameContext &ctx) {
       common_ui::linkPanelPresentation(
           lines, buttons, ids, builtMetrics, ctx.theme, config, anchor,
           measurements, std::nullopt,
-          std::span(protectedContent).first(protectedContentCount)));
+          std::span(protectedContent).first(protectedContentCount),
+          investigationExpanded ? "Fold investigation" : "Inspect members"));
+  next->investigationToggle = next->toggleControls;
+  next->toggleControls.reset();
+  if (investigationExpanded) {
+    auto inspection = common_ui::linkPanelInvestigationPresentation(
+        lines, buttons, buttonIds, *toggleId,
+        {pageIds->first, pageIds->second, controlsPage}, builtMetrics,
+        ctx.theme, config, measurements,
+        std::span(protectedContent).first(protectedContentCount));
+    if (inspection.completeContent) {
+      inspection.investigationToggle = inspection.toggleControls;
+      inspection.toggleControls.reset();
+      next = std::make_shared<common_ui::LinkPanelPresentation>(
+          std::move(inspection));
+      dockLink.reset();
+    } else {
+      // Refuse occlusion rather than replacing the source with a full-screen
+      // tool. Keyboard navigation remains available through the same commands.
+      lines = xanadu::linkPanelLines(
+          *selected, origin, context.reading(),
+          [this](const auto &site) { return context.describe(site); });
+      lines.push_back({.text = "Investigation needs more free canvas · enlarge "
+                               "window or reduce UI text",
+                       .tone = PanelLine::Tone::Muted});
+      next = std::make_shared<common_ui::LinkPanelPresentation>(
+          common_ui::linkPanelPresentation(
+              lines, buttons, ids, builtMetrics, ctx.theme, config, anchor,
+              measurements, {},
+              std::span(protectedContent).first(protectedContentCount),
+              "Fold investigation"));
+      next->investigationToggle = next->toggleControls;
+      next->toggleControls.reset();
+      controlsCollapsed = true;
+    }
+  }
   const auto viewport = std::pair{ctx.screenWidth, ctx.screenHeight};
   if (dockViewport != viewport) dockLink.reset();
   // Scrolling must not remove the reader's explicit Read/Controls toggle.
-  if (dockLink == selected->key || !next->safePlacement ||
-      !next->completeContent) {
+  if ((!investigationExpanded && dockLink == selected->key) ||
+      !next->safePlacement || !next->completeContent) {
     dockViewport = viewport;
     if (dockLink != selected->key) {
       controlsCollapsed = true;
@@ -310,8 +452,8 @@ void LinkPanelOverlay::rebuildPanel(gleditor::FrameContext &ctx) {
     }
     next = std::make_shared<common_ui::LinkPanelPresentation>(
         common_ui::linkPanelDockPresentation(
-            lines, buttons, ids, *toggleId, controlsCollapsed, builtMetrics,
-            ctx.theme, config, measurements,
+            lines, buttons, buttonIds, *toggleId, controlsCollapsed,
+            builtMetrics, ctx.theme, config, measurements,
             common_ui::LinkPanelPageRequest{pageIds->first, pageIds->second,
                                             controlsPage}));
   } else {
@@ -433,7 +575,8 @@ void LinkPanelOverlay::drawFrame(gleditor::FrameContext &ctx) {
               continue;
             const auto &doc      = *ctx.state.docs[*view];
             const auto pageIndex = doc.pageIndexForOffset(site->range.start);
-            const auto page = pageIndex ? doc.page(*pageIndex) : std::nullopt;
+            if (!pageIndex) continue;
+            const auto page = doc.page(*pageIndex);
             if (!page) continue;
             const auto band =
                 page->textBandFor(site->range.start, site->range.end);

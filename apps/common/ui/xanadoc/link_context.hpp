@@ -26,6 +26,7 @@
 #include <gleditor/cpp26.hpp>
 
 #include "common/ui/xanadoc/session.hpp"
+#include "common/xanadu/content_reference.hpp"
 #include "common/xanadu/link_navigation.hpp"
 #include "common/xanadu/link_panel.hpp"
 #include "common/xanadu/store_activity_log.hpp"
@@ -185,6 +186,12 @@ public:
   /// @p site in words: "document 2, bytes 10 to 14" or "cell 7, bytes 0 to
   /// 5". Shared by the panel and the accessibility tree so both say the same.
   [[nodiscard]] std::string describe(const xanadu::OccurrenceSite &site) const;
+
+  /// Native exact-source proof for an explicitly chosen occurrence. Package
+  /// presentation spans are not local addresses and remain unsupported here.
+  [[nodiscard]] std::expected<ContentReference, ContentReferenceError>
+  reference(const LinkKey &key, const LinkMember &member,
+            std::uint32_t occurrence) const;
 
   /// Bumped by every change a reader of selection() might care about.
   [[nodiscard]] std::uint64_t revision() const noexcept { return changes; }

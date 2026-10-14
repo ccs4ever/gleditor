@@ -81,9 +81,11 @@ public:
   [[nodiscard]] bool busy() const override {
     const std::scoped_lock lock(actionGuard);
     return !pending.empty() || !pendingToggles.empty() ||
-           !pendingPages.empty() || dockClipPending || context.entryPending();
+           !pendingPages.empty() || !pendingInvestigations.empty() ||
+           dockClipPending || context.entryPending();
   }
   void toggleControls();
+  void toggleInvestigation();
   void pageControls(int direction);
   void decorate(const Doc &doc, std::vector<gleditor::SpanStyle> &out) override;
   LinkPanelOverlay *noteNavigationSelection(const Caret &caret,
@@ -140,6 +142,7 @@ private:
 
   void rebuildHighlights();
   void rebuildPanel(gleditor::FrameContext &ctx);
+  void appendInvestigation(std::vector<PanelLine> &lines);
   void queueAction(gleditor::ui::WidgetId);
   void executePending();
 
@@ -161,6 +164,7 @@ private:
   std::uint64_t presentationSelection{};
   std::vector<PendingAction> pending;
   std::vector<std::uint64_t> pendingToggles;
+  std::vector<std::uint64_t> pendingInvestigations;
   std::vector<std::pair<std::uint64_t, int>> pendingPages;
   std::size_t controlsPage{};
   std::optional<std::pair<gleditor::ui::WidgetId, gleditor::ui::WidgetId>>
@@ -169,6 +173,7 @@ private:
   std::vector<xanadu::PanelButton> identifiedButtons;
   std::optional<std::uint64_t> identifiedSelection;
   bool controlsCollapsed{};
+  bool investigationExpanded{};
   bool dockClipPending{};
   std::optional<xanadu::LinkKey> dockLink;
   std::optional<std::pair<int, int>> dockViewport;

@@ -1,0 +1,11 @@
+{
+  "steps": [
+    "--type",
+    "Harbor source passage.\nMeadow second passage.\nSurrounding text remains.\n",
+    "--dump-a11y",
+    "--capture",
+    "/workspace/gleditor/design/reviews/spatial-ui-first-increment/evidence/luna-2/replays/J3/author-source/source.ppm",
+    "--chord",
+    "Ctrl+Q"
+  ]
+}

@@ -1,0 +1,38 @@
+rendering with opengl
+rendering with opengles
+rendering with vulkan
+comparing picking results
+ok: opengles picking matches opengl
+ok: vulkan picking matches opengl
+picking results:
+  500,300: kind 1 doc 16382 page 0 cluster 0 frac 0.636
+  175,320: kind 3 doc 0 page 0 cluster 8 frac 0.378
+  295,340: kind 2 doc 0 page 0 cluster 18240 frac 0.933
+  185,350: kind 3 doc 0 page 0 cluster 77 frac 0.268
+  215,360: kind 2 doc 0 page 0 cluster 7119 frac 0.900
+ok: opengles vs opengl: 0/480000 pixels differ (0.0000%), max delta 0, mean delta 0.000, channel tolerance 0, limit 0.00%
+ok: vulkan vs opengl: 1186/480000 pixels differ (0.2471%), max delta 4, mean delta 0.010, channel tolerance 1, limit 1.00%
+ok: the notification overlay changed 18460 bytes of the frame
+ok: opengles vs opengl with overlay: 0/480000 pixels differ (0.0000%), max delta 0, mean delta 0.000, channel tolerance 0, limit 0.00%
+ok: vulkan vs opengl with overlay: 1186/480000 pixels differ (0.2471%), max delta 4, mean delta 0.010, channel tolerance 1, limit 1.00%
+all backends agree
+comparing culled frames against unculled ones
+ok: opengl culling changed no pixels
+ok: opengles culling changed no pixels
+ok: vulkan culling changed no pixels
+comparing a grown atlas against one that never grew
+  opengl grew the atlas 3 times
+  opengles grew the atlas 3 times
+  vulkan grew the atlas 3 times
+ok: opengl across atlas growths, mean change 0.15 (limit 1.2), 0.000% of page pixels changed by >100 levels (limit 0.05%)
+ok: opengles across atlas growths, mean change 0.15 (limit 1.2), 0.000% of page pixels changed by >100 levels (limit 0.05%)
+ok: vulkan across atlas growths, mean change 0.15 (limit 1.2), 0.000% of page pixels changed by >100 levels (limit 0.05%)
+comparing the coarse text path against the detailed one
+ok: coarse page brightness 71.3 against detailed 71.4, delta 0.06 (limit 2.5)
+checking that minified text does not crawl
+ok: opengl under a 0.33% zoom, mean change 0.22 (limit 2.0), 0.1% of page pixels changed by >32 levels (limit 1.0%)
+ok: opengles under a 0.33% zoom, mean change 0.22 (limit 2.0), 0.1% of page pixels changed by >32 levels (limit 1.0%)
+ok: vulkan under a 0.33% zoom, mean change 0.22 (limit 2.0), 0.1% of page pixels changed by >32 levels (limit 1.0%)
+comparing threaded against single-threaded recording
+ok: frames match, but tests/samples/quick_brown_fox.txt has too few page draws to split;
+    pass a larger sample to exercise threaded recording

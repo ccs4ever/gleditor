@@ -1,0 +1,67 @@
+{
+  "validator": "luna-1",
+  "branch": "feat/spatial-ui-overhaul",
+  "baseline": "e9726a6b",
+  "product_edits": false,
+  "native_build": "xuzz, headless offscreen, managed builder run.sh",
+  "accessibility": "diagnostic tree dumps only; build reports accessibility: not in this build; no AT-SPI session",
+  "journeys": {
+    "J22": [
+      {"step": 1, "status": "Missing", "affordance": "Selected Link panel; required integrated visit 03, Review V4, L17, search and pouch fixture absent."},
+      {"step": 2, "status": "Missing", "affordance": "Visible Inspect members; readable source and checkpoint stay visible, but search, comparison, layers and pouch are absent."},
+      {"step": 3, "status": "No affordance", "affordance": "No pinned C17 V8/V12 comparison or pressure result in this profile."},
+      {"step": 4, "status": "Missing", "affordance": "Fold investigation preserves the selected source; comparison-only fold, layer emphasis and saved evidence controls are absent."},
+      {"step": 5, "status": "Missing", "affordance": "Origin returns to bytes 0-20; required visits 02/03/04 route is absent."}
+    ],
+    "J23": [
+      {"step": 1, "status": "Missing", "affordance": "No three-package fixture loaded."},
+      {"step": 2, "status": "Missing", "affordance": "No carrier identity or verification variants available."},
+      {"step": 3, "status": "No affordance", "affordance": "Package quiet/emphasis versus enablement controls were not exposed in the inspected Link tablet."},
+      {"step": 4, "status": "Missing", "affordance": "No update candidate or retained package fixture."},
+      {"step": 5, "status": "Missing", "affordance": "No package preference/reopen state."}
+    ],
+    "J24": [
+      {"step": 1, "status": "Missing", "affordance": "Declared L17 absent; native substitute Link 21 has complete 2-left by 3-right members and Cross."},
+      {"step": 2, "status": "Missing", "affordance": "Native left/right member cursors cycled independently; no overlapping Link, saved L17 context or reselect/restore test; occurrences listed 1/1."},
+      {"step": 3, "status": "No affordance", "affordance": "No unavailable target, cancellation or availability retry state."},
+      {"step": 4, "status": "Missing", "affordance": "Enter and Origin worked for a same-document span; distant cell, wrong-version and locked targets not tested."},
+      {"step": 5, "status": "Missing", "affordance": "No package was pinned or disabled."}
+    ],
+    "J25": [
+      {"step": 1, "status": "Missing", "affordance": "No declared five-visit branching fixture."},
+      {"step": 2, "status": "Missing", "affordance": "Distinct preview visit and playback position not available."},
+      {"step": 3, "status": "Missing", "affordance": "Only current visit 1 and selection-start origin observed; no child-choice graph."},
+      {"step": 4, "status": "No affordance", "affordance": "Visit reference, annotation and earlier-branch controls not tested or exposed."},
+      {"step": 5, "status": "Missing", "affordance": "No reopen/unavailable saved-version fixture."}
+    ],
+    "J26": [
+      {"step": 1, "status": "Missing", "affordance": "Integrated typed pouch cards absent."},
+      {"step": 2, "status": "No affordance", "affordance": "No typed span/operation/query/walk/draft collection actions exposed."},
+      {"step": 3, "status": "Missing", "affordance": "No 146-item collection or inventory filter."},
+      {"step": 4, "status": "No affordance", "affordance": "No duplicate/membership chooser exposed."},
+      {"step": 5, "status": "No affordance", "affordance": "No typed-card dismiss/recover or locked/unresolved availability controls tested."},
+      {"step": 6, "status": "Missing", "affordance": "Basic Link forge works, but typed collection eligibility review absent."}
+    ]
+  },
+  "preservation_controls": {
+    "J6": {"status": "Missing", "scope": "Not run: no J1-J5 output store or VQuery PTY session."},
+    "J7": {"status": "Missing", "scope": "Not run: no budget slice or VPL calculation PTY session."},
+    "J8": {"status": "Missing", "scope": "Not run: no VPL save/reopen flow."},
+    "J9": {"status": "Missing", "scope": "Not run: no VProlog fact/rule/save/reopen PTY session."},
+    "J10": {"status": "Missing", "scope": "Full journey not run; bounded native probe cycled Ctrl+Alt+1/2/3 twice and captured document, cell-list, and Unified views. Caret restoration, hidden-content edits and operation diff remain unvalidated."},
+    "J16": {"status": "Missing", "scope": "Full acceptance not run; bounded native authoring created one simple 2x3 Link. Overlap, distant long-rank cell, branches and crowded-link navigation remain unvalidated."}
+  },
+  "native_probe": {
+    "anchor": {"status": "Pass", "scope": "Select Left 1, select occurrence, Enter, Origin, then quiet/Inspect/Fold; selected prose visible in all matched frames; expanded panel retained state a34 bytes 0-20 and visit 1."},
+    "link": {"status": "Partial", "scope": "Link 21 with 2 left and 3 right authored through native selection/bench/forge controls; member cursors cycle independently; same-document endpoints only."},
+    "store_evidence": {"status": "Pass", "scope": "Paired select/inspect/fold run: source operations identical (36 lines before and after); activity dump grew from 75 to 120 lines with session place/checkpoint and selection metadata, while d.activity-visits remained unchanged with only the initial visit2 0 record. The separate Enter/Origin run adds one completed visit."}
+  },
+  "evidence_root": "evidence/luna-1",
+  "limitations": [
+    "No J6-J9 PTY workflows were run.",
+    "No complete J16 crowded-link route was run.",
+    "No concept-pack fixtures loaded; Missing results are not claims that every underlying feature is absent.",
+    "No AT-SPI session, reduced-motion check, or narrow/enlarged text comparison.",
+    "Frames are inspected PNGs; raw PPM and profiles were not copied into the review directory."
+  ]
+}

@@ -1,0 +1,56 @@
+{
+  "default_build": "passed",
+  "object_count": 443,
+  "default_build_log": "/workspace/spatial-build/increment-build-final.log",
+  "final_incremental_build": "passed",
+  "final_incremental_build_log": "/workspace/spatial-build/increment-build-inspector-final.log",
+  "command": "make -j$(nproc) DEBUG_OPTS='-O0 -g0' CXX='ccache clang++ -isystem /usr/include/poppler -isystem /usr/include/poppler/cpp'",
+  "native_xuzz_sha256": "df0956e87dd282469bcb8e7f09832768435088b5ae8df5c1b98132f45d41e9f8",
+  "owning_checks": [
+    {
+      "binary": "gleditor_test",
+      "filter": "PdfTextSourceTest.*:SvgCacheTest.*:SvgAnimatorTest.*",
+      "tests_run": 13,
+      "tests_passed": 13,
+      "failed_test_names": [],
+      "log": "owning-lib-initial.log"
+    },
+    {
+      "binary": "xudu_test",
+      "filter": "ReadingPlaceTest.*",
+      "tests_run": 4,
+      "tests_passed": 4,
+      "failed_test_names": [],
+      "log": "owning-xudu-initial.log"
+    },
+    {
+      "binary": "xuzz_test",
+      "filter": "ContentReference.*:LinkNavigationTest.*:LinkPanelTest.*:StoreActivityLogTest.*:ActivitySelectionRecordTest.*",
+      "tests_run": 49,
+      "tests_passed": 48,
+      "failed_test_names": [
+        "ContentReference.EqualBytesAtDifferentAddressesStayDistinct"
+      ],
+      "log": "owning-xuzz-initial.log"
+    },
+    {
+      "binary": "zigzag_test",
+      "filter": "LinkPanelPresentationTest.*:LinkPanelOverlayTest.*:ReaderPackageUiTest.*",
+      "tests_run": 34,
+      "tests_passed": 33,
+      "failed_test_names": [
+        "LinkPanelPresentationTest.ExactRangePrefixesSurviveLongContextAndSmallLineLimit"
+      ],
+      "log": "owning-zigzag-initial.log"
+    }
+  ],
+  "tests_run": 100,
+  "tests_passed": 98,
+  "full_make_test": "not run by harness engineer; lead owns gate",
+  "backend_comparison": "not run by harness engineer; lead owns gate",
+  "notes": [
+    "Native baseline+two portability repairs retained separately; no performance gate claimed.",
+    "No product edits made by harness engineer.",
+    "Lead notified of two owning-test failures; subsequent checks must resolve them."
+  ]
+}

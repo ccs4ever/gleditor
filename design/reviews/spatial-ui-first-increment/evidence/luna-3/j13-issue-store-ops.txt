@@ -1,0 +1,66 @@
+op 1  produces=1 parent=0 branch=0 kind=structure flags=0x80 at=0 len=0 to=0 src=0 srcAt=0 srcLen=0 scroll=0 span=[55208,55216) link=0 value=0  [make xanadoc] text="document"
+op 2  produces=2 parent=1 branch=0 kind=structure flags=0x8 at=0 len=0 to=0 src=0 srcAt=0 srcLen=0 scroll=0 span=[55216,55220) link=0 value=0  [make slice] text="main"
+op 3  produces=3 parent=2 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=2 srcAt=0 srcLen=0 scroll=0 span=[55220,55224) link=0 value=0  [make cell ctx=2] text="home"
+op 4  produces=4 parent=3 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=2 srcAt=0 srcLen=0 scroll=0 span=[55224,55230) link=0 value=0  [make cell ctx=2] text="d.dims"
+op 5  produces=5 parent=4 branch=0 kind=structure flags=0x1 at=0 len=0 to=4 src=3 srcAt=2 srcLen=0 scroll=0 span=[0,0) link=4 value=0  [setLink posward dim=4 -> 4 cell@3 ctx=2]
+op 6  produces=6 parent=5 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=2 srcAt=0 srcLen=0 scroll=0 span=[55230,55238) link=0 value=0  [make cell ctx=2] text="New Cell"
+op 7  produces=7 parent=6 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=2 srcAt=0 srcLen=0 scroll=0 span=[55238,55244) link=0 value=0  [make cell ctx=2] text="d.role"
+op 8  produces=8 parent=7 branch=0 kind=structure flags=0x1 at=0 len=0 to=7 src=4 srcAt=2 srcLen=0 scroll=0 span=[0,0) link=4 value=0  [setLink posward dim=4 -> 7 cell@4 ctx=2]
+op 9  produces=9 parent=8 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=2 srcAt=0 srcLen=0 scroll=0 span=[55244,55248) link=0 value=0  [make cell ctx=2] text="text"
+op 10  produces=10 parent=9 branch=0 kind=structure flags=0x1 at=0 len=0 to=9 src=6 srcAt=6 srcLen=0 scroll=0 span=[0,0) link=7 value=0  [setLink posward dim=7 -> 9 cell@6 ctx=6]
+op 11  produces=11 parent=10 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=2 srcAt=0 srcLen=0 scroll=0 span=[55248,55251) link=0 value=0  [make cell ctx=2] text="d.1"
+op 12  produces=12 parent=11 branch=0 kind=structure flags=0x1 at=0 len=0 to=11 src=7 srcAt=2 srcLen=0 scroll=0 span=[0,0) link=4 value=0  [setLink posward dim=4 -> 11 cell@7 ctx=2]
+op 13  produces=13 parent=12 branch=0 kind=structure flags=0x1 at=0 len=0 to=6 src=5 srcAt=5 srcLen=0 scroll=0 span=[0,0) link=11 value=0  [setLink posward dim=11 -> 6 cell@5 ctx=5]
+op 14  produces=14 parent=13 branch=0 kind=structure flags=0x2 at=0 len=0 to=0 src=10 srcAt=10 srcLen=0 scroll=0 span=[55251,55270) link=0 value=0  [setValue ctx=10] text="issue(issue_alpha)."
+op 15  produces=15 parent=14 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=2 srcAt=0 srcLen=0 scroll=0 span=[55270,55278) link=0 value=0  [make cell ctx=2] text="New Cell"
+op 16  produces=16 parent=15 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=2 srcAt=0 srcLen=0 scroll=0 span=[55278,55282) link=0 value=0  [make cell ctx=2] text="text"
+op 17  produces=17 parent=16 branch=0 kind=structure flags=0x1 at=0 len=0 to=16 src=15 srcAt=15 srcLen=0 scroll=0 span=[0,0) link=7 value=0  [setLink posward dim=7 -> 16 cell@15 ctx=15]
+op 18  produces=18 parent=17 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=2 srcAt=0 srcLen=0 scroll=0 span=[55282,55285) link=0 value=0  [make cell ctx=2] text="d.2"
+op 19  produces=19 parent=18 branch=0 kind=structure flags=0x1 at=0 len=0 to=18 src=11 srcAt=2 srcLen=0 scroll=0 span=[0,0) link=4 value=0  [setLink posward dim=4 -> 18 cell@11 ctx=2]
+op 20  produces=20 parent=19 branch=0 kind=structure flags=0x1 at=0 len=0 to=15 src=14 srcAt=14 srcLen=0 scroll=0 span=[0,0) link=18 value=0  [setLink posward dim=18 -> 15 cell@14 ctx=14]
+op 21  produces=21 parent=20 branch=0 kind=structure flags=0x2 at=0 len=0 to=0 src=17 srcAt=17 srcLen=0 scroll=0 span=[55285,55306) link=0 value=0  [setValue ctx=17] text="editing(issue_alpha)."
+op 22  produces=22 parent=21 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=2 srcAt=0 srcLen=0 scroll=0 span=[55306,55314) link=0 value=0  [make cell ctx=2] text="New Cell"
+op 23  produces=23 parent=22 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=2 srcAt=0 srcLen=0 scroll=0 span=[55314,55318) link=0 value=0  [make cell ctx=2] text="text"
+op 24  produces=24 parent=23 branch=0 kind=structure flags=0x1 at=0 len=0 to=23 src=22 srcAt=22 srcLen=0 scroll=0 span=[0,0) link=7 value=0  [setLink posward dim=7 -> 23 cell@22 ctx=22]
+op 25  produces=25 parent=24 branch=0 kind=structure flags=0x1 at=0 len=0 to=22 src=21 srcAt=21 srcLen=0 scroll=0 span=[0,0) link=18 value=0  [setLink posward dim=18 -> 22 cell@21 ctx=21]
+op 26  produces=26 parent=25 branch=0 kind=structure flags=0x2 at=0 len=0 to=0 src=24 srcAt=24 srcLen=0 scroll=0 span=[55318,55338) link=0 value=0  [setValue ctx=24] text="rights(issue_alpha)."
+op 27  produces=27 parent=26 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=2 srcAt=0 srcLen=0 scroll=0 span=[55338,55346) link=0 value=0  [make cell ctx=2] text="New Cell"
+op 28  produces=28 parent=27 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=2 srcAt=0 srcLen=0 scroll=0 span=[55346,55350) link=0 value=0  [make cell ctx=2] text="text"
+op 29  produces=29 parent=28 branch=0 kind=structure flags=0x1 at=0 len=0 to=28 src=27 srcAt=27 srcLen=0 scroll=0 span=[0,0) link=7 value=0  [setLink posward dim=7 -> 28 cell@27 ctx=27]
+op 30  produces=30 parent=29 branch=0 kind=structure flags=0x1 at=0 len=0 to=27 src=26 srcAt=26 srcLen=0 scroll=0 span=[0,0) link=18 value=0  [setLink posward dim=18 -> 27 cell@26 ctx=26]
+op 31  produces=31 parent=30 branch=0 kind=structure flags=0x2 at=0 len=0 to=0 src=29 srcAt=29 srcLen=0 scroll=0 span=[55350,55372) link=0 value=0  [setValue ctx=29] text="approval(issue_alpha)."
+op 32  produces=32 parent=31 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=2 srcAt=0 srcLen=0 scroll=0 span=[55372,55380) link=0 value=0  [make cell ctx=2] text="New Cell"
+op 33  produces=33 parent=32 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=2 srcAt=0 srcLen=0 scroll=0 span=[55380,55384) link=0 value=0  [make cell ctx=2] text="text"
+op 34  produces=34 parent=33 branch=0 kind=structure flags=0x1 at=0 len=0 to=33 src=32 srcAt=32 srcLen=0 scroll=0 span=[0,0) link=7 value=0  [setLink posward dim=7 -> 33 cell@32 ctx=32]
+op 35  produces=35 parent=34 branch=0 kind=structure flags=0x1 at=0 len=0 to=32 src=20 srcAt=20 srcLen=0 scroll=0 span=[0,0) link=11 value=0  [setLink posward dim=11 -> 32 cell@20 ctx=20]
+op 36  produces=36 parent=35 branch=0 kind=structure flags=0x2 at=0 len=0 to=0 src=34 srcAt=34 srcLen=0 scroll=0 span=[55384,55402) link=0 value=0  [setValue ctx=34] text="issue(issue_beta)."
+op 37  produces=37 parent=36 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=2 srcAt=0 srcLen=0 scroll=0 span=[55402,55410) link=0 value=0  [make cell ctx=2] text="New Cell"
+op 38  produces=38 parent=37 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=2 srcAt=0 srcLen=0 scroll=0 span=[55410,55414) link=0 value=0  [make cell ctx=2] text="text"
+op 39  produces=39 parent=38 branch=0 kind=structure flags=0x1 at=0 len=0 to=38 src=37 srcAt=37 srcLen=0 scroll=0 span=[0,0) link=7 value=0  [setLink posward dim=7 -> 38 cell@37 ctx=37]
+op 40  produces=40 parent=39 branch=0 kind=structure flags=0x1 at=0 len=0 to=37 src=36 srcAt=36 srcLen=0 scroll=0 span=[0,0) link=18 value=0  [setLink posward dim=18 -> 37 cell@36 ctx=36]
+op 41  produces=41 parent=40 branch=0 kind=structure flags=0x2 at=0 len=0 to=0 src=39 srcAt=39 srcLen=0 scroll=0 span=[55414,55434) link=0 value=0  [setValue ctx=39] text="editing(issue_beta)."
+op 42  produces=42 parent=41 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=2 srcAt=0 srcLen=0 scroll=0 span=[55434,55442) link=0 value=0  [make cell ctx=2] text="New Cell"
+op 43  produces=43 parent=42 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=2 srcAt=0 srcLen=0 scroll=0 span=[55442,55446) link=0 value=0  [make cell ctx=2] text="text"
+op 44  produces=44 parent=43 branch=0 kind=structure flags=0x1 at=0 len=0 to=43 src=42 srcAt=42 srcLen=0 scroll=0 span=[0,0) link=7 value=0  [setLink posward dim=7 -> 43 cell@42 ctx=42]
+op 45  produces=45 parent=44 branch=0 kind=structure flags=0x1 at=0 len=0 to=42 src=41 srcAt=41 srcLen=0 scroll=0 span=[0,0) link=18 value=0  [setLink posward dim=18 -> 42 cell@41 ctx=41]
+op 46  produces=46 parent=45 branch=0 kind=structure flags=0x2 at=0 len=0 to=0 src=44 srcAt=44 srcLen=0 scroll=0 span=[55446,55465) link=0 value=0  [setValue ctx=44] text="rights(issue_beta)."
+op 47  produces=47 parent=46 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=2 srcAt=0 srcLen=0 scroll=0 span=[55465,55473) link=0 value=0  [make cell ctx=2] text="New Cell"
+op 48  produces=48 parent=47 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=2 srcAt=0 srcLen=0 scroll=0 span=[55473,55477) link=0 value=0  [make cell ctx=2] text="text"
+op 49  produces=49 parent=48 branch=0 kind=structure flags=0x1 at=0 len=0 to=48 src=47 srcAt=47 srcLen=0 scroll=0 span=[0,0) link=7 value=0  [setLink posward dim=7 -> 48 cell@47 ctx=47]
+op 50  produces=50 parent=49 branch=0 kind=structure flags=0x1 at=0 len=0 to=47 src=46 srcAt=46 srcLen=0 scroll=0 span=[0,0) link=18 value=0  [setLink posward dim=18 -> 47 cell@46 ctx=46]
+op 51  produces=51 parent=50 branch=0 kind=structure flags=0x2 at=0 len=0 to=0 src=49 srcAt=49 srcLen=0 scroll=0 span=[55477,55498) link=0 value=0  [setValue ctx=49] text="approval(issue_beta)."
+op 52  produces=52 parent=51 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=2 srcAt=0 srcLen=0 scroll=0 span=[55498,55506) link=0 value=0  [make cell ctx=2] text="New Cell"
+op 53  produces=53 parent=52 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=2 srcAt=0 srcLen=0 scroll=0 span=[55506,55510) link=0 value=0  [make cell ctx=2] text="text"
+op 54  produces=54 parent=53 branch=0 kind=structure flags=0x1 at=0 len=0 to=53 src=52 srcAt=52 srcLen=0 scroll=0 span=[0,0) link=7 value=0  [setLink posward dim=7 -> 53 cell@52 ctx=52]
+op 55  produces=55 parent=54 branch=0 kind=structure flags=0x1 at=0 len=0 to=52 src=40 srcAt=40 srcLen=0 scroll=0 span=[0,0) link=11 value=0  [setLink posward dim=11 -> 52 cell@40 ctx=40]
+op 56  produces=56 parent=55 branch=0 kind=structure flags=0x2 at=0 len=0 to=0 src=54 srcAt=54 srcLen=0 scroll=0 span=[55510,55529) link=0 value=0  [setValue ctx=54] text="issue(issue_gamma)."
+op 57  produces=57 parent=56 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=2 srcAt=0 srcLen=0 scroll=0 span=[55529,55537) link=0 value=0  [make cell ctx=2] text="New Cell"
+op 58  produces=58 parent=57 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=2 srcAt=0 srcLen=0 scroll=0 span=[55537,55541) link=0 value=0  [make cell ctx=2] text="text"
+op 59  produces=59 parent=58 branch=0 kind=structure flags=0x1 at=0 len=0 to=58 src=57 srcAt=57 srcLen=0 scroll=0 span=[0,0) link=7 value=0  [setLink posward dim=7 -> 58 cell@57 ctx=57]
+op 60  produces=60 parent=59 branch=0 kind=structure flags=0x1 at=0 len=0 to=57 src=56 srcAt=56 srcLen=0 scroll=0 span=[0,0) link=18 value=0  [setLink posward dim=18 -> 57 cell@56 ctx=56]
+op 61  produces=61 parent=60 branch=0 kind=structure flags=0x2 at=0 len=0 to=0 src=59 srcAt=59 srcLen=0 scroll=0 span=[55541,55562) link=0 value=0  [setValue ctx=59] text="editing(issue_gamma)."
+op 62  produces=62 parent=61 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=2 srcAt=0 srcLen=0 scroll=0 span=[55562,55570) link=0 value=0  [make cell ctx=2] text="New Cell"
+op 63  produces=63 parent=62 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=2 srcAt=0 srcLen=0 scroll=0 span=[55570,55574) link=0 value=0  [make cell ctx=2] text="text"
+op 64  produces=64 parent=63 branch=0 kind=structure flags=0x1 at=0 len=0 to=63 src=62 srcAt=62 srcLen=0 scroll=0 span=[0,0) link=7 value=0  [setLink posward dim=7 -> 63 cell@62 ctx=62]
+op 65  produces=65 parent=64 branch=0 kind=structure flags=0x1 at=0 len=0 to=62 src=61 srcAt=61 srcLen=0 scroll=0 span=[0,0) link=18 value=0  [setLink posward dim=18 -> 62 cell@61 ctx=61]
+op 66  produces=66 parent=65 branch=0 kind=structure flags=0x2 at=0 len=0 to=0 src=64 srcAt=64 srcLen=0 scroll=0 span=[55574,55596) link=0 value=0  [setValue ctx=64] text="approval(issue_gamma)."

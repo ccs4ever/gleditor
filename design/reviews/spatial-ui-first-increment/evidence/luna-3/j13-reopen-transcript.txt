@@ -1,0 +1,12 @@
+VPL (Vortex Parallel Language) 1.0.0
+Type APL glyphs or J-style ASCII. Type :help for commands.
+      :open /workspace/spatial-build/luna-authoring/j13-vpl/J13/aggregate-save/report
+Opened /workspace/spatial-build/luna-authoring/j13-vpl/J13/aggregate-save/report with 14 cells.
+data: 2 1 3
+      data
+2 1 3
+      counts ← 2 ↑ data
+2 1
+      +/ counts
+3
+      :quit

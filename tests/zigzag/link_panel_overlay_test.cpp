@@ -72,6 +72,64 @@ TEST(LinkPanelPresentationTest, BothChosenLineBandsStayClearOfContextChrome) {
 }
 
 TEST(LinkPanelPresentationTest,
+     InvestigationPagesRetainCommandsOutsideReadingText) {
+  auto lines = contextLines();
+  lines.push_back(
+      {.text = "Pinned exact authority and state", .requiredBytes = 32});
+  auto buttons = xanadu::linkPanelButtons({}, false);
+  for (std::uint32_t i = 0; i < 60; ++i)
+    buttons.push_back(
+        {.label   = "Preview Left member " + std::to_string(i + 1),
+         .command = nav::SelectMember{{}, xanadu::LinkSide::Left, i}});
+  std::vector<ui::WidgetId> ids;
+  for (std::size_t i = 0; i < buttons.size(); ++i) ids.push_back(1024 + i);
+  const ui::UiMetrics metrics{.screenWidth = 1600, .screenHeight = 1000};
+  const std::array reading{ui::Rect{0, 0, 850, 1000}};
+  gleditor::text::ShapingCache cache;
+  std::set<ui::WidgetId> reached;
+  std::size_t pages = 1;
+  for (std::size_t page = 0; page < pages; ++page) {
+    const auto shown = common_ui::linkPanelInvestigationPresentation(
+        lines, buttons, ids, 2000, {2001, 2002, page}, metrics, {}, {}, cache,
+        reading);
+    ASSERT_TRUE(shown.completeContent);
+    ASSERT_TRUE(shown.pages);
+    EXPECT_FALSE(shown.reservedBottom);
+    EXPECT_GE(shown.bounds.left, reading[0].left + reading[0].width);
+    pages = shown.pages->count;
+    ui::ScreenOverlay panel(shown.model);
+    panel.setBounds(shown.bounds);
+    const auto scene = panel.prepare(metrics, shown.theme);
+    for (const auto &action : shown.actions) {
+      reached.insert(action.id);
+      const auto *box = scene->layout.find(action.id);
+      ASSERT_NE(box, nullptr);
+      ASSERT_NE(scene->find(action.id), nullptr);
+      ASSERT_NE(scene->layout.find(box->parentId), nullptr);
+      contained(box->rect, scene->layout.find(box->parentId)->rect);
+      EXPECT_FALSE(scene->find(action.id)->fitted.truncated);
+    }
+  }
+  EXPECT_GT(pages, 1U);
+  EXPECT_EQ(reached.size(), buttons.size());
+}
+
+TEST(LinkPanelPresentationTest,
+     InvestigationRefusesToCoverTheOnlyReadingSurface) {
+  const auto buttons = xanadu::linkPanelButtons({}, false);
+  const auto ids     = actionIds();
+  const ui::UiMetrics metrics{.screenWidth = 640, .screenHeight = 480};
+  const std::array reading{metrics.pixelSafeArea()};
+  gleditor::text::ShapingCache cache;
+  const auto shown = common_ui::linkPanelInvestigationPresentation(
+      contextLines(), buttons, ids, 2000, {2001, 2002, 0}, metrics, {}, {},
+      cache, reading);
+  EXPECT_FALSE(shown.completeContent);
+  EXPECT_FALSE(shown.safePlacement);
+  EXPECT_FALSE(shown.reservedBottom);
+}
+
+TEST(LinkPanelPresentationTest,
      SeparateTextExclusionsLeaveBlankCanvasAvailable) {
   const auto lines   = contextLines();
   const auto buttons = xanadu::linkPanelButtons({}, false);
@@ -301,8 +359,7 @@ TEST(LinkPanelPresentationTest,
               config, measurements,
               common_ui::LinkPanelPageRequest{2001, 2002, page});
           ASSERT_TRUE(dock.completeContent);
-          ASSERT_TRUE(dock.pages);
-          count = dock.pages->count;
+          count = dock.pages ? dock.pages->count : 1;
           ASSERT_TRUE(dock.reservedBottom);
           EXPECT_EQ(*dock.reservedBottom,
                     dock.bounds.bottom + dock.bounds.height);
@@ -311,6 +368,28 @@ TEST(LinkPanelPresentationTest,
           const auto scene = panel.prepare(dockMetrics, dock.theme);
           ASSERT_NE(scene, nullptr);
           contained(dock.bounds, dockMetrics.pixelSafeArea());
+          if (!dock.pages) {
+            // A complete compact dock needs no paging. Verify the same exact
+            // prefixes and commands rather than requiring the fallback mode.
+            for (const auto index : {1U, 2U}) {
+              const auto *visual = scene->find(index + 3);
+              ASSERT_NE(visual, nullptr);
+              EXPECT_GE(visual->fitted.visibleBytes,
+                        lines[index].requiredBytes +
+                            (lines[index].active ? std::string("\u25B8 ").size()
+                                                 : 0));
+              ranges.insert(lines[index].text);
+            }
+            for (const auto &action : dock.actions) {
+              reached.insert(action.id);
+              const auto *visual = scene->find(action.id);
+              ASSERT_NE(visual, nullptr);
+              EXPECT_FALSE(visual->fitted.truncated);
+            }
+            for (const auto &box : scene->layout.boxes)
+              contained(box.rect, dock.bounds);
+            continue;
+          }
           for (const auto id : {4U, 5U, 2000U, 2001U, 2002U}) {
             ASSERT_NE(scene->find(id), nullptr);
             EXPECT_FALSE(scene->find(id)->fitted.truncated);
@@ -340,7 +419,6 @@ TEST(LinkPanelPresentationTest,
           for (const auto &box : scene->layout.boxes)
             contained(box.rect, dock.bounds);
         }
-        EXPECT_GT(count, 1);
         EXPECT_EQ(reached, std::set<ui::WidgetId>(ids.begin(), ids.end()));
         EXPECT_EQ(ranges,
                   (std::set<std::string>{lines[1].text, lines[2].text}));

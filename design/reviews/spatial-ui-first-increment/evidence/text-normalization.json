@@ -1,0 +1,70 @@
+{
+  "note": "Committed text views normalize CRLF/trailing whitespace. Original capture bytes are preserved in deterministic gzip archives. No inputs, errors or substantive output removed.",
+  "files": [
+    {
+      "normalized": "evidence/baseline-help-all.txt",
+      "original_gzip": "evidence/raw-text/baseline-help-all.txt.gz",
+      "original_sha256": "b3f21b8fe3ecebdd05de3392edc7cba2d9fd788be8d979c95182c29a7645c992"
+    },
+    {
+      "normalized": "evidence/before-j16-driver.stdout.log",
+      "original_gzip": "evidence/raw-text/before-j16-driver.stdout.log.gz",
+      "original_sha256": "2a7554ea560e56d9f1aef45e877986e7d4593f4b7314adf91d0825c4b587aed1"
+    },
+    {
+      "normalized": "evidence/full-test-final.log",
+      "original_gzip": "evidence/raw-text/full-test-final.log.gz",
+      "original_sha256": "bd5ddfe7fdcd6fe8714f3deb213a7f1facf8115a1273c316c70a54faaf25d300"
+    },
+    {
+      "normalized": "evidence/full-xudu-engine-final.log",
+      "original_gzip": "evidence/raw-text/full-xudu-engine-final.log.gz",
+      "original_sha256": "76fd0babe98816a979e70204497eb4e41f5df2e1ed563a09599fa06f3c438632"
+    },
+    {
+      "normalized": "evidence/luna-3-native/j13-vpl-reopen-transcript.txt",
+      "original_gzip": "evidence/raw-text/luna-3-native/j13-vpl-reopen-transcript.txt.gz",
+      "original_sha256": "995183ce30e64cbb5df76d5a69bfb282313e20aa420f78fd188bf4bb84f8bed0"
+    },
+    {
+      "normalized": "evidence/luna-3-native/j13-vpl-transcript.txt",
+      "original_gzip": "evidence/raw-text/luna-3-native/j13-vpl-transcript.txt.gz",
+      "original_sha256": "074c1015e7ed425df08e63163b692a45e5dc2bda53f76d2dab185bde104f9fa4"
+    },
+    {
+      "normalized": "evidence/luna-3-native/j13-vprolog-transcript.txt",
+      "original_gzip": "evidence/raw-text/luna-3-native/j13-vprolog-transcript.txt.gz",
+      "original_sha256": "8c040958f9fcf266e37be7343f5e4910c262f3d29589c702c2876c5a6e5c7808"
+    },
+    {
+      "normalized": "evidence/luna-3-native/j13-vquery-transcript.txt",
+      "original_gzip": "evidence/raw-text/luna-3-native/j13-vquery-transcript.txt.gz",
+      "original_sha256": "e89d325eadb7c82c7e03c6c8ee1d186ab5fda601438f05fdf16b7fb8f8643716"
+    },
+    {
+      "normalized": "evidence/luna-3/j13-prolog-transcript.txt",
+      "original_gzip": "evidence/raw-text/luna-3/j13-prolog-transcript.txt.gz",
+      "original_sha256": "8c040958f9fcf266e37be7343f5e4910c262f3d29589c702c2876c5a6e5c7808"
+    },
+    {
+      "normalized": "evidence/luna-3/j13-query-transcript.txt",
+      "original_gzip": "evidence/raw-text/luna-3/j13-query-transcript.txt.gz",
+      "original_sha256": "e89d325eadb7c82c7e03c6c8ee1d186ab5fda601438f05fdf16b7fb8f8643716"
+    },
+    {
+      "normalized": "evidence/luna-3/j13-reopen-transcript.txt",
+      "original_gzip": "evidence/raw-text/luna-3/j13-reopen-transcript.txt.gz",
+      "original_sha256": "995183ce30e64cbb5df76d5a69bfb282313e20aa420f78fd188bf4bb84f8bed0"
+    },
+    {
+      "normalized": "evidence/luna-3/j13-vpl-transcript.txt",
+      "original_gzip": "evidence/raw-text/luna-3/j13-vpl-transcript.txt.gz",
+      "original_sha256": "074c1015e7ed425df08e63163b692a45e5dc2bda53f76d2dab185bde104f9fa4"
+    },
+    {
+      "normalized": "evidence/primary/stdout.log",
+      "original_gzip": "evidence/raw-text/primary/stdout.log.gz",
+      "original_sha256": "02188186b44df46285a499937e35f4b8caf2963ed3fc5ebbff124500c438e326"
+    }
+  ]
+}

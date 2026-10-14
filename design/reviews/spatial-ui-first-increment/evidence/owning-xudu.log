@@ -1,0 +1,18 @@
+Running main() from gmock_main.cc
+Note: Google Test filter = ReadingPlaceTest.*
+[==========] Running 4 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 4 tests from ReadingPlaceTest
+[ RUN      ] ReadingPlaceTest.anEmptyStoreHasNoPlace
+[       OK ] ReadingPlaceTest.anEmptyStoreHasNoPlace (6 ms)
+[ RUN      ] ReadingPlaceTest.thePlaceRecordedIsThePlaceReadBack
+[       OK ] ReadingPlaceTest.thePlaceRecordedIsThePlaceReadBack (7 ms)
+[ RUN      ] ReadingPlaceTest.theNewestPlaceWinsAndSurvivesSaving
+[       OK ] ReadingPlaceTest.theNewestPlaceWinsAndSurvivesSaving (41 ms)
+[ RUN      ] ReadingPlaceTest.pinnedLinkWithoutAnEndpointVisitSurvivesRestart
+[       OK ] ReadingPlaceTest.pinnedLinkWithoutAnEndpointVisitSurvivesRestart (11 ms)
+[----------] 4 tests from ReadingPlaceTest (67 ms total)
+
+[----------] Global test environment tear-down
+[==========] 4 tests from 1 test suite ran. (67 ms total)
+[  PASSED  ] 4 tests.

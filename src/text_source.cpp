@@ -7,6 +7,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -27,7 +28,6 @@
 #include <PDFDoc.h>
 #include <Stream.h>
 #include <goo/GooString.h>
-#include <poppler-version.h>
 
 #ifdef GLEDITOR_HAVE_SDL_IMAGE
 #if GLEDITOR_SDL_MAJOR == 3
@@ -41,45 +41,39 @@
 
 namespace {
 
-/// The three places the core-poppler interface moved under us between the
-/// 24.02 distributions still ship and the 25.02+ this file was written
-/// against. Spelled out here rather than in the call sites so the churn the
-/// include block above warns about stays in one block: each is a rename or a
-/// change of ownership, not a behaviour difference.
+/// Private Poppler APIs vary across packaged releases. Detect each capability
+/// independently; release numbers do not reliably identify these changes.
 namespace poppler_compat {
 
-/// 25.02 renamed `ImageStream::reset()` to `rewind()` and gave it a bool
-/// result; the older one cannot report failure, so treat it as success.
-bool rewind([[maybe_unused]] ImageStream &stream) {
-#if POPPLER_VERSION_MAJOR > 25 ||                                              \
-    (POPPLER_VERSION_MAJOR == 25 && POPPLER_VERSION_MINOR >= 2)
-  return stream.rewind();
-#else
-  stream.reset();
-  return true;
-#endif
+/// Preserve failure reporting on either spelling; older reset returns void.
+template <typename Image> bool rewind(Image &stream) {
+  if constexpr (requires { stream.rewind(); }) {
+    return stream.rewind();
+  } else if constexpr (std::is_convertible_v<decltype(stream.reset()), bool>) {
+    return stream.reset();
+  } else {
+    stream.reset();
+    return true;
+  }
 }
 
-/// `Object::null()` is 25.02's spelling of the null-object constructor.
-Object nullObject() {
-#if POPPLER_VERSION_MAJOR > 25 ||                                              \
-    (POPPLER_VERSION_MAJOR == 25 && POPPLER_VERSION_MINOR >= 2)
-  return Object::null();
-#else
-  return Object(objNull);
-#endif
+template <typename PdfObject = Object> PdfObject nullObject() {
+  if constexpr (requires { PdfObject::null(); }) {
+    return PdfObject::null();
+  } else {
+    return PdfObject(objNull);
+  }
 }
 
-/// 25.02 moved PDFDoc's stream parameter to `unique_ptr`; before that it took
-/// a raw `BaseStream *` and took ownership of it all the same, so releasing
-/// into it hands over the same stream with the same lifetime.
-std::unique_ptr<PDFDoc> openDoc(std::unique_ptr<BaseStream> stream) {
-#if POPPLER_VERSION_MAJOR > 25 ||                                              \
-    (POPPLER_VERSION_MAJOR == 25 && POPPLER_VERSION_MINOR >= 2)
-  return std::make_unique<PDFDoc>(std::move(stream));
-#else
-  return std::make_unique<PDFDoc>(stream.release());
-#endif
+/// Both constructors take ownership; adapt without changing the lifetime.
+template <typename Document = PDFDoc>
+std::unique_ptr<Document> openDoc(std::unique_ptr<BaseStream> stream) {
+  if constexpr (std::is_constructible_v<Document,
+                                        std::unique_ptr<BaseStream>>) {
+    return std::make_unique<Document>(std::move(stream));
+  } else {
+    return std::make_unique<Document>(stream.release());
+  }
 }
 
 } // namespace poppler_compat

@@ -1,0 +1,23 @@
+{
+  "exit_code": 0,
+  "source_ops_sha256_before": {
+    "untitled-20261014-040933/ops.nodes": "a97a3c7d245cd919558d200d7ed2e8439ca55796a7bce25690ad020d8065508f",
+    "default/ops.nodes": "84ce2248d5bbad352f4a518d688b6ddd030a1c35a732cb3968a37cf087bcb582"
+  },
+  "source_ops_sha256_after": {
+    "untitled-20261014-040933/ops.nodes": "a97a3c7d245cd919558d200d7ed2e8439ca55796a7bce25690ad020d8065508f",
+    "default/ops.nodes": "84ce2248d5bbad352f4a518d688b6ddd030a1c35a732cb3968a37cf087bcb582"
+  },
+  "source_ops_unchanged": true,
+  "activity_dump_results_before_after": [
+    [
+      0,
+      2
+    ],
+    [
+      0,
+      2
+    ]
+  ],
+  "scope": "Actual reopened UI select/inspect/member/occurrence/fold; no Enter in this run. Dump visit2 count is a diagnostic record count."
+}

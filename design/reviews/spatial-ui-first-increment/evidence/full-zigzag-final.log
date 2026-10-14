@@ -1,0 +1,1276 @@
+Running main() from gmock_main.cc
+Note: Google Test filter = -SwarmTest.*:MutableNameTest.*:PublicationOutboxNetworkTest.*
+[==========] Running 233 tests from 35 test suites.
+[----------] Global test environment set-up.
+[----------] 6 tests from PageBreakPresentationTest
+[ RUN      ] PageBreakPresentationTest.constrainedLabelsAndAccessibilityShareBounds
+[       OK ] PageBreakPresentationTest.constrainedLabelsAndAccessibilityShareBounds (36 ms)
+[ RUN      ] PageBreakPresentationTest.intrinsicButtonShowsItsCompleteLabel
+[       OK ] PageBreakPresentationTest.intrinsicButtonShowsItsCompleteLabel (2 ms)
+[ RUN      ] PageBreakPresentationTest.unchangedPlacementDoesNoShaping
+[       OK ] PageBreakPresentationTest.unchangedPlacementDoesNoShaping (0 ms)
+[ RUN      ] PageBreakPresentationTest.oldTargetIdentityCannotSplitCurrentParagraph
+[       OK ] PageBreakPresentationTest.oldTargetIdentityCannotSplitCurrentParagraph (0 ms)
+[ RUN      ] PageBreakPresentationTest.warmDrawingAndCapturedPicksUseRetainedScene
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] PageBreakPresentationTest.warmDrawingAndCapturedPicksUseRetainedScene (3 ms)
+[ RUN      ] PageBreakPresentationTest.explicitLegacyFontScalesWithMetrics
+[       OK ] PageBreakPresentationTest.explicitLegacyFontScalesWithMetrics (1 ms)
+[----------] 6 tests from PageBreakPresentationTest (54 ms total)
+
+[----------] 1 test from PageBreakOverlayTest
+[ RUN      ] PageBreakOverlayTest.scaledButtonKeepsTheOriginalTargetUnderItsPointer
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] PageBreakOverlayTest.scaledButtonKeepsTheOriginalTargetUnderItsPointer (44 ms)
+[----------] 1 test from PageBreakOverlayTest (44 ms total)
+
+[----------] 14 tests from RankWalkTest
+[ RUN      ] RankWalkTest.ArenaManifoldLinearForwardWalk
+[       OK ] RankWalkTest.ArenaManifoldLinearForwardWalk (0 ms)
+[ RUN      ] RankWalkTest.ArenaManifoldLinearBackwardWalk
+[       OK ] RankWalkTest.ArenaManifoldLinearBackwardWalk (0 ms)
+[ RUN      ] RankWalkTest.ArenaManifoldEarlyTermination
+[       OK ] RankWalkTest.ArenaManifoldEarlyTermination (0 ms)
+[ RUN      ] RankWalkTest.ArenaManifoldCycleProtection
+[       OK ] RankWalkTest.ArenaManifoldCycleProtection (0 ms)
+[ RUN      ] RankWalkTest.SelfLinkStopsTheWalk
+[       OK ] RankWalkTest.SelfLinkStopsTheWalk (0 ms)
+[ RUN      ] RankWalkTest.ARingWalkedFromItsMiddleVisitsEachCellOnce
+[       OK ] RankWalkTest.ARingWalkedFromItsMiddleVisitsEachCellOnce (0 ms)
+[ RUN      ] RankWalkTest.AbsentStartOrDimensionIsAnEmptyRank
+[       OK ] RankWalkTest.AbsentStartOrDimensionIsAnEmptyRank (0 ms)
+[ RUN      ] RankWalkTest.StepAnswersOptional
+[       OK ] RankWalkTest.StepAnswersOptional (1 ms)
+[ RUN      ] RankWalkTest.NeighboursAndFilters
+[       OK ] RankWalkTest.NeighboursAndFilters (0 ms)
+[ RUN      ] RankWalkTest.SlotProvidesMonadicBorrowedAccess
+[       OK ] RankWalkTest.SlotProvidesMonadicBorrowedAccess (0 ms)
+[ RUN      ] RankWalkTest.CopyOnWriteArenaWalksTheWholeBase
+[       OK ] RankWalkTest.CopyOnWriteArenaWalksTheWholeBase (0 ms)
+[ RUN      ] RankWalkTest.ManifoldRankWalk
+[       OK ] RankWalkTest.ManifoldRankWalk (0 ms)
+[ RUN      ] RankWalkTest.aRankViewCostsWhatTheHandWrittenLoopCost
+rank walk, 100000 cells, ns/cell: while-loop 440.683  RankView 304.556  fold_left 354.184
+[       OK ] RankWalkTest.aRankViewCostsWhatTheHandWrittenLoopCost (2450 ms)
+[ RUN      ] RankWalkTest.ArenaManifoldRankContainsAndUnbrokenInsertion
+[       OK ] RankWalkTest.ArenaManifoldRankContainsAndUnbrokenInsertion (0 ms)
+[----------] 14 tests from RankWalkTest (2454 ms total)
+
+[----------] 2 tests from FoldResultTest
+[ RUN      ] FoldResultTest.ApplyStructureNamesItsRefusal
+[       OK ] FoldResultTest.ApplyStructureNamesItsRefusal (0 ms)
+[ RUN      ] FoldResultTest.AdvanceReportsUnknownVersion
+[       OK ] FoldResultTest.AdvanceReportsUnknownVersion (0 ms)
+[----------] 2 tests from FoldResultTest (0 ms total)
+
+[----------] 1 test from ArenaResultTest
+[ RUN      ] ArenaResultTest.WritesNameTheRefUsedWrongly
+[       OK ] ArenaResultTest.WritesNameTheRefUsedWrongly (0 ms)
+[----------] 1 test from ArenaResultTest (0 ms total)
+
+[----------] 1 test from UnifyResultTest
+[ RUN      ] UnifyResultTest.FailureSaysWhichRuleFailed
+[       OK ] UnifyResultTest.FailureSaysWhichRuleFailed (0 ms)
+[----------] 1 test from UnifyResultTest (0 ms total)
+
+[----------] 3 tests from WalksFormTest
+[ RUN      ] WalksFormTest.KeyboardPreviewChoosesEitherSavedFutureWithoutEntering
+[       OK ] WalksFormTest.KeyboardPreviewChoosesEitherSavedFutureWithoutEntering (0 ms)
+[ RUN      ] WalksFormTest.AccessibilityFieldsPreserveTargetAndAnnotationIdentity
+[       OK ] WalksFormTest.AccessibilityFieldsPreserveTargetAndAnnotationIdentity (0 ms)
+[ RUN      ] WalksFormTest.EmptyWalkCannotInventAVisit
+[       OK ] WalksFormTest.EmptyWalkCannotInventAVisit (0 ms)
+[----------] 3 tests from WalksFormTest (38 ms total)
+
+[----------] 2 tests from PairedEditHeadsTest
+[ RUN      ] PairedEditHeadsTest.InterleavedTextAndCellsKeepOneAncestry
+[       OK ] PairedEditHeadsTest.InterleavedTextAndCellsKeepOneAncestry (21 ms)
+[ RUN      ] PairedEditHeadsTest.HistoricSliceIsNeverMovedByAnUnrelatedCommit
+[       OK ] PairedEditHeadsTest.HistoricSliceIsNeverMovedByAnUnrelatedCommit (19 ms)
+[----------] 2 tests from PairedEditHeadsTest (41 ms total)
+
+[----------] 2 tests from ZzMerkleTest
+[ RUN      ] ZzMerkleTest.VerifySliceAuthorAgainstLedgerRoot
+[       OK ] ZzMerkleTest.VerifySliceAuthorAgainstLedgerRoot (0 ms)
+[ RUN      ] ZzMerkleTest.RevokedAuthorVerificationFails
+[       OK ] ZzMerkleTest.RevokedAuthorVerificationFails (0 ms)
+[----------] 2 tests from ZzMerkleTest (0 ms total)
+
+[----------] 1 test from PouchDrawerInkTest
+[ RUN      ] PouchDrawerInkTest.StandardMatrixDrawsEveryVisibleLabelInsideItsSharedBox
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+glyph cache: atlas 512x512 x1 -> 1024x1024 x1 (211 glyphs, 189162 texels placed, largest 40x44, 1 palettes)
+[       OK ] PouchDrawerInkTest.StandardMatrixDrawsEveryVisibleLabelInsideItsSharedBox (3689 ms)
+[----------] 1 test from PouchDrawerInkTest (3689 ms total)
+
+[----------] 8 tests from ZzXuduConvergenceTest
+[ RUN      ] ZzXuduConvergenceTest.ProjectXuduDocsToZigzag
+[       OK ] ZzXuduConvergenceTest.ProjectXuduDocsToZigzag (0 ms)
+[ RUN      ] ZzXuduConvergenceTest.RasterizeZzStructure
+[       OK ] ZzXuduConvergenceTest.RasterizeZzStructure (0 ms)
+[ RUN      ] ZzXuduConvergenceTest.LinkPackageRoundTrip
+[       OK ] ZzXuduConvergenceTest.LinkPackageRoundTrip (5 ms)
+[ RUN      ] ZzXuduConvergenceTest.ManifoldValidation
+[       OK ] ZzXuduConvergenceTest.ManifoldValidation (0 ms)
+[ RUN      ] ZzXuduConvergenceTest.XuduHypertimeUnchangedSpansBecomeCloneCells
+[       OK ] ZzXuduConvergenceTest.XuduHypertimeUnchangedSpansBecomeCloneCells (0 ms)
+[ RUN      ] ZzXuduConvergenceTest.RasterizeZzStructureWithCloneCells
+[       OK ] ZzXuduConvergenceTest.RasterizeZzStructureWithCloneCells (0 ms)
+[ RUN      ] ZzXuduConvergenceTest.ProjectStoreWithHolesAndTranscopyrightToZigzag
+[       OK ] ZzXuduConvergenceTest.ProjectStoreWithHolesAndTranscopyrightToZigzag (0 ms)
+[ RUN      ] ZzXuduConvergenceTest.StoreProjectionRetainsSourceDocumentAndSpan
+[       OK ] ZzXuduConvergenceTest.StoreProjectionRetainsSourceDocumentAndSpan (0 ms)
+[----------] 8 tests from ZzXuduConvergenceTest (6 ms total)
+
+[----------] 4 tests from SliceToStoreTest
+[ RUN      ] SliceToStoreTest.aSliceBecomesOperationsAndFoldsBackToItself
+[       OK ] SliceToStoreTest.aSliceBecomesOperationsAndFoldsBackToItself (0 ms)
+[ RUN      ] SliceToStoreTest.theRoundTripKeepsEverythingButTheIds
+[       OK ] SliceToStoreTest.theRoundTripKeepsEverythingButTheIds (0 ms)
+[ RUN      ] SliceToStoreTest.mintingTheSameSliceTwiceMintsTheSameOperations
+[       OK ] SliceToStoreTest.mintingTheSameSliceTwiceMintsTheSameOperations (1 ms)
+[ RUN      ] SliceToStoreTest.aSecondSliceReusesTheDimensionsAlreadyMinted
+[       OK ] SliceToStoreTest.aSecondSliceReusesTheDimensionsAlreadyMinted (1 ms)
+[----------] 4 tests from SliceToStoreTest (4 ms total)
+
+[----------] 1 test from XuduProjectionTest
+[ RUN      ] XuduProjectionTest.AParagraphNeverBorrowsAnotherParagraphsAddress
+[       OK ] XuduProjectionTest.AParagraphNeverBorrowsAnotherParagraphsAddress (0 ms)
+[----------] 1 test from XuduProjectionTest (0 ms total)
+
+[----------] 50 tests from ZigzagVisualizerTest
+[ RUN      ] ZigzagVisualizerTest.DefaultStateAndFallback
+[       OK ] ZigzagVisualizerTest.DefaultStateAndFallback (67 ms)
+[ RUN      ] ZigzagVisualizerTest.EmbeddedPresentationSurfaceExposesLiveState
+[       OK ] ZigzagVisualizerTest.EmbeddedPresentationSurfaceExposesLiveState (18 ms)
+[ RUN      ] ZigzagVisualizerTest.NavigationAlongDimensions
+[       OK ] ZigzagVisualizerTest.NavigationAlongDimensions (23 ms)
+[ RUN      ] ZigzagVisualizerTest.SwapDimensions
+[       OK ] ZigzagVisualizerTest.SwapDimensions (59 ms)
+[ RUN      ] ZigzagVisualizerTest.CycleDimensions
+[       OK ] ZigzagVisualizerTest.CycleDimensions (21 ms)
+[ RUN      ] ZigzagVisualizerTest.DirectNavigationToCell
+[       OK ] ZigzagVisualizerTest.DirectNavigationToCell (32 ms)
+[ RUN      ] ZigzagVisualizerTest.AdoptDocument
+[       OK ] ZigzagVisualizerTest.AdoptDocument (84 ms)
+[ RUN      ] ZigzagVisualizerTest.MousePicking
+glyph cache: atlas 1x1 x1 layers, growing to at most 1x1 x1 (device allows 0x0 x0, the vertex encoding 64 layers)
+[       OK ] ZigzagVisualizerTest.MousePicking (56 ms)
+[ RUN      ] ZigzagVisualizerTest.AccessibilityTree
+[       OK ] ZigzagVisualizerTest.AccessibilityTree (24 ms)
+[ RUN      ] ZigzagVisualizerTest.InAppInteractiveCellAndDimensionEditing
+[       OK ] ZigzagVisualizerTest.InAppInteractiveCellAndDimensionEditing (24 ms)
+[ RUN      ] ZigzagVisualizerTest.CloneCellEditingSync
+[       OK ] ZigzagVisualizerTest.CloneCellEditingSync (77 ms)
+[ RUN      ] ZigzagVisualizerTest.MultiViewModeToggle
+[       OK ] ZigzagVisualizerTest.MultiViewModeToggle (20 ms)
+[ RUN      ] ZigzagVisualizerTest.DefaultFocusOnHomeWhenUnspecified
+[       OK ] ZigzagVisualizerTest.DefaultFocusOnHomeWhenUnspecified (72 ms)
+[ RUN      ] ZigzagVisualizerTest.MetaDimensionsDynamicTraversal
+[       OK ] ZigzagVisualizerTest.MetaDimensionsDynamicTraversal (21 ms)
+[ RUN      ] ZigzagVisualizerTest.DeletionProtection
+[       OK ] ZigzagVisualizerTest.DeletionProtection (72 ms)
+[ RUN      ] ZigzagVisualizerTest.HomeAndDimensionCellsAccessibleInTree
+[       OK ] ZigzagVisualizerTest.HomeAndDimensionCellsAccessibleInTree (24 ms)
+[ RUN      ] ZigzagVisualizerTest.DeletingACellCostsOneOperationPerDimension
+[       OK ] ZigzagVisualizerTest.DeletingACellCostsOneOperationPerDimension (19 ms)
+[ RUN      ] ZigzagVisualizerTest.NavigatingAnAbsentDimensionRecordsNothing
+[       OK ] ZigzagVisualizerTest.NavigatingAnAbsentDimensionRecordsNothing (62 ms)
+[ RUN      ] ZigzagVisualizerTest.ADeletedCellIsNotAnnounced
+[       OK ] ZigzagVisualizerTest.ADeletedCellIsNotAnnounced (26 ms)
+[ RUN      ] ZigzagVisualizerTest.FormattedCellDecoratedRangesInTopology
+[       OK ] ZigzagVisualizerTest.FormattedCellDecoratedRangesInTopology (51 ms)
+[ RUN      ] ZigzagVisualizerTest.VisualizerCellAnchorGeneration
+[       OK ] ZigzagVisualizerTest.VisualizerCellAnchorGeneration (17 ms)
+[ RUN      ] ZigzagVisualizerTest.LinkPreviewShowsDistantCellWithoutChangingFocus
+[       OK ] ZigzagVisualizerTest.LinkPreviewShowsDistantCellWithoutChangingFocus (24 ms)
+[ RUN      ] ZigzagVisualizerTest.DualContinuumDepthTiering
+[       OK ] ZigzagVisualizerTest.DualContinuumDepthTiering (21 ms)
+[ RUN      ] ZigzagVisualizerTest.PresentationOriginKeepsTheHostDocumentClear
+[       OK ] ZigzagVisualizerTest.PresentationOriginKeepsTheHostDocumentClear (53 ms)
+[ RUN      ] ZigzagVisualizerTest.DimensionBundleSwitchingAndCycling
+[       OK ] ZigzagVisualizerTest.DimensionBundleSwitchingAndCycling (19 ms)
+[ RUN      ] ZigzagVisualizerTest.OpcodeAndLibraryPaletteHUD
+[       OK ] ZigzagVisualizerTest.OpcodeAndLibraryPaletteHUD (75 ms)
+[ RUN      ] ZigzagVisualizerTest.ActionDispatchingRoutesCorrectly
+[       OK ] ZigzagVisualizerTest.ActionDispatchingRoutesCorrectly (21 ms)
+[ RUN      ] ZigzagVisualizerTest.TranslateVQLAndAttachToFocus
+[       OK ] ZigzagVisualizerTest.TranslateVQLAndAttachToFocus (74 ms)
+[ RUN      ] ZigzagVisualizerTest.PaletteVQLTranslationMode
+[       OK ] ZigzagVisualizerTest.PaletteVQLTranslationMode (54 ms)
+[ RUN      ] ZigzagVisualizerTest.CommandOmnibarTogglingAndTextInput
+[       OK ] ZigzagVisualizerTest.CommandOmnibarTogglingAndTextInput (50 ms)
+[ RUN      ] ZigzagVisualizerTest.CommandOmnibarQuickPathNavigation
+[       OK ] ZigzagVisualizerTest.CommandOmnibarQuickPathNavigation (105 ms)
+[ RUN      ] ZigzagVisualizerTest.CommandOmnibarScriptExecution
+[       OK ] ZigzagVisualizerTest.CommandOmnibarScriptExecution (43 ms)
+[ RUN      ] ZigzagVisualizerTest.CommandOmnibarMacroDefinitionAndDispatch
+[       OK ] ZigzagVisualizerTest.CommandOmnibarMacroDefinitionAndDispatch (88 ms)
+[ RUN      ] ZigzagVisualizerTest.LivingKeymapActionDispatching
+[       OK ] ZigzagVisualizerTest.LivingKeymapActionDispatching (55 ms)
+[ RUN      ] ZigzagVisualizerTest.CommandOmnibarViewAndLibraryCommands
+[       OK ] ZigzagVisualizerTest.CommandOmnibarViewAndLibraryCommands (534 ms)
+[ RUN      ] ZigzagVisualizerTest.DimensionBundlesAndViewModesDispatching
+[       OK ] ZigzagVisualizerTest.DimensionBundlesAndViewModesDispatching (59 ms)
+[ RUN      ] ZigzagVisualizerTest.VPLExecutionAndLogicQueries
+[       OK ] ZigzagVisualizerTest.VPLExecutionAndLogicQueries (117 ms)
+[ RUN      ] ZigzagVisualizerTest.BridgeCommandOmnibarCommands
+[       OK ] ZigzagVisualizerTest.BridgeCommandOmnibarCommands (23 ms)
+[ RUN      ] ZigzagVisualizerTest.FocusScopeInterceptionAndTextEntry
+[       OK ] ZigzagVisualizerTest.FocusScopeInterceptionAndTextEntry (61 ms)
+[ RUN      ] ZigzagVisualizerTest.CellActivationCallbackAndReturnKeyDispatch
+[       OK ] ZigzagVisualizerTest.CellActivationCallbackAndReturnKeyDispatch (22 ms)
+[ RUN      ] ZigzagVisualizerTest.ZigzagVisualizerTranscopyrightSettlement
+[       OK ] ZigzagVisualizerTest.ZigzagVisualizerTranscopyrightSettlement (29 ms)
+[ RUN      ] ZigzagVisualizerTest.QuotationCellInspectionAndBadge
+[       OK ] ZigzagVisualizerTest.QuotationCellInspectionAndBadge (85 ms)
+[ RUN      ] ZigzagVisualizerTest.QuotationCommandBarExecution
+[       OK ] ZigzagVisualizerTest.QuotationCommandBarExecution (99 ms)
+[ RUN      ] ZigzagVisualizerTest.QuoteBuilderOmnibarAndReloadStoreVersion
+[       OK ] ZigzagVisualizerTest.QuoteBuilderOmnibarAndReloadStoreVersion (84 ms)
+[ RUN      ] ZigzagVisualizerTest.LinkHighlightsMarkExactBytesAndBorder
+[       OK ] ZigzagVisualizerTest.LinkHighlightsMarkExactBytesAndBorder (27 ms)
+[ RUN      ] ZigzagVisualizerTest.FocusingAnUnconnectedCellShowsIt
+[       OK ] ZigzagVisualizerTest.FocusingAnUnconnectedCellShowsIt (55 ms)
+[ RUN      ] ZigzagVisualizerTest.ReadableScaleOnlyEnlargesInQuarterSteps
+[       OK ] ZigzagVisualizerTest.ReadableScaleOnlyEnlargesInQuarterSteps (0 ms)
+[ RUN      ] ZigzagVisualizerTest.aSliceOpensAlongTheDimensionItsHomeUses
+[       OK ] ZigzagVisualizerTest.aSliceOpensAlongTheDimensionItsHomeUses (112 ms)
+[ RUN      ] ZigzagVisualizerTest.theFocusIsTakenOnlyWithTheKeyboard
+[       OK ] ZigzagVisualizerTest.theFocusIsTakenOnlyWithTheKeyboard (27 ms)
+[ RUN      ] ZigzagVisualizerTest.DimensionBundlesDoNotAuthorMissingDimensions
+[       OK ] ZigzagVisualizerTest.DimensionBundlesDoNotAuthorMissingDimensions (69 ms)
+[----------] 50 tests from ZigzagVisualizerTest (2982 ms total)
+
+[----------] 3 tests from HypertimeGraphOverlayTest
+[ RUN      ] HypertimeGraphOverlayTest.FittedNodesAndComparisonShareSafeGeometryAndFullIdentity
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+glyph cache: atlas 512x512 x1 -> 1024x1024 x1 (195 glyphs, 201902 texels placed, largest 47x53, 1 palettes)
+[       OK ] HypertimeGraphOverlayTest.FittedNodesAndComparisonShareSafeGeometryAndFullIdentity (612 ms)
+[ RUN      ] HypertimeGraphOverlayTest.WarmFramesRetainBuffersAndShapingAndStalePicksAreInert
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] HypertimeGraphOverlayTest.WarmFramesRetainBuffersAndShapingAndStalePicksAreInert (15 ms)
+[ RUN      ] HypertimeGraphOverlayTest.KeyboardFocusScrubbingAndComparisonKeepDomainSemantics
+[       OK ] HypertimeGraphOverlayTest.KeyboardFocusScrubbingAndComparisonKeepDomainSemantics (50 ms)
+[----------] 3 tests from HypertimeGraphOverlayTest (677 ms total)
+
+[----------] 6 tests from StoreObjectManagerTest
+[ RUN      ] StoreObjectManagerTest.FreshStoreViewShowsCleanCreationState
+[       OK ] StoreObjectManagerTest.FreshStoreViewShowsCleanCreationState (0 ms)
+[ RUN      ] StoreObjectManagerTest.PopulatedStoreDiscoversSlicesAndXanadocsWithNamesAndBadges
+[       OK ] StoreObjectManagerTest.PopulatedStoreDiscoversSlicesAndXanadocsWithNamesAndBadges (2 ms)
+[ RUN      ] StoreObjectManagerTest.MultiOpenCheckboxesToggleOpenState
+glyph cache: atlas 1x1 x1 layers, growing to at most 1x1 x1 (device allows 0x0 x0, the vertex encoding 64 layers)
+[       OK ] StoreObjectManagerTest.MultiOpenCheckboxesToggleOpenState (0 ms)
+[ RUN      ] StoreObjectManagerTest.CloseButtonUnloadsOpenItem
+glyph cache: atlas 1x1 x1 layers, growing to at most 1x1 x1 (device allows 0x0 x0, the vertex encoding 64 layers)
+[       OK ] StoreObjectManagerTest.CloseButtonUnloadsOpenItem (0 ms)
+[ RUN      ] StoreObjectManagerTest.CreationButtonsDispatchNewSliceAndNewXanadoc
+glyph cache: atlas 1x1 x1 layers, growing to at most 1x1 x1 (device allows 0x0 x0, the vertex encoding 64 layers)
+[       OK ] StoreObjectManagerTest.CreationButtonsDispatchNewSliceAndNewXanadoc (2 ms)
+[ RUN      ] StoreObjectManagerTest.AccessibilityDescriptionExposesAllControls
+[       OK ] StoreObjectManagerTest.AccessibilityDescriptionExposesAllControls (0 ms)
+[----------] 6 tests from StoreObjectManagerTest (6 ms total)
+
+[----------] 6 tests from SwarmTelescopeOverlayTest
+[ RUN      ] SwarmTelescopeOverlayTest.FittedResponsivePagesKeepFullAccessibilityAndInk
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+glyph cache: atlas 512x512 x1 -> 1024x1024 x1 (204 glyphs, 195455 texels placed, largest 41x47, 1 palettes)
+[       OK ] SwarmTelescopeOverlayTest.FittedResponsivePagesKeepFullAccessibilityAndInk (894 ms)
+[ RUN      ] SwarmTelescopeOverlayTest.StablePublicationActionsRetireOnSearchAndReopen
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] SwarmTelescopeOverlayTest.StablePublicationActionsRetireOnSearchAndReopen (14 ms)
+[ RUN      ] SwarmTelescopeOverlayTest.SharedFocusEditsUnicodeAndWarmFramesDoNoShapingOrUploads
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] SwarmTelescopeOverlayTest.SharedFocusEditsUnicodeAndWarmFramesDoNoShapingOrUploads (25 ms)
+[ RUN      ] SwarmTelescopeOverlayTest.RealChannelsAndVirtualScrollingReachRemainingPublications
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] SwarmTelescopeOverlayTest.RealChannelsAndVirtualScrollingReachRemainingPublications (20 ms)
+[ RUN      ] SwarmTelescopeOverlayTest.InspectorWrapsDescriptionsAndRetainsIdentifierSuffixes
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] SwarmTelescopeOverlayTest.InspectorWrapsDescriptionsAndRetainsIdentifierSuffixes (55 ms)
+[ RUN      ] SwarmTelescopeOverlayTest.RegisteredPointerFocusAndReturnOpenTheFocusedPublication
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] SwarmTelescopeOverlayTest.RegisteredPointerFocusAndReturnOpenTheFocusedPublication (9 ms)
+[----------] 6 tests from SwarmTelescopeOverlayTest (1019 ms total)
+
+[----------] 2 tests from SystemUiConfigTest
+[ RUN      ] SystemUiConfigTest.ExistingNativeStoreAddsTypographyWithoutChangingNotesOrValues
+[       OK ] SystemUiConfigTest.ExistingNativeStoreAddsTypographyWithoutChangingNotesOrValues (2301 ms)
+[ RUN      ] SystemUiConfigTest.UnresolvedPermascrollLeavesExistingStoreUntouched
+[2026-10-14 04:13:18.402] [xudu.settings] [warning] UI settings structure cannot be resolved with the active permascroll; leaving the store unchanged
+[       OK ] SystemUiConfigTest.UnresolvedPermascrollLeavesExistingStoreUntouched (2603 ms)
+[----------] 2 tests from SystemUiConfigTest (4905 ms total)
+
+[----------] 4 tests from QuotationBuilderOverlayTest
+[ RUN      ] QuotationBuilderOverlayTest.PagesDrawFittedInkAndExposeFullSharedBounds
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+glyph cache: atlas 512x512 x1 -> 1024x1024 x1 (196 glyphs, 207023 texels placed, largest 72x53, 1 palettes)
+[       OK ] QuotationBuilderOverlayTest.PagesDrawFittedInkAndExposeFullSharedBounds (1683 ms)
+[ RUN      ] QuotationBuilderOverlayTest.UnicodeFieldsKeepCaretAndRegisteredModalFocus
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] QuotationBuilderOverlayTest.UnicodeFieldsKeepCaretAndRegisteredModalFocus (33 ms)
+[ RUN      ] QuotationBuilderOverlayTest.RetainsWarmFramesAndRejectsOldCommitPicks
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] QuotationBuilderOverlayTest.RetainsWarmFramesAndRejectsOldCommitPicks (66 ms)
+[ RUN      ] QuotationBuilderOverlayTest.VirtualListsReachOverflowAndCommitKeepsClosureMeaning
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] QuotationBuilderOverlayTest.VirtualListsReachOverflowAndCommitKeepsClosureMeaning (221 ms)
+[----------] 4 tests from QuotationBuilderOverlayTest (2004 ms total)
+
+[----------] 14 tests from PouchDrawerOverlayTest
+[ RUN      ] PouchDrawerOverlayTest.scaledPartitionsAndAccessibilityUseVisibleBounds
+glyph cache: atlas 1x1 x1 layers, growing to at most 1x1 x1 (device allows 0x0 x0, the vertex encoding 64 layers)
+glyph cache: atlas 1x1 x1 layers, growing to at most 1x1 x1 (device allows 0x0 x0, the vertex encoding 64 layers)
+[       OK ] PouchDrawerOverlayTest.scaledPartitionsAndAccessibilityUseVisibleBounds (284 ms)
+[ RUN      ] PouchDrawerOverlayTest.repeatedFramesRetainLayoutAndShaping
+[       OK ] PouchDrawerOverlayTest.repeatedFramesRetainLayoutAndShaping (87 ms)
+[ RUN      ] PouchDrawerOverlayTest.fullItemIdsDispatchAndRetiredActionsDoNotMutate
+glyph cache: atlas 1x1 x1 layers, growing to at most 1x1 x1 (device allows 0x0 x0, the vertex encoding 64 layers)
+glyph cache: atlas 1x1 x1 layers, growing to at most 1x1 x1 (device allows 0x0 x0, the vertex encoding 64 layers)
+[       OK ] PouchDrawerOverlayTest.fullItemIdsDispatchAndRetiredActionsDoNotMutate (50 ms)
+[ RUN      ] PouchDrawerOverlayTest.dropUsesVisiblePartitionAndClosedDrawerRefuses
+[       OK ] PouchDrawerOverlayTest.dropUsesVisiblePartitionAndClosedDrawerRefuses (144 ms)
+[ RUN      ] PouchDrawerOverlayTest.horizontalResizeBothDocksPersistsOnlyOnRelease
+glyph cache: atlas 1x1 x1 layers, growing to at most 1x1 x1 (device allows 0x0 x0, the vertex encoding 64 layers)
+glyph cache: atlas 1x1 x1 layers, growing to at most 1x1 x1 (device allows 0x0 x0, the vertex encoding 64 layers)
+glyph cache: atlas 1x1 x1 layers, growing to at most 1x1 x1 (device allows 0x0 x0, the vertex encoding 64 layers)
+[       OK ] PouchDrawerOverlayTest.horizontalResizeBothDocksPersistsOnlyOnRelease (6712 ms)
+[ RUN      ] PouchDrawerOverlayTest.completedResizePersistsWhenClosedBeforeNextFrame
+glyph cache: atlas 1x1 x1 layers, growing to at most 1x1 x1 (device allows 0x0 x0, the vertex encoding 64 layers)
+[       OK ] PouchDrawerOverlayTest.completedResizePersistsWhenClosedBeforeNextFrame (5303 ms)
+[ RUN      ] PouchDrawerOverlayTest.cancelledAndStationaryResizeDoNotWriteSettings
+glyph cache: atlas 1x1 x1 layers, growing to at most 1x1 x1 (device allows 0x0 x0, the vertex encoding 64 layers)
+[       OK ] PouchDrawerOverlayTest.cancelledAndStationaryResizeDoNotWriteSettings (5381 ms)
+[ RUN      ] PouchDrawerOverlayTest.accessibleResizeClampsToSafeArea
+[       OK ] PouchDrawerOverlayTest.accessibleResizeClampsToSafeArea (5662 ms)
+[ RUN      ] PouchDrawerOverlayTest.wheelUpdatesAccessibleRowsAndOwnerRevision
+glyph cache: atlas 1x1 x1 layers, growing to at most 1x1 x1 (device allows 0x0 x0, the vertex encoding 64 layers)
+[       OK ] PouchDrawerOverlayTest.wheelUpdatesAccessibleRowsAndOwnerRevision (214 ms)
+[ RUN      ] PouchDrawerOverlayTest.registeredModalForwardsSpaceToCardsAndSelectors
+glyph cache: atlas 1x1 x1 layers, growing to at most 1x1 x1 (device allows 0x0 x0, the vertex encoding 64 layers)
+[       OK ] PouchDrawerOverlayTest.registeredModalForwardsSpaceToCardsAndSelectors (202 ms)
+[ RUN      ] PouchDrawerOverlayTest.narrowResizeKeepsControlColumnsReadable
+glyph cache: atlas 1x1 x1 layers, growing to at most 1x1 x1 (device allows 0x0 x0, the vertex encoding 64 layers)
+[       OK ] PouchDrawerOverlayTest.narrowResizeKeepsControlColumnsReadable (5872 ms)
+[ RUN      ] PouchDrawerOverlayTest.adaptiveWidthResizeStartsAtRenderedEdge
+glyph cache: atlas 1x1 x1 layers, growing to at most 1x1 x1 (device allows 0x0 x0, the vertex encoding 64 layers)
+[       OK ] PouchDrawerOverlayTest.adaptiveWidthResizeStartsAtRenderedEdge (137 ms)
+[ RUN      ] PouchDrawerOverlayTest.drawnForgeAuthorsIntoTheActiveCommentary
+glyph cache: atlas 1x1 x1 layers, growing to at most 1x1 x1 (device allows 0x0 x0, the vertex encoding 64 layers)
+[       OK ] PouchDrawerOverlayTest.drawnForgeAuthorsIntoTheActiveCommentary (163 ms)
+glyph cache: atlas 1x1 x1 layers, growing to at most 1x1 x1 (device allows 0x0 x0, the vertex encoding 64 layers)
+[ RUN      ] PouchDrawerOverlayTest.ToggleKeepsDeviceResourcesOnTheRenderThread
+[       OK ] PouchDrawerOverlayTest.ToggleKeepsDeviceResourcesOnTheRenderThread (133 ms)
+[----------] 14 tests from PouchDrawerOverlayTest (30401 ms total)
+
+[----------] 4 tests from StoreObjectManagerOverlayTest
+[ RUN      ] StoreObjectManagerOverlayTest.FittedRowsShareSafeGeometryAndFullLabels
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 0.80000001192092896 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 0.80000001192092896 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 0.80000001192092896 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 0.80000001192092896 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 0.80000001192092896 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 0.80000001192092896 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 0.80000001192092896 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 0.80000001192092896 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 0.80000001192092896 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 0.80000001192092896 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 0.80000001192092896 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 0.80000001192092896 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 0.80000001192092896 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 0.80000001192092896 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 0.80000001192092896 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 0.80000001192092896 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 0.80000001192092896 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 0.80000001192092896 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 0.80000001192092896 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 0.80000001192092896 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 0.80000001192092896 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 0.80000001192092896 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 0.80000001192092896 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 0.80000001192092896 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 0.80000001192092896 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 0.80000001192092896 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 0.80000001192092896 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 0.80000001192092896 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 0.80000001192092896 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 0.80000001192092896 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 0.80000001192092896 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 0.80000001192092896 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 0.80000001192092896 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 0.80000001192092896 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 0.80000001192092896 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 0.80000001192092896 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Noto Sans CJK JP
+
+[  FAILED  ] StoreObjectManagerOverlayTest.FittedRowsShareSafeGeometryAndFullLabels (163 ms)
+[ RUN      ] StoreObjectManagerOverlayTest.RetainsDrawingAndQueuesStableBirthActions
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] StoreObjectManagerOverlayTest.RetainsDrawingAndQueuesStableBirthActions (13 ms)
+[ RUN      ] StoreObjectManagerOverlayTest.ScrollAndModalFocusReachRemainingObjects
+[       OK ] StoreObjectManagerOverlayTest.ScrollAndModalFocusReachRemainingObjects (8 ms)
+[ RUN      ] StoreObjectManagerOverlayTest.AccessibilityActionsRejectHiddenReopenedDrawer
+[       OK ] StoreObjectManagerOverlayTest.AccessibilityActionsRejectHiddenReopenedDrawer (4 ms)
+[----------] 4 tests from StoreObjectManagerOverlayTest (189 ms total)
+
+[----------] 3 tests from CompactZZCellTest
+[ RUN      ] CompactZZCellTest.DimOrdinalLookup
+[       OK ] CompactZZCellTest.DimOrdinalLookup (0 ms)
+[ RUN      ] CompactZZCellTest.LinkPairsAndDynamicDimensions
+[       OK ] CompactZZCellTest.LinkPairsAndDynamicDimensions (0 ms)
+[ RUN      ] CompactZZCellTest.WithheldAndTranscopyrightHoles
+[       OK ] CompactZZCellTest.WithheldAndTranscopyrightHoles (0 ms)
+[----------] 3 tests from CompactZZCellTest (0 ms total)
+
+[----------] 11 tests from UnifiedTransclusionEngineTest
+[ RUN      ] UnifiedTransclusionEngineTest.TextOperationsMintNoCells
+[       OK ] UnifiedTransclusionEngineTest.TextOperationsMintNoCells (2 ms)
+[ RUN      ] UnifiedTransclusionEngineTest.IncrementalSyncKeepsSiblingBranchesApart
+[       OK ] UnifiedTransclusionEngineTest.IncrementalSyncKeepsSiblingBranchesApart (2 ms)
+[ RUN      ] UnifiedTransclusionEngineTest.NewCellCanReuseExactSourceSpans
+[       OK ] UnifiedTransclusionEngineTest.NewCellCanReuseExactSourceSpans (0 ms)
+[ RUN      ] UnifiedTransclusionEngineTest.OrdinarySliceEditReopensAtLatestWithoutDesignatingAnEdition
+[       OK ] UnifiedTransclusionEngineTest.OrdinarySliceEditReopensAtLatestWithoutDesignatingAnEdition (2 ms)
+[ RUN      ] UnifiedTransclusionEngineTest.IncrementalSyncFoldsMintedCells
+[       OK ] UnifiedTransclusionEngineTest.IncrementalSyncFoldsMintedCells (0 ms)
+[ RUN      ] UnifiedTransclusionEngineTest.AsymmetryCanNoLongerBeConstructed
+[       OK ] UnifiedTransclusionEngineTest.AsymmetryCanNoLongerBeConstructed (0 ms)
+[ RUN      ] UnifiedTransclusionEngineTest.StageVisibleCellsForRender
+glyph cache: atlas 512x512 x1 layers, growing to at most 4096x4096 x64 (device allows 4096x4096 x64, the vertex encoding 64 layers)
+[       OK ] UnifiedTransclusionEngineTest.StageVisibleCellsForRender (1 ms)
+[ RUN      ] UnifiedTransclusionEngineTest.StageWithheldAndTranscopyrightCells
+glyph cache: atlas 512x512 x1 layers, growing to at most 4096x4096 x64 (device allows 4096x4096 x64, the vertex encoding 64 layers)
+[       OK ] UnifiedTransclusionEngineTest.StageWithheldAndTranscopyrightCells (0 ms)
+[ RUN      ] UnifiedTransclusionEngineTest.SyncCostPerOperationDoesNotGrowWithSize
+glyph cache: atlas 512x512 x1 layers, growing to at most 4096x4096 x64 (device allows 4096x4096 x64, the vertex encoding 64 layers)
+[       OK ] UnifiedTransclusionEngineTest.SyncCostPerOperationDoesNotGrowWithSize (793 ms)
+[ RUN      ] UnifiedTransclusionEngineTest.FormatFlagsFastPathAndDecoratedStaging
+[       OK ] UnifiedTransclusionEngineTest.FormatFlagsFastPathAndDecoratedStaging (2 ms)
+[ RUN      ] UnifiedTransclusionEngineTest.IncrementalFormatCacheNoFullRescanOnUnrelatedEdits
+glyph cache: atlas 512x512 x1 layers, growing to at most 4096x4096 x64 (device allows 4096x4096 x64, the vertex encoding 64 layers)
+[       OK ] UnifiedTransclusionEngineTest.IncrementalFormatCacheNoFullRescanOnUnrelatedEdits (2 ms)
+[----------] 11 tests from UnifiedTransclusionEngineTest (812 ms total)
+
+[----------] 5 tests from ShapingCacheTest
+[ RUN      ] ShapingCacheTest.CachedStagingMatchesUncachedExactly
+glyph cache: atlas 512x512 x1 layers, growing to at most 4096x4096 x64 (device allows 4096x4096 x64, the vertex encoding 64 layers)
+[       OK ] ShapingCacheTest.CachedStagingMatchesUncachedExactly (3 ms)
+[ RUN      ] ShapingCacheTest.ChangedTextIsNotServedFromCache
+glyph cache: atlas 512x512 x1 layers, growing to at most 4096x4096 x64 (device allows 4096x4096 x64, the vertex encoding 64 layers)
+[       OK ] ShapingCacheTest.ChangedTextIsNotServedFromCache (0 ms)
+[ RUN      ] ShapingCacheTest.StaysWithinItsCapacity
+glyph cache: atlas 512x512 x1 layers, growing to at most 4096x4096 x64 (device allows 4096x4096 x64, the vertex encoding 64 layers)
+[       OK ] ShapingCacheTest.StaysWithinItsCapacity (286 ms)
+[ RUN      ] ShapingCacheTest.ClearingDropsEverything
+glyph cache: atlas 512x512 x1 layers, growing to at most 4096x4096 x64 (device allows 4096x4096 x64, the vertex encoding 64 layers)
+[       OK ] ShapingCacheTest.ClearingDropsEverything (2 ms)
+[ RUN      ] ShapingCacheTest.ReportsTheCostOfAStagingPass
+glyph cache: atlas 512x512 x1 layers, growing to at most 4096x4096 x64 (device allows 4096x4096 x64, the vertex encoding 64 layers)
+  staging 60 cells: shaping every pass 28.506 ms | cached 7.670 ms | 3.7x
+  cache: 60 entries, 600 hits, 660 misses, 0 evictions
+[       OK ] ShapingCacheTest.ReportsTheCostOfAStagingPass (383 ms)
+[----------] 5 tests from ShapingCacheTest (677 ms total)
+
+[----------] 7 tests from DimensionRegistryTest
+[ RUN      ] DimensionRegistryTest.StringInterningAndFastComparison
+[       OK ] DimensionRegistryTest.StringInterningAndFastComparison (0 ms)
+[ RUN      ] DimensionRegistryTest.GetOrCreateWithStoreAndManifold
+[       OK ] DimensionRegistryTest.GetOrCreateWithStoreAndManifold (0 ms)
+[ RUN      ] DimensionRegistryTest.GetOrCreateGivenOnlyManifold
+[       OK ] DimensionRegistryTest.GetOrCreateGivenOnlyManifold (0 ms)
+[ RUN      ] DimensionRegistryTest.MultiStoreIsolation
+[       OK ] DimensionRegistryTest.MultiStoreIsolation (0 ms)
+[ RUN      ] DimensionRegistryTest.ExplicitHeadOverload
+[       OK ] DimensionRegistryTest.ExplicitHeadOverload (0 ms)
+[ RUN      ] DimensionRegistryTest.StoreDestructionUnregisters
+[       OK ] DimensionRegistryTest.StoreDestructionUnregisters (0 ms)
+[ RUN      ] DimensionRegistryTest.GetOrCreateNamesWhyItMadeNothing
+[       OK ] DimensionRegistryTest.GetOrCreateNamesWhyItMadeNothing (0 ms)
+[----------] 7 tests from DimensionRegistryTest (4 ms total)
+
+[----------] 7 tests from SessionMediaCacheTest
+[ RUN      ] SessionMediaCacheTest.RepeatedPlainQueriesStayEmptyAcrossViewChanges
+[       OK ] SessionMediaCacheTest.RepeatedPlainQueriesStayEmptyAcrossViewChanges (8 ms)
+[ RUN      ] SessionMediaCacheTest.LocalMediaOffsetsStaySpecificToEachVersion
+[       OK ] SessionMediaCacheTest.LocalMediaOffsetsStaySpecificToEachVersion (11 ms)
+[ RUN      ] SessionMediaCacheTest.ReturnedMediaIsAnOwningSnapshot
+[       OK ] SessionMediaCacheTest.ReturnedMediaIsAnOwningSnapshot (4 ms)
+[ RUN      ] SessionMediaCacheTest.SameVersionNamesInDifferentStoresStayIsolated
+[       OK ] SessionMediaCacheTest.SameVersionNamesInDifferentStoresStayIsolated (3 ms)
+[ RUN      ] SessionMediaCacheTest.MissingExternalBytesBecomeMediaWithoutAnEdit
+[       OK ] SessionMediaCacheTest.MissingExternalBytesBecomeMediaWithoutAnEdit (1 ms)
+[ RUN      ] SessionMediaCacheTest.NewContainerMetadataInvalidatesPlainClassification
+[       OK ] SessionMediaCacheTest.NewContainerMetadataInvalidatesPlainClassification (2 ms)
+[ RUN      ] SessionMediaCacheTest.BootstrapLocalBytesAreNotCachedAsMissing
+[       OK ] SessionMediaCacheTest.BootstrapLocalBytesAreNotCachedAsMissing (0 ms)
+[----------] 7 tests from SessionMediaCacheTest (33 ms total)
+
+[----------] 5 tests from WorldPresentationTest
+[ RUN      ] WorldPresentationTest.CardsFitTheViewportFontMatrixAndDoNotCoverDropPixels
+[       OK ] WorldPresentationTest.CardsFitTheViewportFontMatrixAndDoNotCoverDropPixels (399 ms)
+[ RUN      ] WorldPresentationTest.TelemetryAndBlueprintRetainGeometryAndFullNames
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] WorldPresentationTest.TelemetryAndBlueprintRetainGeometryAndFullNames (42 ms)
+[ RUN      ] WorldPresentationTest.ZigzagLabelsHaveLodWithoutChangingCellContent
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] WorldPresentationTest.ZigzagLabelsHaveLodWithoutChangingCellContent (161 ms)
+[ RUN      ] WorldPresentationTest.SatelloidPicksAndAccessibilityUseStableFullCardIdentity
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] WorldPresentationTest.SatelloidPicksAndAccessibilityUseStableFullCardIdentity (2 ms)
+[ RUN      ] WorldPresentationTest.CommandsRunOnTheConfiguredOwnerBeforeMutatingTheSlice
+[       OK ] WorldPresentationTest.CommandsRunOnTheConfiguredOwnerBeforeMutatingTheSlice (42 ms)
+[----------] 5 tests from WorldPresentationTest (649 ms total)
+
+[----------] 9 tests from ReaderPackageUiTest
+[ RUN      ] ReaderPackageUiTest.EnabledPackageUsesSharedNavigationAndAccessibleIdentityThenDismissesWithoutMutation
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] ReaderPackageUiTest.EnabledPackageUsesSharedNavigationAndAccessibleIdentityThenDismissesWithoutMutation (4 ms)
+[ RUN      ] ReaderPackageUiTest.RestoringPreferencesRefusesNativeAuthorityOverlap
+[       OK ] ReaderPackageUiTest.RestoringPreferencesRefusesNativeAuthorityOverlap (4 ms)
+[ RUN      ] ReaderPackageUiTest.MissingRepresentativeDoesNotHideVisibleLinkMembers
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[TIMING] First beam crossing viewport drawn: 0.60 ms
+[       OK ] ReaderPackageUiTest.MissingRepresentativeDoesNotHideVisibleLinkMembers (2 ms)
+[ RUN      ] ReaderPackageUiTest.ClosedNativeEndpointRefusesEntryAndSavedVisitWithoutChangingReading
+[       OK ] ReaderPackageUiTest.ClosedNativeEndpointRefusesEntryAndSavedVisitWithoutChangingReading (5 ms)
+[ RUN      ] ReaderPackageUiTest.SavedCellEntryRestoresHistoricalVersionAndExactContentRange
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] ReaderPackageUiTest.SavedCellEntryRestoresHistoricalVersionAndExactContentRange (2 ms)
+[ RUN      ] ReaderPackageUiTest.WalksPreviewAndMetadataPreserveCurrentVisitAndHistoricalExcerpt
+[       OK ] ReaderPackageUiTest.WalksPreviewAndMetadataPreserveCurrentVisitAndHistoricalExcerpt (2 ms)
+[ RUN      ] ReaderPackageUiTest.NativeFormattingIsNotAReaderNavigationCandidate
+[       OK ] ReaderPackageUiTest.NativeFormattingIsNotAReaderNavigationCandidate (10972 ms)
+[ RUN      ] ReaderPackageUiTest.CaretMovementAndLinkExplorationDoNotCreateCompletedVisits
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] ReaderPackageUiTest.CaretMovementAndLinkExplorationDoNotCreateCompletedVisits (13 ms)
+[ RUN      ] ReaderPackageUiTest.UnsupportedActivityPayloadsRemainUntouched
+xudu: not resuming or recording where you were: the activity store at /tmp/reader-package-ui-e9980ebfa582146ab8dc31bf05a28434d6c5f19bb6939ee8018c8db0c3caad5a/XDG_DATA_HOME/xudu/activity cannot be read (activity: expected visit2); it is left untouched
+xudu: not resuming or recording where you were: the activity store at /tmp/reader-package-ui-e9980ebfa582146ab8dc31bf05a28434d6c5f19bb6939ee8018c8db0c3caad5a/XDG_DATA_HOME/xudu/activity cannot be read (activity: expected selection2); it is left untouched
+[       OK ] ReaderPackageUiTest.UnsupportedActivityPayloadsRemainUntouched (29 ms)
+[----------] 9 tests from ReaderPackageUiTest (11039 ms total)
+
+[----------] 7 tests from ClaspLinkForgeTest
+[ RUN      ] ClaspLinkForgeTest.constrainedLabelsDropTargetsAndAccessibilityShareLayout
+[       OK ] ClaspLinkForgeTest.constrainedLabelsDropTargetsAndAccessibilityShareLayout (216 ms)
+[ RUN      ] ClaspLinkForgeTest.compactBenchKeepsFullSourceMetadataAndVisibleGlyphs
+[       OK ] ClaspLinkForgeTest.compactBenchKeepsFullSourceMetadataAndVisibleGlyphs (2 ms)
+[ RUN      ] ClaspLinkForgeTest.unchangedBenchRetainsGeometryAndRejectsOldActions
+[       OK ] ClaspLinkForgeTest.unchangedBenchRetainsGeometryAndRejectsOldActions (34 ms)
+[ RUN      ] ClaspLinkForgeTest.repeatedKeyboardCyclingKeepsSelectorFocus
+[       OK ] ClaspLinkForgeTest.repeatedKeyboardCyclingKeepsSelectorFocus (12 ms)
+[ RUN      ] ClaspLinkForgeTest.movementAndFontChangesPreserveActionIdentity
+[       OK ] ClaspLinkForgeTest.movementAndFontChangesPreserveActionIdentity (8 ms)
+[ RUN      ] ClaspLinkForgeTest.forgePreservesEveryEndsetSpanTypeAndTier
+[       OK ] ClaspLinkForgeTest.forgePreservesEveryEndsetSpanTypeAndTier (6 ms)
+[ RUN      ] ClaspLinkForgeTest.stableDrawDoesNotUploadOrShape
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] ClaspLinkForgeTest.stableDrawDoesNotUploadOrShape (15 ms)
+[----------] 7 tests from ClaspLinkForgeTest (296 ms total)
+
+[----------] 5 tests from ZzCoreTest
+[ RUN      ] ZzCoreTest.CellLookupBorrowsAndFormsZeroOrOneElementRange
+[       OK ] ZzCoreTest.CellLookupBorrowsAndFormsZeroOrOneElementRange (0 ms)
+[ RUN      ] ZzCoreTest.CloneMasterResolutionAlongDClone
+[       OK ] ZzCoreTest.CloneMasterResolutionAlongDClone (0 ms)
+[ RUN      ] ZzCoreTest.ACloneOfANonStringCellReadsItsMasterAndNotItself
+[       OK ] ZzCoreTest.ACloneOfANonStringCellReadsItsMasterAndNotItself (0 ms)
+[ RUN      ] ZzCoreTest.ADoubleRendersShortestAndParsesBackToItself
+[       OK ] ZzCoreTest.ADoubleRendersShortestAndParsesBackToItself (0 ms)
+[ RUN      ] ZzCoreTest.DiagnosticsCount
+[       OK ] ZzCoreTest.DiagnosticsCount (0 ms)
+[----------] 5 tests from ZzCoreTest (0 ms total)
+
+[----------] 17 tests from LinkPanelPresentationTest
+[ RUN      ] LinkPanelPresentationTest.BothChosenLineBandsStayClearOfContextChrome
+[       OK ] LinkPanelPresentationTest.BothChosenLineBandsStayClearOfContextChrome (9 ms)
+[ RUN      ] LinkPanelPresentationTest.InvestigationPagesRetainCommandsOutsideReadingText
+[       OK ] LinkPanelPresentationTest.InvestigationPagesRetainCommandsOutsideReadingText (154 ms)
+[ RUN      ] LinkPanelPresentationTest.InvestigationRefusesToCoverTheOnlyReadingSurface
+[       OK ] LinkPanelPresentationTest.InvestigationRefusesToCoverTheOnlyReadingSurface (0 ms)
+[ RUN      ] LinkPanelPresentationTest.SeparateTextExclusionsLeaveBlankCanvasAvailable
+[       OK ] LinkPanelPresentationTest.SeparateTextExclusionsLeaveBlankCanvasAvailable (3 ms)
+[ RUN      ] LinkPanelPresentationTest.NarrowFreeAreaKeepsFullActionCaptions
+[       OK ] LinkPanelPresentationTest.NarrowFreeAreaKeepsFullActionCaptions (29 ms)
+[ RUN      ] LinkPanelPresentationTest.CaptionPaddingFitsConstrainedActionColumns
+[       OK ] LinkPanelPresentationTest.CaptionPaddingFitsConstrainedActionColumns (287 ms)
+[ RUN      ] LinkPanelPresentationTest.MoreBlankHeightDoesNotInflateLabelSpacing
+[       OK ] LinkPanelPresentationTest.MoreBlankHeightDoesNotInflateLabelSpacing (7 ms)
+[ RUN      ] LinkPanelPresentationTest.ContextAndEveryActionRemainVisibleAndAccessible
+[       OK ] LinkPanelPresentationTest.ContextAndEveryActionRemainVisibleAndAccessible (1383 ms)
+[ RUN      ] LinkPanelPresentationTest.ExactRangePrefixesSurviveLongContextAndSmallLineLimit
+[       OK ] LinkPanelPresentationTest.ExactRangePrefixesSurviveLongContextAndSmallLineLimit (214 ms)
+[ RUN      ] LinkPanelPresentationTest.LegacyPlacementFontsAndColoursFollowLiveMetrics
+[       OK ] LinkPanelPresentationTest.LegacyPlacementFontsAndColoursFollowLiveMetrics (6 ms)
+[ RUN      ] LinkPanelPresentationTest.NamedFontRolesFollowLiveThemeAndLegacyFontsRemainExplicit
+[       OK ] LinkPanelPresentationTest.NamedFontRolesFollowLiveThemeAndLegacyFontsRemainExplicit (60 ms)
+[ RUN      ] LinkPanelPresentationTest.ReadingContentRemainsClearWhenThereIsRoom
+[       OK ] LinkPanelPresentationTest.ReadingContentRemainsClearWhenThereIsRoom (106 ms)
+[ RUN      ] LinkPanelPresentationTest.NoFreeAreaIsExplicitAndDockPreservesCommands
+[       OK ] LinkPanelPresentationTest.NoFreeAreaIsExplicitAndDockPreservesCommands (40 ms)
+[ RUN      ] LinkPanelPresentationTest.EnlargedInspectorPagesKeepRangesAndEveryCommandReachable
+[       OK ] LinkPanelPresentationTest.EnlargedInspectorPagesKeepRangesAndEveryCommandReachable (88 ms)
+[ RUN      ] LinkPanelPresentationTest.ConstrainedDockKeepsMeasuredActionRows
+[       OK ] LinkPanelPresentationTest.ConstrainedDockKeepsMeasuredActionRows (10 ms)
+[ RUN      ] LinkPanelPresentationTest.InspectorPinsWrappedCursorsAndPendingReason
+[       OK ] LinkPanelPresentationTest.InspectorPinsWrappedCursorsAndPendingReason (14 ms)
+[ RUN      ] LinkPanelPresentationTest.MinimumWarningAndEscapesFitAtEnlargedType
+[       OK ] LinkPanelPresentationTest.MinimumWarningAndEscapesFitAtEnlargedType (42 ms)
+[----------] 17 tests from LinkPanelPresentationTest (2461 ms total)
+
+[----------] 8 tests from LinkPanelOverlayTest
+[ RUN      ] LinkPanelOverlayTest.PreviewEdgesKeepLinkHueExactRangesAndActiveSide
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] LinkPanelOverlayTest.PreviewEdgesKeepLinkHueExactRangesAndActiveSide (26 ms)
+[ RUN      ] LinkPanelOverlayTest.NavigationSelectionOwnershipSurvivesCrossButNotEditsOrOtherLinks
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] LinkPanelOverlayTest.NavigationSelectionOwnershipSurvivesCrossButNotEditsOrOtherLinks (21 ms)
+[ RUN      ] LinkPanelOverlayTest.PresentationLayersKeepAuthorityAndLinkIdentity
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] LinkPanelOverlayTest.PresentationLayersKeepAuthorityAndLinkIdentity (58 ms)
+[ RUN      ] LinkPanelOverlayTest.WarmFramesReuseShapingAndMovingAnchorsKeepActionIdentity
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] LinkPanelOverlayTest.WarmFramesReuseShapingAndMovingAnchorsKeepActionIdentity (39 ms)
+[ RUN      ] LinkPanelOverlayTest.CapturedAndQueuedActionsCannotApplyToAnotherSelection
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] LinkPanelOverlayTest.CapturedAndQueuedActionsCannotApplyToAnotherSelection (66 ms)
+[ RUN      ] LinkPanelOverlayTest.DisabledPointerCommandIsQueuedForNavigatorRefusal
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] LinkPanelOverlayTest.DisabledPointerCommandIsQueuedForNavigatorRefusal (28 ms)
+[ RUN      ] LinkPanelOverlayTest.DockWaitsForClipAndReadControlsPreserveSelection
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] LinkPanelOverlayTest.DockWaitsForClipAndReadControlsPreserveSelection (74 ms)
+[ RUN      ] LinkPanelOverlayTest.OverflowPagingRetainsCommandIdentityWithoutNavigation
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] LinkPanelOverlayTest.OverflowPagingRetainsCommandIdentityWithoutNavigation (140 ms)
+[----------] 8 tests from LinkPanelOverlayTest (454 ms total)
+
+[----------] 3 tests from CollaboratorNameplateTest
+[ RUN      ] CollaboratorNameplateTest.UnicodeNamesFitLiveTypographyAndSafeViewport
+[       OK ] CollaboratorNameplateTest.UnicodeNamesFitLiveTypographyAndSafeViewport (304 ms)
+[ RUN      ] CollaboratorNameplateTest.MovingAnchorsReuseShapingAndLiveFontsInvalidate
+[       OK ] CollaboratorNameplateTest.MovingAnchorsReuseShapingAndLiveFontsInvalidate (0 ms)
+[ RUN      ] CollaboratorNameplateTest.InvalidAnchorsAndTinyViewportsStayBounded
+[       OK ] CollaboratorNameplateTest.InvalidAnchorsAndTinyViewportsStayBounded (0 ms)
+[----------] 3 tests from CollaboratorNameplateTest (305 ms total)
+
+[----------] 2 tests from OverviewOverlayTest
+[ RUN      ] OverviewOverlayTest.ScalesAndClampsConfiguredPanelToSafeArea
+[       OK ] OverviewOverlayTest.ScalesAndClampsConfiguredPanelToSafeArea (0 ms)
+[ RUN      ] OverviewOverlayTest.RetainsGeometryAndRejectsStaleAndHiddenPicks
+[       OK ] OverviewOverlayTest.RetainsGeometryAndRejectsStaleAndHiddenPicks (1 ms)
+[----------] 2 tests from OverviewOverlayTest (1 ms total)
+
+[----------] 9 tests from TranscopyrightOverlayTest
+[ RUN      ] TranscopyrightOverlayTest.WarmFramesRetainLabelsBuffersAndDomainSnapshot
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] TranscopyrightOverlayTest.WarmFramesRetainLabelsBuffersAndDomainSnapshot (42 ms)
+[ RUN      ] TranscopyrightOverlayTest.ScaledSafeBoxesPreserveFullAccessibleLabels
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] TranscopyrightOverlayTest.ScaledSafeBoxesPreserveFullAccessibleLabels (96 ms)
+[ RUN      ] TranscopyrightOverlayTest.StandardScreenAndFontMatrixDrawsContainedInk
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] TranscopyrightOverlayTest.StandardScreenAndFontMatrixDrawsContainedInk (198 ms)
+[ RUN      ] TranscopyrightOverlayTest.CapturedPicksKeepTheirMeaningAfterBadgeReorder
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] TranscopyrightOverlayTest.CapturedPicksKeepTheirMeaningAfterBadgeReorder (14 ms)
+[ RUN      ] TranscopyrightOverlayTest.MovingBadgesReuseFittedLabelsAndEmptySafeAreaHidesThem
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] TranscopyrightOverlayTest.MovingBadgesReuseFittedLabelsAndEmptySafeAreaHidesThem (1 ms)
+[ RUN      ] TranscopyrightOverlayTest.RemovedBadgesCannotRetargetCapturedPicks
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] TranscopyrightOverlayTest.RemovedBadgesCannotRetargetCapturedPicks (0 ms)
+[ RUN      ] TranscopyrightOverlayTest.QueuedAccessibilityCannotUnlockRemovedBadge
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] TranscopyrightOverlayTest.QueuedAccessibilityCannotUnlockRemovedBadge (5 ms)
+[ RUN      ] TranscopyrightOverlayTest.PointAnchorsAllocateIntrinsicLabelWidth
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] TranscopyrightOverlayTest.PointAnchorsAllocateIntrinsicLabelWidth (4 ms)
+[ RUN      ] TranscopyrightOverlayTest.AccessibilityDispatchesOnTheRenderThreadAndBloomDoesNotReshape
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] TranscopyrightOverlayTest.AccessibilityDispatchesOnTheRenderThreadAndBloomDoesNotReshape (7 ms)
+[----------] 9 tests from TranscopyrightOverlayTest (370 ms total)
+
+[----------] Global test environment tear-down
+[==========] 233 tests from 35 test suites ran. (65632 ms total)
+[  PASSED  ] 232 tests.
+[  FAILED  ] 1 test, listed below:
+[  FAILED  ] StoreObjectManagerOverlayTest.FittedRowsShareSafeGeometryAndFullLabels
+
+ 1 FAILED TEST

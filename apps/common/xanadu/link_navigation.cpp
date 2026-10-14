@@ -230,11 +230,13 @@ NavigationResult LinkNavigator::select(const LinkKey &key, SelectionHint hint) {
     settleHint(*selected);
     return NavigationEffect{.preview = previewOf(*selected, selected->active)};
   }
-  selected = SelectedLink{.key        = key,
-                          .generation = ++generations,
-                          .active     = hint.side.value_or(LinkSide::Left),
-                          .origin     = current,
-                          .hint       = std::move(hint)};
+  selected =
+      SelectedLink{.key              = key,
+                   .generation       = ++generations,
+                   .active           = hint.side.value_or(LinkSide::Left),
+                   .origin           = current,
+                   .originCheckpoint = std::exchange(nextOriginCheckpoint, {}),
+                   .hint             = std::move(hint)};
   return NavigationEffect{.resolve = ResolveRequest{
                               .key = key, .generation = selected->generation}};
 }
@@ -389,7 +391,9 @@ NavigationResult LinkNavigator::enter() {
                                                    .active = selection.active,
                                                    .left   = selection.left,
                                                    .right  = selection.right,
-                                                   .origin = selection.origin}});
+                                                   .origin = selection.origin,
+                                                   .originCheckpoint =
+                                         selection.originCheckpoint}});
   return NavigationEffect{.focus = target, .visit = current};
 }
 
@@ -420,21 +424,23 @@ NavigationResult LinkNavigator::restoreVisit(const Visit &visit) {
   }
   const auto &saved = *visit.link;
   if (selected && saved.key == selected->key && selected->occurrences) {
-    selected->active = saved.active;
-    selected->left   = saved.left;
-    selected->right  = saved.right;
-    selected->origin = saved.origin;
+    selected->active           = saved.active;
+    selected->left             = saved.left;
+    selected->right            = saved.right;
+    selected->origin           = saved.origin;
+    selected->originCheckpoint = saved.originCheckpoint;
     keepInRange(*selected, LinkSide::Left);
     keepInRange(*selected, LinkSide::Right);
     effect.preview = previewOf(*selected, selected->active);
     return effect;
   }
-  selected = SelectedLink{.key        = saved.key,
-                          .generation = ++generations,
-                          .active     = saved.active,
-                          .left       = saved.left,
-                          .right      = saved.right,
-                          .origin     = saved.origin};
+  selected = SelectedLink{.key              = saved.key,
+                          .generation       = ++generations,
+                          .active           = saved.active,
+                          .left             = saved.left,
+                          .right            = saved.right,
+                          .origin           = saved.origin,
+                          .originCheckpoint = saved.originCheckpoint};
   effect.resolve =
       ResolveRequest{.key = saved.key, .generation = selected->generation};
   return effect;
@@ -442,12 +448,13 @@ NavigationResult LinkNavigator::restoreVisit(const Visit &visit) {
 
 NavigationResult
 LinkNavigator::restoreSelection(const LinkVisitContext &saved) {
-  selected = SelectedLink{.key        = saved.key,
-                          .generation = ++generations,
-                          .active     = saved.active,
-                          .left       = saved.left,
-                          .right      = saved.right,
-                          .origin     = saved.origin};
+  selected = SelectedLink{.key              = saved.key,
+                          .generation       = ++generations,
+                          .active           = saved.active,
+                          .left             = saved.left,
+                          .right            = saved.right,
+                          .origin           = saved.origin,
+                          .originCheckpoint = saved.originCheckpoint};
   return NavigationEffect{
       .resolve =
           ResolveRequest{.key = saved.key, .generation = selected->generation}};
@@ -504,7 +511,9 @@ NavigationResult LinkNavigator::returnToOrigin() {
   }
   current = origin->id;
   activity.select(origin->id);
-  return NavigationEffect{.focus = origin->target, .visit = current};
+  return NavigationEffect{
+      .focus = selected->originCheckpoint.value_or(origin->target),
+      .visit = current};
 }
 
 NavigationResult LinkNavigator::dismiss() {

@@ -171,4 +171,33 @@ std::vector<PanelButton> linkPanelButtons(const SelectedLink &selected,
   };
 }
 
+std::vector<PanelButton> linkMemberButtons(const SelectedLink &selected) {
+  std::vector<PanelButton> buttons;
+  if (!selected.occurrences) return buttons;
+  for (const auto side : {LinkSide::Left, LinkSide::Right}) {
+    const auto label    = side == LinkSide::Left ? "Left" : "Right";
+    const auto &members = selected.occurrences->members(side);
+    for (const auto &member : members) {
+      buttons.push_back(
+          {.label = std::format(
+               "Preview {} {}/{} · {}", label, member.index + 1, members.size(),
+               member.inView()
+                   ? std::format("{} places", member.occurrences.size())
+                   : "not in view"),
+           .command = nav::SelectMember{selected.key, side, member.index}});
+    }
+    const auto &cursor = selected.cursor(side);
+    if (!cursor.member || *cursor.member >= members.size()) continue;
+    const auto &member = members[*cursor.member];
+    for (std::uint32_t place = 0; place < member.occurrences.size(); ++place) {
+      buttons.push_back(
+          {.label   = std::format("Preview {} place {}/{}", label, place + 1,
+                                  member.occurrences.size()),
+           .command = nav::SelectOccurrence{selected.key, side, *cursor.member,
+                                            place}});
+    }
+  }
+  return buttons;
+}
+
 } // namespace xanadu

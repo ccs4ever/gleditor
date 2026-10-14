@@ -1,0 +1,1 @@
+swarm-netns-test: needs root or unprivileged user namespaces (unshare -Urnm) to create network namespaces (skipping)

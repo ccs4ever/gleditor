@@ -112,12 +112,14 @@ TEST_F(ReadingPlaceTest, theNewestPlaceWinsAndSurvivesSaving) {
 
 TEST_F(ReadingPlaceTest, pinnedLinkWithoutAnEndpointVisitSurvivesRestart) {
   xanadu::Store store(perma);
-  auto place  = twoDocuments();
-  place.link  = xanadu::LinkVisitContext{.key    = {store.documentId(), 42},
-                                         .active = xanadu::LinkSide::Right,
-                                         .left  = {.member = 1, .occurrence = 3},
-                                         .right = {.member = 2},
-                                         .origin = xanadu::VisitId{7}};
+  auto place = twoDocuments();
+  place.link = xanadu::LinkVisitContext{
+      .key              = {store.documentId(), 42},
+      .active           = xanadu::LinkSide::Right,
+      .left             = {.member = 1, .occurrence = 3},
+      .right            = {.member = 2},
+      .origin           = xanadu::VisitId{7},
+      .originCheckpoint = xanadu::CellSite{store.documentId(), {}, 21, {4, 9}}};
   std::ignore = xanadu::recordPlace(store, place);
   store.save((root / "activity").string());
   xanadu::Store reopened(perma);

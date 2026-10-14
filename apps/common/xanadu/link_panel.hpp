@@ -97,6 +97,11 @@ struct PanelButton {
 [[nodiscard]] std::vector<PanelButton>
 linkPanelButtons(const SelectedLink &selected, bool hasOrigin);
 
+/// Every authored member remains individually reachable; places belong only
+/// to the chosen member on each side. These select/preview, never enter.
+[[nodiscard]] std::vector<PanelButton>
+linkMemberButtons(const SelectedLink &selected);
+
 } // namespace xanadu
 
 #endif // COMMON_XANADU_LINK_PANEL_HPP

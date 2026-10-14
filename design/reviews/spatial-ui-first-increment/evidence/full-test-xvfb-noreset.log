@@ -1,0 +1,2102 @@
+python3 tools/ux-journey.py --check
+validated 51 stages in 16 journey files
+python3 tests/tools/ux_journey_test.py
+{"run": 1, "argv": ["/tmp/tmp_t7brsw5/binary", "--permascroll", "/tmp/tmp_t7brsw5/probe/run-01/permascroll", "--backend", "opengl", "--profile", "--chord", "Ctrl+N", "--type", "alpha beta gamma", "--chord", "Ctrl+Left", "--chord", "Ctrl+Left", "--chord", "Ctrl+Shift+Right", "--capture", "/tmp/tmp_t7brsw5/probe/run-01/selection.ppm", "--dump-a11y"], "capture": "/tmp/tmp_t7brsw5/probe/run-01/selection.ppm", "exit_code": 0, "timed_out": false, "ppm_valid": true, "width": 2, "height": 2, "blue_selection_pixels": 0, "selection_detected": false, "error": "selection pixels absent or below 20-pixel threshold", "elapsed_seconds": 0.0}
+...missing required variables: input
+.refusing to reuse stage evidence: /tmp/ux path li9josr6/J1/author
+.....
+----------------------------------------------------------------------
+Ran 9 tests in 1.639s
+
+OK
+{"status": "passed", "scope": "stage replay, not journey acceptance", "exit_code": 0}
+{"status": "passed", "scope": "stage replay, not journey acceptance", "exit_code": 0}
+{"status": "timeout", "scope": "stage replay, not journey acceptance", "exit_code": 143, "raw_return_code": 143, "error": "1 second driver timeout"}
+{"status": "timeout", "scope": "stage replay, not journey acceptance", "exit_code": -15, "raw_return_code": -15, "error": "0.5 second driver timeout"}
+build//gleditor_test --gtest_filter='-SwarmTest.*:MutableNameTest.*:PublicationOutboxNetworkTest.*'
+Running main() from gmock_main.cc
+Note: Google Test filter = -SwarmTest.*:MutableNameTest.*:PublicationOutboxNetworkTest.*
+[==========] Running 782 tests from 101 test suites.
+[----------] Global test environment set-up.
+[----------] 20 tests from FocusManagerTest
+[ RUN      ] FocusManagerTest.openingOrderOverridesRegistrationOrderAndReopeningWins
+[       OK ] FocusManagerTest.openingOrderOverridesRegistrationOrderAndReopeningWins (31 ms)
+[ RUN      ] FocusManagerTest.unhandledModalInputNeverFallsThroughToThePane
+[       OK ] FocusManagerTest.unhandledModalInputNeverFallsThroughToThePane (0 ms)
+[ RUN      ] FocusManagerTest.escapeCancelsAnUnhandledModalAndRestoresFocus
+[       OK ] FocusManagerTest.escapeCancelsAnUnhandledModalAndRestoresFocus (0 ms)
+[ RUN      ] FocusManagerTest.outsideClickDismissesWithoutPassingIntoThePane
+[       OK ] FocusManagerTest.outsideClickDismissesWithoutPassingIntoThePane (0 ms)
+[ RUN      ] FocusManagerTest.outsideClickIsBlockedByDefault
+[       OK ] FocusManagerTest.outsideClickIsBlockedByDefault (0 ms)
+[ RUN      ] FocusManagerTest.closingNestedScopesRestoresThePaneAndItsImeRectangle
+[       OK ] FocusManagerTest.closingNestedScopesRestoresThePaneAndItsImeRectangle (0 ms)
+[ RUN      ] FocusManagerTest.commandsRequireGlobalAndFocusedScopeConsent
+[       OK ] FocusManagerTest.commandsRequireGlobalAndFocusedScopeConsent (0 ms)
+[ RUN      ] FocusManagerTest.focusCallbacksCanQueryTheManagerWithoutDeadlocking
+[       OK ] FocusManagerTest.focusCallbacksCanQueryTheManagerWithoutDeadlocking (0 ms)
+[ RUN      ] FocusManagerTest.aDragKeepsItsOwnerOutsideItsBoundsUntilRelease
+[       OK ] FocusManagerTest.aDragKeepsItsOwnerOutsideItsBoundsUntilRelease (0 ms)
+[ RUN      ] FocusManagerTest.aNewModalCancelsThePreviousPointerOwner
+[       OK ] FocusManagerTest.aNewModalCancelsThePreviousPointerOwner (0 ms)
+[ RUN      ] FocusManagerTest.removingAnOlderScopeDoesNotStealFocusFromANewerOne
+[       OK ] FocusManagerTest.removingAnOlderScopeDoesNotStealFocusFromANewerOne (0 ms)
+[ RUN      ] FocusManagerTest.f6CyclesPanesAndShiftF6GoesBackWithoutTyping
+[       OK ] FocusManagerTest.f6CyclesPanesAndShiftF6GoesBackWithoutTyping (0 ms)
+[ RUN      ] FocusManagerTest.windowFocusLossCancelsCaptureAndResetsModifiers
+[       OK ] FocusManagerTest.windowFocusLossCancelsCaptureAndResetsModifiers (0 ms)
+[ RUN      ] FocusManagerTest.registrationLifetimeAndMovesDoNotLeaveDanglingFocus
+[       OK ] FocusManagerTest.registrationLifetimeAndMovesDoNotLeaveDanglingFocus (0 ms)
+[ RUN      ] FocusManagerTest.commandGateCoversNamedAndBoundCommands
+[       OK ] FocusManagerTest.commandGateCoversNamedAndBoundCommands (0 ms)
+[ RUN      ] FocusManagerTest.aDeniedScopedCommandCannotFallThroughToAnotherBinding
+[       OK ] FocusManagerTest.aDeniedScopedCommandCannotFallThroughToAnotherBinding (0 ms)
+[ RUN      ] FocusManagerTest.blockedOutsidePressNeverRequestsGpuPicking
+[       OK ] FocusManagerTest.blockedOutsidePressNeverRequestsGpuPicking (0 ms)
+[ RUN      ] FocusManagerTest.delayedGpuPressIsBoundToRegistrationAndOpening
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] FocusManagerTest.delayedGpuPressIsBoundToRegistrationAndOpening (0 ms)
+[ RUN      ] FocusManagerTest.queuedPressSupersedesPositionAndOriginTogether
+[       OK ] FocusManagerTest.queuedPressSupersedesPositionAndOriginTogether (0 ms)
+[ RUN      ] FocusManagerTest.changedDocumentMembershipInvalidatesBackgroundPick
+[       OK ] FocusManagerTest.changedDocumentMembershipInvalidatesBackgroundPick (0 ms)
+[----------] 20 tests from FocusManagerTest (33 ms total)
+
+[----------] 16 tests from FocusTraversalTest
+[ RUN      ] FocusTraversalTest.InitialTargetsUseValidatedLayoutNodes
+[       OK ] FocusTraversalTest.InitialTargetsUseValidatedLayoutNodes (0 ms)
+[ RUN      ] FocusTraversalTest.TabWrapsLayoutOrderAndSkipsDisabledNodes
+[       OK ] FocusTraversalTest.TabWrapsLayoutOrderAndSkipsDisabledNodes (0 ms)
+[ RUN      ] FocusTraversalTest.EditingArrowsHavePriorityAndNavigationStaysWithinGroup
+[       OK ] FocusTraversalTest.EditingArrowsHavePriorityAndNavigationStaysWithinGroup (0 ms)
+[ RUN      ] FocusTraversalTest.ReturnUsesDefaultActionAndEscapeRestoresNode
+[       OK ] FocusTraversalTest.ReturnUsesDefaultActionAndEscapeRestoresNode (0 ms)
+[ RUN      ] FocusTraversalTest.NodeRequestsAreValidatedAndSnapshotRevisionIsStable
+[       OK ] FocusTraversalTest.NodeRequestsAreValidatedAndSnapshotRevisionIsStable (0 ms)
+[ RUN      ] FocusTraversalTest.NonTextNodesDisableImeAndSwallowComposedText
+[       OK ] FocusTraversalTest.NonTextNodesDisableImeAndSwallowComposedText (0 ms)
+[ RUN      ] FocusTraversalTest.FocusCallbacksCanRequestAnotherNodeReentrantly
+[       OK ] FocusTraversalTest.FocusCallbacksCanRequestAnotherNodeReentrantly (0 ms)
+[ RUN      ] FocusTraversalTest.LayoutChangesReplaceAnUnavailableFocusedNode
+[       OK ] FocusTraversalTest.LayoutChangesReplaceAnUnavailableFocusedNode (0 ms)
+[ RUN      ] FocusTraversalTest.FormUsesSharedTraversalAndPreservesExpandedChoices
+[       OK ] FocusTraversalTest.FormUsesSharedTraversalAndPreservesExpandedChoices (0 ms)
+[ RUN      ] FocusTraversalTest.OneFieldChoiceTabCommitsWithoutMovingToAnotherNode
+[       OK ] FocusTraversalTest.OneFieldChoiceTabCommitsWithoutMovingToAnotherNode (0 ms)
+[ RUN      ] FocusTraversalTest.SpaceOperatesNonTextControlsWithoutComposedText
+[       OK ] FocusTraversalTest.SpaceOperatesNonTextControlsWithoutComposedText (0 ms)
+[ RUN      ] FocusTraversalTest.HiddenDefaultActionCannotOverrideAVisibleFocusedNode
+[       OK ] FocusTraversalTest.HiddenDefaultActionCannotOverrideAVisibleFocusedNode (0 ms)
+[ RUN      ] FocusTraversalTest.ConcurrentLayoutReadCannotOverwriteNewerNodeFocus
+[       OK ] FocusTraversalTest.ConcurrentLayoutReadCannotOverwriteNewerNodeFocus (0 ms)
+[ RUN      ] FocusTraversalTest.RequestFromPreviousOpeningCannotChangeReopenedScope
+[       OK ] FocusTraversalTest.RequestFromPreviousOpeningCannotChangeReopenedScope (1 ms)
+[ RUN      ] FocusTraversalTest.DelayedNodeCallbackReappliesTheLatestNode
+[       OK ] FocusTraversalTest.DelayedNodeCallbackReappliesTheLatestNode (0 ms)
+[ RUN      ] FocusTraversalTest.DelayedScopeGainDoesNotLeaveTheBackgroundFocused
+[       OK ] FocusTraversalTest.DelayedScopeGainDoesNotLeaveTheBackgroundFocused (0 ms)
+[----------] 16 tests from FocusTraversalTest (2 ms total)
+
+[----------] 4 tests from FpPrimitivesTest
+[ RUN      ] FpPrimitivesTest.FromAndToSentinelRoundTrip
+[       OK ] FpPrimitivesTest.FromAndToSentinelRoundTrip (0 ms)
+[ RUN      ] FpPrimitivesTest.RangesNthOfAndSingleOf
+[       OK ] FpPrimitivesTest.RangesNthOfAndSingleOf (0 ms)
+[ RUN      ] FpPrimitivesTest.SteppedPathViewLinearAndCycleTermination
+[       OK ] FpPrimitivesTest.SteppedPathViewLinearAndCycleTermination (0 ms)
+[ RUN      ] FpPrimitivesTest.FilterPresentRangeAdaptor
+[       OK ] FpPrimitivesTest.FilterPresentRangeAdaptor (0 ms)
+[----------] 4 tests from FpPrimitivesTest (0 ms total)
+
+[----------] 1 test from Cpp26SpanTest
+[ RUN      ] Cpp26SpanTest.ChecksBoundsAndPreservesElementReferences
+[       OK ] Cpp26SpanTest.ChecksBoundsAndPreservesElementReferences (0 ms)
+[----------] 1 test from Cpp26SpanTest (0 ms total)
+
+[----------] 3 tests from DeviceCapabilities
+[ RUN      ] DeviceCapabilities.defaultsAreConservative
+[       OK ] DeviceCapabilities.defaultsAreConservative (0 ms)
+[ RUN      ] DeviceCapabilities.theGlFamilyCannotRecordInParallel
+[       OK ] DeviceCapabilities.theGlFamilyCannotRecordInParallel (0 ms)
+[ RUN      ] DeviceCapabilities.vulkanReportsItsRecordingThreads
+[       OK ] DeviceCapabilities.vulkanReportsItsRecordingThreads (0 ms)
+[----------] 3 tests from DeviceCapabilities (0 ms total)
+
+[----------] 3 tests from GlyphBatches
+[ RUN      ] GlyphBatches.theDefaultIssuesOneDrawPerBatchInOrder
+[       OK ] GlyphBatches.theDefaultIssuesOneDrawPerBatchInOrder (0 ms)
+[ RUN      ] GlyphBatches.anEmptyRunDrawsNothing
+[       OK ] GlyphBatches.anEmptyRunDrawsNothing (0 ms)
+[ RUN      ] GlyphBatches.eachBatchKeepsItsOwnTransform
+[       OK ] GlyphBatches.eachBatchKeepsItsOwnTransform (0 ms)
+[----------] 3 tests from GlyphBatches (0 ms total)
+
+[----------] 24 tests from GlyphPaletteTest
+[ RUN      ] GlyphPaletteTest.moveSelfAssignment
+[       OK ] GlyphPaletteTest.moveSelfAssignment (0 ms)
+[ RUN      ] GlyphPaletteTest.moveAssignmentKeepsDeviceOfSource
+[       OK ] GlyphPaletteTest.moveAssignmentKeepsDeviceOfSource (0 ms)
+[ RUN      ] GlyphPaletteTest.moveConstructionKeepsDeviceOfSource
+[       OK ] GlyphPaletteTest.moveConstructionKeepsDeviceOfSource (0 ms)
+[ RUN      ] GlyphPaletteTest.uploadsTargetOwnLayer
+[       OK ] GlyphPaletteTest.uploadsTargetOwnLayer (0 ms)
+[ RUN      ] GlyphPaletteTest.equality
+[       OK ] GlyphPaletteTest.equality (0 ms)
+[ RUN      ] GlyphPaletteTest.less
+[       OK ] GlyphPaletteTest.less (0 ms)
+[ RUN      ] GlyphPaletteTest.greater
+[       OK ] GlyphPaletteTest.greater (0 ms)
+[ RUN      ] GlyphPaletteTest.ordering
+[       OK ] GlyphPaletteTest.ordering (0 ms)
+[ RUN      ] GlyphPaletteTest.availHeight
+[       OK ] GlyphPaletteTest.availHeight (0 ms)
+[ RUN      ] GlyphPaletteTest.availHeightPut1Lane
+[       OK ] GlyphPaletteTest.availHeightPut1Lane (0 ms)
+[ RUN      ] GlyphPaletteTest.availHeightPut2Lanes
+[       OK ] GlyphPaletteTest.availHeightPut2Lanes (0 ms)
+[ RUN      ] GlyphPaletteTest.availHeightFullLane
+[       OK ] GlyphPaletteTest.availHeightFullLane (0 ms)
+[ RUN      ] GlyphPaletteTest.availHeightLaneExpand
+[       OK ] GlyphPaletteTest.availHeightLaneExpand (0 ms)
+[ RUN      ] GlyphPaletteTest.canFit
+[       OK ] GlyphPaletteTest.canFit (0 ms)
+[ RUN      ] GlyphPaletteTest.canFitNewLane
+[       OK ] GlyphPaletteTest.canFitNewLane (0 ms)
+[ RUN      ] GlyphPaletteTest.canFitMaxHeight
+[       OK ] GlyphPaletteTest.canFitMaxHeight (0 ms)
+[ RUN      ] GlyphPaletteTest.canFitMaxWidth
+[       OK ] GlyphPaletteTest.canFitMaxWidth (0 ms)
+[ RUN      ] GlyphPaletteTest.canFitMax
+[       OK ] GlyphPaletteTest.canFitMax (0 ms)
+[ RUN      ] GlyphPaletteTest.cannotFitTooWide
+[       OK ] GlyphPaletteTest.cannotFitTooWide (0 ms)
+[ RUN      ] GlyphPaletteTest.cannotFitTooTall
+[       OK ] GlyphPaletteTest.cannotFitTooTall (0 ms)
+[ RUN      ] GlyphPaletteTest.cannotFitTooWideTall
+[       OK ] GlyphPaletteTest.cannotFitTooWideTall (0 ms)
+[ RUN      ] GlyphPaletteTest.cannotFit2MaxLanes
+[       OK ] GlyphPaletteTest.cannotFit2MaxLanes (0 ms)
+[ RUN      ] GlyphPaletteTest.cannotFitInLaneOrMoreLanes
+[       OK ] GlyphPaletteTest.cannotFitInLaneOrMoreLanes (0 ms)
+[ RUN      ] GlyphPaletteTest.toString
+[       OK ] GlyphPaletteTest.toString (0 ms)
+[----------] 24 tests from GlyphPaletteTest (0 ms total)
+
+[----------] 7 tests from AssetPathTest
+[ RUN      ] AssetPathTest.fallsBackToTheSourceTree
+[       OK ] AssetPathTest.fallsBackToTheSourceTree (0 ms)
+[ RUN      ] AssetPathTest.theEnvironmentOverridesEverything
+[       OK ] AssetPathTest.theEnvironmentOverridesEverything (0 ms)
+[ RUN      ] AssetPathTest.aRequestedDirectoryIsNotSecondGuessed
+[       OK ] AssetPathTest.aRequestedDirectoryIsNotSecondGuessed (0 ms)
+[ RUN      ] AssetPathTest.anEmptyRequestIsNoRequest
+[       OK ] AssetPathTest.anEmptyRequestIsNoRequest (0 ms)
+[ RUN      ] AssetPathTest.joinsWithThePlatformSeparator
+[       OK ] AssetPathTest.joinsWithThePlatformSeparator (0 ms)
+[ RUN      ] AssetPathTest.theAnswerDoesNotChangeUnderTheProgram
+[       OK ] AssetPathTest.theAnswerDoesNotChangeUnderTheProgram (0 ms)
+[ RUN      ] AssetPathTest.theSourceTreeFallbackNamesRealShaders
+[       OK ] AssetPathTest.theSourceTreeFallbackNamesRealShaders (0 ms)
+[----------] 7 tests from AssetPathTest (0 ms total)
+
+[----------] 1 test from XdgPathsTest
+[ RUN      ] XdgPathsTest.respectsEnvironmentAndFallbacks
+[       OK ] XdgPathsTest.respectsEnvironmentAndFallbacks (0 ms)
+[----------] 1 test from XdgPathsTest (0 ms total)
+
+[----------] 1 test from RenderConstantsTest
+[ RUN      ] RenderConstantsTest.VerifyPhysicalAndTimingConstants
+[       OK ] RenderConstantsTest.VerifyPhysicalAndTimingConstants (0 ms)
+[----------] 1 test from RenderConstantsTest (0 ms total)
+
+[----------] 18 tests from DecodeIndexTest
+[ RUN      ] DecodeIndexTest.UnrecognisedMimeTypeIsUnsupported
+[       OK ] DecodeIndexTest.UnrecognisedMimeTypeIsUnsupported (0 ms)
+[ RUN      ] DecodeIndexTest.EmptyBufferNeverThrowsAndIsNotSeekable
+[       OK ] DecodeIndexTest.EmptyBufferNeverThrowsAndIsNotSeekable (0 ms)
+[ RUN      ] DecodeIndexTest.PngReportsSeekableButNoDurableIndex
+[       OK ] DecodeIndexTest.PngReportsSeekableButNoDurableIndex (0 ms)
+[ RUN      ] DecodeIndexTest.JpegWithRestartMarkersIsSeekableAndDurable
+[       OK ] DecodeIndexTest.JpegWithRestartMarkersIsSeekableAndDurable (10 ms)
+[ RUN      ] DecodeIndexTest.VideoGetsADurableContainerIndex
+[       OK ] DecodeIndexTest.VideoGetsADurableContainerIndex (3 ms)
+[ RUN      ] DecodeIndexTest.Mp3IsSeekableButBuildsNoExtractableIndex
+[       OK ] DecodeIndexTest.Mp3IsSeekableButBuildsNoExtractableIndex (16 ms)
+[ RUN      ] DecodeIndexTest.PlainZstdIsNotSeekable
+[       OK ] DecodeIndexTest.PlainZstdIsNotSeekable (180 ms)
+[ RUN      ] DecodeIndexTest.SeekableZstdReportsDurableIndexWithSeekPoints
+[       OK ] DecodeIndexTest.SeekableZstdReportsDurableIndexWithSeekPoints (215 ms)
+[ RUN      ] DecodeIndexTest.ReencodeZstdSeekableFailsOnNonZstdBytes
+[       OK ] DecodeIndexTest.ReencodeZstdSeekableFailsOnNonZstdBytes (0 ms)
+[ RUN      ] DecodeIndexTest.ReencodeZstdSeekableRoundTripsContentAndBecomesDurable
+[       OK ] DecodeIndexTest.ReencodeZstdSeekableRoundTripsContentAndBecomesDurable (1022 ms)
+[ RUN      ] DecodeIndexTest.PlainFlacHasNoDurableIndexButIsStillSeekable
+[       OK ] DecodeIndexTest.PlainFlacHasNoDurableIndexButIsStillSeekable (46 ms)
+[ RUN      ] DecodeIndexTest.SeekableFlacReportsDurableIndexWithSeekPoints
+[       OK ] DecodeIndexTest.SeekableFlacReportsDurableIndexWithSeekPoints (10 ms)
+[ RUN      ] DecodeIndexTest.ReencodeFlacSeekableFailsOnNonFlacBytes
+[       OK ] DecodeIndexTest.ReencodeFlacSeekableFailsOnNonFlacBytes (0 ms)
+[ RUN      ] DecodeIndexTest.ReencodeFlacSeekableRoundTripsContentAndBecomesDurable
+[       OK ] DecodeIndexTest.ReencodeFlacSeekableRoundTripsContentAndBecomesDurable (26 ms)
+[ RUN      ] DecodeIndexTest.SingleStripTiffHasOnlyOneSeekPoint
+[       OK ] DecodeIndexTest.SingleStripTiffHasOnlyOneSeekPoint (24 ms)
+[ RUN      ] DecodeIndexTest.SeekableTiffReportsManyStripsWithSeekPoints
+[       OK ] DecodeIndexTest.SeekableTiffReportsManyStripsWithSeekPoints (32 ms)
+[ RUN      ] DecodeIndexTest.ReencodeTiffSeekableFailsOnNonTiffBytes
+[       OK ] DecodeIndexTest.ReencodeTiffSeekableFailsOnNonTiffBytes (0 ms)
+[ RUN      ] DecodeIndexTest.ReencodeTiffSeekableRoundTripsContentAndBecomesDurable
+gleditor-decode-index: Not a TIFF or MDI file, bad magic number 28526 (0x6f6e).
+[       OK ] DecodeIndexTest.ReencodeTiffSeekableRoundTripsContentAndBecomesDurable (79 ms)
+[----------] 18 tests from DecodeIndexTest (1704 ms total)
+
+[----------] 4 tests from PngCheckpointsTest
+[ RUN      ] PngCheckpointsTest.BuildFailsOnNonPngBytes
+[       OK ] PngCheckpointsTest.BuildFailsOnNonPngBytes (0 ms)
+[ RUN      ] PngCheckpointsTest.BuildNamesAnUnsupportedShape
+[       OK ] PngCheckpointsTest.BuildNamesAnUnsupportedShape (0 ms)
+[ RUN      ] PngCheckpointsTest.CheckpointsExistAndResumeMatchesLinearDecode
+[       OK ] PngCheckpointsTest.CheckpointsExistAndResumeMatchesLinearDecode (2 ms)
+[ RUN      ] PngCheckpointsTest.OutOfRangeRowsReturnNullopt
+[       OK ] PngCheckpointsTest.OutOfRangeRowsReturnNullopt (3 ms)
+[----------] 4 tests from PngCheckpointsTest (7 ms total)
+
+[----------] 3 tests from GroundingModalTest
+[ RUN      ] GroundingModalTest.PopulateKnownSourcesChoice
+[       OK ] GroundingModalTest.PopulateKnownSourcesChoice (0 ms)
+[ RUN      ] GroundingModalTest.GroundFromMatchedLocalFile
+[       OK ] GroundingModalTest.GroundFromMatchedLocalFile (3 ms)
+[ RUN      ] GroundingModalTest.RejectUnmatchedLocalFile
+[       OK ] GroundingModalTest.RejectUnmatchedLocalFile (2 ms)
+[----------] 3 tests from GroundingModalTest (7 ms total)
+
+[----------] 10 tests from A11yFocusTest
+[ RUN      ] A11yFocusTest.latestOpenScopeOwnsTheOnlyModalAndItsLegacyRequestedFocus
+[       OK ] A11yFocusTest.latestOpenScopeOwnsTheOnlyModalAndItsLegacyRequestedFocus (0 ms)
+[ RUN      ] A11yFocusTest.multipleSourceRootsShareOneManagerOwnedModalWrapper
+[       OK ] A11yFocusTest.multipleSourceRootsShareOneManagerOwnedModalWrapper (1 ms)
+[ RUN      ] A11yFocusTest.layoutFocusChangesRebuildEvenWhenSourceRevisionsStayConstant
+[       OK ] A11yFocusTest.layoutFocusChangesRebuildEvenWhenSourceRevisionsStayConstant (1 ms)
+[ RUN      ] A11yFocusTest.accessibilityFocusRequestsGoThroughTheFocusManager
+[       OK ] A11yFocusTest.accessibilityFocusRequestsGoThroughTheFocusManager (0 ms)
+[ RUN      ] A11yFocusTest.aScopeWithoutAnAccessibilitySourceStillIsolatesTheBackground
+[       OK ] A11yFocusTest.aScopeWithoutAnAccessibilitySourceStillIsolatesTheBackground (0 ms)
+[ RUN      ] A11yFocusTest.queuedActionsCannotReachTheBackgroundWhileAModalIsOpen
+[       OK ] A11yFocusTest.queuedActionsCannotReachTheBackgroundWhileAModalIsOpen (0 ms)
+[ RUN      ] A11yFocusTest.newlyOpenedScopesBlockOldQueuedActionsBeforeTheTreeRebuilds
+[       OK ] A11yFocusTest.newlyOpenedScopesBlockOldQueuedActionsBeforeTheTreeRebuilds (0 ms)
+[ RUN      ] A11yFocusTest.actionCallbacksMayUnregisterTheirOwnSource
+[       OK ] A11yFocusTest.actionCallbacksMayUnregisterTheirOwnSource (0 ms)
+[ RUN      ] A11yFocusTest.dynamicSourceSurvivesRemovalUntilItsActionReturns
+[       OK ] A11yFocusTest.dynamicSourceSurvivesRemovalUntilItsActionReturns (0 ms)
+[ RUN      ] A11yFocusTest.sourceCallbacksMayRegisterSourcesAndResizeInvalidatesTheTree
+[       OK ] A11yFocusTest.sourceCallbacksMayRegisterSourcesAndResizeInvalidatesTheTree (0 ms)
+[----------] 10 tests from A11yFocusTest (5 ms total)
+
+[----------] 11 tests from MediaStreamTest
+[ RUN      ] MediaStreamTest.ByteRangeBasicOperations
+[       OK ] MediaStreamTest.ByteRangeBasicOperations (0 ms)
+[ RUN      ] MediaStreamTest.ByteRangeIntersection
+[       OK ] MediaStreamTest.ByteRangeIntersection (0 ms)
+[ RUN      ] MediaStreamTest.ByteRangeSlice
+[       OK ] MediaStreamTest.ByteRangeSlice (0 ms)
+[ RUN      ] MediaStreamTest.TimeRangeOperations
+[       OK ] MediaStreamTest.TimeRangeOperations (0 ms)
+[ RUN      ] MediaStreamTest.MemoryMediaStreamReadAndSlice
+[       OK ] MediaStreamTest.MemoryMediaStreamReadAndSlice (0 ms)
+[ RUN      ] MediaStreamTest.MemoryMediaStreamOutOfBounds
+[       OK ] MediaStreamTest.MemoryMediaStreamOutOfBounds (0 ms)
+[ RUN      ] MediaStreamTest.MemoryMediaStreamFromBytesAndData
+[       OK ] MediaStreamTest.MemoryMediaStreamFromBytesAndData (0 ms)
+[ RUN      ] MediaStreamTest.FileMediaStreamNonExistent
+[       OK ] MediaStreamTest.FileMediaStreamNonExistent (0 ms)
+[ RUN      ] MediaStreamTest.CallbackMediaStreamCustomReader
+[       OK ] MediaStreamTest.CallbackMediaStreamCustomReader (0 ms)
+[ RUN      ] MediaStreamTest.FileMediaStreamReadAndSlice
+[       OK ] MediaStreamTest.FileMediaStreamReadAndSlice (0 ms)
+[ RUN      ] MediaStreamTest.VlcStreamCallbacksBridge
+[       OK ] MediaStreamTest.VlcStreamCallbacksBridge (4 ms)
+[----------] 11 tests from MediaStreamTest (4 ms total)
+
+[----------] 9 tests from CoreShapingCacheTest
+[ RUN      ] CoreShapingCacheTest.WarmPageAndFitAvoidAllShaping
+[       OK ] CoreShapingCacheTest.WarmPageAndFitAvoidAllShaping (7 ms)
+[ RUN      ] CoreShapingCacheTest.ChangedLayoutProducesItsOwnPage
+[       OK ] CoreShapingCacheTest.ChangedLayoutProducesItsOwnPage (1 ms)
+[ RUN      ] CoreShapingCacheTest.FittingConstraintsRemainIndependent
+[       OK ] CoreShapingCacheTest.FittingConstraintsRemainIndependent (2 ms)
+[ RUN      ] CoreShapingCacheTest.ChangedMediaReservationIsNotReused
+[       OK ] CoreShapingCacheTest.ChangedMediaReservationIsNotReused (0 ms)
+[ RUN      ] CoreShapingCacheTest.LeastRecentlyUsedEntryIsEvictedAcrossResultKinds
+[       OK ] CoreShapingCacheTest.LeastRecentlyUsedEntryIsEvictedAcrossResultKinds (0 ms)
+[ RUN      ] CoreShapingCacheTest.EntriesKeepFontOwnersUntilClear
+[       OK ] CoreShapingCacheTest.EntriesKeepFontOwnersUntilClear (0 ms)
+[ RUN      ] CoreShapingCacheTest.MovePreservesEntriesAndRecency
+[       OK ] CoreShapingCacheTest.MovePreservesEntriesAndRecency (0 ms)
+[ RUN      ] CoreShapingCacheTest.ZeroCapacityIsRefused
+[       OK ] CoreShapingCacheTest.ZeroCapacityIsRefused (0 ms)
+[ RUN      ] CoreShapingCacheTest.NonFiniteKeysCannotEscapeTheCapacityBudget
+[       OK ] CoreShapingCacheTest.NonFiniteKeysCannotEscapeTheCapacityBudget (0 ms)
+[----------] 9 tests from CoreShapingCacheTest (24 ms total)
+
+[----------] 26 tests from GlyphCacheTest
+[ RUN      ] GlyphCacheTest.opensSmallerThanTheHardwareAllows
+glyph cache: atlas 512x512 x1 layers, growing to at most 16384x16384 x64 (device allows 16384x16384 x2048, the vertex encoding 64 layers)
+[       OK ] GlyphCacheTest.opensSmallerThanTheHardwareAllows (0 ms)
+[ RUN      ] GlyphCacheTest.opensNoLargerThanTheHardwareAllows
+glyph cache: atlas 256x256 x1 layers, growing to at most 256x256 x4 (device allows 256x256 x4, the vertex encoding 64 layers)
+[       OK ] GlyphCacheTest.opensNoLargerThanTheHardwareAllows (0 ms)
+[ RUN      ] GlyphCacheTest.neverPromisesMoreLayersThanAVertexCanName
+glyph cache: atlas 512x512 x1 layers, growing to at most 16384x16384 x64 (device allows 16384x16384 x2048, the vertex encoding 64 layers)
+[       OK ] GlyphCacheTest.neverPromisesMoreLayersThanAVertexCanName (0 ms)
+[ RUN      ] GlyphCacheTest.growsTheLayerBeforeAddingAnother
+glyph cache: atlas 512x512 x1 layers, growing to at most 4096x4096 x8 (device allows 4096x4096 x8, the vertex encoding 64 layers)
+glyph cache: atlas 512x512 x1 -> 1024x1024 x1 (6 glyphs, 224847 texels placed, largest 170x249, 1 palettes)
+[       OK ] GlyphCacheTest.growsTheLayerBeforeAddingAnother (40 ms)
+[ RUN      ] GlyphCacheTest.addsLayersOnceTheLayerCannotGrow
+glyph cache: atlas 512x512 x1 layers, growing to at most 512x512 x8 (device allows 512x512 x8, the vertex encoding 64 layers)
+glyph cache: atlas 512x512 x1 -> 512x512 x2 (6 glyphs, 224847 texels placed, largest 170x249, 1 palettes)
+glyph cache: atlas 512x512 x2 -> 512x512 x4 (13 glyphs, 464385 texels placed, largest 188x249, 2 palettes)
+[       OK ] GlyphCacheTest.addsLayersOnceTheLayerCannotGrow (5 ms)
+[ RUN      ] GlyphCacheTest.everyAllocationStaysWithinTheReportedLimits
+glyph cache: atlas 512x512 x1 layers, growing to at most 1024x1024 x4 (device allows 1024x1024 x4, the vertex encoding 64 layers)
+glyph cache: atlas 512x512 x1 -> 1024x1024 x1 (6 glyphs, 224847 texels placed, largest 170x249, 1 palettes)
+glyph cache: atlas 1024x1024 x1 -> 1024x1024 x2 (25 glyphs, 938232 texels placed, largest 213x249, 1 palettes)
+[       OK ] GlyphCacheTest.everyAllocationStaysWithinTheReportedLimits (7 ms)
+[ RUN      ] GlyphCacheTest.growingLeavesEarlierGlyphsWhereTheyWere
+glyph cache: atlas 512x512 x1 layers, growing to at most 4096x4096 x8 (device allows 4096x4096 x8, the vertex encoding 64 layers)
+glyph cache: atlas 512x512 x1 -> 1024x1024 x1 (6 glyphs, 224847 texels placed, largest 170x249, 1 palettes)
+[       OK ] GlyphCacheTest.growingLeavesEarlierGlyphsWhereTheyWere (5 ms)
+[ RUN      ] GlyphCacheTest.growingWritesEveryGlyphIntoTheNewTexture
+glyph cache: atlas 512x512 x1 layers, growing to at most 4096x4096 x8 (device allows 4096x4096 x8, the vertex encoding 64 layers)
+glyph cache: atlas 512x512 x1 -> 1024x1024 x1 (6 glyphs, 224847 texels placed, largest 170x249, 1 palettes)
+[       OK ] GlyphCacheTest.growingWritesEveryGlyphIntoTheNewTexture (2 ms)
+[ RUN      ] GlyphCacheTest.refusesAGlyphNoAtlasCouldEverHold
+glyph cache: atlas 64x64 x1 layers, growing to at most 64x64 x2 (device allows 64x64 x2, the vertex encoding 64 layers)
+[       OK ] GlyphCacheTest.refusesAGlyphNoAtlasCouldEverHold (1 ms)
+[ RUN      ] GlyphCacheTest.survivesAGlyphItCannotHold
+glyph cache: atlas 256x256 x1 layers, growing to at most 256x256 x2 (device allows 256x256 x2, the vertex encoding 64 layers)
+[       OK ] GlyphCacheTest.survivesAGlyphItCannotHold (1 ms)
+[ RUN      ] GlyphCacheTest.noDecorationsIsTheDefaultAndItsOwnEntry
+glyph cache: atlas 512x512 x1 layers, growing to at most 1024x1024 x2 (device allows 1024x1024 x2, the vertex encoding 64 layers)
+[       OK ] GlyphCacheTest.noDecorationsIsTheDefaultAndItsOwnEntry (0 ms)
+[ RUN      ] GlyphCacheTest.theSameDecorationsAreOneCacheEntry
+glyph cache: atlas 512x512 x1 layers, growing to at most 1024x1024 x2 (device allows 1024x1024 x2, the vertex encoding 64 layers)
+[       OK ] GlyphCacheTest.theSameDecorationsAreOneCacheEntry (0 ms)
+[ RUN      ] GlyphCacheTest.decorationSetMembershipOrderDoesNotMatter
+glyph cache: atlas 512x512 x1 layers, growing to at most 1024x1024 x2 (device allows 1024x1024 x2, the vertex encoding 64 layers)
+[       OK ] GlyphCacheTest.decorationSetMembershipOrderDoesNotMatter (0 ms)
+[ RUN      ] GlyphCacheTest.differentDecorationsAreDifferentCacheEntries
+glyph cache: atlas 512x512 x1 layers, growing to at most 1024x1024 x2 (device allows 1024x1024 x2, the vertex encoding 64 layers)
+[       OK ] GlyphCacheTest.differentDecorationsAreDifferentCacheEntries (0 ms)
+[ RUN      ] GlyphCacheTest.aSupersetOfDecorationsIsAnotherEntry
+glyph cache: atlas 512x512 x1 layers, growing to at most 1024x1024 x2 (device allows 1024x1024 x2, the vertex encoding 64 layers)
+[       OK ] GlyphCacheTest.aSupersetOfDecorationsIsAnotherEntry (0 ms)
+[ RUN      ] GlyphCacheTest.boldHasMoreInkThanPlain
+glyph cache: atlas 512x512 x1 layers, growing to at most 1024x1024 x2 (device allows 1024x1024 x2, the vertex encoding 64 layers)
+[       OK ] GlyphCacheTest.boldHasMoreInkThanPlain (0 ms)
+[ RUN      ] GlyphCacheTest.italicChangesTheGlyphsRasterisation
+glyph cache: atlas 512x512 x1 layers, growing to at most 1024x1024 x2 (device allows 1024x1024 x2, the vertex encoding 64 layers)
+[       OK ] GlyphCacheTest.italicChangesTheGlyphsRasterisation (0 ms)
+[ RUN      ] GlyphCacheTest.underlineAddsInkBelowTheGlyph
+glyph cache: atlas 512x512 x1 layers, growing to at most 1024x1024 x2 (device allows 1024x1024 x2, the vertex encoding 64 layers)
+[       OK ] GlyphCacheTest.underlineAddsInkBelowTheGlyph (0 ms)
+[ RUN      ] GlyphCacheTest.overlineAddsInkAboveTheGlyph
+glyph cache: atlas 512x512 x1 layers, growing to at most 1024x1024 x2 (device allows 1024x1024 x2, the vertex encoding 64 layers)
+[       OK ] GlyphCacheTest.overlineAddsInkAboveTheGlyph (0 ms)
+[ RUN      ] GlyphCacheTest.strikethroughAddsInkThroughTheGlyph
+glyph cache: atlas 512x512 x1 layers, growing to at most 1024x1024 x2 (device allows 1024x1024 x2, the vertex encoding 64 layers)
+[       OK ] GlyphCacheTest.strikethroughAddsInkThroughTheGlyph (0 ms)
+[ RUN      ] GlyphCacheTest.eachLineDecorationLandsAtADifferentHeight
+glyph cache: atlas 512x512 x1 layers, growing to at most 1024x1024 x2 (device allows 1024x1024 x2, the vertex encoding 64 layers)
+[       OK ] GlyphCacheTest.eachLineDecorationLandsAtADifferentHeight (0 ms)
+[ RUN      ] GlyphCacheTest.superscriptAndSubscriptRaiseNoDecorationSpecificCode
+glyph cache: atlas 512x512 x1 layers, growing to at most 1024x1024 x2 (device allows 1024x1024 x2, the vertex encoding 64 layers)
+[       OK ] GlyphCacheTest.superscriptAndSubscriptRaiseNoDecorationSpecificCode (0 ms)
+[ RUN      ] GlyphCacheTest.boldStillIncreasesInkWhenARealBoldFileExists
+glyph cache: atlas 512x512 x1 layers, growing to at most 1024x1024 x2 (device allows 1024x1024 x2, the vertex encoding 64 layers)
+[       OK ] GlyphCacheTest.boldStillIncreasesInkWhenARealBoldFileExists (0 ms)
+[ RUN      ] GlyphCacheTest.boldStillIncreasesInkWithNoRealBoldFile
+glyph cache: atlas 512x512 x1 layers, growing to at most 1024x1024 x2 (device allows 1024x1024 x2, the vertex encoding 64 layers)
+[       OK ] GlyphCacheTest.boldStillIncreasesInkWithNoRealBoldFile (0 ms)
+[ RUN      ] GlyphCacheTest.aFamilyWithNoBoldFileStillCachesSeparately
+glyph cache: atlas 512x512 x1 layers, growing to at most 1024x1024 x2 (device allows 1024x1024 x2, the vertex encoding 64 layers)
+[       OK ] GlyphCacheTest.aFamilyWithNoBoldFileStillCachesSeparately (0 ms)
+[ RUN      ] GlyphCacheTest.fallbackFontRasterizesInkForMissingGlyphs
+glyph cache: atlas 512x512 x1 layers, growing to at most 1024x1024 x2 (device allows 1024x1024 x2, the vertex encoding 64 layers)
+[       OK ] GlyphCacheTest.fallbackFontRasterizesInkForMissingGlyphs (0 ms)
+[----------] 26 tests from GlyphCacheTest (72 ms total)
+
+[----------] 12 tests from DocGapTest
+[ RUN      ] DocGapTest.PagesCanHoldAGapBeforeTheFirstBuiltPage
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] DocGapTest.PagesCanHoldAGapBeforeTheFirstBuiltPage (195 ms)
+[ RUN      ] DocGapTest.PickingResolvesCorrectlyForAPageBuiltOutOfOrder
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] DocGapTest.PickingResolvesCorrectlyForAPageBuiltOutOfOrder (223 ms)
+[ RUN      ] DocGapTest.ReflowFromsGuardFillsThePageItNeeds
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] DocGapTest.ReflowFromsGuardFillsThePageItNeeds (306 ms)
+[ RUN      ] DocGapTest.AccessibilityStillDescribesADocumentWithAGap
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] DocGapTest.AccessibilityStillDescribesADocumentWithAGap (198 ms)
+[ RUN      ] DocGapTest.TextBandsClipAtPageBreaksWithoutReshaping
+[       OK ] DocGapTest.TextBandsClipAtPageBreaksWithoutReshaping (243 ms)
+[ RUN      ] DocGapTest.InteriorTextBandDoesNotNeedTheStartPageBuilt
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] DocGapTest.InteriorTextBandDoesNotNeedTheStartPageBuilt (156 ms)
+[ RUN      ] DocGapTest.FacingHighlightContourUsesUploadedQuads
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] DocGapTest.FacingHighlightContourUsesUploadedQuads (195 ms)
+[ RUN      ] DocGapTest.PlacedPageBasisMatchesAnchorsAndAnimatedTranslation
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] DocGapTest.PlacedPageBasisMatchesAnchorsAndAnimatedTranslation (190 ms)
+[ RUN      ] DocGapTest.LiveDocumentPaletteReachesDetailedAndCoarseBatches
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] DocGapTest.LiveDocumentPaletteReachesDetailedAndCoarseBatches (217 ms)
+[ RUN      ] DocGapTest.RetainedCaretsMatchNativeLigatureAndBidiPlacement
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] DocGapTest.RetainedCaretsMatchNativeLigatureAndBidiPlacement (5 ms)
+[ RUN      ] DocGapTest.RetainedBlankLineAndMediaGeometrySurvivesByteRenumbering
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] DocGapTest.RetainedBlankLineAndMediaGeometrySurvivesByteRenumbering (2 ms)
+[ RUN      ] DocGapTest.ReflowReplacesRetainedCaretGeometry
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] DocGapTest.ReflowReplacesRetainedCaretGeometry (0 ms)
+[----------] 12 tests from DocGapTest (1973 ms total)
+
+[----------] 5 tests from Animation
+[ RUN      ] Animation.RampReachesItsTargetAndStops
+[       OK ] Animation.RampReachesItsTargetAndStops (0 ms)
+[ RUN      ] Animation.EaseOutDecelerates
+[       OK ] Animation.EaseOutDecelerates (0 ms)
+[ RUN      ] Animation.InterruptingAMotionContinuesFromWhereItGot
+[       OK ] Animation.InterruptingAMotionContinuesFromWhereItGot (0 ms)
+[ RUN      ] Animation.TheSworphLeadsWithTheDocumentAndSettlesWithTheCamera
+[       OK ] Animation.TheSworphLeadsWithTheDocumentAndSettlesWithTheCamera (0 ms)
+[ RUN      ] Animation.ADelayedMoveStandsStillBeforeItStarts
+[       OK ] Animation.ADelayedMoveStandsStillBeforeItStarts (0 ms)
+[----------] 5 tests from Animation (0 ms total)
+
+[----------] 4 tests from ToastFade
+[ RUN      ] ToastFade.RisesFromNothingAndReturnsToIt
+[       OK ] ToastFade.RisesFromNothingAndReturnsToIt (0 ms)
+[ RUN      ] ToastFade.IsFullyOpaqueInTheMiddle
+[       OK ] ToastFade.IsFullyOpaqueInTheMiddle (0 ms)
+[ RUN      ] ToastFade.RampsMonotonicallyAtBothEnds
+[       OK ] ToastFade.RampsMonotonicallyAtBothEnds (0 ms)
+[ RUN      ] ToastFade.StaysInRangeForALifetimeShorterThanTwoFades
+[       OK ] ToastFade.StaysInRangeForALifetimeShorterThanTwoFades (0 ms)
+[----------] 4 tests from ToastFade (0 ms total)
+
+[----------] 3 tests from RenderRegions
+[ RUN      ] RenderRegions.ClampsWritingWithoutChangingProjection
+[       OK ] RenderRegions.ClampsWritingWithoutChangingProjection (0 ms)
+[ RUN      ] RenderRegions.BatchesKeepRegionsAndRestoreImmediateScope
+[       OK ] RenderRegions.BatchesKeepRegionsAndRestoreImmediateScope (0 ms)
+[ RUN      ] RenderRegions.RefusesInvalidViewportAndDepth
+[       OK ] RenderRegions.RefusesInvalidViewportAndDepth (0 ms)
+[----------] 3 tests from RenderRegions (0 ms total)
+
+[----------] 2 tests from SvgAnimatorTest
+[ RUN      ] SvgAnimatorTest.IsAnimatedDetection
+[       OK ] SvgAnimatorTest.IsAnimatedDetection (0 ms)
+[ RUN      ] SvgAnimatorTest.StaticSvgReturnsNullOnLoad
+[       OK ] SvgAnimatorTest.StaticSvgReturnsNullOnLoad (0 ms)
+[----------] 2 tests from SvgAnimatorTest (0 ms total)
+
+[----------] 1 test from MediaAnimationTest
+[ RUN      ] MediaAnimationTest.AnimatedGifPlaybackAndSpeed
+[       OK ] MediaAnimationTest.AnimatedGifPlaybackAndSpeed (1 ms)
+[----------] 1 test from MediaAnimationTest (1 ms total)
+
+[----------] 2 tests from LayoutfiladeBenchmarkTest
+[ RUN      ] LayoutfiladeBenchmarkTest.ScaledCoordinateDescentSpeedup
+Layoutfilade Benchmark [N=10000 lines, 10000 queries]:
+  Linear scan Y descent : 440019 us
+  Layoutfilade O(log N) : 3081 us
+  Speedup factor        : 142.817x
+[       OK ] LayoutfiladeBenchmarkTest.ScaledCoordinateDescentSpeedup (443 ms)
+[ RUN      ] LayoutfiladeBenchmarkTest.IncrementalResizeLatency
+Layoutfilade Incremental Update [N=10000 lines, 10000 updates]:
+  Total update time : 46250 us
+  Average latency   : 4625 ns/update
+tests/lib/layoutfilade_benchmark_test.cpp:129: Failure
+Expected: (nsPerUpdate) < (1000.0), actual: 4625 vs 1000
+
+[  FAILED  ] LayoutfiladeBenchmarkTest.IncrementalResizeLatency (46 ms)
+[----------] 2 tests from LayoutfiladeBenchmarkTest (490 ms total)
+
+[----------] 18 tests from FormTest
+[ RUN      ] FormTest.aClosedFormTakesNoKeys
+[       OK ] FormTest.aClosedFormTakesNoKeys (0 ms)
+[ RUN      ] FormTest.typingGoesIntoTheFocusedField
+[       OK ] FormTest.typingGoesIntoTheFocusedField (0 ms)
+[ RUN      ] FormTest.tabWrapsAndShiftTabGoesBack
+[       OK ] FormTest.tabWrapsAndShiftTabGoesBack (0 ms)
+[ RUN      ] FormTest.theCaretMovesAndTextGoesInWhereItIs
+[       OK ] FormTest.theCaretMovesAndTextGoesInWhereItIs (0 ms)
+[ RUN      ] FormTest.backspaceAndDeleteRemoveWholeCharacters
+[       OK ] FormTest.backspaceAndDeleteRemoveWholeCharacters (0 ms)
+[ RUN      ] FormTest.acceptingHandsBackTheAnswersAndClosesTheForm
+[       OK ] FormTest.acceptingHandsBackTheAnswersAndClosesTheForm (0 ms)
+[ RUN      ] FormTest.aRequiredFieldStopsItAndSaysWhichOne
+[       OK ] FormTest.aRequiredFieldStopsItAndSaysWhichOne (0 ms)
+[ RUN      ] FormTest.escapeAbandonsItWithoutAnswering
+[       OK ] FormTest.escapeAbandonsItWithoutAnswering (0 ms)
+[ RUN      ] FormTest.closingItFromOutsideDoesNotAnswerEither
+[       OK ] FormTest.closingItFromOutsideDoesNotAnswerEither (0 ms)
+[ RUN      ] FormTest.nowhereIsBeingTypedUntilThereIsSomewhereToType
+[       OK ] FormTest.nowhereIsBeingTypedUntilThereIsSomewhereToType (0 ms)
+[ RUN      ] FormTest.editingRemovesWholeGraphemes
+[       OK ] FormTest.editingRemovesWholeGraphemes (0 ms)
+[ RUN      ] FormTest.emptyFormsStillAcceptAndCancelWithoutInventingAField
+[       OK ] FormTest.emptyFormsStillAcceptAndCancelWithoutInventingAField (0 ms)
+[ RUN      ] FormTest.accessibilityFocusSettlesThePreviousChoice
+[       OK ] FormTest.accessibilityFocusSettlesThePreviousChoice (0 ms)
+[ RUN      ] FormTest.horizontalWheelLeavesChoiceHighlightUnchanged
+[       OK ] FormTest.horizontalWheelLeavesChoiceHighlightUnchanged (0 ms)
+[ RUN      ] FormTest.longChoiceListsDoNotAliasTheNextField
+[       OK ] FormTest.longChoiceListsDoNotAliasTheNextField (0 ms)
+[ RUN      ] FormTest.accessibilityTextRunsTrackUnicodeCaretAndEmptyNewline
+[       OK ] FormTest.accessibilityTextRunsTrackUnicodeCaretAndEmptyNewline (0 ms)
+[ RUN      ] FormTest.accessibilitySecretRunsNeverExposeRevealedPassword
+[       OK ] FormTest.accessibilitySecretRunsNeverExposeRevealedPassword (0 ms)
+[ RUN      ] FormTest.accessibilityLongTextRunsRetainFullValueAndDistinctFieldIds
+[       OK ] FormTest.accessibilityLongTextRunsRetainFullValueAndDistinctFieldIds (0 ms)
+[----------] 18 tests from FormTest (0 ms total)
+
+[----------] 1 test from InputAreaTest
+[ RUN      ] InputAreaTest.twoOfThemAreTheSameWhenTheyAreInTheSamePlace
+[       OK ] InputAreaTest.twoOfThemAreTheSameWhenTheyAreInTheSamePlace (0 ms)
+[----------] 1 test from InputAreaTest (0 ms total)
+
+[----------] 8 tests from ChoiceFormTest
+[ RUN      ] ChoiceFormTest.aChoiceAnswersWithWhatItMeansRatherThanWhatItShows
+[       OK ] ChoiceFormTest.aChoiceAnswersWithWhatItMeansRatherThanWhatItShows (0 ms)
+[ RUN      ] ChoiceFormTest.theListOpensMovesAndSettles
+[       OK ] ChoiceFormTest.theListOpensMovesAndSettles (0 ms)
+[ RUN      ] ChoiceFormTest.escapeClosesTheListBeforeItClosesTheForm
+[       OK ] ChoiceFormTest.escapeClosesTheListBeforeItClosesTheForm (0 ms)
+[ RUN      ] ChoiceFormTest.leftAndRightGoThroughTheOptionsWithoutOpeningIt
+[       OK ] ChoiceFormTest.leftAndRightGoThroughTheOptionsWithoutOpeningIt (0 ms)
+[ RUN      ] ChoiceFormTest.aSecretIsHeldButNotShownUntilTheButtonIsPressed
+[       OK ] ChoiceFormTest.aSecretIsHeldButNotShownUntilTheButtonIsPressed (0 ms)
+[ RUN      ] ChoiceFormTest.aButtonIsPressedRatherThanTypedInto
+[       OK ] ChoiceFormTest.aButtonIsPressedRatherThanTypedInto (0 ms)
+[ RUN      ] ChoiceFormTest.everythingComesBackTogetherWhenItIsAccepted
+[       OK ] ChoiceFormTest.everythingComesBackTogetherWhenItIsAccepted (0 ms)
+[ RUN      ] ChoiceFormTest.anEmptyChoiceAnswersWithNothing
+[       OK ] ChoiceFormTest.anEmptyChoiceAnswersWithNothing (0 ms)
+[----------] 8 tests from ChoiceFormTest (0 ms total)
+
+[----------] 1 test from FormChoiceTest
+[ RUN      ] FormChoiceTest.SingleChoiceFieldCanSubmitSelectedBranchWithEnter
+[       OK ] FormChoiceTest.SingleChoiceFieldCanSubmitSelectedBranchWithEnter (0 ms)
+[----------] 1 test from FormChoiceTest (0 ms total)
+
+[----------] 1 test from FormScopeTest
+[ RUN      ] FormScopeTest.directRegistrationRestoresEarlierModalAndDeniesCommands
+[       OK ] FormScopeTest.directRegistrationRestoresEarlierModalAndDeniesCommands (0 ms)
+[----------] 1 test from FormScopeTest (0 ms total)
+
+[----------] 1 test from ChoiceDetailsTest
+[ RUN      ] ChoiceDetailsTest.CompactOptionsRetainCompleteIdentityInAccessibilityAndAnswers
+[       OK ] ChoiceDetailsTest.CompactOptionsRetainCompleteIdentityInAccessibilityAndAnswers (0 ms)
+[----------] 1 test from ChoiceDetailsTest (0 ms total)
+
+[----------] 4 tests from DecodeIndexGifTest
+[ RUN      ] DecodeIndexGifTest.PeekGifSizeValidHeader
+[       OK ] DecodeIndexGifTest.PeekGifSizeValidHeader (0 ms)
+[ RUN      ] DecodeIndexGifTest.PeekGifSizeInvalidBuffers
+[       OK ] DecodeIndexGifTest.PeekGifSizeInvalidBuffers (0 ms)
+[ RUN      ] DecodeIndexGifTest.IsAnimatedGifDistinguishesSingleFromMultiFrame
+[       OK ] DecodeIndexGifTest.IsAnimatedGifDistinguishesSingleFromMultiFrame (0 ms)
+[ RUN      ] DecodeIndexGifTest.BuildDecodeIndexGif
+[       OK ] DecodeIndexGifTest.BuildDecodeIndexGif (0 ms)
+[----------] 4 tests from DecodeIndexGifTest (0 ms total)
+
+[----------] 5 tests from SourceGrounderTest
+[ RUN      ] SourceGrounderTest.LocateExactTextSubspan
+[       OK ] SourceGrounderTest.LocateExactTextSubspan (0 ms)
+[ RUN      ] SourceGrounderTest.LocateNormalizedWhitespaceSubspan
+[       OK ] SourceGrounderTest.LocateNormalizedWhitespaceSubspan (0 ms)
+[ RUN      ] SourceGrounderTest.RejectUnmatchedQuote
+[       OK ] SourceGrounderTest.RejectUnmatchedQuote (0 ms)
+[ RUN      ] SourceGrounderTest.LocateBinarySubspan
+[       OK ] SourceGrounderTest.LocateBinarySubspan (0 ms)
+[ RUN      ] SourceGrounderTest.ComputeSha256
+[       OK ] SourceGrounderTest.ComputeSha256 (1 ms)
+[----------] 5 tests from SourceGrounderTest (2 ms total)
+
+[----------] 18 tests from Diagnostics
+[ RUN      ] Diagnostics.aRecordedMessageIsWrittenToTheLog
+[       OK ] Diagnostics.aRecordedMessageIsWrittenToTheLog (0 ms)
+[ RUN      ] Diagnostics.loggingCanBeTurnedOff
+[       OK ] Diagnostics.loggingCanBeTurnedOff (0 ms)
+[ RUN      ] Diagnostics.startsWithNothingRecorded
+[       OK ] Diagnostics.startsWithNothingRecorded (0 ms)
+[ RUN      ] Diagnostics.nonErrorSeveritiesAreNotFatal
+driver info: just so you know
+[       OK ] Diagnostics.nonErrorSeveritiesAreNotFatal (0 ms)
+[ RUN      ] Diagnostics.anErrorIsRaisedWithItsContextAndText
+driver warning: that looks odd
+driver error: GL_INVALID_ENUM in glEnable
+driver error: boom
+driver error: first failure
+[       OK ] Diagnostics.anErrorIsRaisedWithItsContextAndText (0 ms)
+[ RUN      ] Diagnostics.raisingClearsTheError
+[       OK ] Diagnostics.raisingClearsTheError (0 ms)
+[ RUN      ] Diagnostics.theFirstErrorIsTheOneReported
+driver error: second failure
+[       OK ] Diagnostics.theFirstErrorIsTheOneReported (0 ms)
+[ RUN      ] Diagnostics.repeatedMessagesAreRecordedOnce
+driver warning: same complaint
+[       OK ] Diagnostics.repeatedMessagesAreRecordedOnce (0 ms)
+[ RUN      ] Diagnostics.distinctMessagesAreEachKept
+driver warning: one
+driver warning: two
+[       OK ] Diagnostics.distinctMessagesAreEachKept (0 ms)
+[ RUN      ] Diagnostics.rememberedMessagesAreBounded
+[       OK ] Diagnostics.rememberedMessagesAreBounded (0 ms)
+[ RUN      ] Diagnostics.errorsAreStillCaughtAfterTheDedupeCapIsReached
+[       OK ] Diagnostics.errorsAreStillCaughtAfterTheDedupeCapIsReached (0 ms)
+[ RUN      ] Diagnostics.outsideStrictModeAnErrorIsNotFatal
+[       OK ] Diagnostics.outsideStrictModeAnErrorIsNotFatal (0 ms)
+[ RUN      ] Diagnostics.aNonFatalErrorIsStillDrainable
+[       OK ] Diagnostics.aNonFatalErrorIsStillDrainable (0 ms)
+[ RUN      ] Diagnostics.drainReturnsWhatWasRecordedAndThenNothing
+driver error: GL_INVALID_ENUM in glEnable
+driver error: GL_INVALID_ENUM in glEnable
+driver warning: first
+[       OK ] Diagnostics.drainReturnsWhatWasRecordedAndThenNothing (0 ms)
+[ RUN      ] Diagnostics.drainDoesNotRepeatADeduplicatedMessage
+[       OK ] Diagnostics.drainDoesNotRepeatADeduplicatedMessage (0 ms)
+[ RUN      ] Diagnostics.undrainedMessagesAreBounded
+driver info: second
+driver warning: same complaint
+[       OK ] Diagnostics.undrainedMessagesAreBounded (0 ms)
+[ RUN      ] Diagnostics.clearForgetsEverything
+driver error: boom
+[       OK ] Diagnostics.clearForgetsEverything (0 ms)
+[ RUN      ] Diagnostics.concurrentRecordingIsSafe
+[       OK ] Diagnostics.concurrentRecordingIsSafe (4 ms)
+[----------] 18 tests from Diagnostics (8 ms total)
+
+[----------] 10 tests from ClickableRegistryTest
+[ RUN      ] ClickableRegistryTest.CompileTimeStaticTagGeneration
+[       OK ] ClickableRegistryTest.CompileTimeStaticTagGeneration (0 ms)
+[ RUN      ] ClickableRegistryTest.StaticTagMultiKind
+[       OK ] ClickableRegistryTest.StaticTagMultiKind (0 ms)
+[ RUN      ] ClickableRegistryTest.RegisterExplicitAndDispatch
+[       OK ] ClickableRegistryTest.RegisterExplicitAndDispatch (0 ms)
+[ RUN      ] ClickableRegistryTest.RegisterAutoAndDispatch
+[       OK ] ClickableRegistryTest.RegisterAutoAndDispatch (0 ms)
+[ RUN      ] ClickableRegistryTest.DynamicLabels
+[       OK ] ClickableRegistryTest.DynamicLabels (0 ms)
+[ RUN      ] ClickableRegistryTest.OverlayDispatchWithTagBase
+[       OK ] ClickableRegistryTest.OverlayDispatchWithTagBase (0 ms)
+[ RUN      ] ClickableRegistryTest.PageControlDispatch
+[       OK ] ClickableRegistryTest.PageControlDispatch (0 ms)
+[ RUN      ] ClickableRegistryTest.GlyphControlAndSpanDispatch
+[       OK ] ClickableRegistryTest.GlyphControlAndSpanDispatch (0 ms)
+[ RUN      ] ClickableRegistryTest.RichPickingCallbacks
+[       OK ] ClickableRegistryTest.RichPickingCallbacks (0 ms)
+[ RUN      ] ClickableRegistryTest.MultiKindSeparation
+[       OK ] ClickableRegistryTest.MultiKindSeparation (0 ms)
+[----------] 10 tests from ClickableRegistryTest (0 ms total)
+
+[----------] 32 tests from TextLayoutTest
+[ RUN      ] TextLayoutTest.FontManagerLoadsStandardFont
+[       OK ] TextLayoutTest.FontManagerLoadsStandardFont (0 ms)
+[ RUN      ] TextLayoutTest.LayoutSingleLineProducesValidShaping
+[       OK ] TextLayoutTest.LayoutSingleLineProducesValidShaping (0 ms)
+[ RUN      ] TextLayoutTest.LayoutMultiLineWrapsOnWidth
+[       OK ] TextLayoutTest.LayoutMultiLineWrapsOnWidth (0 ms)
+[ RUN      ] TextLayoutTest.LayoutPaginatesOnMaxHeight
+[       OK ] TextLayoutTest.LayoutPaginatesOnMaxHeight (0 ms)
+[ RUN      ] TextLayoutTest.glyphsOutsideAnyDecoratedRangeCarryNone
+[       OK ] TextLayoutTest.glyphsOutsideAnyDecoratedRangeCarryNone (0 ms)
+[ RUN      ] TextLayoutTest.glyphsWithinADecoratedRangeCarryIt
+[       OK ] TextLayoutTest.glyphsWithinADecoratedRangeCarryIt (0 ms)
+[ RUN      ] TextLayoutTest.overlappingDecoratedRangesCombine
+[       OK ] TextLayoutTest.overlappingDecoratedRangesCombine (0 ms)
+[ RUN      ] TextLayoutTest.MultiFontFallbackShaping
+[       OK ] TextLayoutTest.MultiFontFallbackShaping (1 ms)
+[ RUN      ] TextLayoutTest.PageGeometryIsEchoedBackUnchanged
+[       OK ] TextLayoutTest.PageGeometryIsEchoedBackUnchanged (0 ms)
+[ RUN      ] TextLayoutTest.UnnamedPageDefaultsToFitContentAndIsNotEchoedAsFixed
+[       OK ] TextLayoutTest.UnnamedPageDefaultsToFitContentAndIsNotEchoedAsFixed (0 ms)
+[ RUN      ] TextLayoutTest.BlockBoxConsumesHeightAndIsReportedInShapingBoxes
+[       OK ] TextLayoutTest.BlockBoxConsumesHeightAndIsReportedInShapingBoxes (0 ms)
+[ RUN      ] TextLayoutTest.BlockBoxMovesWholeToNextPageWhenItDoesNotFit
+[       OK ] TextLayoutTest.BlockBoxMovesWholeToNextPageWhenItDoesNotFit (0 ms)
+[ RUN      ] TextLayoutTest.BlockBoxCentresUnderACentreBlockStyleRange
+[       OK ] TextLayoutTest.BlockBoxCentresUnderACentreBlockStyleRange (0 ms)
+[ RUN      ] TextLayoutTest.TextWrapsBesideAFloat
+[       OK ] TextLayoutTest.TextWrapsBesideAFloat (0 ms)
+[ RUN      ] TextLayoutTest.FloatRetiresBelowItsBottom
+[       OK ] TextLayoutTest.FloatRetiresBelowItsBottom (0 ms)
+[ RUN      ] TextLayoutTest.TwoFloatsStackBesideEachOtherWhenTheColumnHasRoom
+[       OK ] TextLayoutTest.TwoFloatsStackBesideEachOtherWhenTheColumnHasRoom (0 ms)
+[ RUN      ] TextLayoutTest.ASecondFloatThatDoesNotFitBesideTheFirstDropsBelowIt
+[       OK ] TextLayoutTest.ASecondFloatThatDoesNotFitBesideTheFirstDropsBelowIt (0 ms)
+[ RUN      ] TextLayoutTest.OverWideFloatClampsToTheColumn
+[       OK ] TextLayoutTest.OverWideFloatClampsToTheColumn (0 ms)
+[ RUN      ] TextLayoutTest.ALineWithNoUsableBandPushesPastTheShorterFloat
+[       OK ] TextLayoutTest.ALineWithNoUsableBandPushesPastTheShorterFloat (0 ms)
+[ RUN      ] TextLayoutTest.FloatMovesWholeToNextPageWhenItDoesNotFit
+[       OK ] TextLayoutTest.FloatMovesWholeToNextPageWhenItDoesNotFit (0 ms)
+[ RUN      ] TextLayoutTest.InlineBoxAdvancesThePenAndIsSkippedByLaterGlyphs
+[       OK ] TextLayoutTest.InlineBoxAdvancesThePenAndIsSkippedByLaterGlyphs (0 ms)
+[ RUN      ] TextLayoutTest.InlineBoxIsPlacedRelativeToTheBaselineWithBaselineOffsetPx
+[       OK ] TextLayoutTest.InlineBoxIsPlacedRelativeToTheBaselineWithBaselineOffsetPx (0 ms)
+[ RUN      ] TextLayoutTest.InlineBoxGrowsTheLinesBarHeightAndPushesTheNextLineDown
+[       OK ] TextLayoutTest.InlineBoxGrowsTheLinesBarHeightAndPushesTheNextLineDown (0 ms)
+[ RUN      ] TextLayoutTest.InlineBoxFlushOnTheBaselineDoesNotGrowBarHeight
+[       OK ] TextLayoutTest.InlineBoxFlushOnTheBaselineDoesNotGrowBarHeight (0 ms)
+[ RUN      ] TextLayoutTest.LeftAlignmentIsUnchangedByDefault
+[       OK ] TextLayoutTest.LeftAlignmentIsUnchangedByDefault (0 ms)
+[ RUN      ] TextLayoutTest.RightAlignedLineSitsFlushWithTheBandsRightEdge
+[       OK ] TextLayoutTest.RightAlignedLineSitsFlushWithTheBandsRightEdge (0 ms)
+[ RUN      ] TextLayoutTest.CentreAlignedLineSitsInTheMiddleOfTheBand
+[       OK ] TextLayoutTest.CentreAlignedLineSitsInTheMiddleOfTheBand (0 ms)
+[ RUN      ] TextLayoutTest.JustifyStretchesInterWordSpacesToFillTheBand
+[       OK ] TextLayoutTest.JustifyStretchesInterWordSpacesToFillTheBand (0 ms)
+[ RUN      ] TextLayoutTest.JustifyLeavesAParagraphsLastLineRagged
+[       OK ] TextLayoutTest.JustifyLeavesAParagraphsLastLineRagged (0 ms)
+[ RUN      ] TextLayoutTest.JustifyWithNoSpacesFallsBackToLeft
+[       OK ] TextLayoutTest.JustifyWithNoSpacesFallsBackToLeft (0 ms)
+[ RUN      ] TextLayoutTest.TrailingSpacesDoNotShiftARightAlignedLinesInk
+[       OK ] TextLayoutTest.TrailingSpacesDoNotShiftARightAlignedLinesInk (0 ms)
+[ RUN      ] TextLayoutTest.RetainedFontSurvivesItsCreatingThread
+[       OK ] TextLayoutTest.RetainedFontSurvivesItsCreatingThread (0 ms)
+[----------] 32 tests from TextLayoutTest (4 ms total)
+
+[----------] 3 tests from MimeTypeTest
+[ RUN      ] MimeTypeTest.ParseStandardMimeTypes
+[       OK ] MimeTypeTest.ParseStandardMimeTypes (0 ms)
+[ RUN      ] MimeTypeTest.DetectPngBuffer
+[       OK ] MimeTypeTest.DetectPngBuffer (0 ms)
+[ RUN      ] MimeTypeTest.DetectTextBuffer
+[       OK ] MimeTypeTest.DetectTextBuffer (1 ms)
+[----------] 3 tests from MimeTypeTest (2 ms total)
+
+[----------] 2 tests from GifDecoderTest
+[ RUN      ] GifDecoderTest.DecodeMultiFrameGif
+[       OK ] GifDecoderTest.DecodeMultiFrameGif (0 ms)
+[ RUN      ] GifDecoderTest.DecodeInvalidBytesReturnsNull
+[       OK ] GifDecoderTest.DecodeInvalidBytesReturnsNull (0 ms)
+[----------] 2 tests from GifDecoderTest (0 ms total)
+
+[----------] 6 tests from TextDiagnosticsTest
+[ RUN      ] TextDiagnosticsTest.SingleLineOverloadsCountOneLayoutEach
+[       OK ] TextDiagnosticsTest.SingleLineOverloadsCountOneLayoutEach (0 ms)
+[ RUN      ] TextDiagnosticsTest.EmptyTextAndMissingFontNeverCallHarfBuzz
+[       OK ] TextDiagnosticsTest.EmptyTextAndMissingFontNeverCallHarfBuzz (0 ms)
+[ RUN      ] TextDiagnosticsTest.NestedCaptureRestoresItsOuterCapture
+[       OK ] TextDiagnosticsTest.NestedCaptureRestoresItsOuterCapture (0 ms)
+[ RUN      ] TextDiagnosticsTest.DisabledCaptureLeavesOuterCaptureActive
+[       OK ] TextDiagnosticsTest.DisabledCaptureLeavesOuterCaptureActive (0 ms)
+[ RUN      ] TextDiagnosticsTest.CaptureDoesNotLeakAcrossThreads
+[       OK ] TextDiagnosticsTest.CaptureDoesNotLeakAcrossThreads (0 ms)
+[ RUN      ] TextDiagnosticsTest.CompletedCaptureDoesNotPolluteNextCapture
+[       OK ] TextDiagnosticsTest.CompletedCaptureDoesNotPolluteNextCapture (0 ms)
+[----------] 6 tests from TextDiagnosticsTest (0 ms total)
+
+[----------] 4 tests from A11yTextTest
+[ RUN      ] A11yTextTest.everyCharacterIsMeasuredInBytes
+[       OK ] A11yTextTest.everyCharacterIsMeasuredInBytes (0 ms)
+[ RUN      ] A11yTextTest.textThatIsNotQuiteUtf8IsStillDescribable
+[       OK ] A11yTextTest.textThatIsNotQuiteUtf8IsStillDescribable (0 ms)
+[ RUN      ] A11yTextTest.aByteOffsetBecomesACharacterIndex
+[       OK ] A11yTextTest.aByteOffsetBecomesACharacterIndex (0 ms)
+[ RUN      ] A11yTextTest.anOffsetInsideACharacterNamesThatCharacter
+[       OK ] A11yTextTest.anOffsetInsideACharacterNamesThatCharacter (0 ms)
+[----------] 4 tests from A11yTextTest (0 ms total)
+
+[----------] 4 tests from A11yWordTest
+[ RUN      ] A11yWordTest.aWordBeginsWhereTheSpaceBeforeItEnds
+[       OK ] A11yWordTest.aWordBeginsWhereTheSpaceBeforeItEnds (0 ms)
+[ RUN      ] A11yWordTest.leadingWhitespaceIsAWordOfItsOwn
+[       OK ] A11yWordTest.leadingWhitespaceIsAWordOfItsOwn (0 ms)
+[ RUN      ] A11yWordTest.aRunOfNothingButSpacesIsStillOneWord
+[       OK ] A11yWordTest.aRunOfNothingButSpacesIsStillOneWord (0 ms)
+[ RUN      ] A11yWordTest.wordsAreCountedInCharactersRatherThanBytes
+[       OK ] A11yWordTest.wordsAreCountedInCharactersRatherThanBytes (0 ms)
+[----------] 4 tests from A11yWordTest (0 ms total)
+
+[----------] 7 tests from A11yRunTest
+[ RUN      ] A11yRunTest.aRunIsALineAndKeepsItsLineBreak
+[       OK ] A11yRunTest.aRunIsALineAndKeepsItsLineBreak (0 ms)
+[ RUN      ] A11yRunTest.emptyTextIsOneEmptyRun
+[       OK ] A11yRunTest.emptyTextIsOneEmptyRun (0 ms)
+[ RUN      ] A11yRunTest.aLineTooLongToDescribeIsCut
+[       OK ] A11yRunTest.aLineTooLongToDescribeIsCut (0 ms)
+[ RUN      ] A11yRunTest.aCutFallsOnAGapWhereThereIsOne
+[       OK ] A11yRunTest.aCutFallsOnAGapWhereThereIsOne (0 ms)
+[ RUN      ] A11yRunTest.aVeryLongWordIsCutAnywayRatherThanLeftUndescribable
+[       OK ] A11yRunTest.aVeryLongWordIsCutAnywayRatherThanLeftUndescribable (0 ms)
+[ RUN      ] A11yRunTest.everyRunTogetherIsTheWholeText
+[       OK ] A11yRunTest.everyRunTogetherIsTheWholeText (0 ms)
+[ RUN      ] A11yRunTest.trailingNewlineKeepsAnEmptyCaretRun
+[       OK ] A11yRunTest.trailingNewlineKeepsAnEmptyCaretRun (0 ms)
+[----------] 7 tests from A11yRunTest (0 ms total)
+
+[----------] 1 test from A11yIdsTest
+[ RUN      ] A11yIdsTest.anIdSaysWhoseItIs
+[       OK ] A11yIdsTest.anIdSaysWhoseItIs (0 ms)
+[----------] 1 test from A11yIdsTest (0 ms total)
+
+[----------] 7 tests from A11yPublisherTest
+[ RUN      ] A11yPublisherTest.everySourceHangsOffOneWindow
+[       OK ] A11yPublisherTest.everySourceHangsOffOneWindow (0 ms)
+[ RUN      ] A11yPublisherTest.nothingIsRebuiltWhileNothingChanges
+[       OK ] A11yPublisherTest.nothingIsRebuiltWhileNothingChanges (0 ms)
+[ RUN      ] A11yPublisherTest.theWindowTitleIsWhatTheWindowIsCalled
+[       OK ] A11yPublisherTest.theWindowTitleIsWhatTheWindowIsCalled (0 ms)
+[ RUN      ] A11yPublisherTest.aTreeCanBeReadAsText
+[       OK ] A11yPublisherTest.aTreeCanBeReadAsText (0 ms)
+[ RUN      ] A11yPublisherTest.diagnosticValuesAreBoundedWithoutChangingAtValues
+[       OK ] A11yPublisherTest.diagnosticValuesAreBoundedWithoutChangingAtValues (1 ms)
+[ RUN      ] A11yPublisherTest.diagnosticPreviewDoesNotSplitAnOversizedGrapheme
+[       OK ] A11yPublisherTest.diagnosticPreviewDoesNotSplitAnOversizedGrapheme (0 ms)
+[ RUN      ] A11yPublisherTest.withNoPlatformThereIsNothingToDoAndNothingBreaks
+[       OK ] A11yPublisherTest.withNoPlatformThereIsNothingToDoAndNothingBreaks (0 ms)
+[----------] 7 tests from A11yPublisherTest (1 ms total)
+
+[----------] 6 tests from TextEllipsisTest
+[ RUN      ] TextEllipsisTest.SingleLineDoesNotWrapAndMarkerConsumesNoSource
+[       OK ] TextEllipsisTest.SingleLineDoesNotWrapAndMarkerConsumesNoSource (0 ms)
+[ RUN      ] TextEllipsisTest.LastVisibleLineEllipsizesButPaginationStillContinues
+[       OK ] TextEllipsisTest.LastVisibleLineEllipsizesButPaginationStillContinues (0 ms)
+[ RUN      ] TextEllipsisTest.DecorationsAndNamedPageSurviveFitting
+[       OK ] TextEllipsisTest.DecorationsAndNamedPageSurviveFitting (0 ms)
+[ RUN      ] TextEllipsisTest.StyledLineKeepsItsIndentAndFitsMarker
+[       OK ] TextEllipsisTest.StyledLineKeepsItsIndentAndFitsMarker (0 ms)
+[ RUN      ] TextEllipsisTest.StyledEllipsisKeepsRightAlignment
+[       OK ] TextEllipsisTest.StyledEllipsisKeepsRightAlignment (0 ms)
+[ RUN      ] TextEllipsisTest.EarlierMediaReservationSurvivesLastLineEllipsis
+[       OK ] TextEllipsisTest.EarlierMediaReservationSurvivesLastLineEllipsis (0 ms)
+[----------] 6 tests from TextEllipsisTest (1 ms total)
+
+[----------] 18 tests from CommandTableTest
+[ RUN      ] CommandTableTest.anUnboundKeyDoesNothing
+[       OK ] CommandTableTest.anUnboundKeyDoesNothing (0 ms)
+[ RUN      ] CommandTableTest.aBoundKeyRuns
+[       OK ] CommandTableTest.aBoundKeyRuns (0 ms)
+[ RUN      ] CommandTableTest.otherKeysAreLeftAlone
+[       OK ] CommandTableTest.otherKeysAreLeftAlone (0 ms)
+[ RUN      ] CommandTableTest.aScopedBindingWinsOnlyInItsScope
+[       OK ] CommandTableTest.aScopedBindingWinsOnlyInItsScope (0 ms)
+[ RUN      ] CommandTableTest.aScopedBindingIsDeadOutsideItsScope
+[       OK ] CommandTableTest.aScopedBindingIsDeadOutsideItsScope (0 ms)
+[ RUN      ] CommandTableTest.conflictsAreOnlyWithinOneScope
+[       OK ] CommandTableTest.conflictsAreOnlyWithinOneScope (0 ms)
+[ RUN      ] CommandTableTest.modifiersMustMatchExactly
+[       OK ] CommandTableTest.modifiersMustMatchExactly (0 ms)
+[ RUN      ] CommandTableTest.combinedModifiersAreDistinct
+[       OK ] CommandTableTest.combinedModifiersAreDistinct (0 ms)
+[ RUN      ] CommandTableTest.theFirstMatchingBindingWins
+[       OK ] CommandTableTest.theFirstMatchingBindingWins (0 ms)
+[ RUN      ] CommandTableTest.aBindingWithNothingToRunIsNotDispatched
+[       OK ] CommandTableTest.aBindingWithNothingToRunIsNotDispatched (0 ms)
+[ RUN      ] CommandTableTest.helpNamesEveryBinding
+[       OK ] CommandTableTest.helpNamesEveryBinding (0 ms)
+[ RUN      ] CommandTableTest.everyBindingIsListed
+[       OK ] CommandTableTest.everyBindingIsListed (0 ms)
+[ RUN      ] CommandTableTest.rebindSingleAction
+[       OK ] CommandTableTest.rebindSingleAction (0 ms)
+[ RUN      ] CommandTableTest.registerOrRebindAction
+[       OK ] CommandTableTest.registerOrRebindAction (0 ms)
+[ RUN      ] CommandTableTest.rebindFromText
+[       OK ] CommandTableTest.rebindFromText (0 ms)
+[ RUN      ] CommandTableTest.parseKeyComboVarious
+[       OK ] CommandTableTest.parseKeyComboVarious (0 ms)
+[ RUN      ] CommandTableTest.aFormattedComboParsesBackToItself
+[       OK ] CommandTableTest.aFormattedComboParsesBackToItself (0 ms)
+[ RUN      ] CommandTableTest.aColonIsTheShiftedSemicolonKey
+[       OK ] CommandTableTest.aColonIsTheShiftedSemicolonKey (0 ms)
+[----------] 18 tests from CommandTableTest (0 ms total)
+
+[----------] 1 test from MouseWheelTest
+[ RUN      ] MouseWheelTest.WheelHelpersExtractCoordinates
+[       OK ] MouseWheelTest.WheelHelpersExtractCoordinates (0 ms)
+[----------] 1 test from MouseWheelTest (0 ms total)
+
+[----------] 7 tests from UiMetricsTest
+[ RUN      ] UiMetricsTest.ScalesLengthsAndFontsIndependently
+[       OK ] UiMetricsTest.ScalesLengthsAndFontsIndependently (0 ms)
+[ RUN      ] UiMetricsTest.SafeAreaCombinesChromeAndSymmetricMargin
+[       OK ] UiMetricsTest.SafeAreaCombinesChromeAndSymmetricMargin (0 ms)
+[ RUN      ] UiMetricsTest.ImpossibleChromeStillProducesContainedEmptyArea
+[       OK ] UiMetricsTest.ImpossibleChromeStillProducesContainedEmptyArea (0 ms)
+[ RUN      ] UiMetricsTest.InvalidScaleAndInsetsDoNotCreateInvalidGeometry
+[       OK ] UiMetricsTest.InvalidScaleAndInsetsDoNotCreateInvalidGeometry (0 ms)
+[ RUN      ] UiMetricsTest.RoundedSharedEdgesStayAdjacentAtAllScales
+[       OK ] UiMetricsTest.RoundedSharedEdgesStayAdjacentAtAllScales (0 ms)
+[ RUN      ] UiMetricsTest.PlacementFlipsAboveAnchorAndClampsLargePanel
+[       OK ] UiMetricsTest.PlacementFlipsAboveAnchorAndClampsLargePanel (0 ms)
+[ RUN      ] UiMetricsTest.LegacyFontOverridesScaleWithoutLosingFamilyOrStyle
+[       OK ] UiMetricsTest.LegacyFontOverridesScaleWithoutLosingFamilyOrStyle (0 ms)
+[----------] 7 tests from UiMetricsTest (0 ms total)
+
+[----------] 11 tests from UiLayoutTest
+[ RUN      ] UiLayoutTest.FlowWrapsWholeItemsInReadingOrder
+[       OK ] UiLayoutTest.FlowWrapsWholeItemsInReadingOrder (0 ms)
+[ RUN      ] UiLayoutTest.WeightedGrowthRedistributesSaturatedShare
+[       OK ] UiLayoutTest.WeightedGrowthRedistributesSaturatedShare (0 ms)
+[ RUN      ] UiLayoutTest.ShrinkRespectsMinimaWhenTheyFit
+[       OK ] UiLayoutTest.ShrinkRespectsMinimaWhenTheyFit (0 ms)
+[ RUN      ] UiLayoutTest.ImpossibleMinimaAndGapsShrinkInsideFractionalBounds
+[       OK ] UiLayoutTest.ImpossibleMinimaAndGapsShrinkInsideFractionalBounds (0 ms)
+[ RUN      ] UiLayoutTest.GridRoundsCumulativeBoundariesWithoutGaps
+[       OK ] UiLayoutTest.GridRoundsCumulativeBoundariesWithoutGaps (0 ms)
+[ RUN      ] UiLayoutTest.SplitKeepsMinimaAndReadingOrderOnBothAxes
+[       OK ] UiLayoutTest.SplitKeepsMinimaAndReadingOrderOnBothAxes (0 ms)
+[ RUN      ] UiLayoutTest.InputAreaAndHitTestUseTheSameResolvedBox
+[       OK ] UiLayoutTest.InputAreaAndHitTestUseTheSameResolvedBox (0 ms)
+[ RUN      ] UiLayoutTest.DisabledAndClippedItemsAreAbsentFromFocusOrder
+[       OK ] UiLayoutTest.DisabledAndClippedItemsAreAbsentFromFocusOrder (0 ms)
+[ RUN      ] UiLayoutTest.DuplicateIdsCannotCreateAmbiguousHitTargets
+[       OK ] UiLayoutTest.DuplicateIdsCannotCreateAmbiguousHitTargets (0 ms)
+[ RUN      ] UiLayoutTest.EmptyAndInvalidInputsStillHaveFiniteContainedGeometry
+[       OK ] UiLayoutTest.EmptyAndInvalidInputsStillHaveFiniteContainedGeometry (0 ms)
+[ RUN      ] UiLayoutTest.ResponsivePropertyMatrixKeepsEveryBoxInsideSafeArea
+[       OK ] UiLayoutTest.ResponsivePropertyMatrixKeepsEveryBoxInsideSafeArea (7 ms)
+[----------] 11 tests from UiLayoutTest (7 ms total)
+
+[----------] 2 tests from SvgCacheTest
+[ RUN      ] SvgCacheTest.PeekSizeFailsOnEmptyBytes
+[       OK ] SvgCacheTest.PeekSizeFailsOnEmptyBytes (0 ms)
+[ RUN      ] SvgCacheTest.PeekSizeFailsOnGarbageBytes
+[       OK ] SvgCacheTest.PeekSizeFailsOnGarbageBytes (0 ms)
+[----------] 2 tests from SvgCacheTest (0 ms total)
+
+[----------] 9 tests from VertexRecord
+[ RUN      ] VertexRecord.isTwentyFourBytesAndDescribedAsSuch
+[       OK ] VertexRecord.isTwentyFourBytesAndDescribedAsSuch (0 ms)
+[ RUN      ] VertexRecord.aQuadSaysItsSizeItsLayerAndItsKind
+[       OK ] VertexRecord.aQuadSaysItsSizeItsLayerAndItsKind (0 ms)
+[ RUN      ] VertexRecord.inkKeepsAllEightBitsOfEveryChannel
+[       OK ] VertexRecord.inkKeepsAllEightBitsOfEveryChannel (0 ms)
+[ RUN      ] VertexRecord.flagsRideInTheByteTheAlphaUsedToOccupy
+[       OK ] VertexRecord.flagsRideInTheByteTheAlphaUsedToOccupy (0 ms)
+[ RUN      ] VertexRecord.paperRoundsAndWhiteStaysWhite
+[       OK ] VertexRecord.paperRoundsAndWhiteStaysWhite (0 ms)
+[ RUN      ] VertexRecord.theClusterSharesAWordWithPaperWithoutTouchingIt
+[       OK ] VertexRecord.theClusterSharesAWordWithPaperWithoutTouchingIt (0 ms)
+[ RUN      ] VertexRecord.atlasCoordinatesSurviveALargeAtlas
+[       OK ] VertexRecord.atlasCoordinatesSurviveALargeAtlas (0 ms)
+[ RUN      ] VertexRecord.aZeroedRowIsAQuadWithNothingInIt
+[       OK ] VertexRecord.aZeroedRowIsAQuadWithNothingInIt (0 ms)
+[ RUN      ] VertexRecord.theDrawsIdentityAndTheQuadsKindRebuildTheWholeTag
+[       OK ] VertexRecord.theDrawsIdentityAndTheQuadsKindRebuildTheWholeTag (0 ms)
+[----------] 9 tests from VertexRecord (0 ms total)
+
+[----------] 6 tests from LayoutfiladeTest
+[ RUN      ] LayoutfiladeTest.MonoidAxiomsAndAction
+[       OK ] LayoutfiladeTest.MonoidAxiomsAndAction (0 ms)
+[ RUN      ] LayoutfiladeTest.CoordinateDescentAndR9
+[       OK ] LayoutfiladeTest.CoordinateDescentAndR9 (0 ms)
+[ RUN      ] LayoutfiladeTest.RichMediaBoxHandling
+[       OK ] LayoutfiladeTest.RichMediaBoxHandling (0 ms)
+[ RUN      ] LayoutfiladeTest.FromTextAndBoxes
+[       OK ] LayoutfiladeTest.FromTextAndBoxes (0 ms)
+[ RUN      ] LayoutfiladeTest.VisibleRangeViewportCulling
+[       OK ] LayoutfiladeTest.VisibleRangeViewportCulling (0 ms)
+[ RUN      ] LayoutfiladeTest.IncrementalInvalidationAndResize
+[       OK ] LayoutfiladeTest.IncrementalInvalidationAndResize (0 ms)
+[----------] 6 tests from LayoutfiladeTest (1 ms total)
+
+[----------] 11 tests from ScreenOverlayTest
+[ RUN      ] ScreenOverlayTest.layoutDrawPickAndAccessibilityShareTheSameBounds
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+glyph cache: atlas 512x512 x1 -> 1024x1024 x1 (286 glyphs, 253240 texels placed, largest 52x44, 1 palettes)
+glyph cache: atlas 1024x1024 x1 -> 2048x2048 x1 (567 glyphs, 730129 texels placed, largest 92x72, 1 palettes)
+[       OK ] ScreenOverlayTest.layoutDrawPickAndAccessibilityShareTheSameBounds (703 ms)
+[ RUN      ] ScreenOverlayTest.unchangedFramesReuseTheLayoutAndNeverShapeText
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] ScreenOverlayTest.unchangedFramesReuseTheLayoutAndNeverShapeText (17 ms)
+[ RUN      ] ScreenOverlayTest.metricsThemeAndContentChangesInvalidateExactlyOnce
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] ScreenOverlayTest.metricsThemeAndContentChangesInvalidateExactlyOnce (1 ms)
+[ RUN      ] ScreenOverlayTest.focusDrawingRetainsTextBatchesAndStaysInsideBoxes
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] ScreenOverlayTest.focusDrawingRetainsTextBatchesAndStaysInsideBoxes (4 ms)
+[ RUN      ] ScreenOverlayTest.hiddenOverlaysDrawAndExposeNothing
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] ScreenOverlayTest.hiddenOverlaysDrawAndExposeNothing (0 ms)
+[ RUN      ] ScreenOverlayTest.fractionalSafeAreaEdgesStillContainEveryDrawnQuad
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] ScreenOverlayTest.fractionalSafeAreaEdgesStillContainEveryDrawnQuad (0 ms)
+[ RUN      ] ScreenOverlayTest.drawnPickingIdentityActivatesOnlyItsOwningOverlay
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] ScreenOverlayTest.drawnPickingIdentityActivatesOnlyItsOwningOverlay (0 ms)
+[ RUN      ] ScreenOverlayTest.asynchronousPicksKeepFullIdsAcrossReorderingAndRemoval
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] ScreenOverlayTest.asynchronousPicksKeepFullIdsAcrossReorderingAndRemoval (38 ms)
+[ RUN      ] ScreenOverlayTest.accessibilityEditingUsesTheSameActionPathAsTyping
+[       OK ] ScreenOverlayTest.accessibilityEditingUsesTheSameActionPathAsTyping (0 ms)
+[ RUN      ] ScreenOverlayTest.scrolledTextFieldsCropInkAtTheirVisibleViewport
+[       OK ] ScreenOverlayTest.scrolledTextFieldsCropInkAtTheirVisibleViewport (1 ms)
+[ RUN      ] ScreenOverlayTest.legacyFrameContextsUseTheirScreenDimensionsForLayout
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] ScreenOverlayTest.legacyFrameContextsUseTheirScreenDimensionsForLayout (0 ms)
+[----------] 11 tests from ScreenOverlayTest (771 ms total)
+
+[----------] 7 tests from OnionSkinTest
+[ RUN      ] OnionSkinTest.ActiveFrontDocumentIsAtOriginWithFullOpacity
+[       OK ] OnionSkinTest.ActiveFrontDocumentIsAtOriginWithFullOpacity (0 ms)
+[ RUN      ] OnionSkinTest.BackgroundDocumentsCascadeInDepthAndStagger
+[       OK ] OnionSkinTest.BackgroundDocumentsCascadeInDepthAndStagger (0 ms)
+[ RUN      ] OnionSkinTest.OpacityDecayClampsAtFloorForDeepStacks
+[       OK ] OnionSkinTest.OpacityDecayClampsAtFloorForDeepStacks (0 ms)
+[ RUN      ] OnionSkinTest.ScrollWheelCyclingWrapsForwardAndBackward
+[       OK ] OnionSkinTest.ScrollWheelCyclingWrapsForwardAndBackward (0 ms)
+[ RUN      ] OnionSkinTest.BackToFrontDepthSortingOrder
+[       OK ] OnionSkinTest.BackToFrontDepthSortingOrder (0 ms)
+[ RUN      ] OnionSkinTest.TimelineOpacityRampInterpolation
+[       OK ] OnionSkinTest.TimelineOpacityRampInterpolation (0 ms)
+[ RUN      ] OnionSkinTest.AppStateWheelHandlerInterception
+[       OK ] OnionSkinTest.AppStateWheelHandlerInterception (0 ms)
+[----------] 7 tests from OnionSkinTest (0 ms total)
+
+[----------] 16 tests from CanvasImageTest
+[ RUN      ] CanvasImageTest.degenerateOrInvalidImagesAddNothing
+[       OK ] CanvasImageTest.degenerateOrInvalidImagesAddNothing (0 ms)
+[ RUN      ] CanvasImageTest.anImageRowCarriesTheResourcesUvRectVerbatim
+[       OK ] CanvasImageTest.anImageRowCarriesTheResourcesUvRectVerbatim (0 ms)
+[ RUN      ] CanvasImageTest.thePickingIndexIsWhateverSetTagLastSaid
+[       OK ] CanvasImageTest.thePickingIndexIsWhateverSetTagLastSaid (0 ms)
+[ RUN      ] CanvasImageTest.addRectStaysOnTheGlyphStreamAlone
+[       OK ] CanvasImageTest.addRectStaysOnTheGlyphStreamAlone (0 ms)
+[ RUN      ] CanvasImageTest.clearingDropsPreviouslyCommittedImages
+[       OK ] CanvasImageTest.clearingDropsPreviouslyCommittedImages (0 ms)
+[ RUN      ] CanvasImageTest.drawBindsTheImagesOwnAtlas
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] CanvasImageTest.drawBindsTheImagesOwnAtlas (0 ms)
+[ RUN      ] CanvasImageTest.NestedClipsIntersectAndPopRestoresTheParent
+[       OK ] CanvasImageTest.NestedClipsIntersectAndPopRestoresTheParent (0 ms)
+[ RUN      ] CanvasImageTest.DisjointClipDrawsNothingAndClearResetsTheStack
+[       OK ] CanvasImageTest.DisjointClipDrawsNothingAndClearResetsTheStack (0 ms)
+[ RUN      ] CanvasImageTest.InvalidClipsAreRefusedWithoutChangingTheStack
+[       OK ] CanvasImageTest.InvalidClipsAreRefusedWithoutChangingTheStack (0 ms)
+[ RUN      ] CanvasImageTest.ImageClippingInterpolatesUvOnAllFourEdges
+[       OK ] CanvasImageTest.ImageClippingInterpolatesUvOnAllFourEdges (0 ms)
+[ RUN      ] CanvasImageTest.RetainedGlyphClippingPreservesAtlasSamplingAndIdentity
+[       OK ] CanvasImageTest.RetainedGlyphClippingPreservesAtlasSamplingAndIdentity (0 ms)
+[ RUN      ] CanvasImageTest.BoxedTextFitsCachesAndRestoresTheEnclosingClip
+[       OK ] CanvasImageTest.BoxedTextFitsCachesAndRestoresTheEnclosingClip (0 ms)
+[ RUN      ] CanvasImageTest.EmptyBoxNeverUsesTheUnboundedFitConvention
+[       OK ] CanvasImageTest.EmptyBoxNeverUsesTheUnboundedFitConvention (0 ms)
+[ RUN      ] CanvasImageTest.ClipModeKeepsAndCropsAPartialCluster
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] CanvasImageTest.ClipModeKeepsAndCropsAPartialCluster (0 ms)
+[ RUN      ] CanvasImageTest.ExplicitBoxDrawsOneBoundedLine
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] CanvasImageTest.ExplicitBoxDrawsOneBoundedLine (0 ms)
+[ RUN      ] CanvasImageTest.NarrowerFitConstraintAlsoNarrowsThePhysicalClip
+[       OK ] CanvasImageTest.NarrowerFitConstraintAlsoNarrowsThePhysicalClip (0 ms)
+[----------] 16 tests from CanvasImageTest (3 ms total)
+
+[----------] 7 tests from RendererScriptTest
+[ RUN      ] RendererScriptTest.QueuedFocusRunsBeforeTheNextSyntheticText
+[       OK ] RendererScriptTest.QueuedFocusRunsBeforeTheNextSyntheticText (0 ms)
+[ RUN      ] RendererScriptTest.LiveCaptureObservesAnimationButOrdinaryCaptureWaits
+[       OK ] RendererScriptTest.LiveCaptureObservesAnimationButOrdinaryCaptureWaits (0 ms)
+[ RUN      ] RendererScriptTest.LiveCaptureWaitsForQueuedFocusEvenDuringAnimation
+[       OK ] RendererScriptTest.LiveCaptureWaitsForQueuedFocusEvenDuringAnimation (0 ms)
+[ RUN      ] RendererScriptTest.OrdinaryCaptureRunsAfterAnimationFinishes
+[       OK ] RendererScriptTest.OrdinaryCaptureRunsAfterAnimationFinishes (0 ms)
+[ RUN      ] RendererScriptTest.ReadinessTimeoutFailsEvenDuringAnimation
+[       OK ] RendererScriptTest.ReadinessTimeoutFailsEvenDuringAnimation (0 ms)
+[ RUN      ] RendererScriptTest.ReadinessRequiresUniqueValueAndObservesAnimation
+await-a11y "Clip" value "Playing": ready
+[       OK ] RendererScriptTest.ReadinessRequiresUniqueValueAndObservesAnimation (0 ms)
+[ RUN      ] RendererScriptTest.ReadinessDeadlineIncludesQueuedFocus
+[       OK ] RendererScriptTest.ReadinessDeadlineIncludesQueuedFocus (0 ms)
+[----------] 7 tests from RendererScriptTest (1 ms total)
+
+[----------] 3 tests from FloatingToolbarLayoutTest
+[ RUN      ] FloatingToolbarLayoutTest.FlowsInsideScaledSafeAreaAndKeepsAccessibleBounds
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+--await-a11y: timed out awaiting "Missing" value "*"; found 0
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+--await-a11y: timed out while queued view effects remain
+[       OK ] FloatingToolbarLayoutTest.FlowsInsideScaledSafeAreaAndKeepsAccessibleBounds (9 ms)
+[ RUN      ] FloatingToolbarLayoutTest.IgnoresUnrelatedPickingAndHiddenActions
+[       OK ] FloatingToolbarLayoutTest.IgnoresUnrelatedPickingAndHiddenActions (0 ms)
+[ RUN      ] FloatingToolbarLayoutTest.UnchangedFormattingNotificationsPreserveLayout
+glyph cache: atlas 1x1 x1 layers, growing to at most 1x1 x1 (device allows 0x0 x0, the vertex encoding 64 layers)
+[       OK ] FloatingToolbarLayoutTest.UnchangedFormattingNotificationsPreserveLayout (1 ms)
+[----------] 3 tests from FloatingToolbarLayoutTest (11 ms total)
+
+[----------] 6 tests from FloatingToolbarRenderingTest
+[ RUN      ] FloatingToolbarRenderingTest.EveryButtonDrawsVisibleTextAtNormalSizes
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] FloatingToolbarRenderingTest.EveryButtonDrawsVisibleTextAtNormalSizes (3 ms)
+[ RUN      ] FloatingToolbarRenderingTest.UnchangedDrawFramesDoNoShaping
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] FloatingToolbarRenderingTest.UnchangedDrawFramesDoNoShaping (4 ms)
+[ RUN      ] FloatingToolbarRenderingTest.RequiresCapturedTargetsFromItsOwnScope
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] FloatingToolbarRenderingTest.RequiresCapturedTargetsFromItsOwnScope (2 ms)
+[ RUN      ] FloatingToolbarRenderingTest.OwnerQualifiedActionsCanReenterToolbar
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] FloatingToolbarRenderingTest.OwnerQualifiedActionsCanReenterToolbar (2 ms)
+[ RUN      ] FloatingToolbarRenderingTest.MissingDocumentsClearActionability
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] FloatingToolbarRenderingTest.MissingDocumentsClearActionability (2 ms)
+[ RUN      ] FloatingToolbarRenderingTest.CapturedActionsKeepTheirDocumentContext
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] FloatingToolbarRenderingTest.CapturedActionsKeepTheirDocumentContext (2 ms)
+[----------] 6 tests from FloatingToolbarRenderingTest (20 ms total)
+
+[----------] 6 tests from ImageCacheTest
+[ RUN      ] ImageCacheTest.DecodeInvalidBufferReturnsEmpty
+[       OK ] ImageCacheTest.DecodeInvalidBufferReturnsEmpty (0 ms)
+[ RUN      ] ImageCacheTest.ImageResourceAspectRatio
+[       OK ] ImageCacheTest.ImageResourceAspectRatio (0 ms)
+[ RUN      ] ImageCacheTest.PutAndFindImageWithoutDevice
+[       OK ] ImageCacheTest.PutAndFindImageWithoutDevice (0 ms)
+[ RUN      ] ImageCacheTest.ManyDifferentlySizedImagesNeverOverlapAcrossLayers
+[       OK ] ImageCacheTest.ManyDifferentlySizedImagesNeverOverlapAcrossLayers (0 ms)
+[ RUN      ] ImageCacheTest.AtlasFullFailsClosedWithoutCorruptingEarlierEntries
+[       OK ] ImageCacheTest.AtlasFullFailsClosedWithoutCorruptingEarlierEntries (0 ms)
+[ RUN      ] ImageCacheTest.ImageWiderThanAtlasUploadsACorrectlyStridedCrop
+warning: image wide (100x40) exceeds the atlas (64x64); uploading a top-left crop
+[       OK ] ImageCacheTest.ImageWiderThanAtlasUploadsACorrectlyStridedCrop (0 ms)
+[----------] 6 tests from ImageCacheTest (0 ms total)
+
+[----------] 8 tests from ByteOrderMarkTest
+[ RUN      ] ByteOrderMarkTest.plainTextIsUnchanged
+[       OK ] ByteOrderMarkTest.plainTextIsUnchanged (0 ms)
+[ RUN      ] ByteOrderMarkTest.emptyInputIsNotAnError
+[       OK ] ByteOrderMarkTest.emptyInputIsNotAnError (0 ms)
+[ RUN      ] ByteOrderMarkTest.aUtf8MarkIsRemoved
+[       OK ] ByteOrderMarkTest.aUtf8MarkIsRemoved (0 ms)
+[ RUN      ] ByteOrderMarkTest.aUtf8MarkOnItsOwnLeavesNothing
+[       OK ] ByteOrderMarkTest.aUtf8MarkOnItsOwnLeavesNothing (0 ms)
+[ RUN      ] ByteOrderMarkTest.shortInputIsNotMistakenForAMark
+[       OK ] ByteOrderMarkTest.shortInputIsNotMistakenForAMark (0 ms)
+[ RUN      ] ByteOrderMarkTest.utf16IsRefusedRatherThanMisread
+[       OK ] ByteOrderMarkTest.utf16IsRefusedRatherThanMisread (0 ms)
+[ RUN      ] ByteOrderMarkTest.utf32IsRefused
+[       OK ] ByteOrderMarkTest.utf32IsRefused (0 ms)
+[ RUN      ] ByteOrderMarkTest.aLittleEndianUtf32MarkIsNotReportedAsUtf16
+[       OK ] ByteOrderMarkTest.aLittleEndianUtf32MarkIsNotReportedAsUtf16 (0 ms)
+[----------] 8 tests from ByteOrderMarkTest (0 ms total)
+
+[----------] 2 tests from MemoryTextSourceTest
+[ RUN      ] MemoryTextSourceTest.reportsWhatItWasGiven
+[       OK ] MemoryTextSourceTest.reportsWhatItWasGiven (0 ms)
+[ RUN      ] MemoryTextSourceTest.theNameIsOptional
+[       OK ] MemoryTextSourceTest.theNameIsOptional (0 ms)
+[----------] 2 tests from MemoryTextSourceTest (0 ms total)
+
+[----------] 1 test from TextSourcePageSizeTest
+[ RUN      ] TextSourcePageSizeTest.defaultsToLetterAndNeverChangesForASourceThatDoesNotOverrideIt
+[       OK ] TextSourcePageSizeTest.defaultsToLetterAndNeverChangesForASourceThatDoesNotOverrideIt (0 ms)
+[----------] 1 test from TextSourcePageSizeTest (0 ms total)
+
+[----------] 2 tests from FileTextSourceTest
+[ RUN      ] FileTextSourceTest.aWholeImageFileIsTaggedAsAMediaPiece
+[       OK ] FileTextSourceTest.aWholeImageFileIsTaggedAsAMediaPiece (0 ms)
+[ RUN      ] FileTextSourceTest.aPlainTextFileIsStillOnePlainPiece
+[       OK ] FileTextSourceTest.aPlainTextFileIsStillOnePlainPiece (7 ms)
+[----------] 2 tests from FileTextSourceTest (8 ms total)
+
+[----------] 3 tests from LibCoverageBoost
+[ RUN      ] LibCoverageBoost.modCombinationsAndBit
+[       OK ] LibCoverageBoost.modCombinationsAndBit (0 ms)
+[ RUN      ] LibCoverageBoost.drawBudgetOperations
+[       OK ] LibCoverageBoost.drawBudgetOperations (0 ms)
+[ RUN      ] LibCoverageBoost.a11yNodeHierarchy
+[       OK ] LibCoverageBoost.a11yNodeHierarchy (0 ms)
+[----------] 3 tests from LibCoverageBoost (0 ms total)
+
+[----------] 4 tests from CaretMotionTest
+[ RUN      ] CaretMotionTest.aCharacterStepNeverSplitsACodePoint
+[       OK ] CaretMotionTest.aCharacterStepNeverSplitsACodePoint (0 ms)
+[ RUN      ] CaretMotionTest.aWordStepSkipsSpaceThenAWord
+[       OK ] CaretMotionTest.aWordStepSkipsSpaceThenAWord (0 ms)
+[ RUN      ] CaretMotionTest.aByteIsPlacedOnItsLineAtItsGlyph
+[       OK ] CaretMotionTest.aByteIsPlacedOnItsLineAtItsGlyph (0 ms)
+[ RUN      ] CaretMotionTest.movingToALineKeepsTheColumnOrStopsAtItsEnd
+[       OK ] CaretMotionTest.movingToALineKeepsTheColumnOrStopsAtItsEnd (0 ms)
+[----------] 4 tests from CaretMotionTest (0 ms total)
+
+[----------] 7 tests from FormLayoutTest
+[ RUN      ] FormLayoutTest.responsiveFieldsImeAndInkShareContainedGeometry
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+glyph cache: atlas 512x512 x1 -> 1024x1024 x1 (164 glyphs, 215990 texels placed, largest 64x72, 1 palettes)
+glyph cache: atlas 1024x1024 x1 -> 2048x2048 x1 (338 glyphs, 738526 texels placed, largest 112x128, 1 palettes)
+[       OK ] FormLayoutTest.responsiveFieldsImeAndInkShareContainedGeometry (96 ms)
+[ RUN      ] FormLayoutTest.keyboardHelpDrawsVisibleInk
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] FormLayoutTest.keyboardHelpDrawsVisibleInk (4 ms)
+[ RUN      ] FormLayoutTest.steadyFramesDoNotReshapeOrReuploadChrome
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] FormLayoutTest.steadyFramesDoNotReshapeOrReuploadChrome (2 ms)
+[ RUN      ] FormLayoutTest.traversalRevealsHiddenFieldsAndKeepsTheirValues
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] FormLayoutTest.traversalRevealsHiddenFieldsAndKeepsTheirValues (1 ms)
+[ RUN      ] FormLayoutTest.openChoicesVirtualizeAndFollowTheKeyboardHighlight
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] FormLayoutTest.openChoicesVirtualizeAndFollowTheKeyboardHighlight (2 ms)
+[ RUN      ] FormLayoutTest.tinyExpandedChoiceKeepsItsHighlightedOptionVisible
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] FormLayoutTest.tinyExpandedChoiceKeepsItsHighlightedOptionVisible (2 ms)
+[ RUN      ] FormLayoutTest.themeAndFontScaleInvalidateRetainedGeometry
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+glyph cache: atlas 1x1 x1 layers, growing to at most 1x1 x1 (device allows 0x0 x0, the vertex encoding 64 layers)
+[       OK ] FormLayoutTest.themeAndFontScaleInvalidateRetainedGeometry (2 ms)
+[----------] 7 tests from FormLayoutTest (111 ms total)
+
+[----------] 2 tests from OverlayPickScopeTest
+[ RUN      ] OverlayPickScopeTest.PersistentScopesStayDistinctWhenFrameScopesWrap
+[       OK ] OverlayPickScopeTest.PersistentScopesStayDistinctWhenFrameScopesWrap (36 ms)
+[ RUN      ] OverlayPickScopeTest.FrameAllocationBeforePersistentCannotAlias
+glyph cache: atlas 1x1 x1 layers, growing to at most 1x1 x1 (device allows 0x0 x0, the vertex encoding 64 layers)
+[       OK ] OverlayPickScopeTest.FrameAllocationBeforePersistentCannotAlias (0 ms)
+[----------] 2 tests from OverlayPickScopeTest (36 ms total)
+
+[----------] 8 tests from WorkerPool
+[ RUN      ] WorkerPool.runsEveryIndexExactlyOnce
+[       OK ] WorkerPool.runsEveryIndexExactlyOnce (18 ms)
+[ RUN      ] WorkerPool.doesNothingForAnEmptyBatch
+[       OK ] WorkerPool.doesNothingForAnEmptyBatch (0 ms)
+[ RUN      ] WorkerPool.aPoolOfOneRunsOnTheCallingThread
+[       OK ] WorkerPool.aPoolOfOneRunsOnTheCallingThread (0 ms)
+[ RUN      ] WorkerPool.sharesRunConcurrently
+[       OK ] WorkerPool.sharesRunConcurrently (2 ms)
+[ RUN      ] WorkerPool.theCallerTakesAShare
+[       OK ] WorkerPool.theCallerTakesAShare (0 ms)
+[ RUN      ] WorkerPool.everyShareFinishesBeforeAThrowPropagates
+[       OK ] WorkerPool.everyShareFinishesBeforeAThrowPropagates (0 ms)
+[ RUN      ] WorkerPool.survivesAFailedBatch
+[       OK ] WorkerPool.survivesAFailedBatch (0 ms)
+[ RUN      ] WorkerPool.handlesManyBatchesInARow
+[       OK ] WorkerPool.handlesManyBatchesInARow (0 ms)
+[----------] 8 tests from WorkerPool (22 ms total)
+
+[----------] 14 tests from UiWidgetTest
+[ RUN      ] UiWidgetTest.textEditingPreservesUtf8AndPlacesInsertionAtTheCaret
+[       OK ] UiWidgetTest.textEditingPreservesUtf8AndPlacesInsertionAtTheCaret (0 ms)
+[ RUN      ] UiWidgetTest.backspaceAndNavigationKeepCombiningAndZwjGraphemesWhole
+[       OK ] UiWidgetTest.backspaceAndNavigationKeepCombiningAndZwjGraphemesWhole (0 ms)
+[ RUN      ] UiWidgetTest.longTextFieldsScrollToTheCaretAndKeepTheirCompleteText
+[       OK ] UiWidgetTest.longTextFieldsScrollToTheCaretAndKeepTheirCompleteText (0 ms)
+[ RUN      ] UiWidgetTest.rtlTextFieldsRevealTheCorrectVisualEdgeForHomeAndEnd
+[       OK ] UiWidgetTest.rtlTextFieldsRevealTheCorrectVisualEdgeForHomeAndEnd (0 ms)
+[ RUN      ] UiWidgetTest.virtualListsNeverShapeThousandsOfOffscreenRows
+[       OK ] UiWidgetTest.virtualListsNeverShapeThousandsOfOffscreenRows (20 ms)
+[ RUN      ] UiWidgetTest.clippedListEdgesDoNotExposeUndrawnActions
+[       OK ] UiWidgetTest.clippedListEdgesDoNotExposeUndrawnActions (9 ms)
+[ RUN      ] UiWidgetTest.disabledTabsCannotActivateAndSelectionReportsTheOwningWidget
+[       OK ] UiWidgetTest.disabledTabsCannotActivateAndSelectionReportsTheOwningWidget (3 ms)
+[ RUN      ] UiWidgetTest.steppersClampAndOnlyExposeEnabledMovesAtTheirLimits
+[       OK ] UiWidgetTest.steppersClampAndOnlyExposeEnabledMovesAtTheirLimits (0 ms)
+[ RUN      ] UiWidgetTest.scrubbersClampFractionsAndRejectInvalidNumbersWithoutMutation
+[       OK ] UiWidgetTest.scrubbersClampFractionsAndRejectInvalidNumbersWithoutMutation (0 ms)
+[ RUN      ] UiWidgetTest.positionedDiagramClipsAndCullsNodesAcrossDisplayScales
+[       OK ] UiWidgetTest.positionedDiagramClipsAndCullsNodesAcrossDisplayScales (0 ms)
+[ RUN      ] UiWidgetTest.positionedDiagramRejectsInvalidGeometry
+[       OK ] UiWidgetTest.positionedDiagramRejectsInvalidGeometry (0 ms)
+[ RUN      ] UiWidgetTest.textFieldCallbacksRetainCaretAcrossOwnerRebuilds
+[       OK ] UiWidgetTest.textFieldCallbacksRetainCaretAcrossOwnerRebuilds (1 ms)
+[ RUN      ] UiWidgetTest.virtualRowsUseIdentifierAndDescriptionFittingWithoutLosingLabels
+[       OK ] UiWidgetTest.virtualRowsUseIdentifierAndDescriptionFittingWithoutLosingLabels (0 ms)
+[ RUN      ] UiWidgetTest.CompactLabelRetainsCompleteAccessibleDescription
+[       OK ] UiWidgetTest.CompactLabelRetainsCompleteAccessibleDescription (0 ms)
+[----------] 14 tests from UiWidgetTest (40 ms total)
+
+[----------] 5 tests from Frustum
+[ RUN      ] Frustum.aBoxUnderTheCameraIsInView
+[       OK ] Frustum.aBoxUnderTheCameraIsInView (0 ms)
+[ RUN      ] Frustum.aBoxFarToOneSideIsRejected
+[       OK ] Frustum.aBoxFarToOneSideIsRejected (0 ms)
+[ RUN      ] Frustum.aBoxStraddlingAnEdgeIsKept
+[       OK ] Frustum.aBoxStraddlingAnEdgeIsKept (0 ms)
+[ RUN      ] Frustum.aBoxBehindTheCameraIsNotMistakenForOneInFront
+[       OK ] Frustum.aBoxBehindTheCameraIsNotMistakenForOneInFront (0 ms)
+[ RUN      ] Frustum.mostPagesOfALongDocumentAreRejected
+[       OK ] Frustum.mostPagesOfALongDocumentAreRejected (3 ms)
+[----------] 5 tests from Frustum (3 ms total)
+
+[----------] 3 tests from ScreenScale
+[ RUN      ] ScreenScale.movingTheCameraBackShrinksThings
+[       OK ] ScreenScale.movingTheCameraBackShrinksThings (0 ms)
+[ RUN      ] ScreenScale.aWiderDrawableGivesEachUnitMorePixels
+[       OK ] ScreenScale.aWiderDrawableGivesEachUnitMorePixels (0 ms)
+[ RUN      ] ScreenScale.somethingOnTheCameraPlaneReadsAsVeryClose
+[       OK ] ScreenScale.somethingOnTheCameraPlaneReadsAsVeryClose (0 ms)
+[----------] 3 tests from ScreenScale (0 ms total)
+
+[----------] 3 tests from CurveRibbonsTest
+[ RUN      ] CurveRibbonsTest.BoundsUploadWorkAndPreservesPointerExclusion
+[       OK ] CurveRibbonsTest.BoundsUploadWorkAndPreservesPointerExclusion (1 ms)
+[ RUN      ] CurveRibbonsTest.RefusesNonFiniteGeometryAndInvalidStyle
+[       OK ] CurveRibbonsTest.RefusesNonFiniteGeometryAndInvalidStyle (0 ms)
+[ RUN      ] CurveRibbonsTest.SegmentJoinsShareNormalsAndDistanceBasedTaper
+[       OK ] CurveRibbonsTest.SegmentJoinsShareNormalsAndDistanceBasedTaper (0 ms)
+[----------] 3 tests from CurveRibbonsTest (1 ms total)
+
+[----------] 16 tests from GlyphLane
+[ RUN      ] GlyphLane.equality
+[       OK ] GlyphLane.equality (0 ms)
+[ RUN      ] GlyphLane.less
+[       OK ] GlyphLane.less (0 ms)
+[ RUN      ] GlyphLane.greater
+[       OK ] GlyphLane.greater (0 ms)
+[ RUN      ] GlyphLane.ordering
+[       OK ] GlyphLane.ordering (0 ms)
+[ RUN      ] GlyphLane.availWidth
+[       OK ] GlyphLane.availWidth (0 ms)
+[ RUN      ] GlyphLane.putAtZero
+[       OK ] GlyphLane.putAtZero (0 ms)
+[ RUN      ] GlyphLane.putAt10
+[       OK ] GlyphLane.putAt10 (0 ms)
+[ RUN      ] GlyphLane.putMaxSize
+[       OK ] GlyphLane.putMaxSize (0 ms)
+[ RUN      ] GlyphLane.putOverMaxSize
+[       OK ] GlyphLane.putOverMaxSize (0 ms)
+[ RUN      ] GlyphLane.canFit
+[       OK ] GlyphLane.canFit (0 ms)
+[ RUN      ] GlyphLane.canFitJustWide
+[       OK ] GlyphLane.canFitJustWide (0 ms)
+[ RUN      ] GlyphLane.canFitJustTall
+[       OK ] GlyphLane.canFitJustTall (0 ms)
+[ RUN      ] GlyphLane.canFitJust
+[       OK ] GlyphLane.canFitJust (0 ms)
+[ RUN      ] GlyphLane.canFitTooWide
+[       OK ] GlyphLane.canFitTooWide (0 ms)
+[ RUN      ] GlyphLane.canFitTooTall
+[       OK ] GlyphLane.canFitTooTall (0 ms)
+[ RUN      ] GlyphLane.canFitTooTallAndWide
+[       OK ] GlyphLane.canFitTooTallAndWide (0 ms)
+[----------] 16 tests from GlyphLane (0 ms total)
+
+[----------] 14 tests from ShaderSource
+[ RUN      ] ShaderSource.backendNamesRoundTrip
+[       OK ] ShaderSource.backendNamesRoundTrip (0 ms)
+[ RUN      ] ShaderSource.rejectsUnknownBackendName
+[       OK ] ShaderSource.rejectsUnknownBackendName (0 ms)
+[ RUN      ] ShaderSource.eachBackendGetsItsOwnVersionDirective
+[       OK ] ShaderSource.eachBackendGetsItsOwnVersionDirective (0 ms)
+[ RUN      ] ShaderSource.onlyGlesDeclaresDefaultPrecision
+[       OK ] ShaderSource.onlyGlesDeclaresDefaultPrecision (0 ms)
+[ RUN      ] ShaderSource.onlyVulkanLocatesVaryings
+[       OK ] ShaderSource.onlyVulkanLocatesVaryings (0 ms)
+[ RUN      ] ShaderSource.vertexAttributesAreLocatedOnEveryBackend
+[       OK ] ShaderSource.vertexAttributesAreLocatedOnEveryBackend (0 ms)
+[ RUN      ] ShaderSource.vertexIndexBuiltinDiffersOnVulkan
+[       OK ] ShaderSource.vertexIndexBuiltinDiffersOnVulkan (0 ms)
+[ RUN      ] ShaderSource.vulkanDeclaresUniformsThroughDescriptors
+[       OK ] ShaderSource.vulkanDeclaresUniformsThroughDescriptors (0 ms)
+[ RUN      ] ShaderSource.glFamilyDeclaresPlainUniforms
+[       OK ] ShaderSource.glFamilyDeclaresPlainUniforms (0 ms)
+[ RUN      ] ShaderSource.noBackendDeclaresASeparateCameraBlock
+[       OK ] ShaderSource.noBackendDeclaresASeparateCameraBlock (0 ms)
+[ RUN      ] ShaderSource.highlightArrayMatchesTheHostSideBound
+[       OK ] ShaderSource.highlightArrayMatchesTheHostSideBound (0 ms)
+[ RUN      ] ShaderSource.bodyIsAppendedAfterThePreamble
+[       OK ] ShaderSource.bodyIsAppendedAfterThePreamble (0 ms)
+[ RUN      ] ShaderSource.missingShaderFileReportsThePath
+[       OK ] ShaderSource.missingShaderFileReportsThePath (0 ms)
+[ RUN      ] ShaderSource.glyphShadersAssembleWithVerticalMultiBanding
+[       OK ] ShaderSource.glyphShadersAssembleWithVerticalMultiBanding (0 ms)
+[----------] 14 tests from ShaderSource (2 ms total)
+
+[----------] 16 tests from MediaWidgetTest
+[ RUN      ] MediaWidgetTest.DefaultPropertiesAndVisibility
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] MediaWidgetTest.DefaultPropertiesAndVisibility (0 ms)
+[ RUN      ] MediaWidgetTest.DocumentAttachmentAndPositioning
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] MediaWidgetTest.DocumentAttachmentAndPositioning (0 ms)
+[ RUN      ] MediaWidgetTest.PickPlayPauseStopButtons
+[       OK ] MediaWidgetTest.PickPlayPauseStopButtons (0 ms)
+[ RUN      ] MediaWidgetTest.PickSeekBarCalculatesFractionAndSeeks
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] MediaWidgetTest.PickSeekBarCalculatesFractionAndSeeks (0 ms)
+[ RUN      ] MediaWidgetTest.IgnoresUnrelatedPicks
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] MediaWidgetTest.IgnoresUnrelatedPicks (0 ms)
+[ RUN      ] MediaWidgetTest.AccessibilityTreeAndActions
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] MediaWidgetTest.AccessibilityTreeAndActions (0 ms)
+[ RUN      ] MediaWidgetTest.EachCardOwnsItsPickingAndAccessibilityRange
+[       OK ] MediaWidgetTest.EachCardOwnsItsPickingAndAccessibilityRange (0 ms)
+[ RUN      ] MediaWidgetTest.DeviceReadyAndDrawFrame
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] MediaWidgetTest.DeviceReadyAndDrawFrame (30 ms)
+[ RUN      ] MediaWidgetTest.BusyAndLoadResource
+[       OK ] MediaWidgetTest.BusyAndLoadResource (0 ms)
+[ RUN      ] MediaWidgetTest.SettledChromeShapesAndUploadsNothing
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] MediaWidgetTest.SettledChromeShapesAndUploadsNothing (6 ms)
+[ RUN      ] MediaWidgetTest.PlayerChangesInvalidateChromeAndPositionOnlyMovesIt
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] MediaWidgetTest.PlayerChangesInvalidateChromeAndPositionOnlyMovesIt (2 ms)
+[ RUN      ] MediaWidgetTest.ResponsiveChromeStaysWithinTheCardAndKeepsFullA11yTitle
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] MediaWidgetTest.ResponsiveChromeStaysWithinTheCardAndKeepsFullA11yTitle (28 ms)
+[ RUN      ] MediaWidgetTest.AccessibleSeekUsesTheSharedScrubberClamp
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] MediaWidgetTest.AccessibleSeekUsesTheSharedScrubberClamp (0 ms)
+[ RUN      ] MediaWidgetTest.MoreThanSixteenCardsKeepCapturedPickingIdentities
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] MediaWidgetTest.MoreThanSixteenCardsKeepCapturedPickingIdentities (29 ms)
+[ RUN      ] MediaWidgetTest.CapturedCardMeaningSurvivesPresentationChanges
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] MediaWidgetTest.CapturedCardMeaningSurvivesPresentationChanges (5 ms)
+[ RUN      ] MediaWidgetTest.normalCardDrawsItsTitleAndPlaybackBadge
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] MediaWidgetTest.normalCardDrawsItsTitleAndPlaybackBadge (8 ms)
+[----------] 16 tests from MediaWidgetTest (143 ms total)
+
+[----------] 10 tests from ScreenOverlayFocusTest
+[ RUN      ] ScreenOverlayFocusTest.replacingFocusedControlWithLabelClearsFocusDraw
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] ScreenOverlayFocusTest.replacingFocusedControlWithLabelClearsFocusDraw (0 ms)
+[ RUN      ] ScreenOverlayFocusTest.tabOrderEqualsRetainedLayoutAcrossSizesAndScales
+[       OK ] ScreenOverlayFocusTest.tabOrderEqualsRetainedLayoutAcrossSizesAndScales (28 ms)
+[ RUN      ] ScreenOverlayFocusTest.defaultAndExplicitInitialFocusUseWidgetMetadata
+[       OK ] ScreenOverlayFocusTest.defaultAndExplicitInitialFocusUseWidgetMetadata (0 ms)
+[ RUN      ] ScreenOverlayFocusTest.onlyFocusedTextFieldsReceiveComposedTextAndImeArea
+[       OK ] ScreenOverlayFocusTest.onlyFocusedTextFieldsReceiveComposedTextAndImeArea (1 ms)
+[ RUN      ] ScreenOverlayFocusTest.arrowsMoveWithinButtonGroupsAndSpaceActivates
+[       OK ] ScreenOverlayFocusTest.arrowsMoveWithinButtonGroupsAndSpaceActivates (0 ms)
+[ RUN      ] ScreenOverlayFocusTest.pointerFocusAndCaptureUseThePublishedPixelGeometry
+[       OK ] ScreenOverlayFocusTest.pointerFocusAndCaptureUseThePublishedPixelGeometry (0 ms)
+[ RUN      ] ScreenOverlayFocusTest.accessibilityFocusRequestsAreValidatedByTheManager
+[       OK ] ScreenOverlayFocusTest.accessibilityFocusRequestsAreValidatedByTheManager (0 ms)
+[ RUN      ] ScreenOverlayFocusTest.focusChangesKeepTheLayoutAndShapingRetained
+[       OK ] ScreenOverlayFocusTest.focusChangesKeepTheLayoutAndShapingRetained (1 ms)
+[ RUN      ] ScreenOverlayFocusTest.escapeHidesTopOverlayAndRestoresThePriorScopeAndNode
+[       OK ] ScreenOverlayFocusTest.escapeHidesTopOverlayAndRestoresThePriorScopeAndNode (1 ms)
+[ RUN      ] ScreenOverlayFocusTest.cpuPressReleaseNeverAlsoRequestsGpuActivation
+[       OK ] ScreenOverlayFocusTest.cpuPressReleaseNeverAlsoRequestsGpuActivation (0 ms)
+[----------] 10 tests from ScreenOverlayFocusTest (38 ms total)
+
+[----------] 13 tests from RadialMenuTest
+[ RUN      ] RadialMenuTest.SectorResolutionDynamicCount
+[       OK ] RadialMenuTest.SectorResolutionDynamicCount (0 ms)
+[ RUN      ] RadialMenuTest.OpenCloseToggleState
+[       OK ] RadialMenuTest.OpenCloseToggleState (0 ms)
+[ RUN      ] RadialMenuTest.SubRadialTransition
+[       OK ] RadialMenuTest.SubRadialTransition (0 ms)
+[ RUN      ] RadialMenuTest.ActionDispatchAndHandlers
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] RadialMenuTest.ActionDispatchAndHandlers (0 ms)
+[ RUN      ] RadialMenuTest.AccessibilityMenuTree
+[       OK ] RadialMenuTest.AccessibilityMenuTree (0 ms)
+[ RUN      ] RadialMenuTest.CircularHubPicking
+glyph cache: atlas 1x1 x1 layers, growing to at most 1x1 x1 (device allows 0x0 x0, the vertex encoding 64 layers)
+[       OK ] RadialMenuTest.CircularHubPicking (0 ms)
+[ RUN      ] RadialMenuTest.WedgeGeometryAndSectorResolution
+[       OK ] RadialMenuTest.WedgeGeometryAndSectorResolution (0 ms)
+[ RUN      ] RadialMenuTest.RetainsScaledSafeGeometryAndFullAccessibleLabels
+[       OK ] RadialMenuTest.RetainsScaledSafeGeometryAndFullAccessibleLabels (6 ms)
+[ RUN      ] RadialMenuTest.KeyboardAndAccessibilityPreserveSelectionProvenance
+[       OK ] RadialMenuTest.KeyboardAndAccessibilityPreserveSelectionProvenance (0 ms)
+[ RUN      ] RadialMenuTest.OwnerQualifiedActionsInvokeCallbacksOutsideStateLock
+[       OK ] RadialMenuTest.OwnerQualifiedActionsInvokeCallbacksOutsideStateLock (0 ms)
+[ RUN      ] RadialMenuTest.DisabledActionsDoNotDispatchOrReceiveKeyboardFocus
+glyph cache: atlas 1x1 x1 layers, growing to at most 1x1 x1 (device allows 0x0 x0, the vertex encoding 64 layers)
+[       OK ] RadialMenuTest.DisabledActionsDoNotDispatchOrReceiveKeyboardFocus (0 ms)
+[ RUN      ] RadialMenuTest.RightClickUsesTheClosedMenusCurrentViewport
+glyph cache: atlas 1x1 x1 layers, growing to at most 1x1 x1 (device allows 0x0 x0, the vertex encoding 64 layers)
+[       OK ] RadialMenuTest.RightClickUsesTheClosedMenusCurrentViewport (0 ms)
+[ RUN      ] RadialMenuTest.UnchangedDrawFramesDoNoShaping
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] RadialMenuTest.UnchangedDrawFramesDoNoShaping (42 ms)
+[----------] 13 tests from RadialMenuTest (51 ms total)
+
+[----------] 3 tests from NurbsTest
+[ RUN      ] NurbsTest.RationalQuadraticDescribesACircularArc
+[       OK ] NurbsTest.RationalQuadraticDescribesACircularArc (0 ms)
+[ RUN      ] NurbsTest.InteriorKnotRetainsLocalControlAndContinuousTangent
+[       OK ] NurbsTest.InteriorKnotRetainsLocalControlAndContinuousTangent (0 ms)
+[ RUN      ] NurbsTest.RefusesInvalidWeightsKnotsAndParameters
+[       OK ] NurbsTest.RefusesInvalidWeightsKnotsAndParameters (0 ms)
+[----------] 3 tests from NurbsTest (1 ms total)
+
+[----------] 3 tests from TextBoundsTest
+[ RUN      ] TextBoundsTest.IncludesEveryEdgeInCanvasCoordinates
+[       OK ] TextBoundsTest.IncludesEveryEdgeInCanvasCoordinates (0 ms)
+[ RUN      ] TextBoundsTest.InvalidGeometryCannotContainText
+[       OK ] TextBoundsTest.InvalidGeometryCannotContainText (0 ms)
+[ RUN      ] TextBoundsTest.DetectsTheHeightOfRealWrappedText
+[       OK ] TextBoundsTest.DetectsTheHeightOfRealWrappedText (0 ms)
+[----------] 3 tests from TextBoundsTest (0 ms total)
+
+[----------] 5 tests from CanvasTextBoundsTest
+[ RUN      ] CanvasTextBoundsTest.LogsOnlyGeometryAndPickingIdentity
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] CanvasTextBoundsTest.LogsOnlyGeometryAndPickingIdentity (0 ms)
+[ RUN      ] CanvasTextBoundsTest.ClearRemovesThePreviousParentBounds
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] CanvasTextBoundsTest.ClearRemovesThePreviousParentBounds (0 ms)
+[ RUN      ] CanvasTextBoundsTest.BoundsCanBeExplicitlyDisabled
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] CanvasTextBoundsTest.BoundsCanBeExplicitlyDisabled (0 ms)
+[ RUN      ] CanvasTextBoundsTest.DebugLoggingIsOptIn
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] CanvasTextBoundsTest.DebugLoggingIsOptIn (0 ms)
+[ RUN      ] CanvasTextBoundsTest.CountsColdGlyphShapingButNotCachedGlyphs
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] CanvasTextBoundsTest.CountsColdGlyphShapingButNotCachedGlyphs (0 ms)
+[----------] 5 tests from CanvasTextBoundsTest (3 ms total)
+
+[----------] 9 tests from PdfTextSourceTest
+[ RUN      ] PdfTextSourceTest.loadsSinglePagePdf
+[       OK ] PdfTextSourceTest.loadsSinglePagePdf (1 ms)
+[ RUN      ] PdfTextSourceTest.loadsMultiPagePdfWithPageBreaks
+[       OK ] PdfTextSourceTest.loadsMultiPagePdfWithPageBreaks (1 ms)
+[ RUN      ] PdfTextSourceTest.loadsFromMemoryBuffer
+[       OK ] PdfTextSourceTest.loadsFromMemoryBuffer (1 ms)
+[ RUN      ] PdfTextSourceTest.fileTextSourceAutoDetectsPdf
+[       OK ] PdfTextSourceTest.fileTextSourceAutoDetectsPdf (1 ms)
+[ RUN      ] PdfTextSourceTest.fileTextSourceAutoDetectsPdfWithoutExtensionViaLibmagic
+[       OK ] PdfTextSourceTest.fileTextSourceAutoDetectsPdfWithoutExtensionViaLibmagic (1 ms)
+[ RUN      ] PdfTextSourceTest.plainTextFileHasNoForcedBreaks
+[       OK ] PdfTextSourceTest.plainTextFileHasNoForcedBreaks (5 ms)
+[ RUN      ] PdfTextSourceTest.throwsOnNonexistentOrInvalidPdf
+poppler/error: Couldn't open file 'nonexistent_path_to_pdf.pdf': No such file or directory.
+poppler/error: May not be a PDF file (continuing anyway)
+poppler/error: Couldn't find trailer dictionary
+poppler/error: Couldn't find trailer dictionary
+poppler/error: Couldn't read xref table
+[       OK ] PdfTextSourceTest.throwsOnNonexistentOrInvalidPdf (1 ms)
+[ RUN      ] PdfTextSourceTest.piecesIncludesEmbeddedFigureAsItsOwnImagePiece
+[       OK ] PdfTextSourceTest.piecesIncludesEmbeddedFigureAsItsOwnImagePiece (1 ms)
+[ RUN      ] PdfTextSourceTest.piecesMarksARepeatedFigureAsDuplicateOfItsFirstOccurrence
+[       OK ] PdfTextSourceTest.piecesMarksARepeatedFigureAsDuplicateOfItsFirstOccurrence (1 ms)
+[----------] 9 tests from PdfTextSourceTest (16 ms total)
+
+[----------] 12 tests from MediaTest
+[ RUN      ] MediaTest.MediaResourceFromFileAndStream
+[       OK ] MediaTest.MediaResourceFromFileAndStream (0 ms)
+[ RUN      ] MediaTest.MediaPlayerPlaybackStateCycle
+[       OK ] MediaTest.MediaPlayerPlaybackStateCycle (0 ms)
+[ RUN      ] MediaTest.MediaPlayerVolumeAndMute
+[       OK ] MediaTest.MediaPlayerVolumeAndMute (0 ms)
+[ RUN      ] MediaTest.MediaPlayerTimeRangeBoundsAndSeeking
+[       OK ] MediaTest.MediaPlayerTimeRangeBoundsAndSeeking (0 ms)
+[ RUN      ] MediaTest.anAudioOnlyStreamPlays
+[       OK ] MediaTest.anAudioOnlyStreamPlays (0 ms)
+[ RUN      ] MediaTest.VideoPropertiesAndFrames
+[       OK ] MediaTest.VideoPropertiesAndFrames (0 ms)
+[ RUN      ] MediaTest.PlaybackStateNames
+[       OK ] MediaTest.PlaybackStateNames (0 ms)
+[ RUN      ] MediaTest.MediaResourceLocationAndSubspan
+[       OK ] MediaTest.MediaResourceLocationAndSubspan (0 ms)
+[ RUN      ] MediaTest.MediaPlayerUnloadAndByteRanges
+[       OK ] MediaTest.MediaPlayerUnloadAndByteRanges (0 ms)
+[ RUN      ] MediaTest.FragmentTimeRangeScalesLinearlyByByteOffset
+[       OK ] MediaTest.FragmentTimeRangeScalesLinearlyByByteOffset (0 ms)
+[ RUN      ] MediaTest.FragmentTimeRangeEmptyWhenNotYetKnown
+[       OK ] MediaTest.FragmentTimeRangeEmptyWhenNotYetKnown (0 ms)
+[ RUN      ] MediaTest.FragmentTimeRangeClampsAFragmentPastTheContainerEnd
+[       OK ] MediaTest.FragmentTimeRangeClampsAFragmentPastTheContainerEnd (0 ms)
+[----------] 12 tests from MediaTest (1 ms total)
+
+[----------] 29 tests from AutomationScript
+[ RUN      ] AutomationScript.keepsTheOrderTheOptionsWereWrittenIn
+[       OK ] AutomationScript.keepsTheOrderTheOptionsWereWrittenIn (0 ms)
+[ RUN      ] AutomationScript.namedClicksPreserveFullLabelsAndScriptOrder
+[       OK ] AutomationScript.namedClicksPreserveFullLabelsAndScriptOrder (0 ms)
+[ RUN      ] AutomationScript.theSameOptionsInAnotherOrderAreAnotherScript
+[       OK ] AutomationScript.theSameOptionsInAnotherOrderAreAnotherScript (0 ms)
+[ RUN      ] AutomationScript.takesAValueJoinedByAnEqualsSign
+[       OK ] AutomationScript.takesAValueJoinedByAnEqualsSign (0 ms)
+[ RUN      ] AutomationScript.waitsInOrderAndRejectsUnboundedOrMalformedDurations
+[       OK ] AutomationScript.waitsInOrderAndRejectsUnboundedOrMalformedDurations (0 ms)
+[ RUN      ] AutomationScript.capturesAtThePointItWasWritten
+[       OK ] AutomationScript.capturesAtThePointItWasWritten (0 ms)
+[ RUN      ] AutomationScript.LiveCaptureRetainsKeyboardOrderAndDelay
+[       OK ] AutomationScript.LiveCaptureRetainsKeyboardOrderAndDelay (0 ms)
+[ RUN      ] AutomationScript.ignoresEverythingThatIsNotAnAutomationOption
+[       OK ] AutomationScript.ignoresEverythingThatIsNotAnAutomationOption (0 ms)
+[ RUN      ] AutomationScript.takesTheNextWordEvenWhenItLooksLikeAnOption
+[       OK ] AutomationScript.takesTheNextWordEvenWhenItLooksLikeAnOption (0 ms)
+[ RUN      ] AutomationScript.anEmptyCommandLineIsAnEmptyScript
+[       OK ] AutomationScript.anEmptyCommandLineIsAnEmptyScript (0 ms)
+[ RUN      ] AutomationScript.typingCanBeEmptyAndIsStillAStep
+[       OK ] AutomationScript.typingCanBeEmptyAndIsStillAStep (0 ms)
+[ RUN      ] AutomationScript.typeWithoutBracketsIsPlainTextAsBefore
+[       OK ] AutomationScript.typeWithoutBracketsIsPlainTextAsBefore (0 ms)
+[ RUN      ] AutomationScript.typeWithOneBracketedDecoration
+[       OK ] AutomationScript.typeWithOneBracketedDecoration (0 ms)
+[ RUN      ] AutomationScript.typeWithSeveralBracketedDecorations
+[       OK ] AutomationScript.typeWithSeveralBracketedDecorations (0 ms)
+[ RUN      ] AutomationScript.typeBracketsCanBeEmpty
+[       OK ] AutomationScript.typeBracketsCanBeEmpty (0 ms)
+[ RUN      ] AutomationScript.typeWithAnUnrecognisedDecorationNameIsIgnored
+--type: no decoration called "not-a-thing"
+[       OK ] AutomationScript.typeWithAnUnrecognisedDecorationNameIsIgnored (0 ms)
+[ RUN      ] AutomationScript.typeWithNoClosingBracketIsPlainText
+[       OK ] AutomationScript.typeWithNoClosingBracketIsPlainText (0 ms)
+[ RUN      ] AutomationScript.typeCanBracketDecorateEmptyText
+[       OK ] AutomationScript.typeCanBracketDecorateEmptyText (0 ms)
+[ RUN      ] AutomationScript.resizePreservesInputOrderAndRejectsEmptyWindows
+[       OK ] AutomationScript.resizePreservesInputOrderAndRejectsEmptyWindows (0 ms)
+[ RUN      ] AutomationScript.chordIsAKeyDownThroughTheKeymap
+--chord: "Alt+NoSuchKey" is not a key combination
+[       OK ] AutomationScript.chordIsAKeyDownThroughTheKeymap (0 ms)
+[ RUN      ] AutomationScript.dragIsAPressMovesAndARelease
+[       OK ] AutomationScript.dragIsAPressMovesAndARelease (0 ms)
+[ RUN      ] AutomationScript.pressesAreHeldUntilReleased
+[       OK ] AutomationScript.pressesAreHeldUntilReleased (0 ms)
+[ RUN      ] AutomationScript.aDoubledBracketTypesALiteralOne
+[       OK ] AutomationScript.aDoubledBracketTypesALiteralOne (0 ms)
+[ RUN      ] AutomationScript.dumpingTheTreeIsAnOrderedRepeatableStep
+[       OK ] AutomationScript.dumpingTheTreeIsAnOrderedRepeatableStep (0 ms)
+[ RUN      ] AutomationScript.everyScriptedStepWantsFrames
+[       OK ] AutomationScript.everyScriptedStepWantsFrames (2 ms)
+[ RUN      ] AutomationScript.observingAFrameWantsFrames
+[       OK ] AutomationScript.observingAFrameWantsFrames (0 ms)
+[ RUN      ] AutomationScript.aRunAskingForNoFrameWantsNone
+[       OK ] AutomationScript.aRunAskingForNoFrameWantsNone (0 ms)
+[ RUN      ] AutomationScript.ModifierHoldSurroundsTheOrdinaryPointerGesture
+[       OK ] AutomationScript.ModifierHoldSurroundsTheOrdinaryPointerGesture (0 ms)
+[ RUN      ] AutomationScript.AccessibilityReadinessKeepsLabelsValuesAndBoundedTimeout
+[       OK ] AutomationScript.AccessibilityReadinessKeepsLabelsValuesAndBoundedTimeout (0 ms)
+[----------] 29 tests from AutomationScript (5 ms total)
+
+[----------] 4 tests from PageFillTest
+[ RUN      ] PageFillTest.aDocumentWithNoLineBreaksStillWraps
+[       OK ] PageFillTest.aDocumentWithNoLineBreaksStillWraps (570 ms)
+[ RUN      ] PageFillTest.thePageFillsUp
+[       OK ] PageFillTest.thePageFillsUp (597 ms)
+[ RUN      ] PageFillTest.aShortDocumentIsTakenWhole
+[       OK ] PageFillTest.aShortDocumentIsTakenWhole (0 ms)
+[ RUN      ] PageFillTest.shapingTheSameBytesTwiceGivesTheSameAnswers
+[       OK ] PageFillTest.shapingTheSameBytesTwiceGivesTheSameAnswers (314 ms)
+[----------] 4 tests from PageFillTest (1483 ms total)
+
+[----------] 14 tests from Picking
+[ RUN      ] Picking.emptyTagIsTheClearedValue
+[       OK ] Picking.emptyTagIsTheClearedValue (0 ms)
+[ RUN      ] Picking.tagsCompareByBothFields
+[       OK ] Picking.tagsCompareByBothFields (0 ms)
+[ RUN      ] Picking.resultCarriesTheQueriedPixel
+[       OK ] Picking.resultCarriesTheQueriedPixel (0 ms)
+[ RUN      ] Picking.noResultYetIsNotAnEmptyTag
+[       OK ] Picking.noResultYetIsNotAnEmptyTag (0 ms)
+[ RUN      ] Picking.identityPacksAndUnpacksToTheSameFields
+[       OK ] Picking.identityPacksAndUnpacksToTheSameFields (0 ms)
+[ RUN      ] Picking.identityHoldsTheWidestValuesEachFieldClaims
+[       OK ] Picking.identityHoldsTheWidestValuesEachFieldClaims (0 ms)
+[ RUN      ] Picking.fractionSpansTheWholeQuad
+[       OK ] Picking.fractionSpansTheWholeQuad (0 ms)
+[ RUN      ] Picking.adifferentFractionIsStillTheSameObject
+[       OK ] Picking.adifferentFractionIsStillTheSameObject (0 ms)
+[ RUN      ] Picking.aSingleCharacterClusterHasTwoBoundaries
+[       OK ] Picking.aSingleCharacterClusterHasTwoBoundaries (0 ms)
+[ RUN      ] Picking.aTwoCharacterLigatureSplitsAtTheQuarters
+[       OK ] Picking.aTwoCharacterLigatureSplitsAtTheQuarters (0 ms)
+[ RUN      ] Picking.aThreeCharacterLigatureSplitsAtSixths
+[       OK ] Picking.aThreeCharacterLigatureSplitsAtSixths (0 ms)
+[ RUN      ] Picking.theStepNeverEscapesTheCluster
+[       OK ] Picking.theStepNeverEscapesTheCluster (0 ms)
+[ RUN      ] Picking.aHighlightRangeDefaultsToCoveringWholeClusters
+[       OK ] Picking.aHighlightRangeDefaultsToCoveringWholeClusters (0 ms)
+[ RUN      ] Picking.theHighlightTableFitsTheSmallestGuaranteedUniformBlock
+[       OK ] Picking.theHighlightTableFitsTheSmallestGuaranteedUniformBlock (0 ms)
+[----------] 14 tests from Picking (1 ms total)
+
+[----------] 5 tests from StreamBufferGLTest
+[ RUN      ] StreamBufferGLTest.SequentialAllocationsAlignProperly
+[       OK ] StreamBufferGLTest.SequentialAllocationsAlignProperly (0 ms)
+[ RUN      ] StreamBufferGLTest.WrapsAroundWhenExceedingCapacity
+[       OK ] StreamBufferGLTest.WrapsAroundWhenExceedingCapacity (0 ms)
+[ RUN      ] StreamBufferGLTest.RejectsAllocationLargerThanCapacity
+[       OK ] StreamBufferGLTest.RejectsAllocationLargerThanCapacity (0 ms)
+[ RUN      ] StreamBufferGLTest.RejectsZeroCapacity
+[       OK ] StreamBufferGLTest.RejectsZeroCapacity (0 ms)
+[ RUN      ] StreamBufferGLTest.WaitAllReleasesActiveFences
+[       OK ] StreamBufferGLTest.WaitAllReleasesActiveFences (0 ms)
+[----------] 5 tests from StreamBufferGLTest (0 ms total)
+
+[----------] 8 tests from Utf8Test
+[ RUN      ] Utf8Test.anOffsetOnABoundaryDoesNotMove
+[       OK ] Utf8Test.anOffsetOnABoundaryDoesNotMove (0 ms)
+[ RUN      ] Utf8Test.theStartMovesBackOntoTheCharacter
+[       OK ] Utf8Test.theStartMovesBackOntoTheCharacter (0 ms)
+[ RUN      ] Utf8Test.theEndMovesForwardPastTheCharacter
+[       OK ] Utf8Test.theEndMovesForwardPastTheCharacter (0 ms)
+[ RUN      ] Utf8Test.theTwoDirectionsBracketTheWholeCharacter
+[       OK ] Utf8Test.theTwoDirectionsBracketTheWholeCharacter (0 ms)
+[ RUN      ] Utf8Test.aFourByteCharacterIsCrossedInOneStep
+[       OK ] Utf8Test.aFourByteCharacterIsCrossedInOneStep (0 ms)
+[ RUN      ] Utf8Test.anOffsetPastTheEndIsLeftAlone
+[       OK ] Utf8Test.anOffsetPastTheEndIsLeftAlone (0 ms)
+[ RUN      ] Utf8Test.emptyTextIsNotSearched
+[       OK ] Utf8Test.emptyTextIsNotSearched (0 ms)
+[ RUN      ] Utf8Test.aLeadingContinuationByteTerminates
+[       OK ] Utf8Test.aLeadingContinuationByteTerminates (0 ms)
+[----------] 8 tests from Utf8Test (0 ms total)
+
+[----------] 3 tests from MediaWidgetSpeedTest
+[ RUN      ] MediaWidgetSpeedTest.CyclePlaybackRatesByPicking
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] MediaWidgetSpeedTest.CyclePlaybackRatesByPicking (0 ms)
+[ RUN      ] MediaWidgetSpeedTest.SetPlaybackRateDirectly
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] MediaWidgetSpeedTest.SetPlaybackRateDirectly (0 ms)
+[ RUN      ] MediaWidgetSpeedTest.AccessibilityPerformActionOnSpeedButton
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] MediaWidgetSpeedTest.AccessibilityPerformActionOnSpeedButton (0 ms)
+[----------] 3 tests from MediaWidgetSpeedTest (0 ms total)
+
+[----------] 7 tests from EditorConfigTest
+[ RUN      ] EditorConfigTest.ParseDefaultConfig
+[       OK ] EditorConfigTest.ParseDefaultConfig (0 ms)
+[ RUN      ] EditorConfigTest.ParseCustomConfigOverrides
+[       OK ] EditorConfigTest.ParseCustomConfigOverrides (0 ms)
+[ RUN      ] EditorConfigTest.InvalidTsvFallsBackGracefully
+[       OK ] EditorConfigTest.InvalidTsvFallsBackGracefully (0 ms)
+[ RUN      ] EditorConfigTest.LoadAssetsConfig
+[       OK ] EditorConfigTest.LoadAssetsConfig (0 ms)
+[ RUN      ] EditorConfigTest.ModalCommandsDefaultToQuitAndCanBeDisabled
+[       OK ] EditorConfigTest.ModalCommandsDefaultToQuitAndCanBeDisabled (0 ms)
+[ RUN      ] EditorConfigTest.UiFontsAndScalesAreIndependentFromDocumentTypography
+[       OK ] EditorConfigTest.UiFontsAndScalesAreIndependentFromDocumentTypography (0 ms)
+[ RUN      ] EditorConfigTest.InvalidUiScalesAndFontsRetainTypedDefaults
+[       OK ] EditorConfigTest.InvalidUiScalesAndFontsRetainTypedDefaults (0 ms)
+[----------] 7 tests from EditorConfigTest (1 ms total)
+
+[----------] 10 tests from ToastOverlayTest
+[ RUN      ] ToastOverlayTest.startsEmpty
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] ToastOverlayTest.startsEmpty (0 ms)
+[ RUN      ] ToastOverlayTest.postingShowsAMessage
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] ToastOverlayTest.postingShowsAMessage (0 ms)
+[ RUN      ] ToastOverlayTest.everySeverityIsShown
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] ToastOverlayTest.everySeverityIsShown (0 ms)
+[ RUN      ] ToastOverlayTest.olderMessagesAreDroppedPastTheCap
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] ToastOverlayTest.olderMessagesAreDroppedPastTheCap (0 ms)
+[ RUN      ] ToastOverlayTest.aMessageGoesAwayOnceItsLifetimeIsUp
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] ToastOverlayTest.aMessageGoesAwayOnceItsLifetimeIsUp (0 ms)
+[ RUN      ] ToastOverlayTest.expiryOnlyTakesTheMessagesThatAreDue
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] ToastOverlayTest.expiryOnlyTakesTheMessagesThatAreDue (0 ms)
+[ RUN      ] ToastOverlayTest.spaceIsReusedAcrossManyMessages
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] ToastOverlayTest.spaceIsReusedAcrossManyMessages (0 ms)
+[ RUN      ] ToastOverlayTest.longMessagesStayInsideTheSafeAreaAtEveryFontScale
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+glyph cache: atlas 512x512 x1 -> 1024x1024 x1 (281 glyphs, 229993 texels placed, largest 64x39, 1 palettes)
+[       OK ] ToastOverlayTest.longMessagesStayInsideTheSafeAreaAtEveryFontScale (330 ms)
+[ RUN      ] ToastOverlayTest.changingTypographyKeepsTheOriginalExpiryAndSerial
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] ToastOverlayTest.changingTypographyKeepsTheOriginalExpiryAndSerial (2 ms)
+[ RUN      ] ToastOverlayTest.everyUnicodeFixtureHasBoundedGeometryAndItsFullLabel
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] ToastOverlayTest.everyUnicodeFixtureHasBoundedGeometryAndItsFullLabel (48 ms)
+[----------] 10 tests from ToastOverlayTest (383 ms total)
+
+[----------] 18 tests from TextFitTest
+[ RUN      ] TextFitTest.EmptyTextHasNoVisibleSourceOrTruncation
+[       OK ] TextFitTest.EmptyTextHasNoVisibleSourceOrTruncation (0 ms)
+[ RUN      ] TextFitTest.ZeroWidthMeansUnboundedAndPreservesTheSource
+[       OK ] TextFitTest.ZeroWidthMeansUnboundedAndPreservesTheSource (0 ms)
+[ RUN      ] TextFitTest.WidthSweepIncludesSubpixelAndNarrowerThanEllipsis
+[       OK ] TextFitTest.WidthSweepIncludesSubpixelAndNarrowerThanEllipsis (40 ms)
+[ RUN      ] TextFitTest.UnicodeWidthSweepsCutOnlyCompleteGraphemesAndClusters
+[       OK ] TextFitTest.UnicodeWidthSweepsCutOnlyCompleteGraphemesAndClusters (69 ms)
+[ RUN      ] TextFitTest.StartAndMiddleEllipsisRetainIdentifierSuffix
+[       OK ] TextFitTest.StartAndMiddleEllipsisRetainIdentifierSuffix (0 ms)
+[ RUN      ] TextFitTest.ArabicEndEllipsisAppearsAtTheVisualLeft
+[       OK ] TextFitTest.ArabicEndEllipsisAppearsAtTheVisualLeft (0 ms)
+[ RUN      ] TextFitTest.WrapRespectsMaxLinesAndEllipsizesItsLastLine
+[       OK ] TextFitTest.WrapRespectsMaxLinesAndEllipsizesItsLastLine (0 ms)
+[ RUN      ] TextFitTest.HeightLimitWinsOverMaxLines
+[       OK ] TextFitTest.HeightLimitWinsOverMaxLines (0 ms)
+[ RUN      ] TextFitTest.WrapDoesNotMarkExactlyFittingLinesAsTruncated
+[       OK ] TextFitTest.WrapDoesNotMarkExactlyFittingLinesAsTruncated (0 ms)
+[ RUN      ] TextFitTest.AlignmentUsesTheConstrainedWidth
+[       OK ] TextFitTest.AlignmentUsesTheConstrainedWidth (0 ms)
+[ RUN      ] TextFitTest.HeightBelowOneLineProducesNoOverflow
+[       OK ] TextFitTest.HeightBelowOneLineProducesNoOverflow (0 ms)
+[ RUN      ] TextFitTest.UnboundedLineCountWrapsAllSource
+[       OK ] TextFitTest.UnboundedLineCountWrapsAllSource (0 ms)
+[ RUN      ] TextFitTest.ClipUsesNoEllipsisAndKeepsASingleLine
+[       OK ] TextFitTest.ClipUsesNoEllipsisAndKeepsASingleLine (0 ms)
+[ RUN      ] TextFitTest.StringViewDoesNotReadOrShowSurroundingBytes
+[       OK ] TextFitTest.StringViewDoesNotReadOrShowSurroundingBytes (0 ms)
+[ RUN      ] TextFitTest.FitOwnsDisplayedTextAfterTheInputIsDestroyed
+[       OK ] TextFitTest.FitOwnsDisplayedTextAfterTheInputIsDestroyed (0 ms)
+[ RUN      ] TextFitTest.MixedBidiPreservesLogicalSourceAndVisualRunOrder
+[       OK ] TextFitTest.MixedBidiPreservesLogicalSourceAndVisualRunOrder (0 ms)
+[ RUN      ] TextFitTest.FallbackStringViewRemainsWithinItsSourceSlice
+[       OK ] TextFitTest.FallbackStringViewRemainsWithinItsSourceSlice (0 ms)
+[ RUN      ] TextFitTest.EndEllipsisLineRangeExcludesOmittedSource
+[       OK ] TextFitTest.EndEllipsisLineRangeExcludesOmittedSource (0 ms)
+[----------] 18 tests from TextFitTest (113 ms total)
+
+[----------] 12 tests from BeamsTest
+[ RUN      ] BeamsTest.theRecordIsWhatTheShaderDeclares
+[       OK ] BeamsTest.theRecordIsWhatTheShaderDeclares (0 ms)
+[ RUN      ] BeamsTest.aBeamAddedOnItsOwnCoversTheWholeRoute
+[       OK ] BeamsTest.aBeamAddedOnItsOwnCoversTheWholeRoute (0 ms)
+[ RUN      ] BeamsTest.aPathSharesOneFadeOutAmongItsSegments
+[       OK ] BeamsTest.aPathSharesOneFadeOutAmongItsSegments (0 ms)
+[ RUN      ] BeamsTest.aPathThatGoesNowhereAddsNothing
+[       OK ] BeamsTest.aPathThatGoesNowhereAddsNothing (0 ms)
+[ RUN      ] BeamsTest.addedBeamsReachTheBufferInOrder
+[       OK ] BeamsTest.addedBeamsReachTheBufferInOrder (0 ms)
+[ RUN      ] BeamsTest.rebuildingReplacesWhatWasThereBefore
+[       OK ] BeamsTest.rebuildingReplacesWhatWasThereBefore (0 ms)
+[ RUN      ] BeamsTest.moreBeamsThanTheStorageHoldsGrowIt
+[       OK ] BeamsTest.moreBeamsThanTheStorageHoldsGrowIt (0 ms)
+[ RUN      ] BeamsTest.theFourCornersAreARectangleAlongTheRun
+[       OK ] BeamsTest.theFourCornersAreARectangleAlongTheRun (0 ms)
+[ RUN      ] BeamsTest.theWidthIsAcrossTheBeamAtAnyAngle
+[       OK ] BeamsTest.theWidthIsAcrossTheBeamAtAnyAngle (0 ms)
+[ RUN      ] BeamsTest.aPickedBeamComesBackAsABeam
+[       OK ] BeamsTest.aPickedBeamComesBackAsABeam (0 ms)
+[ RUN      ] BeamsTest.drawingWithoutAPipelineIsQuiet
+[       OK ] BeamsTest.drawingWithoutAPipelineIsQuiet (0 ms)
+[ RUN      ] BeamsTest.NurbsJoinsKeepNormalsAndPickingIdentity
+[       OK ] BeamsTest.NurbsJoinsKeepNormalsAndPickingIdentity (0 ms)
+[----------] 12 tests from BeamsTest (1 ms total)
+
+[----------] 3 tests from ColorTest
+[ RUN      ] ColorTest.packAndUnpackRgbaRoundtrip
+[       OK ] ColorTest.packAndUnpackRgbaRoundtrip (0 ms)
+[ RUN      ] ColorTest.parseAndFormatHexColor
+[       OK ] ColorTest.parseAndFormatHexColor (0 ms)
+[ RUN      ] ColorTest.toHexAndFromHex
+[       OK ] ColorTest.toHexAndFromHex (0 ms)
+[----------] 3 tests from ColorTest (0 ms total)
+
+[----------] 3 tests from SpatialTest
+[ RUN      ] SpatialTest.evaluateQuadraticBezier
+[       OK ] SpatialTest.evaluateQuadraticBezier (0 ms)
+[ RUN      ] SpatialTest.onScreenFrustumTesting
+[       OK ] SpatialTest.onScreenFrustumTesting (0 ms)
+[ RUN      ] SpatialTest.framingDistanceAndFov
+[       OK ] SpatialTest.framingDistanceAndFov (0 ms)
+[----------] 3 tests from SpatialTest (0 ms total)
+
+[----------] 32 tests from BufferPoolTest
+[ RUN      ] BufferPoolTest.reserveHandsOutDistinctRuns
+[       OK ] BufferPoolTest.reserveHandsOutDistinctRuns (0 ms)
+[ RUN      ] BufferPoolTest.reserveOfZeroRowsIsEmpty
+[       OK ] BufferPoolTest.reserveOfZeroRowsIsEmpty (0 ms)
+[ RUN      ] BufferPoolTest.reserveBeyondCapacityGrowsTheBuffer
+[       OK ] BufferPoolTest.reserveBeyondCapacityGrowsTheBuffer (0 ms)
+[ RUN      ] BufferPoolTest.growthKeepsEarlierAllocationsAddressable
+[       OK ] BufferPoolTest.growthKeepsEarlierAllocationsAddressable (0 ms)
+[ RUN      ] BufferPoolTest.releasedRunsAreMergedAndReused
+[       OK ] BufferPoolTest.releasedRunsAreMergedAndReused (0 ms)
+[ RUN      ] BufferPoolTest.writeRejectsDataThatIsNotRowAligned
+[       OK ] BufferPoolTest.writeRejectsDataThatIsNotRowAligned (0 ms)
+[ RUN      ] BufferPoolTest.writeRejectsOverrunOfTheAllocation
+[       OK ] BufferPoolTest.writeRejectsOverrunOfTheAllocation (0 ms)
+[ RUN      ] BufferPoolTest.writeTargetsTheAllocationsOffset
+[       OK ] BufferPoolTest.writeTargetsTheAllocationsOffset (0 ms)
+[ RUN      ] BufferPoolTest.growthOvershootsByHalfRatherThanByDouble
+[       OK ] BufferPoolTest.growthOvershootsByHalfRatherThanByDouble (0 ms)
+[ RUN      ] BufferPoolTest.growthCountsTheFreeRunItIsExtending
+[       OK ] BufferPoolTest.growthCountsTheFreeRunItIsExtending (0 ms)
+[ RUN      ] BufferPoolTest.trimGivesBackTheRoomGrowthReserved
+[       OK ] BufferPoolTest.trimGivesBackTheRoomGrowthReserved (0 ms)
+[ RUN      ] BufferPoolTest.allocationsSurviveATrimAndItCanGrowAgain
+[       OK ] BufferPoolTest.allocationsSurviveATrimAndItCanGrowAgain (0 ms)
+[ RUN      ] BufferPoolTest.trimDoesNothingWhenThereIsLittleToGiveBack
+[       OK ] BufferPoolTest.trimDoesNothingWhenThereIsLittleToGiveBack (0 ms)
+[ RUN      ] BufferPoolTest.trimLeavesHolesInTheMiddleAlone
+[       OK ] BufferPoolTest.trimLeavesHolesInTheMiddleAlone (0 ms)
+[ RUN      ] BufferPoolTest.erasedRowsAreZeroedOnTheDevice
+[       OK ] BufferPoolTest.erasedRowsAreZeroedOnTheDevice (0 ms)
+[ RUN      ] BufferPoolTest.erasureIsRelativeToTheAllocation
+[       OK ] BufferPoolTest.erasureIsRelativeToTheAllocation (0 ms)
+[ RUN      ] BufferPoolTest.erasingRefusesToRunPastTheAllocation
+[       OK ] BufferPoolTest.erasingRefusesToRunPastTheAllocation (0 ms)
+[ RUN      ] BufferPoolTest.erasedRowsAreHandedBackToTheirOwnAllocation
+[       OK ] BufferPoolTest.erasedRowsAreHandedBackToTheirOwnAllocation (0 ms)
+[ RUN      ] BufferPoolTest.adjacentErasuresMergeIntoOneRun
+[       OK ] BufferPoolTest.adjacentErasuresMergeIntoOneRun (0 ms)
+[ RUN      ] BufferPoolTest.erasedRowsAreNotOfferedToOtherAllocations
+[       OK ] BufferPoolTest.erasedRowsAreNotOfferedToOtherAllocations (0 ms)
+[ RUN      ] BufferPoolTest.releasingAnAllocationTakesItsErasedRowsWithIt
+[       OK ] BufferPoolTest.releasingAnAllocationTakesItsErasedRowsWithIt (0 ms)
+[ RUN      ] BufferPoolTest.erasingALargeRunDoesNotStageItAllAtOnce
+[       OK ] BufferPoolTest.erasingALargeRunDoesNotStageItAllAtOnce (0 ms)
+[ RUN      ] BufferPoolTest.everyAllocationHasRoomToGrowInto
+[       OK ] BufferPoolTest.everyAllocationHasRoomToGrowInto (0 ms)
+[ RUN      ] BufferPoolTest.growingWithinTheRoomMovesNothing
+[       OK ] BufferPoolTest.growingWithinTheRoomMovesNothing (0 ms)
+[ RUN      ] BufferPoolTest.outgrowingTheRoomMovesTheRowsAndTheHandleStillWorks
+[       OK ] BufferPoolTest.outgrowingTheRoomMovesTheRowsAndTheHandleStillWorks (0 ms)
+[ RUN      ] BufferPoolTest.theRoomAMovedAllocationLeavesIsReusable
+[       OK ] BufferPoolTest.theRoomAMovedAllocationLeavesIsReusable (0 ms)
+[ RUN      ] BufferPoolTest.aMoveDoesNotLandOnTopOfWhatItIsLeaving
+[       OK ] BufferPoolTest.aMoveDoesNotLandOnTopOfWhatItIsLeaving (0 ms)
+[ RUN      ] BufferPoolTest.erasedRowsTravelWithAMovedAllocation
+[       OK ] BufferPoolTest.erasedRowsTravelWithAMovedAllocation (0 ms)
+[ RUN      ] BufferPoolTest.shrinkingKeepsThePlaceAndWidensTheRoom
+[       OK ] BufferPoolTest.shrinkingKeepsThePlaceAndWidensTheRoom (0 ms)
+[ RUN      ] BufferPoolTest.aReleasedAllocationIsNoLongerAddressable
+[       OK ] BufferPoolTest.aReleasedAllocationIsNoLongerAddressable (0 ms)
+[ RUN      ] BufferPoolTest.rejectsZeroStride
+[       OK ] BufferPoolTest.rejectsZeroStride (0 ms)
+[ RUN      ] BufferPoolTest.rejectsNullDevice
+[       OK ] BufferPoolTest.rejectsNullDevice (0 ms)
+[----------] 32 tests from BufferPoolTest (4 ms total)
+
+[----------] 3 tests from VulkanResourceLifetimeTest
+[ RUN      ] VulkanResourceLifetimeTest.EarlierCanvasesRenderAfterMultiplePoolExtensions
+render: vulkan device, llvmpipe (LLVM 19.1.7, 256 bits) (API 1.4.305)
+glyph cache: atlas 512x512 x1 layers, growing to at most 16384x16384 x64 (device allows 16384x16384 x2048, the vertex encoding 64 layers)
+[       OK ] VulkanResourceLifetimeTest.EarlierCanvasesRenderAfterMultiplePoolExtensions (1520 ms)
+[ RUN      ] VulkanResourceLifetimeTest.DestroyedAndResizedBuffersOutliveRecordedDraws
+render: vulkan device, llvmpipe (LLVM 19.1.7, 256 bits) (API 1.4.305)
+glyph cache: atlas 512x512 x1 layers, growing to at most 16384x16384 x64 (device allows 16384x16384 x2048, the vertex encoding 64 layers)
+[       OK ] VulkanResourceLifetimeTest.DestroyedAndResizedBuffersOutliveRecordedDraws (118 ms)
+[ RUN      ] VulkanResourceLifetimeTest.RepeatedFrameReuseRetiresReplacedBuffers
+render: vulkan device, llvmpipe (LLVM 19.1.7, 256 bits) (API 1.4.305)
+glyph cache: atlas 512x512 x1 layers, growing to at most 16384x16384 x64 (device allows 16384x16384 x2048, the vertex encoding 64 layers)
+[       OK ] VulkanResourceLifetimeTest.RepeatedFrameReuseRetiresReplacedBuffers (482 ms)
+[----------] 3 tests from VulkanResourceLifetimeTest (2122 ms total)
+
+[----------] 2 tests from WorldPanelTest
+[ RUN      ] WorldPanelTest.ProjectionAndLegibilityAtThreeZoomLevels
+[       OK ] WorldPanelTest.ProjectionAndLegibilityAtThreeZoomLevels (0 ms)
+[ RUN      ] WorldPanelTest.LowLodRetainsPicksFullNamesAndProjectedAccessibility
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] WorldPanelTest.LowLodRetainsPicksFullNamesAndProjectedAccessibility (4 ms)
+[----------] 2 tests from WorldPanelTest (5 ms total)
+
+[----------] 8 tests from DocPageBudgetTest
+[ RUN      ] DocPageBudgetTest.ABacklogShapedBeforeTheFirstCallStillBuildsInBoundedBatches
+[       OK ] DocPageBudgetTest.ABacklogShapedBeforeTheFirstCallStillBuildsInBoundedBatches (14691 ms)
+[ RUN      ] DocPageBudgetTest.ViewportPriorityBuildsTheTargetPageDirectly
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] DocPageBudgetTest.ViewportPriorityBuildsTheTargetPageDirectly (19697 ms)
+[ RUN      ] DocPageBudgetTest.PriorityOffsetComesRightAfterTheViewport
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] DocPageBudgetTest.PriorityOffsetComesRightAfterTheViewport (24317 ms)
+[ RUN      ] DocPageBudgetTest.DegeneratesToDocumentOrderWithNoPriorityAndAParkedCamera
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] DocPageBudgetTest.DegeneratesToDocumentOrderWithNoPriorityAndAParkedCamera (3449 ms)
+[ RUN      ] DocPageBudgetTest.PageIndexForOffsetAnswersBeforeAnyPageIsBuilt
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] DocPageBudgetTest.PageIndexForOffsetAnswersBeforeAnyPageIsBuilt (2854 ms)
+[ RUN      ] DocPageBudgetTest.ApproximateAnchorAgreesWithAnchorOncePageIsBuilt
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] DocPageBudgetTest.ApproximateAnchorAgreesWithAnchorOncePageIsBuilt (2358 ms)
+[ RUN      ] DocPageBudgetTest.SettlesWithABoundedBuiltPageCountWellBelowTotal
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] DocPageBudgetTest.SettlesWithABoundedBuiltPageCountWellBelowTotal (12588 ms)
+[ RUN      ] DocPageBudgetTest.ABankedPageBuildsIdenticallyToOneNeverBanked
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] DocPageBudgetTest.ABankedPageBuildsIdenticallyToOneNeverBanked (25510 ms)
+[----------] 8 tests from DocPageBudgetTest (105468 ms total)
+
+[----------] 9 tests from DocumentSwitcherTest
+[ RUN      ] DocumentSwitcherTest.defaultVisibilityAndSelection
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] DocumentSwitcherTest.defaultVisibilityAndSelection (0 ms)
+[ RUN      ] DocumentSwitcherTest.pickTabSelectionTriggersHandler
+[       OK ] DocumentSwitcherTest.pickTabSelectionTriggersHandler (0 ms)
+[ RUN      ] DocumentSwitcherTest.pickCloseButtonTriggersCloseHandler
+[       OK ] DocumentSwitcherTest.pickCloseButtonTriggersCloseHandler (0 ms)
+[ RUN      ] DocumentSwitcherTest.ignoresNonOverlayPicks
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] DocumentSwitcherTest.ignoresNonOverlayPicks (0 ms)
+[ RUN      ] DocumentSwitcherTest.pickNewDocButtonTriggersHandler
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] DocumentSwitcherTest.pickNewDocButtonTriggersHandler (0 ms)
+[ RUN      ] DocumentSwitcherTest.responsiveTabsKeepDrawnAndAccessibleBoundsTogether
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+glyph cache: atlas 512x512 x1 -> 1024x1024 x1 (226 glyphs, 208910 texels placed, largest 64x47, 1 palettes)
+[       OK ] DocumentSwitcherTest.responsiveTabsKeepDrawnAndAccessibleBoundsTogether (278 ms)
+[ RUN      ] DocumentSwitcherTest.accessibilityUsesTheSameSelectCloseAndUtilityActions
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] DocumentSwitcherTest.accessibilityUsesTheSameSelectCloseAndUtilityActions (1 ms)
+[ RUN      ] DocumentSwitcherTest.documentChangesInvalidateRetainedTabsExactlyOnce
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] DocumentSwitcherTest.documentChangesInvalidateRetainedTabsExactlyOnce (1 ms)
+[ RUN      ] DocumentSwitcherTest.asynchronousPicksKeepTheirDocumentAndWidgetIdentity
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] DocumentSwitcherTest.asynchronousPicksKeepTheirDocumentAndWidgetIdentity (1 ms)
+[----------] 9 tests from DocumentSwitcherTest (284 ms total)
+
+[----------] 4 tests from FloatingToolbar3DTest
+[ RUN      ] FloatingToolbar3DTest.DefaultStateAndVisibility
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] FloatingToolbar3DTest.DefaultStateAndVisibility (0 ms)
+[ RUN      ] FloatingToolbar3DTest.FormattingAndHeadingState
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] FloatingToolbar3DTest.FormattingAndHeadingState (0 ms)
+[ RUN      ] FloatingToolbar3DTest.PickingActionDispatchesHandler
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] FloatingToolbar3DTest.PickingActionDispatchesHandler (0 ms)
+[ RUN      ] FloatingToolbar3DTest.AccessibilityActionPerformsClick
+[       OK ] FloatingToolbar3DTest.AccessibilityActionPerformsClick (0 ms)
+[----------] 4 tests from FloatingToolbar3DTest (0 ms total)
+
+[----------] 3 tests from AllBackends/RenderRegionDeviceTest
+[ RUN      ] AllBackends/RenderRegionDeviceTest.ClipsColorAndPickingThenRestoresWholeTarget/0
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+render: opengl device, version 4.5 (Core Profile) Mesa 25.0.7-2+deb13u1
+glyph cache: atlas 512x512 x1 layers, growing to at most 16384x16384 x64 (device allows 16384x16384 x2048, the vertex encoding 64 layers)
+[       OK ] AllBackends/RenderRegionDeviceTest.ClipsColorAndPickingThenRestoresWholeTarget/0 (615 ms)
+[ RUN      ] AllBackends/RenderRegionDeviceTest.ClipsColorAndPickingThenRestoresWholeTarget/1
+glyph cache: atlas 512x512 x1 layers, growing to at most 16384x16384 x64 (device allows 16384x16384 x2048, the vertex encoding 64 layers)
+render: opengles device, version OpenGL ES 3.2 Mesa 25.0.7-2+deb13u1
+[       OK ] AllBackends/RenderRegionDeviceTest.ClipsColorAndPickingThenRestoresWholeTarget/1 (503 ms)
+[ RUN      ] AllBackends/RenderRegionDeviceTest.ClipsColorAndPickingThenRestoresWholeTarget/2
+render: vulkan device, llvmpipe (LLVM 19.1.7, 256 bits) (API 1.4.305)
+glyph cache: atlas 512x512 x1 layers, growing to at most 16384x16384 x64 (device allows 16384x16384 x2048, the vertex encoding 64 layers)
+[       OK ] AllBackends/RenderRegionDeviceTest.ClipsColorAndPickingThenRestoresWholeTarget/2 (412 ms)
+[----------] 3 tests from AllBackends/RenderRegionDeviceTest (1531 ms total)
+
+[----------] 3 tests from AllBackends/DocumentPaletteDeviceTest
+[ RUN      ] AllBackends/DocumentPaletteDeviceTest.DarkPaperPreservesHighlightsAndPickingWithoutLeakingIntoNextDraw/0
+render: opengl device, version 4.5 (Core Profile) Mesa 25.0.7-2+deb13u1
+[       OK ] AllBackends/DocumentPaletteDeviceTest.DarkPaperPreservesHighlightsAndPickingWithoutLeakingIntoNextDraw/0 (203 ms)
+[ RUN      ] AllBackends/DocumentPaletteDeviceTest.DarkPaperPreservesHighlightsAndPickingWithoutLeakingIntoNextDraw/1
+render: opengles device, version OpenGL ES 3.2 Mesa 25.0.7-2+deb13u1
+[       OK ] AllBackends/DocumentPaletteDeviceTest.DarkPaperPreservesHighlightsAndPickingWithoutLeakingIntoNextDraw/1 (199 ms)
+[ RUN      ] AllBackends/DocumentPaletteDeviceTest.DarkPaperPreservesHighlightsAndPickingWithoutLeakingIntoNextDraw/2
+render: vulkan device, llvmpipe (LLVM 19.1.7, 256 bits) (API 1.4.305)
+[       OK ] AllBackends/DocumentPaletteDeviceTest.DarkPaperPreservesHighlightsAndPickingWithoutLeakingIntoNextDraw/2 (197 ms)
+[----------] 3 tests from AllBackends/DocumentPaletteDeviceTest (601 ms total)
+
+[----------] Global test environment tear-down
+[==========] 782 tests from 101 test suites ran. (117670 ms total)
+[  PASSED  ] 781 tests.
+[  FAILED  ] 1 test, listed below:
+[  FAILED  ] LayoutfiladeBenchmarkTest.IncrementalResizeLatency
+
+ 1 FAILED TEST
+make: *** [Makefile:1122: test] Error 1

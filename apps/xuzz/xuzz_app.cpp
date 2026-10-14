@@ -2756,6 +2756,21 @@ int XuzzApp::run(const int argc, char **argv) {
         renderer->runWithState(
             [&linkPanel](RenderState &) { linkPanel.toggleControls(); });
       });
+  app.commands().registerAction(
+      "std:xuzz/investigation", "expand or fold exact Link investigation",
+      [renderer, &linkPanel, &linkContext, state] {
+        renderer->runWithState([&linkPanel, &linkContext,
+                                state](RenderState &) {
+          if (!linkContext.selection()) {
+            state->showDialog(render::DiagnosticSeverity::Info,
+                              "Link investigation",
+                              "Select a Link from the page, cell or link list, "
+                              "then inspect its members.");
+            return;
+          }
+          linkPanel.toggleInvestigation();
+        });
+      });
 
   app.commands().registerAction(
       std::string(xanadu::settings::kKeymapOverviewToggle),
@@ -3363,7 +3378,9 @@ int XuzzApp::run(const int argc, char **argv) {
                                             .active = selected->active,
                                             .left   = selected->left,
                                             .right  = selected->right,
-                                            .origin = selected->origin};
+                                            .origin = selected->origin,
+                                            .originCheckpoint =
+                                                selected->originCheckpoint};
     }
     session->rememberPlace(place);
   }

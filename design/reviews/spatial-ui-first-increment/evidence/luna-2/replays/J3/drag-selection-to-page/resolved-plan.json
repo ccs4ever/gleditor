@@ -1,0 +1,38 @@
+{
+  "launch_args": [
+    "/workspace/gleditor/design/reviews/spatial-ui-first-increment/luna-2-profiles/j3/data/xudu/xanadocs/default"
+  ],
+  "steps": [
+    "--mouse-down",
+    "205,286",
+    "--capture",
+    "/workspace/gleditor/design/reviews/spatial-ui-first-increment/evidence/luna-2/replays/J3/drag-selection-to-page/selection-press.ppm",
+    "--mouse-move",
+    "273,286",
+    "--capture",
+    "/workspace/gleditor/design/reviews/spatial-ui-first-increment/evidence/luna-2/replays/J3/drag-selection-to-page/selection-mid.ppm",
+    "--mouse-up",
+    "273,286",
+    "--dump-a11y",
+    "--capture",
+    "/workspace/gleditor/design/reviews/spatial-ui-first-increment/evidence/luna-2/replays/J3/drag-selection-to-page/selection.ppm",
+    "--mouse-down",
+    "230,286",
+    "--mouse-move",
+    "1350,450",
+    "--capture",
+    "/workspace/gleditor/design/reviews/spatial-ui-first-increment/evidence/luna-2/replays/J3/drag-selection-to-page/drag-void.ppm",
+    "--mouse-up",
+    "1350,450",
+    "--dump-a11y",
+    "--capture",
+    "/workspace/gleditor/design/reviews/spatial-ui-first-increment/evidence/luna-2/replays/J3/drag-selection-to-page/void-drop.ppm",
+    "--click",
+    "90,140",
+    "--dump-a11y",
+    "--capture",
+    "/workspace/gleditor/design/reviews/spatial-ui-first-increment/evidence/luna-2/replays/J3/drag-selection-to-page/source-return.ppm",
+    "--chord",
+    "Ctrl+Q"
+  ]
+}

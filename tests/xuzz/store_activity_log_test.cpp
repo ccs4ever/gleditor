@@ -34,7 +34,9 @@ TEST(StoreActivityLogTest, BranchesAndSelectedVisitSurviveReopening) {
                                 .active = xanadu::LinkSide::Right,
                                 .left   = {.member = 0, .occurrence = 0},
                                 .right  = {.member = 1, .occurrence = 0},
-                                .origin = origin}});
+                                .origin = origin,
+                                .originCheckpoint =
+                                xanadu::DocumentSite{document, {}, {19, 19}}}});
     log.select(origin);
     second = log.append({.parent = origin,
                          .target = xanadu::CellSite{document, {}, 21, {0, 3}}});
@@ -49,6 +51,18 @@ TEST(StoreActivityLogTest, BranchesAndSelectedVisitSurviveReopening) {
               (std::vector<xanadu::VisitId>{first, second}));
     ASSERT_TRUE(log.find(first));
     EXPECT_EQ(log.find(first)->link->right.member, 1U);
+    EXPECT_EQ(log.find(first)->link->originCheckpoint,
+              (std::optional<xanadu::OccurrenceSite>{
+                  xanadu::DocumentSite{document, {}, {19, 19}}}));
+    xanadu::LinkNavigator restored(log);
+    ASSERT_TRUE(restored.dispatch(xanadu::nav::EnterVisit{first}));
+    const auto returned = restored.dispatch(xanadu::nav::ReturnToOrigin{});
+    ASSERT_TRUE(returned && returned->focus);
+    EXPECT_EQ(
+        *returned->focus,
+        (xanadu::OccurrenceSite{xanadu::DocumentSite{document, {}, {19, 19}}}));
+    EXPECT_EQ(log.current(), origin);
+    EXPECT_EQ(log.walkEntries().size(), 3U);
     EXPECT_EQ(std::get<xanadu::CellSite>(log.find(second)->target).cell, 21U);
     log.select(second);
   }
@@ -160,4 +174,73 @@ TEST_F(ActivityMetadataTest, PersistedUnknownReferenceIsRefusedByTypedError) {
   inject("d.activity-references", "reference1 999");
   EXPECT_THROW((xanadu::StoreActivityLog{store.get(), base / "activity"}),
                xanadu::ActivityRecordUnreadable);
+}
+
+TEST_F(ActivityMetadataTest, PreviousVisitPayloadIsRefusedWithoutRewriting) {
+  const auto rank = store->rebuildManifold(store->latest())
+                        .dimensionNamed("d.activity-visits", *store);
+  ASSERT_TRUE(rank);
+  auto at           = store->makeCell(store->latest(), "visit1 0 doc");
+  std::ignore       = store->setLink(at, store->homeCell(), *rank,
+                                     zigzag::DimVector::POS, store->cellRefOf(at));
+  const auto before = store->opCount();
+  EXPECT_THROW((xanadu::StoreActivityLog{store.get(), base / "activity"}),
+               xanadu::ActivityRecordUnreadable);
+  EXPECT_EQ(store->opCount(), before);
+}
+
+TEST(ActivitySelectionRecordTest, OldAndTruncatedCheckpointsAreRefused) {
+  EXPECT_THROW(
+      xanadu::decodeLinkContext(
+          "selection1 00000000000000000000000000000000 1 0 -1 -1 -1 -1 1"),
+      xanadu::ActivityRecordUnreadable);
+  EXPECT_THROW(
+      xanadu::decodeLinkContext("selection2 00000000000000000000000000000000 1 "
+                                "0 -1 -1 -1 -1 1 1 doc"),
+      xanadu::ActivityRecordUnreadable);
+}
+
+TEST(ActivitySelectionRecordTest,
+     NegativeAndOverflowingCheckpointNumbersAreRefused) {
+  const std::string authority = "00000000000000000000000000000000";
+  const auto selection        = "selection2 " + authority + " ";
+  const auto context          = selection + "1 0 -1 -1 -1 -1 1 1 ";
+  const auto doc              = context + "doc " + authority + " 0 ";
+  const auto cell             = context + "cell " + authority + " 0 ";
+  for (const auto &malformed : std::vector<std::string>{
+           selection + "-1 0 -1 -1 -1 -1 1 0",
+           selection + "4294967296 0 -1 -1 -1 -1 1 0",
+           selection + "1 0 -1 -1 -1 -1 -1 0",
+           selection + "1 0 -1 -1 -1 -1 18446744073709551616 0",
+           selection + "1 0 -1 -1 -1 -1 1 -1", doc + "-1 -1 0", doc + "0 -1 0",
+           doc + "4294967296 4294967296 0", cell + "0 0 -1",
+           cell + "0 0 4294967296"}) {
+    SCOPED_TRACE(malformed);
+    EXPECT_THROW(xanadu::decodeLinkContext(malformed),
+                 xanadu::ActivityRecordUnreadable);
+  }
+  // Every representable offset remains accepted; source availability is
+  // checked by the host rather than by the private activity codec.
+  const auto boundary =
+      xanadu::decodeLinkContext(doc + "4294967295 4294967295 0");
+  ASSERT_TRUE(boundary.originCheckpoint);
+  EXPECT_EQ(std::get<xanadu::DocumentSite>(*boundary.originCheckpoint).range,
+            (xanadu::Extent{4294967295U, 4294967295U}));
+}
+
+TEST_F(ActivityMetadataTest, NegativeVisitParentAndAddressesAreRefused) {
+  const auto rank = store->rebuildManifold(store->latest())
+                        .dimensionNamed("d.activity-visits", *store);
+  ASSERT_TRUE(rank);
+  for (const auto *record :
+       {"visit2 -1 doc 00000000000000000000000000000000 0 0 0 0 0 0",
+        "visit2 0 doc 00000000000000000000000000000000 0 -1 -1 0 0 0"}) {
+    auto at           = store->makeCell(store->latest(), record);
+    std::ignore       = store->setLink(at, store->homeCell(), *rank,
+                                       zigzag::DimVector::POS, store->cellRefOf(at));
+    const auto before = store->opCount();
+    EXPECT_THROW((xanadu::StoreActivityLog{store.get(), base / "activity"}),
+                 xanadu::ActivityRecordUnreadable);
+    EXPECT_EQ(store->opCount(), before);
+  }
 }

@@ -1,0 +1,137 @@
+{
+  "runner": "luna-3-native-first-increment",
+  "mode": "First-increment native validation addendum for J11-J15 preservation controls and J27-J32. UI evidence uses visible controls/default chords; REPL evidence uses PTY prompts. Raw stage exits alone are not passes.",
+  "native_validation": {
+    "date": "2026-10-14",
+    "scope": "First-increment native validation addendum for J11-J15 preservation controls and J27-J32. UI evidence uses visible controls/default chords; REPL evidence uses PTY prompts. Raw stage exits alone are not passes.",
+    "environment": {
+      "dbus_run_session": "missing; native AT-SPI launch stages were blocked before application launch",
+      "accesskit": "not built; assistive-technology parity unvalidated",
+      "docker_runner": "not used for additional stages in this addendum",
+      "raw_artifacts": "/workspace/spatial-build/luna-authoring"
+    },
+    "journey_steps": [
+      {
+        "id": "J11/1",
+        "outcome": "Fail",
+        "affordance": "Ctrl+Alt+[; Ctrl+Alt+]; Ctrl+Alt+L",
+        "finding": "Captured forge result does not establish one identity with complete 2x3 endsets; legacy drag replay coordinates hit no cell.",
+        "evidence": "evidence/luna-3-native/j11-forged.png"
+      },
+      {
+        "id": "J11/2-3",
+        "outcome": "Harness gap",
+        "affordance": "AT-SPI replay attempt",
+        "finding": "Not run: dbus-run-session is unavailable, preventing the native accessibility session from launching.",
+        "evidence": "evidence/luna-3-native/j11-atspi-environment-error.log"
+      },
+      {
+        "id": "J12/1",
+        "outcome": "Missing",
+        "affordance": "Ctrl+Alt+N; Ctrl+Alt+2; Ctrl+Alt+3",
+        "finding": "The captured stage does not establish the complete Slices-only to Both setup and accessibility state.",
+        "evidence": "/workspace/spatial-build/luna-authoring/j12-author/J12/transclude-edit-close-ui/"
+      },
+      {
+        "id": "J12/2-3",
+        "outcome": "Missing",
+        "affordance": "Ctrl+Alt+T; Alt+Shift+T; visible Open source card",
+        "finding": "Frames do not establish readable destination occurrence, shared primedia, durable surrounding edits, or three-location reopen.",
+        "evidence": "evidence/luna-3-native/j12-document-state.png; evidence/luna-3-native/j12-source-return.png"
+      },
+      {
+        "id": "J13/1",
+        "outcome": "Pass",
+        "affordance": "VQuery PTY prompt",
+        "finding": "Queries ran on authored issue data and saved 11 rows; source-cell provenance was not demonstrated.",
+        "evidence": "evidence/luna-3-native/j13-vquery-transcript.txt"
+      },
+      {
+        "id": "J13/2",
+        "outcome": "Pass",
+        "affordance": "VProlog PTY prompt; VPL :open prompt",
+        "finding": "Loaded VQuery result, evaluated gate rule, returned two ready issues and exported a three-solution status store consumed by VPL.",
+        "evidence": "evidence/luna-3-native/j13-vprolog-transcript.txt; evidence/luna-3-native/j13-vpl-transcript.txt"
+      },
+      {
+        "id": "J13/3",
+        "outcome": "Missing",
+        "affordance": "VPL PTY prompt",
+        "finding": "VPL saved and reopened report and recomputed 3; Xuzz open/inspection, provenance and route to source were not captured.",
+        "evidence": "evidence/luna-3-native/j13-vpl-reopen-transcript.txt"
+      },
+      {
+        "id": "J14/1-4",
+        "outcome": "Missing",
+        "affordance": "Graphical authoring stage; AT-SPI attempted",
+        "finding": "Captured frame does not show six typed cells; persistence/reopen and accessible state not established. AT-SPI launch was environment-blocked.",
+        "evidence": "evidence/luna-3-native/j14-six-kinds-attempt.png"
+      },
+      {
+        "id": "J15/1",
+        "outcome": "Missing",
+        "affordance": "Chord-driven graphical authoring",
+        "finding": "Base, ancestor and branch-A are captured, but two complete retained branches/change-site inventory are not.",
+        "evidence": "evidence/luna-3-native/j15-branch-map.png"
+      },
+      {
+        "id": "J15/2",
+        "outcome": "Fail",
+        "affordance": "Visible version selection attempted",
+        "finding": "Requested control S \u00b7 Version a14 was absent; three-version map selection did not complete.",
+        "evidence": "evidence/luna-3-native/j15-version-selection-error.log"
+      },
+      {
+        "id": "J15/3-5",
+        "outcome": "Missing",
+        "affordance": "Not demonstrated",
+        "finding": "No evidence of text/slice change-site comparison, no-write navigation, or reopen persistence.",
+        "evidence": "/workspace/spatial-build/luna-authoring/run-j15-reopen/J15/reopened-comparison/"
+      },
+      {
+        "id": "J27/all steps",
+        "outcome": "Missing",
+        "affordance": "Native interface inventory/status review",
+        "finding": "The complete native journey services are not implemented/demonstrated at the requested scope; see report for specific missing capabilities.",
+        "evidence": "design/projects/spatial-ui-overhaul-status.md"
+      },
+      {
+        "id": "J28/all steps",
+        "outcome": "Missing",
+        "affordance": "Native interface inventory/status review",
+        "finding": "The complete native journey services are not implemented/demonstrated at the requested scope; see report for specific missing capabilities.",
+        "evidence": "design/projects/spatial-ui-overhaul-status.md"
+      },
+      {
+        "id": "J29/all steps",
+        "outcome": "Missing",
+        "affordance": "Native interface inventory/status review",
+        "finding": "The complete native journey services are not implemented/demonstrated at the requested scope; see report for specific missing capabilities.",
+        "evidence": "design/projects/spatial-ui-overhaul-status.md"
+      },
+      {
+        "id": "J30/all steps",
+        "outcome": "Missing",
+        "affordance": "Native interface inventory/status review",
+        "finding": "The complete native journey services are not implemented/demonstrated at the requested scope; see report for specific missing capabilities.",
+        "evidence": "design/projects/spatial-ui-overhaul-status.md"
+      },
+      {
+        "id": "J31/all steps",
+        "outcome": "Missing",
+        "affordance": "Native interface inventory/status review",
+        "finding": "The complete native journey services are not implemented/demonstrated at the requested scope; see report for specific missing capabilities.",
+        "evidence": "design/projects/spatial-ui-overhaul-status.md"
+      },
+      {
+        "id": "J32/all steps",
+        "outcome": "Missing",
+        "affordance": "Native interface inventory/status review",
+        "finding": "The complete native journey services are not implemented/demonstrated at the requested scope; see report for specific missing capabilities.",
+        "evidence": "design/projects/spatial-ui-overhaul-status.md"
+      }
+    ],
+    "complete_native_spatial_journeys_passed": 0,
+    "report": "luna-3-report.md#native-first-increment-validation--j11-j15-and-j27-j32"
+  }
+}

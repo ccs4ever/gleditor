@@ -227,6 +227,35 @@ TEST(LinkPanelTest, MovingOffTheLinkAfterEnteringSaysSo) {
   EXPECT_EQ(selected[3].text, "origin: none");
 }
 
+TEST(LinkPanelTest,
+     InvestigationExposesEveryMemberAndChosenPlacesWithoutEntry) {
+  Panel p;
+  p.run(nav::SelectLink{.key = p.key()});
+  p.run(nav::SelectMember{p.key(), LinkSide::Left, 0});
+  const auto before   = p.selected();
+  const auto buttons  = xanadu::linkMemberButtons(before);
+  std::size_t members = 0, places = 0;
+  for (const auto &button : buttons) {
+    EXPECT_TRUE(button.label.starts_with("Preview "));
+    EXPECT_TRUE(button.enabled);
+    if (const auto *member = std::get_if<nav::SelectMember>(&button.command)) {
+      ++members;
+      EXPECT_EQ(member->key, before.key);
+    } else {
+      const auto *place = std::get_if<nav::SelectOccurrence>(&button.command);
+      ASSERT_NE(place, nullptr);
+      ++places;
+      EXPECT_EQ(place->key, before.key);
+    }
+  }
+  ASSERT_TRUE(before.occurrences);
+  EXPECT_EQ(members,
+            before.occurrences->left.size() + before.occurrences->right.size());
+  EXPECT_EQ(places, before.occurrences->left[0].occurrences.size());
+  EXPECT_EQ(p.selected().left, before.left);
+  EXPECT_EQ(p.selected().right, before.right);
+}
+
 TEST(LinkPanelTest, ButtonsSendTheKeymapsCommands) {
   Panel p;
   p.run(nav::SelectLink{.key = p.key()});

@@ -1,0 +1,120 @@
+Running main() from gmock_main.cc
+Note: Google Test filter = ContentReference.*:LinkNavigationTest.*:LinkPanelTest.*:StoreActivityLogTest.*:ActivitySelectionRecordTest.*
+[==========] Running 49 tests from 5 test suites.
+[----------] Global test environment set-up.
+[----------] 12 tests from LinkPanelTest
+[ RUN      ] LinkPanelTest.APendingLinkSaysSo
+[       OK ] LinkPanelTest.APendingLinkSaysSo (7 ms)
+[ RUN      ] LinkPanelTest.UnsetCursorsExplainTheChoiceAndAreMuted
+[       OK ] LinkPanelTest.UnsetCursorsExplainTheChoiceAndAreMuted (2 ms)
+[ RUN      ] LinkPanelTest.EachSideShowsItsOwnChoice
+[       OK ] LinkPanelTest.EachSideShowsItsOwnChoice (5 ms)
+[ RUN      ] LinkPanelTest.AMemberWithSeveralOccurrencesWaitsForAChoice
+[       OK ] LinkPanelTest.AMemberWithSeveralOccurrencesWaitsForAChoice (7 ms)
+[ RUN      ] LinkPanelTest.AMemberOutOfViewSaysSo
+[       OK ] LinkPanelTest.AMemberOutOfViewSaysSo (3 ms)
+[ RUN      ] LinkPanelTest.ConfigDefaultsComeFromTheUiSystemDoc
+[       OK ] LinkPanelTest.ConfigDefaultsComeFromTheUiSystemDoc (4894 ms)
+[ RUN      ] LinkPanelTest.FitLimitsComeFromLiveUiSettingsAndRemainBounded
+[       OK ] LinkPanelTest.FitLimitsComeFromLiveUiSettingsAndRemainBounded (4985 ms)
+[ RUN      ] LinkPanelTest.ReadingNamesTheMembersTheCaretIsOn
+[       OK ] LinkPanelTest.ReadingNamesTheMembersTheCaretIsOn (4 ms)
+[ RUN      ] LinkPanelTest.MovingOffTheLinkAfterEnteringSaysSo
+[       OK ] LinkPanelTest.MovingOffTheLinkAfterEnteringSaysSo (7 ms)
+[ RUN      ] LinkPanelTest.InvestigationExposesEveryMemberAndChosenPlacesWithoutEntry
+[       OK ] LinkPanelTest.InvestigationExposesEveryMemberAndChosenPlacesWithoutEntry (6 ms)
+[ RUN      ] LinkPanelTest.ButtonsSendTheKeymapsCommands
+[       OK ] LinkPanelTest.ButtonsSendTheKeymapsCommands (2 ms)
+[ RUN      ] LinkPanelTest.EnterIsEnabledOnlyWithAChosenPlace
+[       OK ] LinkPanelTest.EnterIsEnabledOnlyWithAChosenPlace (2 ms)
+[----------] 12 tests from LinkPanelTest (9928 ms total)
+
+[----------] 1 test from StoreActivityLogTest
+[ RUN      ] StoreActivityLogTest.BranchesAndSelectedVisitSurviveReopening
+[       OK ] StoreActivityLogTest.BranchesAndSelectedVisitSurviveReopening (53 ms)
+[----------] 1 test from StoreActivityLogTest (53 ms total)
+
+[----------] 2 tests from ActivitySelectionRecordTest
+[ RUN      ] ActivitySelectionRecordTest.OldAndTruncatedCheckpointsAreRefused
+[       OK ] ActivitySelectionRecordTest.OldAndTruncatedCheckpointsAreRefused (0 ms)
+[ RUN      ] ActivitySelectionRecordTest.NegativeAndOverflowingCheckpointNumbersAreRefused
+[       OK ] ActivitySelectionRecordTest.NegativeAndOverflowingCheckpointNumbersAreRefused (0 ms)
+[----------] 2 tests from ActivitySelectionRecordTest (1 ms total)
+
+[----------] 26 tests from LinkNavigationTest
+[ RUN      ] LinkNavigationTest.SelectingPinsTheWholeLinkWithoutMoving
+[       OK ] LinkNavigationTest.SelectingPinsTheWholeLinkWithoutMoving (2 ms)
+[ RUN      ] LinkNavigationTest.SingletonMembersAreReadyWithoutEntering
+[       OK ] LinkNavigationTest.SingletonMembersAreReadyWithoutEntering (3 ms)
+[ RUN      ] LinkNavigationTest.SideCursorsMoveIndependently
+[       OK ] LinkNavigationTest.SideCursorsMoveIndependently (3 ms)
+[ RUN      ] LinkNavigationTest.EnterNeedsAChosenOccurrenceAndRecordsOneVisit
+[       OK ] LinkNavigationTest.EnterNeedsAChosenOccurrenceAndRecordsOneVisit (8 ms)
+[ RUN      ] LinkNavigationTest.BrowsingNeverFocusesOrRecords
+[       OK ] LinkNavigationTest.BrowsingNeverFocusesOrRecords (6 ms)
+[ RUN      ] LinkNavigationTest.CrossingSwapsTheActiveSideBothWays
+[       OK ] LinkNavigationTest.CrossingSwapsTheActiveSideBothWays (2 ms)
+[ RUN      ] LinkNavigationTest.StepsCycleFromUnset
+[       OK ] LinkNavigationTest.StepsCycleFromUnset (2 ms)
+[ RUN      ] LinkNavigationTest.LateOccurrencesForAnEarlierSelectionAreRefused
+[       OK ] LinkNavigationTest.LateOccurrencesForAnEarlierSelectionAreRefused (4 ms)
+[ RUN      ] LinkNavigationTest.APickSettlesOnAMemberOnlyWhenOneMatches
+[       OK ] LinkNavigationTest.APickSettlesOnAMemberOnlyWhenOneMatches (8 ms)
+[ RUN      ] LinkNavigationTest.ActivityBackRestoresTheVisitAndItsPanel
+[       OK ] LinkNavigationTest.ActivityBackRestoresTheVisitAndItsPanel (6 ms)
+[ RUN      ] LinkNavigationTest.RestartRestoresSelectedLinkWithoutAnotherVisit
+[       OK ] LinkNavigationTest.RestartRestoresSelectedLinkWithoutAnotherVisit (2 ms)
+[ RUN      ] LinkNavigationTest.ActivityForwardChoosesEitherExistingBranch
+[       OK ] LinkNavigationTest.ActivityForwardChoosesEitherExistingBranch (37 ms)
+[ RUN      ] LinkNavigationTest.AuthoredManyToManyLinkSurvivesStoreReopen
+[       OK ] LinkNavigationTest.AuthoredManyToManyLinkSurvivesStoreReopen (2 ms)
+[ RUN      ] LinkNavigationTest.ActivityBackIntoAnotherLinkResolvesItAgain
+[       OK ] LinkNavigationTest.ActivityBackIntoAnotherLinkResolvesItAgain (7 ms)
+[ RUN      ] LinkNavigationTest.ReturnToOriginKeepsTheLinkAndAddsNoVisit
+[       OK ] LinkNavigationTest.ReturnToOriginKeepsTheLinkAndAddsNoVisit (2 ms)
+[ RUN      ] LinkNavigationTest.DismissRemovesTheContextAndMovesNothing
+[       OK ] LinkNavigationTest.DismissRemovesTheContextAndMovesNothing (2 ms)
+[ RUN      ] LinkNavigationTest.AnUnknownLinkIsRefusedAndNotPinned
+[       OK ] LinkNavigationTest.AnUnknownLinkIsRefusedAndNotPinned (7 ms)
+[ RUN      ] LinkNavigationTest.StepLinkWalksTheCandidatesInOrder
+[       OK ] LinkNavigationTest.StepLinkWalksTheCandidatesInOrder (7 ms)
+[ RUN      ] LinkNavigationTest.EveryKeymapActionNamesACommand
+[       OK ] LinkNavigationTest.EveryKeymapActionNamesACommand (0 ms)
+[ RUN      ] LinkNavigationTest.PointerKeymapAndAccessibilityAgree
+[       OK ] LinkNavigationTest.PointerKeymapAndAccessibilityAgree (10 ms)
+[ RUN      ] LinkNavigationTest.ErrorsAndCommandsHaveNames
+[       OK ] LinkNavigationTest.ErrorsAndCommandsHaveNames (0 ms)
+[ RUN      ] LinkNavigationTest.CancelEntryPreservesBothCursorsAndCompletedVisits
+[       OK ] LinkNavigationTest.CancelEntryPreservesBothCursorsAndCompletedVisits (2 ms)
+[ RUN      ] LinkNavigationTest.EveryUiActionHasAnUnclaimedDefaultChord
+[       OK ] LinkNavigationTest.EveryUiActionHasAnUnclaimedDefaultChord (3 ms)
+[ RUN      ] LinkNavigationTest.WalksEntersSavedVisitWithoutAppendingAndKeepsFutures
+[       OK ] LinkNavigationTest.WalksEntersSavedVisitWithoutAppendingAndKeepsFutures (5 ms)
+[ RUN      ] LinkNavigationTest.ResumePinnedChoicesBeforeAnyEndpointVisit
+[       OK ] LinkNavigationTest.ResumePinnedChoicesBeforeAnyEndpointVisit (3 ms)
+[ RUN      ] LinkNavigationTest.SelectionCheckpointPreservesVisitsAndExactReturn
+[       OK ] LinkNavigationTest.SelectionCheckpointPreservesVisitsAndExactReturn (3 ms)
+[----------] 26 tests from LinkNavigationTest (145 ms total)
+
+[----------] 8 tests from ContentReference
+[ RUN      ] ContentReference.RetainsDisjointRangesGapsAndPinnedFrame
+[       OK ] ContentReference.RetainsDisjointRangesGapsAndPinnedFrame (2 ms)
+[ RUN      ] ContentReference.RejectsMalformedLengthsOverlapOrderAndAddressOverflow
+[       OK ] ContentReference.RejectsMalformedLengthsOverlapOrderAndAddressOverflow (0 ms)
+[ RUN      ] ContentReference.RejectsUnaddressedContentAndMissingState
+[       OK ] ContentReference.RejectsUnaddressedContentAndMissingState (38 ms)
+[ RUN      ] ContentReference.LegacyConcatextIsExplicitAndSeparateFromCellBirth
+[       OK ] ContentReference.LegacyConcatextIsExplicitAndSeparateFromCellBirth (0 ms)
+[ RUN      ] ContentReference.ConvertsRealRepeatedOccurrencesWithoutChangingAddresses
+[       OK ] ContentReference.ConvertsRealRepeatedOccurrencesWithoutChangingAddresses (2 ms)
+[ RUN      ] ContentReference.EqualBytesAtDifferentAddressesStayDistinct
+[       OK ] ContentReference.EqualBytesAtDifferentAddressesStayDistinct (2 ms)
+[ RUN      ] ContentReference.ConversionChecksCellFrameAndPartialMapping
+[       OK ] ContentReference.ConversionChecksCellFrameAndPartialMapping (0 ms)
+[ RUN      ] ContentReference.RejectsPackagePlaceholderAndDifferentSourceRegistry
+[       OK ] ContentReference.RejectsPackagePlaceholderAndDifferentSourceRegistry (1 ms)
+[----------] 8 tests from ContentReference (48 ms total)
+
+[----------] Global test environment tear-down
+[==========] 49 tests from 5 test suites ran. (10179 ms total)
+[  PASSED  ] 49 tests.

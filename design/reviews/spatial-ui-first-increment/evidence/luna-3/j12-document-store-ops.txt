@@ -1,0 +1,6 @@
+op 1  produces=1 parent=0 branch=0 kind=structure flags=0x80 at=0 len=0 to=0 src=0 srcAt=0 srcLen=0 scroll=0 span=[55432,55440) link=0 value=0  [make xanadoc] text="document"
+op 2  produces=a1 parent=0 branch=1 kind=insert flags=0x0 at=0 len=0 to=0 src=0 srcAt=0 srcLen=0 scroll=0 span=[55251,55293) link=0 value=0 text="Harbor orchids retain their first address."
+op 3  produces=a2 parent=2 branch=0 kind=insert flags=0x0 at=42 len=0 to=0 src=0 srcAt=0 srcLen=0 scroll=0 span=[55444,55470) link=0 value=0 text="Neighbor text before edit."
+op 4  produces=a3 parent=3 branch=0 kind=insert flags=0x0 at=68 len=0 to=0 src=0 srcAt=0 srcLen=0 scroll=0 span=[55470,55471) link=0 value=0 text="\n"
+op 5  produces=a4 parent=4 branch=0 kind=insert flags=0x0 at=69 len=0 to=0 src=0 srcAt=0 srcLen=0 scroll=0 span=[55471,55496) link=0 value=0 text="Neighbor text after edit."
+op 6  produces=a5 parent=5 branch=0 kind=insert flags=0x0 at=94 len=0 to=0 src=0 srcAt=0 srcLen=0 scroll=0 span=[55496,55497) link=0 value=0 text="\n"

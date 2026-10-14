@@ -1,0 +1,109 @@
+Usage: xuzz [--help] [--version] [--help-all] [--font VAR] [--fov VAR] [--backend VAR] [--coarse-below VAR] [--profile] [--no-cull] [--benchmark VAR] [--dump-a11y]... [--screenshot VAR] [--await-a11y VAR]... [--capture-live VAR]... [--capture VAR]... [--record-frames VAR] [--record-prefix VAR] [--no-present] [--pick VAR]... [--resize VAR]... [--click-label VAR]... [--click VAR]... [--select VAR]... [--type VAR]... [--do VAR]... [--key VAR]... [--wait-ms VAR]... [--chord VAR]... [--hold-mods VAR]... [--mouse-down VAR]... [--mouse-move VAR]... [--mouse-up VAR]... [--drag VAR]... [--right-click VAR]... [--wheel VAR]... [--ctrl-wheel VAR]... [--shift-wheel VAR]... [--toast VAR]... [--strict-diagnostics] [--print-asset-dir] [--view VAR] [--version-id VAR] [--alongside VAR] [--background VAR]... [--no-beams] [--no-sworph] [--whole-pages] [--map] [--compare VAR]... [--alias VAR]... [--onion-skin] [--pouch] [--telescope] [--physics] [--tension-layout] [--audio VAR]... [--video VAR]... [--xudu VAR] [--slice VAR] [--raster] [--torrent VAR]... [--torrent-data VAR] [--swarm] [--private-dht] [--test-publication-swarm VAR] [--peer VAR]... [--dht-node VAR]... [--collab-room VAR] [--collab-host VAR] [--collab-name VAR] [--auto-unlock] [--author-name VAR] [--author-email VAR] [--gpg-key VAR] [--author-here] [--show-config] [--check-authorship VAR] [--read VAR]... [--publish VAR] [--quote VAR]... [--import VAR]... [--import-branch VAR]... [--import-break VAR]... [--insert-text VAR]... [--structure-script VAR] [--transclude VAR]... [--transclude-text VAR]... [--format-link VAR]... [--dimension-link VAR]... [--permascroll VAR] [--dump-permascroll VAR] [--open-store VAR]... [--export-osmic] [--headless] [--link VAR]... [--system-doc VAR]... store [files]...
+
+Positional arguments:
+  store                     directory the primary spools live in or slice to load; created if it is not there. Defaults to "default" in the xanadocs folder, $XDG_DATA_HOME/xudu/xanadocs [nargs=0..1] [default: "/workspace/spatial-build/run-YSj49E/data/xudu/xanadocs/default"]
+  files                     source files or slices to import or open [nargs: 0 or more]
+
+Optional arguments:
+  -h, --help                shows help message and exits
+  -v, --version             prints version information and exits
+  --help-all                show every option, including the ones for driving this without a person, and describe them at length
+  --font                    Default font, as a Pango font description, for example "Serif 16". Anything Pango can resolve on this machine. [nargs=0..1] [default: "Monospace 16"]
+  --fov                     Initial vertical field of view in degrees. Widening it is how several pages are brought on screen at once, and how a headless run sees many small ones. [nargs=0..1] [default: "5"]
+  --backend                 Rendering backend: opengl (the default), opengles or vulkan. The Vulkan backend is only present when the binary was built with it; naming one that is not compiled in reports which are. [nargs=0..1] [default: "opengl"]
+  --coarse-below            Draw a page as one solid bar per line once one layout pixel of it covers fewer than this many screen pixels. Zero draws every visible page in full detail, which is far slower on a document held at a distance. [nargs=0..1] [default: "0.15"]
+
+Options for automation and diagnosis (detailed usage):
+  --profile                 Perform initial setup, then quit once the document has settled. Pairs with --screenshot to capture a finished frame and stop.
+  --no-cull                 Draw every page of every document, including those entirely outside the view. Only useful for checking that culling changes nothing it should not: the frame must come out identical.
+  --benchmark               Draw N frames once the document has settled, then report frame, collect and record times and exit. The median is reported rather than the mean, because a software rasteriser produces occasional hundred-millisecond frames no average removes. [nargs=0..1] [default: "0"]
+  --dump-a11y               Print the accessibility tree at this point in the script, once the frame has settled: every node this program reports to the platform, indented, with its role, its name, its value and where the caret is. What an assistive technology is handed, in the one form that can be read without running one. Repeatable and ordered with the other automation options, like --capture, so a tree can be printed before a step that quits. [may be repeated]
+  --screenshot              Write the first fully drawn frame to this path as a binary PPM. The frame is the settled one -- every queued command carried out, every document loaded, and every animation finished -- so a capture shows the finished result rather than the middle of a fade. [nargs=0..1] [default: ""]
+  --await-a11y              Observe ongoing work until exactly one accessible node matches. An empty label matches by value. Fail on timeout; maximum 60000 ms. [may be repeated]
+  --capture-live            After handled keyboard input, wait MS milliseconds and capture without waiting for animation settlement. No input bypass. [may be repeated]
+  --capture                 Capture the frame after every preceding scripted action. Unlike --screenshot, this may capture a live animation or video. Repeatable and ordered with --click, --type and other scripted actions. [may be repeated]
+  --record-frames           Capture N consecutive settled frames as binary PPMs and exit. [nargs=0..1] [default: 0]
+  --record-prefix           Prefix for recorded frame PPM filenames. [nargs=0..1] [default: ""]
+  --no-present              Draw frames without showing them, for capturing a frame on a machine that can give a rendering context but cannot put one on a screen. The capture is unaffected: drawing goes to an offscreen target either way. Accepted by the OpenGL and OpenGL ES backends; Vulkan refuses it, because every frame acquires a swapchain image and presenting is what hands it back.
+  --pick                    Report the picking tag at pixel X,Y once the document has settled. Repeatable. The read is asynchronous, so a run waits for every query to come back before it exits. [may be repeated]
+  --resize                  Resize the native window in logical pixels through the ordinary window-size handler, in script order. Repeatable. [may be repeated]
+  --click-label             Resolve one visible actionable accessibility label to its drawn bounds and click their centre through the ordinary picking path. Missing or ambiguous labels fail the run. Repeatable and ordered with other automation options. [may be repeated]
+  --click                   Click at pixel X,Y once the document has settled, placing the caret there, and print where it landed. Repeatable. [may be repeated]
+  --select                  Select the byte range START,END of the document the caret is in -- the first, before anything has placed it -- as a click and drag would. Carried out in the order it was written among the other automation options. [may be repeated]
+  --type                    Insert this text at the caret. Repeatable, and carried out in the order it was written among the other automation options, so that "--click here --type this --click there --type that" is the sequence it reads as. The document is spliced immediately and the layout that follows is scheduled off the render thread. Goes to whatever has the keyboard, so while a dialog is up this fills in the field it is on rather than the document. A leading [NAME,...] decorates the inserted text with those decorations; "[[" at the start types one literal "[". [nargs=0..1] [default: {}] [may be repeated]
+  --do                      Run the bound command called NAME -- the names are the ones `--help` lists -- in the order it was written among the other automation options. By name rather than by key, because a scancode and a modifier mask say which keys somebody would have pressed and not what they meant by it. This is also how a run with nobody at the keyboard reaches a dialog: open it with --do, fill it in with --type and --key. [may be repeated]
+  --key                     Press a key that is not text, for a dialog that is up: escape, enter, tab, backspace, delete, left, right, up, down, home, end, and any of them prefixed shift-. Carried out in order with the other automation options, and reported as a mistake when nothing is up to receive it. [may be repeated]
+  --wait-ms                 Pause the automation script while rendering and input handling continue. Allows background downloads and other asynchronous work to complete before the next scripted input or capture. [may be repeated]
+  --chord                   Press a key combination written as the keymap writes it, for example Alt+Shift+N, through the same path a key from the keyboard takes: a dialog that is up first, then the key bindings. Carried out in order with the other automation options. [may be repeated]
+  --hold-mods               Set the keyboard's held modifier state for subsequent pointer gestures, for example --hold-mods Alt --drag ... --hold-mods None. The gesture uses the ordinary pointer handlers. [may be repeated]
+  --mouse-down              Press a mouse button at pixel X,Y (1 left, the default; 2 middle; 3 right), handled as the platform's own press would be. [may be repeated]
+  --mouse-move              Move the pointer to pixel X,Y, holding whatever buttons earlier --mouse-down steps pressed, so a move between a press and a release is a drag. [may be repeated]
+  --mouse-up                Release a mouse button at pixel X,Y, which is where a drag is dropped. [may be repeated]
+  --drag                    Press the left button at X1,Y1, move to X2,Y2 in a few steps and release there: a drag and drop, as a hand makes it. [may be repeated]
+  --right-click             Press and release the right mouse button at pixel X,Y, which is what opens a context menu. [may be repeated]
+  --wheel                   Send a mouse wheel event with WX,WY deltas through the same handler as the platform event. Position it with --mouse-move. [may be repeated]
+  --ctrl-wheel              Send a Ctrl+wheel event with WX,WY deltas at the pointer. [may be repeated]
+  --shift-wheel             Send a Shift+wheel event with WX,WY deltas at the pointer. [may be repeated]
+  --toast                   Show a notification once the first frame is drawn, written as [info:|warning:|error:]TEXT. An unprefixed message is a warning. Repeatable. [may be repeated]
+  --strict-diagnostics      Treat a driver error as fatal instead of showing it as a notification, and set the exit status accordingly. Automated runs want this: a frame rendered by a driver that was reporting errors proves nothing, however plausible it looks.
+  --print-asset-dir         Report the directory the shaders and the icon were found in, then quit without opening a window. Answers the one question a package can be asked on a machine whose driver cannot give it a context.
+  --view                    initial presentation mode: unified (default), xanadoc, or zigzag [nargs=0..1] [default: "unified"]
+  --version-id              microversion to open, for example 2a4; the default is the most recent state in the store [nargs=0..1] [default: ""]
+  --alongside               a second microversion to show beside the opening one [nargs=0..1] [default: ""]
+  --background              open this microversion as a background document (depthZ < 0); repeatable [may be repeated]
+  --no-beams                do not draw the connections between documents and cells
+  --no-sworph               do not let a link coming into view bring its far document over
+  --whole-pages             frame whole pages, and fit linked documents together, rather than framing for reading
+  --map                     show the hypertime map on startup; ctrl-h toggles it while running
+  --compare                 compare microversions in hypertime map diff panel, e.g. v1,v2,v3; repeatable [may be repeated]
+  --alias                   assign alias to microversion as VERSION:ALIAS; repeatable [may be repeated]
+  --onion-skin              visualize open documents stacked in 3D depth with opacity decay
+  --pouch                   open the screen-edge pouch drawer on startup; ctrl-\ or F2 toggles it
+  --telescope               open decentralized swarm telescope overlay on startup; ctrl-shift-T or F3 toggles it
+  --physics                 enable 3-way tension spring layout simulation for document positioning
+  --tension-layout          alias for --physics
+  --audio                   open an audio stream or file as an embedded AudioWidget; repeatable [may be repeated]
+  --video                   open a video stream or file as an embedded MediaWidget; repeatable [may be repeated]
+  --xudu                    load a Xudu store path or document [nargs=0..1] [default: ""]
+  --slice                   load a ZigZag slice or store path [nargs=0..1] [default: ""]
+  --raster                  print 1D/2D raster reading text of the slice to stdout and exit
+
+Networking and Swarm options (detailed usage):
+  --torrent                 a .torrent file, a magnet link, or a name; repeatable [may be repeated]
+  --torrent-data            directory where files described by --torrent are [nargs=0..1] [default: ""]
+  --swarm                   fetch quoted content from the BitTorrent network
+  --private-dht             allow more than one DHT node on the same /8 network
+  --test-publication-swarm  publication worker listen HOST:PORT with explicit mock identity verification; testing only [nargs=0..1] [default: ""]
+  --peer                    introduce a peer as HOST:PORT; repeatable [may be repeated]
+  --dht-node                bootstrap the DHT from a known node as HOST:PORT; repeatable [may be repeated]
+  --collab-room             collaborative room name for real-time swarm editing [nargs=0..1] [default: ""]
+  --collab-host             collaborative room host fingerprint [nargs=0..1] [default: ""]
+  --collab-name             local author display name for collaborative carets [nargs=0..1] [default: ""]
+  --auto-unlock             automatically unlock transcopyright spans on launch
+
+Batch import and orchestration options (detailed usage):
+  --author-name             name to record on publications made from this machine [nargs=0..1] [default: ""]
+  --author-email            email to record alongside the author name [nargs=0..1] [default: ""]
+  --gpg-key                 fingerprint of the secret key to sign authorship records with [nargs=0..1] [default: ""]
+  --author-here             keep the --author-* settings in this store rather than per-user configuration
+  --show-config             print the current configuration and quit
+  --check-authorship        verify the signature on this publication, report who signed it, and quit [nargs=0..1] [default: ""]
+  --read                    open a complete signed publication with cached dependencies; repeatable [may be repeated]
+  --publish                 publish the opening document under this name [nargs=0..1] [default: ""]
+  --quote                   quote a byte range of a torrent-backed file as FILE_INDEX,OFFSET,LENGTH; repeatable [may be repeated]
+  --import                  read files into stores as initial operations; repeatable [may be repeated]
+  --import-branch           import a file as a new root microversion branch; repeatable [may be repeated]
+  --import-break            insert a page break and append text from file; repeatable [may be repeated]
+  --insert-text             insert text into document as DOC:POS:FILE_OR_TEXT; repeatable [may be repeated]
+  --structure-script        apply a sequential combined Xanadu/Zigzag store script [nargs=0..1] [default: ""]
+  --transclude              transclude span from one doc into another as SRCDOC:START:LEN,DESTDOC:POS; repeatable [may be repeated]
+  --transclude-text         transclude text matching query from one doc into another; repeatable [may be repeated]
+  --format-link             create formatting link as DOC:START:LEN:ATTR[:TIER[:OWNER]]; repeatable [may be repeated]
+  --dimension-link          create dimension link as DOC1:START:LEN,DOC2:START:LEN:DIMNAME; repeatable [may be repeated]
+  --permascroll             directory holding the sovereign user permascroll to bind [nargs=0..1] [default: ""]
+  --dump-permascroll        dump sovereign user permascroll bytes to a file upon exit [nargs=0..1] [default: ""]
+  --open-store              open an existing xanadoc store as an auxiliary document; repeatable [may be repeated]
+  --export-osmic            export human-readable OSMIC text spools alongside binary stores
+  --batch, --headless       run batch commands non-interactively and exit without GUI
+  --link                    create a link between open document spans; repeatable [may be repeated]
+  --system-doc              open a sovereign system xanadoc (keymap, settings, layout, ui, pouches); repeatable [may be repeated]

@@ -1,0 +1,20 @@
+{
+  "source_commit": "e9726a6b3825e794ab86db6cd54f18d9258e75c0",
+  "baseline_note": "Pinned product code plus optional-reference and Poppler capability portability repairs; no spatial increment yet.",
+  "make_command": "make -j$(nproc) DEBUG_OPTS='-O0 -g0' CXX='ccache clang++ -isystem /usr/include/poppler -isystem /usr/include/poppler/cpp' xuzz",
+  "no_performance_gate_claimed": true,
+  "runner": "/workspace/spatial-build/run.sh",
+  "container": "spatial-native-session",
+  "headless_variables": [
+    "SDL_VIDEODRIVER=offscreen",
+    "SDL_AUDIODRIVER=dummy",
+    "LIBGL_ALWAYS_SOFTWARE=1",
+    "XDG_DATA_HOME=fresh/data",
+    "XDG_CONFIG_HOME=fresh/config",
+    "XDG_CACHE_HOME=fresh/cache"
+  ],
+  "binary_sha256": "2e26e05e75298e6c05cc9d77229a34fbaa87463eddd9bc4ebdf68a0cea39fb63",
+  "baseline_binary": "/workspace/spatial-build/baseline-bin/xuzz",
+  "builder_versions": "3\nDebian clang version 19.1.7 (3+b1)\n2.32.4\n26.2.20\n10.2.0\n25.03.0\n2.0.11\nvalidated 51 stages in 16 journey files\n",
+  "baseline_build_log": "/workspace/spatial-build/baseline-native-complete.log"
+}

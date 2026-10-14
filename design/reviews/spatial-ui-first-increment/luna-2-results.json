@@ -1,0 +1,67 @@
+{
+  "validator": "luna-2",
+  "baseline": "e9726a6b",
+  "product_edits": false,
+  "native_build": "xuzz with first spatial UI increment; accessibility: not in this build",
+  "journeys": {
+    "J17": [
+      {"step": 1, "status": "Missing", "affordance": "Ctrl+Shift+T Swarm Telescope; topic/search fields present, but no channels or publication matches in the isolated store."},
+      {"step": 2, "status": "Missing", "affordance": "Inspector exists, but the isolated profile has no publication to select; identity and verification metadata could not be inspected."},
+      {"step": 3, "status": "No affordance", "affordance": "No pinned request or publisher-pointer advancement control."},
+      {"step": 4, "status": "Missing", "affordance": "No request or peer fixture is available to exercise interruption, retry, cancellation, invalid-payload or unavailable-peer states; behavior remains untested."},
+      {"step": 5, "status": "Missing", "affordance": "Open selected publication exists but is disabled; no cached edition fixture."}
+    ],
+    "J18": [
+      {"step": 1, "status": "No affordance", "affordance": "No unified Omni lens; telescope is publication-only and Alt+/ is a ZigZag VQL bar."},
+      {"step": 2, "status": "No affordance", "affordance": "No cross-media inspector with origin/version/match/held descriptors."},
+      {"step": 3, "status": "No affordance", "affordance": "No OCR region or transcript-time result locators."},
+      {"step": 4, "status": "No affordance", "affordance": "No title-only video result or per-result acquisition choice."},
+      {"step": 5, "status": "No affordance", "affordance": "No resolved unified-search occurrence or independent source comparison."}
+    ],
+    "J19": [
+      {"step": 1, "status": "No affordance", "affordance": "No unified query media/store/history filters."},
+      {"step": 2, "status": "No affordance", "affordance": "No grouping/sort/filter-exclusion inspector controls."},
+      {"step": 3, "status": "No affordance", "affordance": "No asynchronous query identity or stale-response state."},
+      {"step": 4, "status": "No affordance", "affordance": "No coverage panel or cancellable unified request."},
+      {"step": 5, "status": "No affordance", "affordance": "No completed-empty/incomplete coverage state, saved recipe or result snapshot."}
+    ],
+    "J20": [
+      {"step": 1, "status": "No affordance", "affordance": "No historical text search across branches or exact states."},
+      {"step": 2, "status": "No affordance", "affordance": "No literal/token/numeric/related-ideas matching controls."},
+      {"step": 3, "status": "No affordance", "affordance": "No explicit historical query and retained V8 occurrence."},
+      {"step": 4, "status": "No affordance", "affordance": "No state-run/repeated-source expansion or operation counts."},
+      {"step": 5, "status": "No affordance", "affordance": "No branch coverage states, recipe or result snapshot controls."}
+    ],
+    "J21": [
+      {"step": 1, "status": "Missing", "affordance": "Ctrl+H opens Hypertime Branching DAG & N-Way Diff with Comparison tab, but the isolated store only has Genesis."},
+      {"step": 2, "status": "No affordance", "affordance": "No three-state ancestry or lowest-common-ancestor controls."},
+      {"step": 3, "status": "No affordance", "affordance": "No typed-value, topology or change-neighborhood comparison controls."},
+      {"step": 4, "status": "No affordance", "affordance": "No side swap or retained unavailable-region target."},
+      {"step": 5, "status": "No affordance", "affordance": "No occurrence enter/return and durable comparison reopen flow."}
+    ]
+  },
+  "preservation_controls": {
+    "J1": {"status": "Pass", "scope": "Menu and Ctrl+N document creation, typing, Ctrl+Q save; dump confirms text."},
+    "J2": {"status": "Pass", "scope": "Menu and Ctrl+Alt+N slice creation plus cell authoring; captures and dumps retained."},
+    "J3": {"status": "Partial", "scope": "Text drag/page creation and a passage action in the pouch were observed. The replay requested a stale actionable label; pointer and Return did not consume the displayed row. The separate baseline run showed an empty pouch for the retained source store, so build-to-build reuse comparison is inconclusive."},
+    "J4": {"status": "Partial", "scope": "Alt+Home and F6 return observed on authored slice; caret/selection/link preservation variants not run."},
+    "J5": {"status": "Partial", "scope": "Plain text saved/reopened and present at caret 22; multi-document, slice, pouch, camera and caret-resume state not validated."}
+  },
+  "baseline_comparison": {
+    "build": "/workspace/spatial-build/baseline-bin/xuzz",
+    "profile": "luna-2-profiles/j3-baseline",
+    "status": "Inconclusive",
+    "observation": "The retained source store opened with an empty pouch (Clear zone), so the baseline did not reproduce the passage action needed for an equivalent reuse attempt.",
+    "evidence": "evidence/luna-2/replays/J3/baseline/"
+  },
+  "evidence_root": "evidence/luna-2",
+  "profile_root": "luna-2-profiles",
+  "limitations": [
+    "No AT-SPI session: native build reports accessibility: not in this build.",
+    "No concept fixtures were loaded or treated as native data.",
+    "The curated replay stage exit status was treated only as harness diagnostic evidence; frames, accessibility output and store dumps were inspected.",
+    "Pinned e9726a6b baseline was launched through /workspace/spatial-build/run.sh in a separate profile. It showed Clear zone without the passage action, so it did not provide an equivalent J3 reuse state; see evidence/luna-2/replays/J3/baseline/.",
+    "No-affordance findings describe controls absent from the inspected native UI; missing fixtures do not establish that an acquisition or search architecture is absent.",
+    "No make, test, or build commands were run."
+  ]
+}

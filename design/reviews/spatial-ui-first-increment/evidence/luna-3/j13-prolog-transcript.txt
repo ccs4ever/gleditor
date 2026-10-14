@@ -1,0 +1,35 @@
+VProlog 0.1.0 (Vortex/Vlog Hyperstructural Logic Engine)
+Type ':help' or 'help.' for commands. 'halt.' to exit.
+
+?- :open /workspace/spatial-build/luna-authoring/j13-query/J13/query-facts/facts
+% Opened 11 facts from /workspace/spatial-build/luna-authoring/j13-query/J13/query-facts/facts
+?- listing.
+issue(issue_alpha).
+editing(issue_alpha).
+rights(issue_alpha).
+approval(issue_alpha).
+issue(issue_beta).
+editing(issue_beta).
+rights(issue_beta).
+approval(issue_beta).
+issue(issue_gamma).
+editing(issue_gamma).
+approval(issue_gamma).
+?- assert((ready(I) :- editing(I), rights(I), approval(I))).
+true.
+?- ready(issue_gamma).
+false.
+?- ready(I).
+I = issue_alpha ;
+I = issue_beta.
+?- assert((status(1) :- issue(I), ready(I))).
+true.
+?- assert((status(0) :- issue(I), \+ ready(I))).
+true.
+?- status(S).
+S = 1 ;
+S = 1 ;
+S = 0.
+?- :export /workspace/spatial-build/luna-authoring/j13-prolog-r1/J13/reason-export/flags
+% Exported 3 solutions to /workspace/spatial-build/luna-authoring/j13-prolog-r1/J13/reason-export/flags
+?- halt.

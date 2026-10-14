@@ -1330,6 +1330,11 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
                     "changing the link",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"Alt+Shift+I"}}}}},
+        {.name    = "std:xuzz/investigation",
+         .notes   = "Expand or fold exact Link member investigation without "
+                    "travelling",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+I"}}}}},
         {.name    = std::string(settings::kKeymapLinkDismiss),
          .notes   = "Put the selected link away",
          .schemas = {{.expectedTypes = {"string"},

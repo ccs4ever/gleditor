@@ -1,0 +1,25 @@
+{
+  "launch_args": [
+    "/workspace/gleditor/design/reviews/spatial-ui-first-increment/luna-2-profiles/j3/data/xudu/xanadocs/default"
+  ],
+  "steps": [
+    "--select",
+    "40,40",
+    "--chord",
+    "Ctrl+\\",
+    "--click-label",
+    "To Link (Left) ›",
+    "--dump-a11y",
+    "--capture",
+    "/workspace/gleditor/design/reviews/spatial-ui-first-increment/evidence/luna-2/replays/J3/reuse-pouch-item/pouch-actions.ppm",
+    "--click-label",
+    "Insert: Meadow",
+    "--click-label",
+    "Close",
+    "--dump-a11y",
+    "--capture",
+    "/workspace/gleditor/design/reviews/spatial-ui-first-increment/evidence/luna-2/replays/J3/reuse-pouch-item/pouch-reused.ppm",
+    "--chord",
+    "Ctrl+Q"
+  ]
+}

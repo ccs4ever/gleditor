@@ -1,0 +1,42 @@
+{
+  "suite_runs": [
+    {
+      "log": "full-test-xvfb-noreset.log",
+      "run": 782,
+      "passed": 781,
+      "failed": [
+        "LayoutfiladeBenchmarkTest.IncrementalResizeLatency"
+      ]
+    },
+    {
+      "log": "full-xudu-engine-final.log",
+      "run": 1327,
+      "passed": 1325,
+      "failed": [
+        "VortexBenchmarkTest.MemoizedVsUnmemoizedExecution",
+        "SampleXanadocsTest.PermascrollPurityHasNoBinaryMediaBlobs"
+      ]
+    },
+    {
+      "log": "full-xuzz-final.log",
+      "run": 99,
+      "passed": 99,
+      "failed": []
+    },
+    {
+      "log": "full-zigzag-final.log",
+      "run": 233,
+      "passed": 232,
+      "failed": [
+        "StoreObjectManagerOverlayTest.FittedRowsShareSafeGeometryAndFullLabels"
+      ]
+    }
+  ],
+  "owning_checks": {
+    "run": 100,
+    "passed": 100
+  },
+  "native_xuzz_sha256": "df0956e87dd282469bcb8e7f09832768435088b5ae8df5c1b98132f45d41e9f8",
+  "optimization": "O0 behavior checks; no performance acceptance",
+  "scope": "Broader gates remain red. See validation.md; sample purity passes after restoring generated fixture changes."
+}

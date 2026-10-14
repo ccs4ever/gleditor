@@ -707,3 +707,48 @@ TEST(LinkNavigationTest, ResumePinnedChoicesBeforeAnyEndpointVisit) {
   EXPECT_EQ(h.log.size(), before);
   EXPECT_EQ(h.log.current(), current);
 }
+
+TEST(LinkNavigationTest, SelectionCheckpointPreservesVisitsAndExactReturn) {
+  Harness h;
+  const auto root          = arrive(h);
+  const auto readingOffset = h.inHead(9, 9);
+  h.navigator.checkpointOrigin(readingOffset);
+  ASSERT_TRUE(h.run(nav::SelectLink{.key = h.link()}));
+  EXPECT_EQ(h.log.size(), 1U);
+  EXPECT_EQ(h.selected().origin, root);
+  EXPECT_EQ(h.selected().originCheckpoint,
+            std::optional<xanadu::OccurrenceSite>{readingOffset});
+  // Re-picking a pinned link after further reading keeps its first checkpoint.
+  h.navigator.checkpointOrigin(h.inHead(12, 12));
+  ASSERT_TRUE(h.run(nav::SelectLink{.key = h.link()}));
+  ASSERT_TRUE(h.run(nav::SelectOccurrence{.key        = h.link(),
+                                          .side       = LinkSide::Right,
+                                          .member     = kThree,
+                                          .occurrence = 0}));
+  ASSERT_TRUE(h.run(nav::Cross{}));
+  ASSERT_TRUE(h.run(nav::Cross{}));
+  EXPECT_EQ(h.log.size(), 1U);
+  const auto entered = h.run(nav::Enter{});
+  ASSERT_TRUE(entered && entered->visit);
+  EXPECT_EQ(h.log.size(), 2U);
+  const auto destination = *entered->visit;
+  EXPECT_EQ(h.log.find(destination)->parent, root);
+  EXPECT_EQ(h.log.find(root)->target, xanadu::OccurrenceSite{h.inHead(0, 5)});
+  const auto back = h.run(nav::ActivityBack{});
+  ASSERT_TRUE(back && back->focus);
+  EXPECT_EQ(*back->focus, xanadu::OccurrenceSite{h.inHead(0, 5)});
+  ASSERT_TRUE(h.run(nav::ActivityForward{destination}));
+  const auto returned = h.run(nav::ReturnToOrigin{});
+  ASSERT_TRUE(returned && returned->focus);
+  EXPECT_EQ(*returned->focus, xanadu::OccurrenceSite{readingOffset});
+  EXPECT_EQ(returned->visit, root);
+  EXPECT_EQ(h.log.current(), root);
+  EXPECT_EQ(h.log.size(), 2U);
+  // Restoring the completed destination retains the frozen checkpoint.
+  xanadu::LinkNavigator resumed(h.log);
+  ASSERT_TRUE(resumed.dispatch(nav::EnterVisit{destination}));
+  const auto afterRestore = resumed.dispatch(nav::ReturnToOrigin{});
+  ASSERT_TRUE(afterRestore && afterRestore->focus);
+  EXPECT_EQ(*afterRestore->focus, xanadu::OccurrenceSite{readingOffset});
+  EXPECT_EQ(h.log.size(), 2U);
+}

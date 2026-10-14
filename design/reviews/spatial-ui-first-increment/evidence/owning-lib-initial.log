@@ -1,0 +1,47 @@
+Running main() from gmock_main.cc
+Note: Google Test filter = PdfTextSourceTest.*:SvgCacheTest.*:SvgAnimatorTest.*
+[==========] Running 13 tests from 3 test suites.
+[----------] Global test environment set-up.
+[----------] 2 tests from SvgAnimatorTest
+[ RUN      ] SvgAnimatorTest.IsAnimatedDetection
+[       OK ] SvgAnimatorTest.IsAnimatedDetection (0 ms)
+[ RUN      ] SvgAnimatorTest.StaticSvgReturnsNullOnLoad
+[       OK ] SvgAnimatorTest.StaticSvgReturnsNullOnLoad (0 ms)
+[----------] 2 tests from SvgAnimatorTest (0 ms total)
+
+[----------] 2 tests from SvgCacheTest
+[ RUN      ] SvgCacheTest.PeekSizeFailsOnEmptyBytes
+[       OK ] SvgCacheTest.PeekSizeFailsOnEmptyBytes (0 ms)
+[ RUN      ] SvgCacheTest.PeekSizeFailsOnGarbageBytes
+[       OK ] SvgCacheTest.PeekSizeFailsOnGarbageBytes (0 ms)
+[----------] 2 tests from SvgCacheTest (0 ms total)
+
+[----------] 9 tests from PdfTextSourceTest
+[ RUN      ] PdfTextSourceTest.loadsSinglePagePdf
+[       OK ] PdfTextSourceTest.loadsSinglePagePdf (5 ms)
+[ RUN      ] PdfTextSourceTest.loadsMultiPagePdfWithPageBreaks
+[       OK ] PdfTextSourceTest.loadsMultiPagePdfWithPageBreaks (3 ms)
+[ RUN      ] PdfTextSourceTest.loadsFromMemoryBuffer
+[       OK ] PdfTextSourceTest.loadsFromMemoryBuffer (1 ms)
+[ RUN      ] PdfTextSourceTest.fileTextSourceAutoDetectsPdf
+[       OK ] PdfTextSourceTest.fileTextSourceAutoDetectsPdf (1 ms)
+[ RUN      ] PdfTextSourceTest.fileTextSourceAutoDetectsPdfWithoutExtensionViaLibmagic
+[       OK ] PdfTextSourceTest.fileTextSourceAutoDetectsPdfWithoutExtensionViaLibmagic (1 ms)
+[ RUN      ] PdfTextSourceTest.plainTextFileHasNoForcedBreaks
+[       OK ] PdfTextSourceTest.plainTextFileHasNoForcedBreaks (7 ms)
+[ RUN      ] PdfTextSourceTest.throwsOnNonexistentOrInvalidPdf
+poppler/error: Couldn't open file 'nonexistent_path_to_pdf.pdf': No such file or directory.
+poppler/error: May not be a PDF file (continuing anyway)
+poppler/error: Couldn't find trailer dictionary
+poppler/error: Couldn't find trailer dictionary
+poppler/error: Couldn't read xref table
+[       OK ] PdfTextSourceTest.throwsOnNonexistentOrInvalidPdf (2 ms)
+[ RUN      ] PdfTextSourceTest.piecesIncludesEmbeddedFigureAsItsOwnImagePiece
+[       OK ] PdfTextSourceTest.piecesIncludesEmbeddedFigureAsItsOwnImagePiece (2 ms)
+[ RUN      ] PdfTextSourceTest.piecesMarksARepeatedFigureAsDuplicateOfItsFirstOccurrence
+[       OK ] PdfTextSourceTest.piecesMarksARepeatedFigureAsDuplicateOfItsFirstOccurrence (1 ms)
+[----------] 9 tests from PdfTextSourceTest (26 ms total)
+
+[----------] Global test environment tear-down
+[==========] 13 tests from 3 test suites ran. (27 ms total)
+[  PASSED  ] 13 tests.

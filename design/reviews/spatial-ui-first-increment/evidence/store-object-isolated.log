@@ -1,0 +1,628 @@
+Running main() from gmock_main.cc
+Note: Google Test filter = StoreObjectManagerOverlayTest.FittedRowsShareSafeGeometryAndFullLabels
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from StoreObjectManagerOverlayTest
+[ RUN      ] StoreObjectManagerOverlayTest.FittedRowsShareSafeGeometryAndFullLabels
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 0.80000001192092896 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 0.80000001192092896 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 0.80000001192092896 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 0.80000001192092896 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 0.80000001192092896 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 0.80000001192092896 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 0.80000001192092896 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 0.80000001192092896 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 0.80000001192092896 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 0.80000001192092896 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 0.80000001192092896 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 0.80000001192092896 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 640 1 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 0.80000001192092896 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 0.80000001192092896 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 0.80000001192092896 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 0.80000001192092896 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 0.80000001192092896 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 0.80000001192092896 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 0.80000001192092896 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 0.80000001192092896 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 0.80000001192092896 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 0.80000001192092896 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 0.80000001192092896 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 0.80000001192092896 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 1280 1 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 0.80000001192092896 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 0.80000001192092896 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 0.80000001192092896 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 0.80000001192092896 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 0.80000001192092896 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 0.80000001192092896 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 0.80000001192092896 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 0.80000001192092896 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 0.80000001192092896 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 0.80000001192092896 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 0.80000001192092896 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 0.80000001192092896 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Sans
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Serif
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Monospace
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:76: Failure
+Value of: visual->fitted.shaping.glyphs.empty()
+  Actual: true
+Expected: false
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:77: Failure
+Expected: (visual->fitted.lines) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Noto Sans CJK JP
+
+tests/zigzag/store_object_manager_overlay_test.cpp:78: Failure
+Expected: (visual->fitted.visibleBytes) > (0U), actual: 0 vs 0
+Google Test trace:
+tests/zigzag/store_object_manager_overlay_test.cpp:37: 2560 1 Noto Sans CJK JP
+
+[  FAILED  ] StoreObjectManagerOverlayTest.FittedRowsShareSafeGeometryAndFullLabels (58 ms)
+[----------] 1 test from StoreObjectManagerOverlayTest (58 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (58 ms total)
+[  PASSED  ] 0 tests.
+[  FAILED  ] 1 test, listed below:
+[  FAILED  ] StoreObjectManagerOverlayTest.FittedRowsShareSafeGeometryAndFullLabels
+
+ 1 FAILED TEST

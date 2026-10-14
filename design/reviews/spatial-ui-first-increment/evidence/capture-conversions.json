@@ -1,0 +1,481 @@
+{
+  "lossless_ppm_to_png": [
+    {
+      "original": "evidence/inspection-invariants/expanded.ppm",
+      "png": "evidence/inspection-invariants/expanded.png",
+      "original_sha256": "23d583d809edd3fd378b2a01b53e45e0940d4bf0824722ea4985e6d3c7b90943",
+      "png_sha256": "eff2c802d6f6ca932d82a0e446ddb01210ba9eb0a9731c6aad00b5648dbe0939",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/inspection-invariants/expanded.ppm"
+    },
+    {
+      "original": "evidence/inspection-invariants/folded.ppm",
+      "png": "evidence/inspection-invariants/folded.png",
+      "original_sha256": "1278cce647cee252b91c0f2a1b8bee568e4385b81eb89409ac2075255259ea7f",
+      "png_sha256": "dc971fc82367117677d167c025c3021f4a7cae886efca9c1b56717ffce6177c8",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/inspection-invariants/folded.ppm"
+    },
+    {
+      "original": "evidence/inspection-invariants/preview.ppm",
+      "png": "evidence/inspection-invariants/preview.png",
+      "original_sha256": "5f2e96eada6576cc83a98f42254a75995f73944e74006bc93690a541d58f2d42",
+      "png_sha256": "105f4486501155df449a5b0c7594f37b5454fda6b2a0ce2d90afc78c6ac3a4ee",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/inspection-invariants/preview.ppm"
+    },
+    {
+      "original": "evidence/inspection-invariants/selected.ppm",
+      "png": "evidence/inspection-invariants/selected.png",
+      "original_sha256": "1492aa6d7e5f9d19e2a64c76081019f7c0686aa8dcfcea50f4a9b9aed7b9c32c",
+      "png_sha256": "57143da052c0624423c1947f8292686d4078ea78b2e885554da28cacc1d52d3e",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/inspection-invariants/selected.ppm"
+    },
+    {
+      "original": "evidence/inspector-opengl/entered.ppm",
+      "png": "evidence/inspector-opengl/entered.png",
+      "original_sha256": "bdf6b1f3f818effce562b12ff54f3b4a10a7096382b7cbf66505cf65340b2517",
+      "png_sha256": "048dd17e724b06a6ed55624db4c6b6777cb86d14ebe5552dcc23467abfcd59be",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/inspector-opengl/entered.ppm"
+    },
+    {
+      "original": "evidence/inspector-opengl/expanded.ppm",
+      "png": "evidence/inspector-opengl/expanded.png",
+      "original_sha256": "9e2ed74004bd6e8abc7e173a7f9bd7c4ab6a0402bed24c11fe89afe7f1b47f8b",
+      "png_sha256": "5cc9365ba43c68fa0d30e7bcb3ad2999f8852b9b714e67730109584606b3b5ce",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/inspector-opengl/expanded.ppm"
+    },
+    {
+      "original": "evidence/inspector-opengl/folded.ppm",
+      "png": "evidence/inspector-opengl/folded.png",
+      "original_sha256": "caa37b453dedc1087be49eae62e1f26422a259801f347c3ca48305b1e8d6ccdd",
+      "png_sha256": "b5180f85595b08a0421f4df66f1fb1cd12ab3bad5c59daeb9d0766ae2cc8f082",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/inspector-opengl/folded.ppm"
+    },
+    {
+      "original": "evidence/inspector-opengl/preview.ppm",
+      "png": "evidence/inspector-opengl/preview.png",
+      "original_sha256": "f2ce37ec5d5d3b6aa3a8ece512378db18c0cc04ac476153252ea2b98b02430d3",
+      "png_sha256": "f366e4e6f20f5433befba3df03998bfb73c9d76146bcdf3877bb43fe8c9c1107",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/inspector-opengl/preview.ppm"
+    },
+    {
+      "original": "evidence/inspector-opengl/quiet.ppm",
+      "png": "evidence/inspector-opengl/quiet.png",
+      "original_sha256": "dec4563ff0d035947f5fc27d6172c2401008c4da0521cc50bdab8e47768011c4",
+      "png_sha256": "24452407c7a55f33cd7a2a40b7b24443d621acaa2b0892e1cb95c31b7824839b",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/inspector-opengl/quiet.ppm"
+    },
+    {
+      "original": "evidence/inspector-opengl/returned.ppm",
+      "png": "evidence/inspector-opengl/returned.png",
+      "original_sha256": "fc6ccc7ff81d5bae2760c7398f8927a47219730953018ebb968eae57020efa95",
+      "png_sha256": "b22a0563c1b1a493363d671db13b10f919f42725b9810a56ef994d4358395e61",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/inspector-opengl/returned.ppm"
+    },
+    {
+      "original": "evidence/inspector-opengles/entered.ppm",
+      "png": "evidence/inspector-opengles/entered.png",
+      "original_sha256": "40e546ac6a1cb16e10d5b44857885d4cae8f0e6a6f0f995fba8f3bbe0cabfdc9",
+      "png_sha256": "a13d6770f4f768ba39126bc5361c73004d12c1ae655b088d30885b87faa96758",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/inspector-opengles/entered.ppm"
+    },
+    {
+      "original": "evidence/inspector-opengles/expanded.ppm",
+      "png": "evidence/inspector-opengles/expanded.png",
+      "original_sha256": "a72ff2226ab9386f689660290bff5122172458b7a2f57713f1a7a99408e5e1f4",
+      "png_sha256": "e8d1e9e58186dc637ee576462f51e75ad112004d2bb75707867e5ed0d0092524",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/inspector-opengles/expanded.ppm"
+    },
+    {
+      "original": "evidence/inspector-opengles/folded.ppm",
+      "png": "evidence/inspector-opengles/folded.png",
+      "original_sha256": "388cf3fad5d56a880abc678bdab5b2d5a9fd136dae2d0fa1cc1553eaa453fb27",
+      "png_sha256": "f469e947aed74b5683f161d1cde2f71a811598f5d6a98752ee64a67581e52cb2",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/inspector-opengles/folded.ppm"
+    },
+    {
+      "original": "evidence/inspector-opengles/preview.ppm",
+      "png": "evidence/inspector-opengles/preview.png",
+      "original_sha256": "a626d9dd828118cfb09612b9d7ee2fa5275e2cd7a6665b6815e21bdab830823d",
+      "png_sha256": "b31fa5b553ca3fcea5721f37ddf8973e2009a5654cdc73a242ce04acba09f33c",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/inspector-opengles/preview.ppm"
+    },
+    {
+      "original": "evidence/inspector-opengles/quiet.ppm",
+      "png": "evidence/inspector-opengles/quiet.png",
+      "original_sha256": "1b14fafc41fa21a138864d677a46d02809a298a73c6f34eb18faf3b458844df2",
+      "png_sha256": "de64d0b048c95d6c8c6cd4011b312f9e7135be943b76263cbed221173a6cf884",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/inspector-opengles/quiet.ppm"
+    },
+    {
+      "original": "evidence/inspector-opengles/returned.ppm",
+      "png": "evidence/inspector-opengles/returned.png",
+      "original_sha256": "76f85e883a9cf40eec193abf10406ebe5f2bf7cc50401712f424312c17fcda22",
+      "png_sha256": "7b223b03755158b897b33f13105b9e46eae9804ae603efd14af2bc95da011ac1",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/inspector-opengles/returned.ppm"
+    },
+    {
+      "original": "evidence/inspector-vulkan/entered.ppm",
+      "png": "evidence/inspector-vulkan/entered.png",
+      "original_sha256": "a527ecd9339a296c6b951a56a0946227a30ea199575fb6e9b2a1984c3628a54b",
+      "png_sha256": "01a281cf8549a8ad4200b749bd239bf451c5cb6d075e1ea6ce94767f02967a0e",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/inspector-vulkan/entered.ppm"
+    },
+    {
+      "original": "evidence/inspector-vulkan/expanded.ppm",
+      "png": "evidence/inspector-vulkan/expanded.png",
+      "original_sha256": "f2525fd983e7a76ae04bb4b66313a872a64de106ad1519e7da455e8e1717b9ce",
+      "png_sha256": "0acae544248cd47f55a500b61fa7ecbc292b2154e5c7e68dcdb78cb21a93fa28",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/inspector-vulkan/expanded.ppm"
+    },
+    {
+      "original": "evidence/inspector-vulkan/folded.ppm",
+      "png": "evidence/inspector-vulkan/folded.png",
+      "original_sha256": "bec0a6b35db711582dcfc1bf4186cae5c0337c29dc09d103ceedab50752b2416",
+      "png_sha256": "2b3cc1a88657eb5285beb3f7df7568e76a7ef7dc713de0f4cd6a396426cb8aeb",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/inspector-vulkan/folded.ppm"
+    },
+    {
+      "original": "evidence/inspector-vulkan/preview.ppm",
+      "png": "evidence/inspector-vulkan/preview.png",
+      "original_sha256": "08447ba77562c0d68061061b5c8e750d06cd962163292f0d8311c720ed5e78d9",
+      "png_sha256": "597ac1f6da59d9699267549e8f012a5bb79fa72cc43e9453f87a06c2055e1c1e",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/inspector-vulkan/preview.ppm"
+    },
+    {
+      "original": "evidence/inspector-vulkan/quiet.ppm",
+      "png": "evidence/inspector-vulkan/quiet.png",
+      "original_sha256": "0534b7ae0a050a853e42c075e61a9133f8413a478cdf0a2a3ab69e75dd2de59f",
+      "png_sha256": "87ff80578aab14d72e5e028dac546b4500bfe57339ac55ed72233e3de8b30f5b",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/inspector-vulkan/quiet.ppm"
+    },
+    {
+      "original": "evidence/inspector-vulkan/returned.ppm",
+      "png": "evidence/inspector-vulkan/returned.png",
+      "original_sha256": "080e36c926bb3965368613cd683c3a6ccbb553e112a4e970b5981c734c14f3a6",
+      "png_sha256": "4f3a5bcc6aa5ff153001340df13acacfe4c7ea4d87b039a27021f9b197ffc5b8",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/inspector-vulkan/returned.ppm"
+    },
+    {
+      "original": "evidence/luna-2/default.ppm",
+      "png": "evidence/luna-2/default.png",
+      "original_sha256": "1c00ef221500ea913ffb4694dfa849529717dc8a81a5ef84b77d9bcac7c44f8e",
+      "png_sha256": "c49b68acdda22afeb978ddb0afb3c67cca8259020507cca8de6f97b7ee3be5d9",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/default.ppm"
+    },
+    {
+      "original": "evidence/luna-2/hypertime-comparison.ppm",
+      "png": "evidence/luna-2/hypertime-comparison.png",
+      "original_sha256": "410dae3e7efd0611573c86915cc4e609acfb92c5987d9c81cc9bf4961fddfe56",
+      "png_sha256": "75dfb51c9e0bb5427faab7c96a417b269d276395a05c334fc40d575c5f8d1426",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/hypertime-comparison.ppm"
+    },
+    {
+      "original": "evidence/luna-2/hypertime.ppm",
+      "png": "evidence/luna-2/hypertime.png",
+      "original_sha256": "17f3b8019c4beb3e6112e23138ef48c3db2ad835dc7766c5392be5a2925245ac",
+      "png_sha256": "0b49b332716d2e76dda2270867ff4172cd6e755717d8dedb6c94b55978c486bb",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/hypertime.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J1/menu-key-author-and-close/initial.ppm",
+      "png": "evidence/luna-2/replays/J1/menu-key-author-and-close/initial.png",
+      "original_sha256": "8c478b4f697ffe7fee9592b0e23c54e7b34cb15d107c54a1bfb67f0678dd1402",
+      "png_sha256": "d9a0a17d7e2bebd61150a769a16284463552f4e1c1322bddf9ac17b2d039f5b9",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J1/menu-key-author-and-close/initial.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J1/menu-key-author-and-close/key-alpha.ppm",
+      "png": "evidence/luna-2/replays/J1/menu-key-author-and-close/key-alpha.png",
+      "original_sha256": "8443624d692e81f59b580e75a64e3d22e4336ba72f1ef875efba3c7c1710212c",
+      "png_sha256": "a5f9c50ce60a95b6f0f0e3f4ef7d68e9db431d6f5631582e479f28359347ef91",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J1/menu-key-author-and-close/key-alpha.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J1/menu-key-author-and-close/key-beta.ppm",
+      "png": "evidence/luna-2/replays/J1/menu-key-author-and-close/key-beta.png",
+      "original_sha256": "6275287f7a3087eea93239880a859c181aacad90f62a6ad842b4f010dfdb4a0b",
+      "png_sha256": "80113cc095168b6cd97c03154d28e6219cb4e694ba20c1070064e83597db3fd3",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J1/menu-key-author-and-close/key-beta.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J1/menu-key-author-and-close/key-document.ppm",
+      "png": "evidence/luna-2/replays/J1/menu-key-author-and-close/key-document.png",
+      "original_sha256": "50e6ccca16b2d9c157420778ac3020fcf6abc32afb068398d4f6529a201ab0e0",
+      "png_sha256": "f20550c734d882a0c135dc523290e5d54973f2e8000ed97bb8e376dbde3e4b5f",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J1/menu-key-author-and-close/key-document.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J1/menu-key-author-and-close/menu-alpha.ppm",
+      "png": "evidence/luna-2/replays/J1/menu-key-author-and-close/menu-alpha.png",
+      "original_sha256": "3e39414ad8b130624b439ad191e363dec395e76a65ace803c3713b3a6a87534b",
+      "png_sha256": "8ff4da68dc2cdb114bbc68137e2e93d2dd8ef283eadffd5dfcc8a8c64d99fabf",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J1/menu-key-author-and-close/menu-alpha.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J1/menu-key-author-and-close/menu-beta.ppm",
+      "png": "evidence/luna-2/replays/J1/menu-key-author-and-close/menu-beta.png",
+      "original_sha256": "868fd9e5cfaa940192b679ec4544ae1323a28b37671adc0c56e97f1c0abcd3cd",
+      "png_sha256": "47c9760131cbefa5c9fc61c9016a1316977fcc6f6e69485b51cff3a7e47d0beb",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J1/menu-key-author-and-close/menu-beta.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J1/menu-key-author-and-close/menu-document.ppm",
+      "png": "evidence/luna-2/replays/J1/menu-key-author-and-close/menu-document.png",
+      "original_sha256": "f20d83627d2615dd5fa27eeeed0f94e7e166489b6631426600bafd4e8f35ee98",
+      "png_sha256": "805c204ab29784ec9bbba6a8de84c84dacbe20d4cee06fdc524331cf873b93e4",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J1/menu-key-author-and-close/menu-document.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J3/author-source/source.ppm",
+      "png": "evidence/luna-2/replays/J3/author-source/source.png",
+      "original_sha256": "317c875c94ebbced87d38d60657b388584518d61bf6f644dba51974f73deac58",
+      "png_sha256": "e3c728489af27456419b05e22c06562945d447bd73ddac2508c960252f907f18",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J3/author-source/source.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J3/baseline/clicked.ppm",
+      "png": "evidence/luna-2/replays/J3/baseline/clicked.png",
+      "original_sha256": "07b741f94ba7dc6c2635d37edfca5516e7be5dce85644fd9e57d2da206d4cef8",
+      "png_sha256": "c2b21eba2124389e81ffdf4e20bc8635f6252163e69580b4db1984d8a076e604",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J3/baseline/clicked.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J3/baseline/opened.ppm",
+      "png": "evidence/luna-2/replays/J3/baseline/opened.png",
+      "original_sha256": "07b741f94ba7dc6c2635d37edfca5516e7be5dce85644fd9e57d2da206d4cef8",
+      "png_sha256": "c2b21eba2124389e81ffdf4e20bc8635f6252163e69580b4db1984d8a076e604",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J3/baseline/opened.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J3/baseline/pouch-open.ppm",
+      "png": "evidence/luna-2/replays/J3/baseline/pouch-open.png",
+      "original_sha256": "437f5fce82d1371609296665681e83b291e0c6753b27f8b74af01606c9e7bb77",
+      "png_sha256": "7c1e0cfd5aec3368fb4cabfc190b8c52c7240bf8d6e589229e222c439875362f",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J3/baseline/pouch-open.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J3/baseline/returned.ppm",
+      "png": "evidence/luna-2/replays/J3/baseline/returned.png",
+      "original_sha256": "07b741f94ba7dc6c2635d37edfca5516e7be5dce85644fd9e57d2da206d4cef8",
+      "png_sha256": "c2b21eba2124389e81ffdf4e20bc8635f6252163e69580b4db1984d8a076e604",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J3/baseline/returned.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J3/baseline-native/authored.ppm",
+      "png": "evidence/luna-2/replays/J3/baseline-native/authored.png",
+      "original_sha256": "1c75e35ad05937527cdc9c711ebfac15684213f07b1c29b43b1470dc33fb230f",
+      "png_sha256": "6f3e1d7f3972a6f5c6329f32778cb124536dd2bc1793524b31baf1c3d04a8672",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J3/baseline-native/authored.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J3/baseline-native/pouch-selection.ppm",
+      "png": "evidence/luna-2/replays/J3/baseline-native/pouch-selection.png",
+      "original_sha256": "120c66da24617442a295af0e857879466b7e00826b6f18d529f7827dc1241cb7",
+      "png_sha256": "54462c2e702d65220cbe32d4dc1696198ef43a1dc65c8e5ad3f8689efd2d12b4",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J3/baseline-native/pouch-selection.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J3/baseline-replay/pouch-click.ppm",
+      "png": "evidence/luna-2/replays/J3/baseline-replay/pouch-click.png",
+      "original_sha256": "7a12ebb30d487b1ff6c07156d90efa9611b1ae7bee1c962f545fc264d761f936",
+      "png_sha256": "e3ec175bbfb711ea35ab65ef8cca04d917fb0e8fe65a1b362b031f0c65e9c3b6",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J3/baseline-replay/pouch-click.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J3/baseline-replay/pouch-drop.ppm",
+      "png": "evidence/luna-2/replays/J3/baseline-replay/pouch-drop.png",
+      "original_sha256": "7a12ebb30d487b1ff6c07156d90efa9611b1ae7bee1c962f545fc264d761f936",
+      "png_sha256": "e3ec175bbfb711ea35ab65ef8cca04d917fb0e8fe65a1b362b031f0c65e9c3b6",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J3/baseline-replay/pouch-drop.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J3/baseline-replay/pouch-hover.ppm",
+      "png": "evidence/luna-2/replays/J3/baseline-replay/pouch-hover.png",
+      "original_sha256": "7a12ebb30d487b1ff6c07156d90efa9611b1ae7bee1c962f545fc264d761f936",
+      "png_sha256": "e3ec175bbfb711ea35ab65ef8cca04d917fb0e8fe65a1b362b031f0c65e9c3b6",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J3/baseline-replay/pouch-hover.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J3/baseline-replay/selected.ppm",
+      "png": "evidence/luna-2/replays/J3/baseline-replay/selected.png",
+      "original_sha256": "6a8b6d2bfb7b50cb9c89e0e874d1e68a10eb417af29cae985b7987e1ac74ff57",
+      "png_sha256": "1d4a1f3158276fe0c686a93019ac9b061407a6e9268c8b1f10cb53891af74274",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J3/baseline-replay/selected.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J3/drag-selection-to-page/drag-void.ppm",
+      "png": "evidence/luna-2/replays/J3/drag-selection-to-page/drag-void.png",
+      "original_sha256": "312966fc4f4cb013c56958f44fa7c11064fbd512b5dc167094b10d5d86190807",
+      "png_sha256": "c8f26d91cae836386552d21d3c8328b0a4547db80ec2295b75a6b5ee03e3d705",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J3/drag-selection-to-page/drag-void.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J3/drag-selection-to-page/selection-mid.ppm",
+      "png": "evidence/luna-2/replays/J3/drag-selection-to-page/selection-mid.png",
+      "original_sha256": "6e460545272f1990d19d67a5a490a07959d147b14c9f78bc3808586aeaa8cfd4",
+      "png_sha256": "447267f2387cfe9e645db6b27422bcda03b455e41e39d8a3b9fd7b5c78a91d17",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J3/drag-selection-to-page/selection-mid.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J3/drag-selection-to-page/selection-press.ppm",
+      "png": "evidence/luna-2/replays/J3/drag-selection-to-page/selection-press.png",
+      "original_sha256": "12d28d4c57aae736a116d63a7c273bf28ea2db00fc224692158e9f5372028035",
+      "png_sha256": "208a6b123e4e1a357a24f617a82c8074633672e68ca2ee4bb3ac053a28824651",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J3/drag-selection-to-page/selection-press.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J3/drag-selection-to-page/selection.ppm",
+      "png": "evidence/luna-2/replays/J3/drag-selection-to-page/selection.png",
+      "original_sha256": "6e460545272f1990d19d67a5a490a07959d147b14c9f78bc3808586aeaa8cfd4",
+      "png_sha256": "447267f2387cfe9e645db6b27422bcda03b455e41e39d8a3b9fd7b5c78a91d17",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J3/drag-selection-to-page/selection.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J3/drag-selection-to-page/source-return.ppm",
+      "png": "evidence/luna-2/replays/J3/drag-selection-to-page/source-return.png",
+      "original_sha256": "314c9405a4558c46dc493f9929d0417031d0690fd7406700d656a28c9e8b3997",
+      "png_sha256": "f1d38568731259c162d577dbdb2d75a10275508cf04842f13319a5c717dc6d76",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J3/drag-selection-to-page/source-return.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J3/drag-selection-to-page/void-drop.ppm",
+      "png": "evidence/luna-2/replays/J3/drag-selection-to-page/void-drop.png",
+      "original_sha256": "bc09aad890eac86417b5467da3a79b3cfcd1291df3e94573255289fb6e375284",
+      "png_sha256": "4a870f7d4a845f26cdb6d77d95209f0ae5d55fb60fa99f353f6ed1496a8b6d86",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J3/drag-selection-to-page/void-drop.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J3/drag-selection-to-pouch/meadow-selected.ppm",
+      "png": "evidence/luna-2/replays/J3/drag-selection-to-pouch/meadow-selected.png",
+      "original_sha256": "2145e4c677feeb2c65c6a2bcd8cfef4392d712859e48b0288a93167da16163c3",
+      "png_sha256": "7b0bc6dbc80d2784af58eeb6687b656d25d6b9145d7b3c2e7ffed0698b060b97",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J3/drag-selection-to-pouch/meadow-selected.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J3/drag-selection-to-pouch/pouch-drop.ppm",
+      "png": "evidence/luna-2/replays/J3/drag-selection-to-pouch/pouch-drop.png",
+      "original_sha256": "cdfcf81170203f6f65ade44f90c99f2533c145873b263f9855e82cb1e5b3a8b4",
+      "png_sha256": "3573ea87e5a82e0bbd27c10cfc401d101574edc31ca4b8febe7bfc28dccc0886",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J3/drag-selection-to-pouch/pouch-drop.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J3/drag-selection-to-pouch/pouch-hover.ppm",
+      "png": "evidence/luna-2/replays/J3/drag-selection-to-pouch/pouch-hover.png",
+      "original_sha256": "b3bdfdaf3982ff3da9f35d8af09063e019654037f2ed2672690d944d0866d247",
+      "png_sha256": "55f1dff2b61adcddf391804873e9258c0ee7f7dea1118ad87f385d549aece833",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J3/drag-selection-to-pouch/pouch-hover.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J3/drag-selection-to-pouch/pouch-reopened.ppm",
+      "png": "evidence/luna-2/replays/J3/drag-selection-to-pouch/pouch-reopened.png",
+      "original_sha256": "cdfcf81170203f6f65ade44f90c99f2533c145873b263f9855e82cb1e5b3a8b4",
+      "png_sha256": "3573ea87e5a82e0bbd27c10cfc401d101574edc31ca4b8febe7bfc28dccc0886",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J3/drag-selection-to-pouch/pouch-reopened.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J3/reuse-pointer-actual.ppm",
+      "png": "evidence/luna-2/replays/J3/reuse-pointer-actual.png",
+      "original_sha256": "8f0d0a8850b39d609b6287e4e517e3ab92f89dc8c14de49d8a898d2951f74aeb",
+      "png_sha256": "1af2699fabcd813d191785deb1317c3eebc1d16cfc92c2924126b4665e587a2d",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J3/reuse-pointer-actual.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J3/reuse-pointer.ppm",
+      "png": "evidence/luna-2/replays/J3/reuse-pointer.png",
+      "original_sha256": "6c52115144a807cca2ad92b038bbab683f0c88f1989bdb9a02caa6619813aae3",
+      "png_sha256": "ad87023fe63f9bf40973b3e13595a0cd0a0f4e73eb462929ec8ecfd1855bd8d9",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J3/reuse-pointer.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J3/reuse-pouch-item/pouch-actions.ppm",
+      "png": "evidence/luna-2/replays/J3/reuse-pouch-item/pouch-actions.png",
+      "original_sha256": "5fcd8414ee9407e685670354aaa4936971a13e58c92ba5614d0591f47a2f9932",
+      "png_sha256": "8ccf726eef7256490664ba01811cafe423caae21642d75232993ecf2125c2b17",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J3/reuse-pouch-item/pouch-actions.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J3/reuse-return.ppm",
+      "png": "evidence/luna-2/replays/J3/reuse-return.png",
+      "original_sha256": "9b04b0dd418543aee90d2fd9d4de8d8046873de05dcfaa074bf0aa49898a67eb",
+      "png_sha256": "66d7d8803aaf22e6163308b83f8b2d7b7d4ef838afffe3bf954666bc1b737f76",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J3/reuse-return.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J4-before.ppm",
+      "png": "evidence/luna-2/replays/J4-before.png",
+      "original_sha256": "72bd0468f9559afff926436d0f9e43952a85a5f7b8be005a2487f6369cae1392",
+      "png_sha256": "8c2f5f433473a66940588a65674c138ce8c40d680d07c2630c8be181814d838f",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J4-before.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J4-home.ppm",
+      "png": "evidence/luna-2/replays/J4-home.png",
+      "original_sha256": "aa3fd1fbd38828dbe82ff9d45ad49f8e29f27d4ec4001686b4e54a6a1867d554",
+      "png_sha256": "c1bd9bf8d4ff8bb1a0fb02ba71c8d7b884346f9d7d42311c7793702cabea32d0",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J4-home.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J4-return.ppm",
+      "png": "evidence/luna-2/replays/J4-return.png",
+      "original_sha256": "3ae54cafd1348b06d335db0f2416de2f32b2473e2b8533343e7d2e4ddb5f6b0e",
+      "png_sha256": "e2e8d977f6f469c21e674fa0d0ee071d27476d0f8a6f4aa33c44b33381040347",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J4-return.ppm"
+    },
+    {
+      "original": "evidence/luna-2/replays/J5-reopened.ppm",
+      "png": "evidence/luna-2/replays/J5-reopened.png",
+      "original_sha256": "6e6f2676777d6e088ced71b8c9c8a5be7629d387304f0f0731037392d516f280",
+      "png_sha256": "f43a1f5c11722124174bf7cad1ecc9574fc9d5aedb6360d027ebdc6b177a78c0",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/replays/J5-reopened.ppm"
+    },
+    {
+      "original": "evidence/luna-2/telescope-pressure.ppm",
+      "png": "evidence/luna-2/telescope-pressure.png",
+      "original_sha256": "a2e9d7092696b2daf556ce4aabfb2c60fa034dc740c5b4a3932d28f02f7ee83e",
+      "png_sha256": "72e062bd2d0f902b39089e2d404b5cb96f2ca5aaee2d425b936ef80515a01a2f",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/telescope-pressure.ppm"
+    },
+    {
+      "original": "evidence/luna-2/telescope.ppm",
+      "png": "evidence/luna-2/telescope.png",
+      "original_sha256": "abfead7824057891dfa39deed9d664bac77e0da8a73fc7230ebe39b418cf5f87",
+      "png_sha256": "b1ce67c09d16878441c9451c2004a616df33518d9ae5acb15c0cd0780f7d2c5b",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/telescope.ppm"
+    },
+    {
+      "original": "evidence/luna-2/vql-bar.ppm",
+      "png": "evidence/luna-2/vql-bar.png",
+      "original_sha256": "6b195c08e452c60d703f8329266931f8c973b5ba58f710faf38b03e87061670c",
+      "png_sha256": "b36bd4bfe7e6a4845c2b98dee3a973bbc43ca26eba9702a3af1e290ee37e134f",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-2/vql-bar.ppm"
+    },
+    {
+      "original": "evidence/luna-3/j13-facts-open.ppm",
+      "png": "evidence/luna-3/j13-facts-open.png",
+      "original_sha256": "432551409d3d3bd4a9e74cb2335175bce6126d1c0e9b0ee8e16aeb8ab79fbbe5",
+      "png_sha256": "1e0648c340534350589fb719c81e14230bd61d94f1ab631f2cd80c213d3ff1e2",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-3/j13-facts-open.ppm"
+    },
+    {
+      "original": "evidence/luna-3/j13-flags-open.ppm",
+      "png": "evidence/luna-3/j13-flags-open.png",
+      "original_sha256": "b28d27dcbe914d3026367635952b7d602baff636c8927d995fcc5f7407dcdd72",
+      "png_sha256": "c18a229e2e347b04edab57b43bacd9011423ffd7de453e69e9486c0761feb78b",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-3/j13-flags-open.ppm"
+    },
+    {
+      "original": "evidence/luna-3/j13-issues-open.ppm",
+      "png": "evidence/luna-3/j13-issues-open.png",
+      "original_sha256": "94e71493e732366e28b04de293de2233c610ccba00503839daf9da7cf13a93be",
+      "png_sha256": "7705e82eaa03fd35e31acc38ab2673caae31a5129e39c0b074e36cc1fdb487c8",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-3/j13-issues-open.ppm"
+    },
+    {
+      "original": "evidence/luna-3/j13-report-open.ppm",
+      "png": "evidence/luna-3/j13-report-open.png",
+      "original_sha256": "9c0624edebc3bba413c7e2da50cfa2c6a99f6b964e5252cfcae09835114ebfe2",
+      "png_sha256": "dfe7138dd0429b7c2aa122caef3d5b5d432b0dbab44820e60438c7dcf4dfc42e",
+      "raw_archive": "/workspace/spatial-build/native-raw-review/evidence/luna-3/j13-report-open.ppm"
+    }
+  ],
+  "note": "Recorded input commands retain original PPM capture paths. PNGs are the lossless review artifacts; raw files/profile archives remain in this workspace, not Git."
+}

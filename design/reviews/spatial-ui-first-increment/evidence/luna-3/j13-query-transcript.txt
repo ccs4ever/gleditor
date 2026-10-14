@@ -1,0 +1,22 @@
+VQL Interactive REPL (vquery v1.0.0)
+Type queries or :help for commands. Press Ctrl+D to exit.
+vql> return 3/d.1::rank
+home
+issue(issue_alpha).
+issue(issue_beta).
+issue(issue_gamma).
+vql> return 3/d.1::rank[. != "home"]/d.2::rank
+issue(issue_alpha).
+editing(issue_alpha).
+rights(issue_alpha).
+approval(issue_alpha).
+issue(issue_beta).
+editing(issue_beta).
+rights(issue_beta).
+approval(issue_beta).
+issue(issue_gamma).
+editing(issue_gamma).
+approval(issue_gamma).
+vql> :save /workspace/spatial-build/luna-authoring/j13-query/J13/query-facts/facts
+Saved 11 result rows to /workspace/spatial-build/luna-authoring/j13-query/J13/query-facts/facts
+vql> :quit

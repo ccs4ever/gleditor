@@ -1,0 +1,110 @@
+Running main() from gmock_main.cc
+Note: Google Test filter = LinkPanelPresentationTest.*:LinkPanelOverlayTest.*:ReaderPackageUiTest.*
+[==========] Running 34 tests from 3 test suites.
+[----------] Global test environment set-up.
+[----------] 9 tests from ReaderPackageUiTest
+[ RUN      ] ReaderPackageUiTest.EnabledPackageUsesSharedNavigationAndAccessibleIdentityThenDismissesWithoutMutation
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] ReaderPackageUiTest.EnabledPackageUsesSharedNavigationAndAccessibleIdentityThenDismissesWithoutMutation (8 ms)
+[ RUN      ] ReaderPackageUiTest.RestoringPreferencesRefusesNativeAuthorityOverlap
+[       OK ] ReaderPackageUiTest.RestoringPreferencesRefusesNativeAuthorityOverlap (13 ms)
+[ RUN      ] ReaderPackageUiTest.MissingRepresentativeDoesNotHideVisibleLinkMembers
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[TIMING] First beam crossing viewport drawn: 1.07 ms
+[       OK ] ReaderPackageUiTest.MissingRepresentativeDoesNotHideVisibleLinkMembers (3 ms)
+[ RUN      ] ReaderPackageUiTest.ClosedNativeEndpointRefusesEntryAndSavedVisitWithoutChangingReading
+[       OK ] ReaderPackageUiTest.ClosedNativeEndpointRefusesEntryAndSavedVisitWithoutChangingReading (4 ms)
+[ RUN      ] ReaderPackageUiTest.SavedCellEntryRestoresHistoricalVersionAndExactContentRange
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] ReaderPackageUiTest.SavedCellEntryRestoresHistoricalVersionAndExactContentRange (3 ms)
+[ RUN      ] ReaderPackageUiTest.WalksPreviewAndMetadataPreserveCurrentVisitAndHistoricalExcerpt
+[       OK ] ReaderPackageUiTest.WalksPreviewAndMetadataPreserveCurrentVisitAndHistoricalExcerpt (2 ms)
+[ RUN      ] ReaderPackageUiTest.NativeFormattingIsNotAReaderNavigationCandidate
+[       OK ] ReaderPackageUiTest.NativeFormattingIsNotAReaderNavigationCandidate (9007 ms)
+[ RUN      ] ReaderPackageUiTest.CaretMovementAndLinkExplorationDoNotCreateCompletedVisits
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] ReaderPackageUiTest.CaretMovementAndLinkExplorationDoNotCreateCompletedVisits (3 ms)
+[ RUN      ] ReaderPackageUiTest.UnsupportedActivityPayloadsRemainUntouched
+xudu: not resuming or recording where you were: the activity store at /tmp/reader-package-ui-6f79688311dc4032ed9e28e60fc9a17f0aeba5c93c397494ab79f15500170065/XDG_DATA_HOME/xudu/activity cannot be read (activity: expected visit2); it is left untouched
+xudu: not resuming or recording where you were: the activity store at /tmp/reader-package-ui-6f79688311dc4032ed9e28e60fc9a17f0aeba5c93c397494ab79f15500170065/XDG_DATA_HOME/xudu/activity cannot be read (activity: expected selection2); it is left untouched
+[       OK ] ReaderPackageUiTest.UnsupportedActivityPayloadsRemainUntouched (46 ms)
+[----------] 9 tests from ReaderPackageUiTest (9094 ms total)
+
+[----------] 17 tests from LinkPanelPresentationTest
+[ RUN      ] LinkPanelPresentationTest.BothChosenLineBandsStayClearOfContextChrome
+[       OK ] LinkPanelPresentationTest.BothChosenLineBandsStayClearOfContextChrome (8 ms)
+[ RUN      ] LinkPanelPresentationTest.InvestigationPagesRetainCommandsOutsideReadingText
+[       OK ] LinkPanelPresentationTest.InvestigationPagesRetainCommandsOutsideReadingText (39 ms)
+[ RUN      ] LinkPanelPresentationTest.InvestigationRefusesToCoverTheOnlyReadingSurface
+[       OK ] LinkPanelPresentationTest.InvestigationRefusesToCoverTheOnlyReadingSurface (0 ms)
+[ RUN      ] LinkPanelPresentationTest.SeparateTextExclusionsLeaveBlankCanvasAvailable
+[       OK ] LinkPanelPresentationTest.SeparateTextExclusionsLeaveBlankCanvasAvailable (3 ms)
+[ RUN      ] LinkPanelPresentationTest.NarrowFreeAreaKeepsFullActionCaptions
+[       OK ] LinkPanelPresentationTest.NarrowFreeAreaKeepsFullActionCaptions (6 ms)
+[ RUN      ] LinkPanelPresentationTest.CaptionPaddingFitsConstrainedActionColumns
+[       OK ] LinkPanelPresentationTest.CaptionPaddingFitsConstrainedActionColumns (92 ms)
+[ RUN      ] LinkPanelPresentationTest.MoreBlankHeightDoesNotInflateLabelSpacing
+[       OK ] LinkPanelPresentationTest.MoreBlankHeightDoesNotInflateLabelSpacing (3 ms)
+[ RUN      ] LinkPanelPresentationTest.ContextAndEveryActionRemainVisibleAndAccessible
+[       OK ] LinkPanelPresentationTest.ContextAndEveryActionRemainVisibleAndAccessible (381 ms)
+[ RUN      ] LinkPanelPresentationTest.ExactRangePrefixesSurviveLongContextAndSmallLineLimit
+tests/zigzag/link_panel_overlay_test.cpp:362: Failure
+Value of: dock.pages
+  Actual: false
+Expected: true
+Google Test trace:
+tests/zigzag/link_panel_overlay_test.cpp:336: 640 scale 1.5
+
+[  FAILED  ] LinkPanelPresentationTest.ExactRangePrefixesSurviveLongContextAndSmallLineLimit (17 ms)
+[ RUN      ] LinkPanelPresentationTest.LegacyPlacementFontsAndColoursFollowLiveMetrics
+[       OK ] LinkPanelPresentationTest.LegacyPlacementFontsAndColoursFollowLiveMetrics (2 ms)
+[ RUN      ] LinkPanelPresentationTest.NamedFontRolesFollowLiveThemeAndLegacyFontsRemainExplicit
+[       OK ] LinkPanelPresentationTest.NamedFontRolesFollowLiveThemeAndLegacyFontsRemainExplicit (11 ms)
+[ RUN      ] LinkPanelPresentationTest.ReadingContentRemainsClearWhenThereIsRoom
+[       OK ] LinkPanelPresentationTest.ReadingContentRemainsClearWhenThereIsRoom (33 ms)
+[ RUN      ] LinkPanelPresentationTest.NoFreeAreaIsExplicitAndDockPreservesCommands
+[       OK ] LinkPanelPresentationTest.NoFreeAreaIsExplicitAndDockPreservesCommands (15 ms)
+[ RUN      ] LinkPanelPresentationTest.EnlargedInspectorPagesKeepRangesAndEveryCommandReachable
+[       OK ] LinkPanelPresentationTest.EnlargedInspectorPagesKeepRangesAndEveryCommandReachable (25 ms)
+[ RUN      ] LinkPanelPresentationTest.ConstrainedDockKeepsMeasuredActionRows
+[       OK ] LinkPanelPresentationTest.ConstrainedDockKeepsMeasuredActionRows (5 ms)
+[ RUN      ] LinkPanelPresentationTest.InspectorPinsWrappedCursorsAndPendingReason
+[       OK ] LinkPanelPresentationTest.InspectorPinsWrappedCursorsAndPendingReason (7 ms)
+[ RUN      ] LinkPanelPresentationTest.MinimumWarningAndEscapesFitAtEnlargedType
+[       OK ] LinkPanelPresentationTest.MinimumWarningAndEscapesFitAtEnlargedType (2 ms)
+[----------] 17 tests from LinkPanelPresentationTest (658 ms total)
+
+[----------] 8 tests from LinkPanelOverlayTest
+[ RUN      ] LinkPanelOverlayTest.PreviewEdgesKeepLinkHueExactRangesAndActiveSide
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] LinkPanelOverlayTest.PreviewEdgesKeepLinkHueExactRangesAndActiveSide (11 ms)
+[ RUN      ] LinkPanelOverlayTest.NavigationSelectionOwnershipSurvivesCrossButNotEditsOrOtherLinks
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] LinkPanelOverlayTest.NavigationSelectionOwnershipSurvivesCrossButNotEditsOrOtherLinks (8 ms)
+[ RUN      ] LinkPanelOverlayTest.PresentationLayersKeepAuthorityAndLinkIdentity
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] LinkPanelOverlayTest.PresentationLayersKeepAuthorityAndLinkIdentity (8 ms)
+[ RUN      ] LinkPanelOverlayTest.WarmFramesReuseShapingAndMovingAnchorsKeepActionIdentity
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] LinkPanelOverlayTest.WarmFramesReuseShapingAndMovingAnchorsKeepActionIdentity (16 ms)
+[ RUN      ] LinkPanelOverlayTest.CapturedAndQueuedActionsCannotApplyToAnotherSelection
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] LinkPanelOverlayTest.CapturedAndQueuedActionsCannotApplyToAnotherSelection (9 ms)
+[ RUN      ] LinkPanelOverlayTest.DisabledPointerCommandIsQueuedForNavigatorRefusal
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] LinkPanelOverlayTest.DisabledPointerCommandIsQueuedForNavigatorRefusal (21 ms)
+[ RUN      ] LinkPanelOverlayTest.DockWaitsForClipAndReadControlsPreserveSelection
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] LinkPanelOverlayTest.DockWaitsForClipAndReadControlsPreserveSelection (16 ms)
+[ RUN      ] LinkPanelOverlayTest.OverflowPagingRetainsCommandIdentityWithoutNavigation
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] LinkPanelOverlayTest.OverflowPagingRetainsCommandIdentityWithoutNavigation (38 ms)
+[----------] 8 tests from LinkPanelOverlayTest (132 ms total)
+
+[----------] Global test environment tear-down
+[==========] 34 tests from 3 test suites ran. (9886 ms total)
+[  PASSED  ] 33 tests.
+[  FAILED  ] 1 test, listed below:
+[  FAILED  ] LinkPanelPresentationTest.ExactRangePrefixesSurviveLongContextAndSmallLineLimit
+
+ 1 FAILED TEST

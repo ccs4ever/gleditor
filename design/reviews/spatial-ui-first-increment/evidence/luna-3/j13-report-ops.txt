@@ -1,0 +1,28 @@
+op 1  produces=1 parent=0 branch=0 kind=structure flags=0x8 at=0 len=0 to=0 src=0 srcAt=0 srcLen=0 scroll=0 span=[59876,59880) link=0 value=0  [make slice] text="main"
+op 2  produces=2 parent=1 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[59880,59884) link=0 value=0  [make cell ctx=1] text="home"
+op 3  produces=3 parent=2 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[59884,59890) link=0 value=0  [make cell ctx=1] text="d.dims"
+op 4  produces=4 parent=3 branch=0 kind=structure flags=0x1 at=0 len=0 to=3 src=2 srcAt=1 srcLen=0 scroll=0 span=[0,0) link=3 value=0  [setLink posward dim=3 -> 3 cell@2 ctx=1]
+op 5  produces=5 parent=4 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[59890,59898) link=0 value=0  [make cell ctx=1] text="d.result"
+op 6  produces=6 parent=5 branch=0 kind=structure flags=0x1 at=0 len=0 to=5 src=3 srcAt=1 srcLen=0 scroll=0 span=[0,0) link=3 value=0  [setLink posward dim=3 -> 5 cell@3 ctx=1]
+op 7  produces=7 parent=6 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[59898,59906) link=0 value=0  [make cell ctx=1] text="d.source"
+op 8  produces=8 parent=7 branch=0 kind=structure flags=0x1 at=0 len=0 to=7 src=5 srcAt=1 srcLen=0 scroll=0 span=[0,0) link=3 value=0  [setLink posward dim=3 -> 7 cell@5 ctx=1]
+op 9  produces=9 parent=8 branch=0 kind=structure flags=0x30 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[59906,59907) link=0 value=2  [make cell int64 ctx=1] text="2"
+op 10  produces=10 parent=9 branch=0 kind=structure flags=0x1 at=0 len=0 to=9 src=4 srcAt=4 srcLen=0 scroll=0 span=[0,0) link=5 value=0  [setLink posward dim=5 -> 9 cell@4 ctx=4]
+op 11  produces=11 parent=10 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[59907,60163) link=0 value=0  [make cell ctx=1] text="/workspace/spatial-build/luna-authoring/j13-prol"...
+op 12  produces=12 parent=11 branch=0 kind=structure flags=0x1 at=0 len=0 to=11 src=9 srcAt=9 srcLen=0 scroll=0 span=[0,0) link=7 value=0  [setLink posward dim=7 -> 11 cell@9 ctx=9]
+op 13  produces=13 parent=12 branch=0 kind=structure flags=0x30 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[60163,60164) link=0 value=1  [make cell int64 ctx=1] text="1"
+op 14  produces=14 parent=13 branch=0 kind=structure flags=0x1 at=0 len=0 to=13 src=12 srcAt=12 srcLen=0 scroll=0 span=[0,0) link=5 value=0  [setLink posward dim=5 -> 13 cell@12 ctx=12]
+op 15  produces=15 parent=14 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[60164,60420) link=0 value=0  [make cell ctx=1] text="/workspace/spatial-build/luna-authoring/j13-prol"...
+op 16  produces=16 parent=15 branch=0 kind=structure flags=0x1 at=0 len=0 to=15 src=13 srcAt=13 srcLen=0 scroll=0 span=[0,0) link=7 value=0  [setLink posward dim=7 -> 15 cell@13 ctx=13]
+op 17  produces=17 parent=16 branch=0 kind=structure flags=0x30 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[60420,60421) link=0 value=3  [make cell int64 ctx=1] text="3"
+op 18  produces=18 parent=17 branch=0 kind=structure flags=0x1 at=0 len=0 to=17 src=16 srcAt=16 srcLen=0 scroll=0 span=[0,0) link=5 value=0  [setLink posward dim=5 -> 17 cell@16 ctx=16]
+op 19  produces=19 parent=18 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[60421,60677) link=0 value=0  [make cell ctx=1] text="/workspace/spatial-build/luna-authoring/j13-prol"...
+op 20  produces=20 parent=19 branch=0 kind=structure flags=0x1 at=0 len=0 to=19 src=17 srcAt=17 srcLen=0 scroll=0 span=[0,0) link=7 value=0  [setLink posward dim=7 -> 19 cell@17 ctx=17]
+op 21  produces=21 parent=20 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[60677,60687) link=0 value=0  [make cell ctx=1] text="d.editions"
+op 22  produces=22 parent=21 branch=0 kind=structure flags=0x1 at=0 len=0 to=21 src=7 srcAt=1 srcLen=0 scroll=0 span=[0,0) link=3 value=0  [setLink posward dim=3 -> 21 cell@7 ctx=1]
+op 23  produces=23 parent=22 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[60687,60699) link=0 value=0  [make cell ctx=1] text="d.edition-of"
+op 24  produces=24 parent=23 branch=0 kind=structure flags=0x1 at=0 len=0 to=23 src=21 srcAt=1 srcLen=0 scroll=0 span=[0,0) link=3 value=0  [setLink posward dim=3 -> 23 cell@21 ctx=1]
+op 25  produces=25 parent=24 branch=0 kind=structure flags=0x40 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[0,0) link=0 value=20  [make cell op_handle ctx=1]
+op 26  produces=26 parent=25 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[60699,60706) link=0 value=0  [make cell ctx=1] text="current"
+op 27  produces=27 parent=26 branch=0 kind=structure flags=0x1 at=0 len=0 to=26 src=10 srcAt=10 srcLen=0 scroll=0 span=[0,0) link=21 value=0  [setLink posward dim=21 -> 26 cell@10 ctx=10]
+op 28  produces=28 parent=27 branch=0 kind=structure flags=0x1 at=0 len=0 to=25 src=26 srcAt=26 srcLen=0 scroll=0 span=[0,0) link=23 value=0  [setLink posward dim=23 -> 25 cell@26 ctx=26]
