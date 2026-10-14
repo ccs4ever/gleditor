@@ -829,6 +829,12 @@ int XuzzApp::run(const int argc, char **argv) {
         }
       }
     }
+    // The readable-distance cap can leave the chosen passage outside a
+    // camera centred on two whole pages. Keep the exact target in view using
+    // the existing caret-follow framing; the companion remains secondary.
+    views.keepInView(focused,
+                     range.end > range.start ? range.end - 1 : range.start);
+    views.keepInView(focused, range.start);
   });
   linkContext.setCaretQuery(
       [&renderer]() -> std::optional<xanadu::LinkContext::CaretPosition> {

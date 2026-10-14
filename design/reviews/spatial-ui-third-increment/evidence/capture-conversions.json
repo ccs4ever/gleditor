@@ -1,0 +1,40 @@
+{
+  "lossless_conversions": [
+    {
+      "original": "evidence/landing/baseline/06-back-after-second.ppm",
+      "png": "evidence/landing/baseline/06-back-after-second.png",
+      "original_sha256": "369ab8212145d340f4aea6df18cb0dbeb8bea0e08e3b46a8e079f22e18cd9536"
+    },
+    {
+      "original": "evidence/landing/baseline/04-back-root.ppm",
+      "png": "evidence/landing/baseline/04-back-root.png",
+      "original_sha256": "369ab8212145d340f4aea6df18cb0dbeb8bea0e08e3b46a8e079f22e18cd9536"
+    },
+    {
+      "original": "evidence/landing/baseline/01-enter.ppm",
+      "png": "evidence/landing/baseline/01-enter.png",
+      "original_sha256": "369ab8212145d340f4aea6df18cb0dbeb8bea0e08e3b46a8e079f22e18cd9536"
+    },
+    {
+      "original": "evidence/landing/baseline/00-authored.ppm",
+      "png": "evidence/landing/baseline/00-authored.png",
+      "original_sha256": "369ab8212145d340f4aea6df18cb0dbeb8bea0e08e3b46a8e079f22e18cd9536"
+    },
+    {
+      "original": "evidence/landing/baseline/05-enter-again.ppm",
+      "png": "evidence/landing/baseline/05-enter-again.png",
+      "original_sha256": "369ab8212145d340f4aea6df18cb0dbeb8bea0e08e3b46a8e079f22e18cd9536"
+    },
+    {
+      "original": "evidence/landing/baseline/02-origin.ppm",
+      "png": "evidence/landing/baseline/02-origin.png",
+      "original_sha256": "369ab8212145d340f4aea6df18cb0dbeb8bea0e08e3b46a8e079f22e18cd9536"
+    },
+    {
+      "original": "evidence/landing/baseline/03-back.ppm",
+      "png": "evidence/landing/baseline/03-back.png",
+      "original_sha256": "369ab8212145d340f4aea6df18cb0dbeb8bea0e08e3b46a8e079f22e18cd9536"
+    }
+  ],
+  "archive": "/workspace/spatial-build/third/raw-review"
+}

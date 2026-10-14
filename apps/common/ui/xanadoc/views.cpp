@@ -514,6 +514,11 @@ void Views::focusSpanAt(RenderState &rState, const std::size_t docIndex,
   if (docIndex >= session.views().size() || docIndex >= rState.docs.size() ||
       !rState.docs[docIndex])
     return;
+  // Endpoint travel uses the same document activation as a tab selection.
+  // Its exact-range camera belongs to the caller, rather than the page-zero
+  // framing scheduled by ordinary activation.
+  activateDocument(rState, static_cast<std::uint32_t>(docIndex));
+  cancelReadingFrame();
   auto *const caret = renderer->editCaret();
   if (caret) {
     caret->placeAt(static_cast<std::uint32_t>(docIndex), charStart);

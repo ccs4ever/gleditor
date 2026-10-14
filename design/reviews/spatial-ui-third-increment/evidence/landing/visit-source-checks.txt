@@ -1,0 +1,9 @@
+Same-profile source operation SHA-256 before navigation and after Back:
+origin: 0966c3dce31f7f5a3a161d1a8033eb2fee61716d512e43c709713787b7e1ccc9
+right:  07fda1ea881a3747c68498095ba0adc5c6b09d7af401bd1f88da6f19d81cc960
+
+Activity store after Back:
+root visit ID 1
+child visit ID 2, parent ID 1 (activity-after.txt operations 13/15/17)
+child visit ID 3, parent ID 1 (activity-after.txt operations 19/21/23)
+current visit returns to ID 1 (last d.activity-current edge)

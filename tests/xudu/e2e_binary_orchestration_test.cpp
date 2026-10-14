@@ -1195,6 +1195,55 @@ TEST(E2EBinaryOrchestrationTest,
 }
 
 TEST(E2EBinaryOrchestrationTest,
+     linkTravelActivatesExactDocumentAndKeepsSiblingVisits) {
+  const auto binary = findXuduBinary();
+  ASSERT_TRUE(fs::exists(binary));
+  const auto root = fs::current_path() / "build" / "integration_link_landing";
+  fs::remove_all(root);
+  fs::create_directories(root);
+  const auto scroll = root / "permascroll";
+  const auto result = executeProcess(
+      "XDG_CONFIG_HOME=" + (root / "config").string() +
+      " XDG_DATA_HOME=" + (root / "data").string() + " XDG_CACHE_HOME=" +
+      (root / "cache").string() + " timeout 120 " + binary.string() +
+      permascrollFlag(scroll) + " --backend " + activeBackend() +
+      " --profile --resize 1440,1000"
+      " --chord 'Ctrl+N' --type 'Origin exact passage.' --select 0,21"
+      " --chord 'Ctrl+Alt+[' --chord 'Ctrl+N'"
+      " --type 'Distant target exact passage.' --select 0,29"
+      " --chord 'Ctrl+Alt+]' --chord 'Ctrl+Alt+L' --chord 'Alt+Shift+N'"
+      " --click-label Enter --await-a11y '5000,Doc 2=selected' --dump-a11y"
+      " --capture " +
+      (root / "entered.ppm").string() +
+      " --click-label Origin --await-a11y '5000,Doc 3=selected' --dump-a11y"
+      " --capture " +
+      (root / "origin.ppm").string() +
+      " --click-label Enter --await-a11y '5000,Doc 2=selected'"
+      " --click-label Back --await-a11y '5000,default=selected' --dump-a11y"
+      " --capture " +
+      (root / "back.ppm").string() + " --chord 'Ctrl+Q'");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_THAT(result.output, testing::HasSubstr("[caret 21 from 0]"));
+  EXPECT_THAT(result.output, testing::HasSubstr("[caret 29 from 0]"));
+  EXPECT_THAT(result.output, testing::HasSubstr("focus: default"));
+
+  const auto activityPath = root / "data/xudu/activity";
+  Store activity(permascrollAt(scroll));
+  activity.load(activityPath.string());
+  xanadu::StoreActivityLog log(&activity, activityPath);
+  ASSERT_EQ(log.walkEntries().size(), 3U);
+  EXPECT_EQ(log.current(), (xanadu::VisitId{1}));
+  EXPECT_EQ(log.children({1}), (std::vector<xanadu::VisitId>{{2}, {3}}));
+  ASSERT_TRUE(log.find({2}));
+  ASSERT_TRUE(log.find({3}));
+  EXPECT_EQ(log.find({2})->target, log.find({3})->target);
+  const auto *target =
+      std::get_if<xanadu::DocumentSite>(&log.find({2})->target);
+  ASSERT_NE(target, nullptr);
+  EXPECT_EQ(target->range, (xanadu::Extent{0, 21}));
+}
+
+TEST(E2EBinaryOrchestrationTest,
      pouchDividerResizesAndKeepsTheDocumentUntouched) {
   const auto binary = findXuduBinary();
   ASSERT_TRUE(fs::exists(binary));

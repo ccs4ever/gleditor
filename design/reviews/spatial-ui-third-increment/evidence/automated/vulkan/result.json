@@ -1,0 +1,8 @@
+{
+  "command": [
+    "/workspace/gleditor/build/xudu_test",
+    "--gtest_filter=E2EBinaryOrchestrationTest.linkTravelActivatesExactDocumentAndKeepsSiblingVisits"
+  ],
+  "backend": "vulkan",
+  "exit_code": 0
+}

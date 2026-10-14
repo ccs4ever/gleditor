@@ -1,0 +1,12 @@
+Running main() from gmock_main.cc
+Note: Google Test filter = E2EBinaryOrchestrationTest.linkTravelActivatesExactDocumentAndKeepsSiblingVisits
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from E2EBinaryOrchestrationTest
+[ RUN      ] E2EBinaryOrchestrationTest.linkTravelActivatesExactDocumentAndKeepsSiblingVisits
+[       OK ] E2EBinaryOrchestrationTest.linkTravelActivatesExactDocumentAndKeepsSiblingVisits (31747 ms)
+[----------] 1 test from E2EBinaryOrchestrationTest (31747 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (31747 ms total)
+[  PASSED  ] 1 test.

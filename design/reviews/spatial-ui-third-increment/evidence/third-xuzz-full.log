@@ -1,0 +1,255 @@
+Running main() from gmock_main.cc
+[==========] Running 99 tests from 17 test suites.
+[----------] Global test environment set-up.
+[----------] 11 tests from LinkOccurrencesTest
+[ RUN      ] LinkOccurrencesTest.BackToBackQuotationsStayTwoMatches
+[       OK ] LinkOccurrencesTest.BackToBackQuotationsStayTwoMatches (4 ms)
+[ RUN      ] LinkOccurrencesTest.ContinuingAddressesAcrossPiecesAreOneMatch
+[       OK ] LinkOccurrencesTest.ContinuingAddressesAcrossPiecesAreOneMatch (0 ms)
+[ RUN      ] LinkOccurrencesTest.RearrangedHalvesAreTwoPartialMatches
+[       OK ] LinkOccurrencesTest.RearrangedHalvesAreTwoPartialMatches (0 ms)
+[ RUN      ] LinkOccurrencesTest.OtherScrollAndEmptyMemberMatchNothing
+[       OK ] LinkOccurrencesTest.OtherScrollAndEmptyMemberMatchNothing (0 ms)
+[ RUN      ] LinkOccurrencesTest.TwoByThreeKeepsMembersSeparateAndOrdered
+[       OK ] LinkOccurrencesTest.TwoByThreeKeepsMembersSeparateAndOrdered (3 ms)
+[ RUN      ] LinkOccurrencesTest.RepeatedQuotationsAreSeparateOccurrences
+[       OK ] LinkOccurrencesTest.RepeatedQuotationsAreSeparateOccurrences (38 ms)
+[ RUN      ] LinkOccurrencesTest.CellContentOccurrencesCarryExactRangeAndCoverage
+[       OK ] LinkOccurrencesTest.CellContentOccurrencesCarryExactRangeAndCoverage (6 ms)
+[ RUN      ] LinkOccurrencesTest.MembersOutOfViewKeepTheirPlace
+[       OK ] LinkOccurrencesTest.MembersOutOfViewKeepTheirPlace (2 ms)
+[ RUN      ] LinkOccurrencesTest.OlderVersionShowsOnlyTheOriginal
+[       OK ] LinkOccurrencesTest.OlderVersionShowsOnlyTheOriginal (6 ms)
+[ RUN      ] LinkOccurrencesTest.UnknownLinkIsRefusedByName
+[       OK ] LinkOccurrencesTest.UnknownLinkIsRefusedByName (6 ms)
+[ RUN      ] LinkOccurrencesTest.ContentOccurrencesNeedEverySpanInOrder
+[       OK ] LinkOccurrencesTest.ContentOccurrencesNeedEverySpanInOrder (0 ms)
+[----------] 11 tests from LinkOccurrencesTest (69 ms total)
+
+[----------] 12 tests from LinkPanelTest
+[ RUN      ] LinkPanelTest.APendingLinkSaysSo
+[       OK ] LinkPanelTest.APendingLinkSaysSo (2 ms)
+[ RUN      ] LinkPanelTest.UnsetCursorsExplainTheChoiceAndAreMuted
+[       OK ] LinkPanelTest.UnsetCursorsExplainTheChoiceAndAreMuted (7 ms)
+[ RUN      ] LinkPanelTest.EachSideShowsItsOwnChoice
+[       OK ] LinkPanelTest.EachSideShowsItsOwnChoice (3 ms)
+[ RUN      ] LinkPanelTest.AMemberWithSeveralOccurrencesWaitsForAChoice
+[       OK ] LinkPanelTest.AMemberWithSeveralOccurrencesWaitsForAChoice (6 ms)
+[ RUN      ] LinkPanelTest.AMemberOutOfViewSaysSo
+[       OK ] LinkPanelTest.AMemberOutOfViewSaysSo (2 ms)
+[ RUN      ] LinkPanelTest.ConfigDefaultsComeFromTheUiSystemDoc
+[       OK ] LinkPanelTest.ConfigDefaultsComeFromTheUiSystemDoc (4553 ms)
+[ RUN      ] LinkPanelTest.FitLimitsComeFromLiveUiSettingsAndRemainBounded
+[       OK ] LinkPanelTest.FitLimitsComeFromLiveUiSettingsAndRemainBounded (4127 ms)
+[ RUN      ] LinkPanelTest.ReadingNamesTheMembersTheCaretIsOn
+[       OK ] LinkPanelTest.ReadingNamesTheMembersTheCaretIsOn (2 ms)
+[ RUN      ] LinkPanelTest.MovingOffTheLinkAfterEnteringSaysSo
+[       OK ] LinkPanelTest.MovingOffTheLinkAfterEnteringSaysSo (6 ms)
+[ RUN      ] LinkPanelTest.InvestigationExposesEveryMemberAndChosenPlacesWithoutEntry
+[       OK ] LinkPanelTest.InvestigationExposesEveryMemberAndChosenPlacesWithoutEntry (4 ms)
+[ RUN      ] LinkPanelTest.ButtonsSendTheKeymapsCommands
+[       OK ] LinkPanelTest.ButtonsSendTheKeymapsCommands (4 ms)
+[ RUN      ] LinkPanelTest.EnterIsEnabledOnlyWithAChosenPlace
+[       OK ] LinkPanelTest.EnterIsEnabledOnlyWithAChosenPlace (7 ms)
+[----------] 12 tests from LinkPanelTest (8734 ms total)
+
+[----------] 3 tests from PanelConfigTest
+[ RUN      ] PanelConfigTest.DefaultsAndLiveLimitsComeFromSystemUi
+[       OK ] PanelConfigTest.DefaultsAndLiveLimitsComeFromSystemUi (4493 ms)
+[ RUN      ] PanelConfigTest.bigModalGeometryIsSeededAndValidatedInSystemUi
+[       OK ] PanelConfigTest.bigModalGeometryIsSeededAndValidatedInSystemUi (5171 ms)
+[ RUN      ] PanelConfigTest.WorldCardsAreSeededAndLiveGeometryIsValidated
+[       OK ] PanelConfigTest.WorldCardsAreSeededAndLiveGeometryIsValidated (6032 ms)
+[----------] 3 tests from PanelConfigTest (15697 ms total)
+
+[----------] 2 tests from LinkGutterRouteTest
+[ RUN      ] LinkGutterRouteTest.RemotePagesRetainExactEndsAndLocalTurns
+[       OK ] LinkGutterRouteTest.RemotePagesRetainExactEndsAndLocalTurns (0 ms)
+[ RUN      ] LinkGutterRouteTest.ShortRunsDoNotReverseOrMoveAttachments
+[       OK ] LinkGutterRouteTest.ShortRunsDoNotReverseOrMoveAttachments (0 ms)
+[----------] 2 tests from LinkGutterRouteTest (0 ms total)
+
+[----------] 10 tests from ShallowAlignmentTest
+[ RUN      ] ShallowAlignmentTest.SharedCompanionBalancesBothVisibleLinks
+[       OK ] ShallowAlignmentTest.SharedCompanionBalancesBothVisibleLinks (0 ms)
+[ RUN      ] ShallowAlignmentTest.NarrowGutterPrefersCompromiseToAnExtremeRoute
+[       OK ] ShallowAlignmentTest.NarrowGutterPrefersCompromiseToAnExtremeRoute (0 ms)
+[ RUN      ] ShallowAlignmentTest.DuplicateScaffoldingAndInputOrderDoNotChangeVotes
+[       OK ] ShallowAlignmentTest.DuplicateScaffoldingAndInputOrderDoNotChangeVotes (38 ms)
+[ RUN      ] ShallowAlignmentTest.PageFragmentsShareTheirOccurrenceVote
+[       OK ] ShallowAlignmentTest.PageFragmentsShareTheirOccurrenceVote (0 ms)
+[ RUN      ] ShallowAlignmentTest.SparseOffscreenMembersCannotDominateVisibleLayout
+[       OK ] ShallowAlignmentTest.SparseOffscreenMembersCannotDominateVisibleLayout (0 ms)
+[ RUN      ] ShallowAlignmentTest.ContradictoryOrdersAndZeroRunRemainBounded
+[       OK ] ShallowAlignmentTest.ContradictoryOrdersAndZeroRunRemainBounded (0 ms)
+[ RUN      ] ShallowAlignmentTest.NoOppositeSideOrNoUsefulImprovementKeepsArrangement
+[       OK ] ShallowAlignmentTest.NoOppositeSideOrNoUsefulImprovementKeepsArrangement (0 ms)
+[ RUN      ] ShallowAlignmentTest.RefusesIncompleteWorkAndInvalidBounds
+[       OK ] ShallowAlignmentTest.RefusesIncompleteWorkAndInvalidBounds (0 ms)
+[ RUN      ] ShallowAlignmentTest.RefusesOverflowRatherThanReturningNaNCost
+[       OK ] ShallowAlignmentTest.RefusesOverflowRatherThanReturningNaNCost (0 ms)
+[ RUN      ] ShallowAlignmentTest.DenseEndsetsUseAFragmentAndCandidateBudget
+[       OK ] ShallowAlignmentTest.DenseEndsetsUseAFragmentAndCandidateBudget (4 ms)
+[----------] 10 tests from ShallowAlignmentTest (44 ms total)
+
+[----------] 1 test from XuzzFocusManagerTest
+[ RUN      ] XuzzFocusManagerTest.ReverseOrderDispatchAndGrabbing
+[       OK ] XuzzFocusManagerTest.ReverseOrderDispatchAndGrabbing (0 ms)
+[----------] 1 test from XuzzFocusManagerTest (0 ms total)
+
+[----------] 3 tests from XuzzBridgeTest
+[ RUN      ] XuzzBridgeTest.VortexStdLibBridgeOperations
+[       OK ] XuzzBridgeTest.VortexStdLibBridgeOperations (2 ms)
+[ RUN      ] XuzzBridgeTest.PresentationSurfaceCellActivationAndDocumentFocusCoordination
+[       OK ] XuzzBridgeTest.PresentationSurfaceCellActivationAndDocumentFocusCoordination (1 ms)
+[ RUN      ] XuzzBridgeTest.VortexBridgeTranscopyrightSettlement
+[       OK ] XuzzBridgeTest.VortexBridgeTranscopyrightSettlement (12 ms)
+[----------] 3 tests from XuzzBridgeTest (16 ms total)
+
+[----------] 1 test from XuzzSovereignKeymapTest
+[ RUN      ] XuzzSovereignKeymapTest.SovereignKeymapGovernance
+[       OK ] XuzzSovereignKeymapTest.SovereignKeymapGovernance (16896 ms)
+[----------] 1 test from XuzzSovereignKeymapTest (16896 ms total)
+
+[----------] 4 tests from AnchorMotionTest
+[ RUN      ] AnchorMotionTest.FocusExtendsRetractsAndReversesFromCurrentProgress
+[       OK ] AnchorMotionTest.FocusExtendsRetractsAndReversesFromCurrentProgress (0 ms)
+[ RUN      ] AnchorMotionTest.ReducedMotionAndZeroDurationCutAndDoNotReplay
+[       OK ] AnchorMotionTest.ReducedMotionAndZeroDurationCutAndDoNotReplay (0 ms)
+[ RUN      ] AnchorMotionTest.IdentityIncludesSideMemberOccurrenceAndSite
+[       OK ] AnchorMotionTest.IdentityIncludesSideMemberOccurrenceAndSite (0 ms)
+[ RUN      ] AnchorMotionTest.LiveReducedMotionToggleCannotReplaySettledReach
+[       OK ] AnchorMotionTest.LiveReducedMotionToggleCannotReplaySettledReach (0 ms)
+[----------] 4 tests from AnchorMotionTest (0 ms total)
+
+[----------] 4 tests from XuzzConvergenceSample
+[ RUN      ] XuzzConvergenceSample.OneHeadReplaysAsDocumentAndManifold
+[       OK ] XuzzConvergenceSample.OneHeadReplaysAsDocumentAndManifold (1 ms)
+[ RUN      ] XuzzConvergenceSample.PlainDocumentDoesNotInventCells
+[       OK ] XuzzConvergenceSample.PlainDocumentDoesNotInventCells (1 ms)
+[ RUN      ] XuzzConvergenceSample.SliceCanGainXanadocTextAfterGenesis
+[       OK ] XuzzConvergenceSample.SliceCanGainXanadocTextAfterGenesis (0 ms)
+[ RUN      ] XuzzConvergenceSample.MaterializedStoreLoadsForInspection
+[       OK ] XuzzConvergenceSample.MaterializedStoreLoadsForInspection (3 ms)
+[----------] 4 tests from XuzzConvergenceSample (7 ms total)
+
+[----------] 2 tests from KeyboardSliceTest
+[ RUN      ] KeyboardSliceTest.aSliceIsBuiltNamedAndLinkedFromTheKeyboard
+[       OK ] KeyboardSliceTest.aSliceIsBuiltNamedAndLinkedFromTheKeyboard (26581 ms)
+[ RUN      ] KeyboardSliceTest.aRelaunchedSessionCarriesOnWhereItStopped
+[       OK ] KeyboardSliceTest.aRelaunchedSessionCarriesOnWhereItStopped (23105 ms)
+[----------] 2 tests from KeyboardSliceTest (49687 ms total)
+
+[----------] 2 tests from PublicationUiTest
+[ RUN      ] PublicationUiTest.aSliceCanBeAddedToTheCurrentTextStoreAndReopened
+[       OK ] PublicationUiTest.aSliceCanBeAddedToTheCurrentTextStoreAndReopened (16810 ms)
+[ RUN      ] PublicationUiTest.telescopeSearchDoesNotWriteIntoTheDocument
+[       OK ] PublicationUiTest.telescopeSearchDoesNotWriteIntoTheDocument (14221 ms)
+[----------] 2 tests from PublicationUiTest (31032 ms total)
+
+[----------] 1 test from StoreActivityLogTest
+[ RUN      ] StoreActivityLogTest.BranchesAndSelectedVisitSurviveReopening
+[       OK ] StoreActivityLogTest.BranchesAndSelectedVisitSurviveReopening (21 ms)
+[----------] 1 test from StoreActivityLogTest (21 ms total)
+
+[----------] 7 tests from ActivityMetadataTest
+[ RUN      ] ActivityMetadataTest.ReferencesAndUnicodeAnnotationsPersistWithoutVisits
+[       OK ] ActivityMetadataTest.ReferencesAndUnicodeAnnotationsPersistWithoutVisits (42 ms)
+[ RUN      ] ActivityMetadataTest.InvalidTargetsAndEmptyNotesAppendNothing
+[       OK ] ActivityMetadataTest.InvalidTargetsAndEmptyNotesAppendNothing (6 ms)
+[ RUN      ] ActivityMetadataTest.MalformedReferenceIsRefusedByTypedError
+[       OK ] ActivityMetadataTest.MalformedReferenceIsRefusedByTypedError (16 ms)
+[ RUN      ] ActivityMetadataTest.TruncatedAnnotationIsRefusedByTypedError
+[       OK ] ActivityMetadataTest.TruncatedAnnotationIsRefusedByTypedError (16 ms)
+[ RUN      ] ActivityMetadataTest.PersistedUnknownReferenceIsRefusedByTypedError
+[       OK ] ActivityMetadataTest.PersistedUnknownReferenceIsRefusedByTypedError (20 ms)
+[ RUN      ] ActivityMetadataTest.PreviousVisitPayloadIsRefusedWithoutRewriting
+[       OK ] ActivityMetadataTest.PreviousVisitPayloadIsRefusedWithoutRewriting (11 ms)
+[ RUN      ] ActivityMetadataTest.NegativeVisitParentAndAddressesAreRefused
+[       OK ] ActivityMetadataTest.NegativeVisitParentAndAddressesAreRefused (39 ms)
+[----------] 7 tests from ActivityMetadataTest (152 ms total)
+
+[----------] 2 tests from ActivitySelectionRecordTest
+[ RUN      ] ActivitySelectionRecordTest.OldAndTruncatedCheckpointsAreRefused
+[       OK ] ActivitySelectionRecordTest.OldAndTruncatedCheckpointsAreRefused (0 ms)
+[ RUN      ] ActivitySelectionRecordTest.NegativeAndOverflowingCheckpointNumbersAreRefused
+[       OK ] ActivitySelectionRecordTest.NegativeAndOverflowingCheckpointNumbersAreRefused (0 ms)
+[----------] 2 tests from ActivitySelectionRecordTest (0 ms total)
+
+[----------] 26 tests from LinkNavigationTest
+[ RUN      ] LinkNavigationTest.SelectingPinsTheWholeLinkWithoutMoving
+[       OK ] LinkNavigationTest.SelectingPinsTheWholeLinkWithoutMoving (6 ms)
+[ RUN      ] LinkNavigationTest.SingletonMembersAreReadyWithoutEntering
+[       OK ] LinkNavigationTest.SingletonMembersAreReadyWithoutEntering (2 ms)
+[ RUN      ] LinkNavigationTest.SideCursorsMoveIndependently
+[       OK ] LinkNavigationTest.SideCursorsMoveIndependently (5 ms)
+[ RUN      ] LinkNavigationTest.EnterNeedsAChosenOccurrenceAndRecordsOneVisit
+[       OK ] LinkNavigationTest.EnterNeedsAChosenOccurrenceAndRecordsOneVisit (4 ms)
+[ RUN      ] LinkNavigationTest.BrowsingNeverFocusesOrRecords
+[       OK ] LinkNavigationTest.BrowsingNeverFocusesOrRecords (4 ms)
+[ RUN      ] LinkNavigationTest.CrossingSwapsTheActiveSideBothWays
+[       OK ] LinkNavigationTest.CrossingSwapsTheActiveSideBothWays (4 ms)
+[ RUN      ] LinkNavigationTest.StepsCycleFromUnset
+[       OK ] LinkNavigationTest.StepsCycleFromUnset (7 ms)
+[ RUN      ] LinkNavigationTest.LateOccurrencesForAnEarlierSelectionAreRefused
+[       OK ] LinkNavigationTest.LateOccurrencesForAnEarlierSelectionAreRefused (3 ms)
+[ RUN      ] LinkNavigationTest.APickSettlesOnAMemberOnlyWhenOneMatches
+[       OK ] LinkNavigationTest.APickSettlesOnAMemberOnlyWhenOneMatches (6 ms)
+[ RUN      ] LinkNavigationTest.ActivityBackRestoresTheVisitAndItsPanel
+[       OK ] LinkNavigationTest.ActivityBackRestoresTheVisitAndItsPanel (2 ms)
+[ RUN      ] LinkNavigationTest.RestartRestoresSelectedLinkWithoutAnotherVisit
+[       OK ] LinkNavigationTest.RestartRestoresSelectedLinkWithoutAnotherVisit (2 ms)
+[ RUN      ] LinkNavigationTest.ActivityForwardChoosesEitherExistingBranch
+[       OK ] LinkNavigationTest.ActivityForwardChoosesEitherExistingBranch (2 ms)
+[ RUN      ] LinkNavigationTest.AuthoredManyToManyLinkSurvivesStoreReopen
+[       OK ] LinkNavigationTest.AuthoredManyToManyLinkSurvivesStoreReopen (3 ms)
+[ RUN      ] LinkNavigationTest.ActivityBackIntoAnotherLinkResolvesItAgain
+[       OK ] LinkNavigationTest.ActivityBackIntoAnotherLinkResolvesItAgain (21 ms)
+[ RUN      ] LinkNavigationTest.ReturnToOriginKeepsTheLinkAndAddsNoVisit
+[       OK ] LinkNavigationTest.ReturnToOriginKeepsTheLinkAndAddsNoVisit (2 ms)
+[ RUN      ] LinkNavigationTest.DismissRemovesTheContextAndMovesNothing
+[       OK ] LinkNavigationTest.DismissRemovesTheContextAndMovesNothing (2 ms)
+[ RUN      ] LinkNavigationTest.AnUnknownLinkIsRefusedAndNotPinned
+[       OK ] LinkNavigationTest.AnUnknownLinkIsRefusedAndNotPinned (2 ms)
+[ RUN      ] LinkNavigationTest.StepLinkWalksTheCandidatesInOrder
+[       OK ] LinkNavigationTest.StepLinkWalksTheCandidatesInOrder (2 ms)
+[ RUN      ] LinkNavigationTest.EveryKeymapActionNamesACommand
+[       OK ] LinkNavigationTest.EveryKeymapActionNamesACommand (0 ms)
+[ RUN      ] LinkNavigationTest.PointerKeymapAndAccessibilityAgree
+[       OK ] LinkNavigationTest.PointerKeymapAndAccessibilityAgree (6 ms)
+[ RUN      ] LinkNavigationTest.ErrorsAndCommandsHaveNames
+[       OK ] LinkNavigationTest.ErrorsAndCommandsHaveNames (0 ms)
+[ RUN      ] LinkNavigationTest.CancelEntryPreservesBothCursorsAndCompletedVisits
+[       OK ] LinkNavigationTest.CancelEntryPreservesBothCursorsAndCompletedVisits (2 ms)
+[ RUN      ] LinkNavigationTest.EveryUiActionHasAnUnclaimedDefaultChord
+[       OK ] LinkNavigationTest.EveryUiActionHasAnUnclaimedDefaultChord (1 ms)
+[ RUN      ] LinkNavigationTest.WalksEntersSavedVisitWithoutAppendingAndKeepsFutures
+[       OK ] LinkNavigationTest.WalksEntersSavedVisitWithoutAppendingAndKeepsFutures (2 ms)
+[ RUN      ] LinkNavigationTest.ResumePinnedChoicesBeforeAnyEndpointVisit
+[       OK ] LinkNavigationTest.ResumePinnedChoicesBeforeAnyEndpointVisit (2 ms)
+[ RUN      ] LinkNavigationTest.SelectionCheckpointPreservesVisitsAndExactReturn
+[       OK ] LinkNavigationTest.SelectionCheckpointPreservesVisitsAndExactReturn (2 ms)
+[----------] 26 tests from LinkNavigationTest (106 ms total)
+
+[----------] 8 tests from ContentReference
+[ RUN      ] ContentReference.RetainsDisjointRangesGapsAndPinnedFrame
+[       OK ] ContentReference.RetainsDisjointRangesGapsAndPinnedFrame (0 ms)
+[ RUN      ] ContentReference.RejectsMalformedLengthsOverlapOrderAndAddressOverflow
+[       OK ] ContentReference.RejectsMalformedLengthsOverlapOrderAndAddressOverflow (0 ms)
+[ RUN      ] ContentReference.RejectsUnaddressedContentAndMissingState
+[       OK ] ContentReference.RejectsUnaddressedContentAndMissingState (0 ms)
+[ RUN      ] ContentReference.LegacyConcatextIsExplicitAndSeparateFromCellBirth
+[       OK ] ContentReference.LegacyConcatextIsExplicitAndSeparateFromCellBirth (0 ms)
+[ RUN      ] ContentReference.ConvertsRealRepeatedOccurrencesWithoutChangingAddresses
+[       OK ] ContentReference.ConvertsRealRepeatedOccurrencesWithoutChangingAddresses (1 ms)
+[ RUN      ] ContentReference.EqualBytesAtDifferentAddressesStayDistinct
+[       OK ] ContentReference.EqualBytesAtDifferentAddressesStayDistinct (0 ms)
+[ RUN      ] ContentReference.ConversionChecksCellFrameAndPartialMapping
+[       OK ] ContentReference.ConversionChecksCellFrameAndPartialMapping (1 ms)
+[ RUN      ] ContentReference.RejectsPackagePlaceholderAndDifferentSourceRegistry
+[       OK ] ContentReference.RejectsPackagePlaceholderAndDifferentSourceRegistry (1 ms)
+[----------] 8 tests from ContentReference (4 ms total)
+
+[----------] Global test environment tear-down
+[==========] 99 tests from 17 test suites ran. (122474 ms total)
+[  PASSED  ] 99 tests.

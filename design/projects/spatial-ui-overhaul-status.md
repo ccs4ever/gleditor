@@ -7,6 +7,25 @@ session.
 
 ## Current checkpoint
 
+Third checkpoint (2026-10-14): short cross-document Link landings now keep the complete selected
+passage readable and synchronize the selected tab with document focus. Exact-range focus reuses
+`Views::activateDocument()` and cancels its ordinary page-zero frame; after existing companion
+framing, the existing caret-follow helper brings the selected range's endpoints into view with its
+beginning taking priority. No new camera, view host, source operation or visit path is added.
+
+The independent Luna post-fix run now has same-profile source operation snapshots before navigation
+and after Back. Both source hashes are unchanged. Enter → Origin → Enter → Back produces exactly two
+sibling completed visits (2 and 3 under root 1); Origin and Back restore without adding visits. The
+focused passage and selected tab match through the sequence. Native evidence is in
+`design/reviews/spatial-ui-third-increment/evidence/landing/`.
+
+The new UI-authored E2E check waits for Doc 2 selected after Enter, Doc 3 after Origin and default
+after Back; it verifies exact selections and the retained root plus two sibling visits. It passes on
+OpenGL/OpenGL ES/Vulkan, alongside 233/233 native UI and 99/99 Xuzz tests. Independent review
+accepts the bounded short single-line 1440×1000 fixture. Long/multi-line ranges, narrow/enlarged
+text, motion/AT and cell/historical/unavailable/reopen variants remain open. Sequential endpoint
+following does not guarantee that a range larger than the viewport fits in its entirety.
+
 Second checkpoint (2026-10-14): the pinned-baseline comparison classifies all four original broader
 E2E failures as pre-existing. The drawer's missing visible New Xanadoc and Close Drawer controls are
 repaired by reserving whole-pixel measured padding through nested containers and flooring the header
@@ -17,9 +36,10 @@ size/font-scale/family combinations, and the named-control creation E2E check pa
 The scoped Luna follow-up UI-authors a two-document Link and verifies logical Enter/Origin/Back, two
 distinct sibling visits (2 and 3 under parent 1), current visit 3 after the second Enter and current
 visit 1 after Back. Source dumps match an independently UI-authored control fixture, not a
-same-profile before/after snapshot. The left landing clips the passage beginning beyond the
-viewport; full readable landing, cell/historical targets, unavailable/cancel and branch reopen
-remain unaccepted. The report preserves those limits explicitly.
+same-profile before/after snapshot. That second-checkpoint left landing clipped the passage
+beginning beyond the viewport; the third checkpoint resolves the short fixture. Wider
+readable-landing variants, cell/historical targets, unavailable/cancel and branch reopen remain
+unaccepted. The report preserves those limits explicitly.
 
 Actual Store Object Manager → New Xanadoc → New Slice → Close Drawer → reopen sequences pass at
 640×480 and 1440×1000 on OpenGL, OpenGL ES and Vulkan, using visible controls. Independent review
@@ -186,15 +206,17 @@ reviews pass.
 
 ## Exact next task
 
-After this tested checkpoint, establish readable cross-document landing and align tab selection with
-the restored reading focus through the existing coordinator. Establish full J24 source/activity
-invariants for distant cell and historical document endpoints, unavailable/cancel and repeated
-occurrences, then J25 branching Back/Return/reopen. Keep native anchor captures at narrow/enlarged
-text and all backends. Correct the two broad E2E drag tests from actual drawn targets and
-investigate the whole-page ink threshold without weakening it. Resolve legacy J3 pouch insertion,
-J11 stale drag authoring and J15 stale version-selection replay findings against the pinned baseline
-before calling them regressions. Preserve the three Luna native reports and open AT/performance
-gates.
+Extend readable landing to multi-line/long selections, tighter windows and enlarged text, then cell
+and exact historical endpoints through the existing rendering seams. Complete J24 source/activity
+invariants for unavailable/cancel and repeated occurrences, then J25 branching Back/Return/reopen.
+Keep same-profile before/after source snapshots and per-backend native captures. The short fixture
+passes at 1440×1000 on three backends and at 800×600 in the independent Luna run; that does not
+establish all ranges or layouts.
+
+Correct the two broader E2E drag tests from actual drawn targets and investigate the whole-page ink
+threshold without weakening it. Resolve legacy J3 pouch insertion, J11 stale drag authoring and J15
+stale version-selection findings against the pinned baseline. Preserve the Luna reports and open
+AT/optimized-performance gates.
 
 The next spatial service package is the publication/pin-lifecycle audit followed by D2 branch/frame
 enumeration, per the dependency map above. Do not substitute raw primedia search for historical

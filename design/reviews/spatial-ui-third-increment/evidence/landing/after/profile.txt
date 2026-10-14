@@ -1,0 +1,4 @@
+profile=/workspace/spatial-build/run-ayyODW/data
+permascroll=/workspace/spatial-build/run-ayyODW/data/xuzz/permascroll/default
+0=/workspace/spatial-build/run-ayyODW/data/xudu/xanadocs/untitled-20261014-054815
+1=/workspace/spatial-build/run-ayyODW/data/xudu/xanadocs/untitled-20261014-054816

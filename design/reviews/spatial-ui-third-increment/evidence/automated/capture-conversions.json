@@ -1,0 +1,50 @@
+{
+  "lossless": [
+    {
+      "capture": "opengles/entered.ppm",
+      "png": "opengles/entered.png",
+      "raw_sha256": "165c588897f026f9b2a1970d99b0bd72d7167c2401caab4264375ef94a0ceca2"
+    },
+    {
+      "capture": "opengles/back.ppm",
+      "png": "opengles/back.png",
+      "raw_sha256": "5fe283534ecfd0b811206edeb500180fbf2a6f030c76304c3e4c1eed0e5179c7"
+    },
+    {
+      "capture": "opengles/origin.ppm",
+      "png": "opengles/origin.png",
+      "raw_sha256": "4de8dc4d393f809b61d5abb359a58814eef1f63c324a2f7a1cb559e480975241"
+    },
+    {
+      "capture": "vulkan/entered.ppm",
+      "png": "vulkan/entered.png",
+      "raw_sha256": "43bab482785eee715c590304d0452c85b813b8f75d7a1cbc299c7a98b8e5c10e"
+    },
+    {
+      "capture": "vulkan/back.ppm",
+      "png": "vulkan/back.png",
+      "raw_sha256": "1b05f5830d62256e15b4f60cddab7cfdfe4e7f62afed14fb6fd4d2d5823682c9"
+    },
+    {
+      "capture": "vulkan/origin.ppm",
+      "png": "vulkan/origin.png",
+      "raw_sha256": "e2aaecd14e50edfb69a1ad2272e053450d9870082d3b6a7a3d1b5a0ccc2471df"
+    },
+    {
+      "capture": "opengl/entered.ppm",
+      "png": "opengl/entered.png",
+      "raw_sha256": "b05fbea0aeaaba9c87551645a0b1e10c75a83e394b600798632d450057154e77"
+    },
+    {
+      "capture": "opengl/back.ppm",
+      "png": "opengl/back.png",
+      "raw_sha256": "2c736d2d766f4d16f7389d0109ccbb9e60f0375056d7c16f87955473f6f8e299"
+    },
+    {
+      "capture": "opengl/origin.ppm",
+      "png": "opengl/origin.png",
+      "raw_sha256": "65b42d17b593a047d15850d79f6f4789877870949269890670b5d51467af5bf4"
+    }
+  ],
+  "archive": "/workspace/spatial-build/third/raw-automated"
+}
