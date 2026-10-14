@@ -7,6 +7,48 @@ session.
 
 ## Current checkpoint
 
+Fifth checkpoint (2026-10-14), validation complete: the native UI now has a governed
+`Ctrl+Alt+Shift+F` action for editing `ui.fontScale`. It opens the existing native form, validates a
+positive finite value representable by the UI, writes the typed setting through the existing system
+document adapter and repoints the UI system document so the live watcher applies it. The UI system
+document notes distinguish chrome typography from document text size and point to the action. This
+is an existing-form input path and command-dispatch action, not a new domain service, camera or view
+host. In C++, `Views` opens the existing `Form` and handles its callback on the render thread; the
+callback uses the typed system-setting update API and repoints `Session`. The action uses the
+existing sovereign keymap and Vortex command-dispatch path. The form also rejects malformed,
+out-of-range and underflow values without changing the setting; cancel leaves it unchanged. The UI
+suite passes 233/233, the Xuzz suite 99/99 and the SystemDocs suite 24/24. The new form E2E passes
+on OpenGL, OpenGL ES and Vulkan. The independent font-scale Link journey passes at 800×600 on all
+three backends and 1440×1000 on OpenGL. The core renderer comparison has exact OpenGL/OpenGL ES
+equality and 0.2471% Vulkan pixel difference; its broad E2E extension was excluded. The prior
+785/785 core library pass is reused after verifying the binary is unchanged, not counted as a
+fifth-increment rerun. Do not treat the inherited 1117 test count as a fifth increment run. Full
+details and hashes are in `design/reviews/spatial-ui-fifth-increment/validation.md`.
+
+Repository format and UI text policy checks pass. Lint retains exactly the 37 unchanged Markdown
+diagnostics from the fourth checkpoint and reports none in touched files. `origin/main` remains at
+`c7f70cc757034c006a6ce18d2a11e9c962aecce4`; no subsequent main change required integration.
+
+The earlier native `ui.fontScale` probe did not reach a usable scalar-value editor from the tested
+settings-document focus state; it did not establish that all native routes were unavailable. The new
+governed action supplies a direct path. At 800×600 and scale 1.5, the folded Link investigation
+status is clipped and the investigation cannot fully expand. The native occurrence fixture had one
+available occurrence for each authored member; repeated occurrences were not exercised. The 80-line
+multipage previews at 800×600 did not produce evidence of a completed document entry; no cross-page
+continuation or return behavior is validated. See
+`design/reviews/spatial-ui-fifth-increment/evidence/occurrence/validation.md` and
+`design/reviews/spatial-ui-fifth-increment/evidence/multipage/report.md`.
+
+The next task is to investigate UI-authored multiline Link entry through the existing page-readiness
+and pending-anchor lifecycle: both selected range endpoints must be ready before the bounded
+preprojection fit, while an ordinary `Ctrl+Return` page break must not trigger an invented Enter
+visit or visited-source write. Then validate actual enlarged document text using existing layout
+tunables, followed by cell/history, pending/cancel and branch reopen. Audit the publication services
+before advancing the separate D2 history prerequisites. Do not claim full J1–J16 preservation or
+complete J17–J32 coverage. Repeated occurrences, unavailable/pending cancellation, branch reopen,
+cell/history, actual enlarged document text, native AT-SPI, optimized performance, whole-page ink
+and complete 16+16 journey coverage remain open.
+
 Fourth checkpoint (2026-10-14), validation complete: multiline Link landing uses retained page-range
 bounds and the existing camera placement seam. The fit accounts for live and settled chrome on all
 edges and the visible overview with a shared safe margin. After existing LinkBeams and timeline

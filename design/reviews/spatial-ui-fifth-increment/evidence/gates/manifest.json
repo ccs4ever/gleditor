@@ -1,0 +1,62 @@
+{
+  "base_commit": "975d8b1b0fb2b08659aa3db04ed81071d0526a43",
+  "product_and_test_diff_sha256": "51bb7a1bdb7a68bc43d86ddaef3fb8edcc9bc378a3b613a7c005f36f206e03d1",
+  "logs": [
+    {
+      "file": "fifth-build.log.gz",
+      "command": "/workspace/spatial-build/run.sh make -j3 DEBUG_OPTS='-O0 -g0' CXX='ccache clang++ -isystem /usr/include/poppler -isystem /usr/include/poppler/cpp'",
+      "exit_code": 0,
+      "uncompressed_bytes": 431461,
+      "uncompressed_sha256": "ec4bea0bba92f20099effc4bb0c8d2ec6a13723d9352721021160910ccd9778c",
+      "compressed_sha256": "9ebdfc7b0964cdc72b6506f874a21a88f5cfd1ba8955800cfc7c641f05cecf3d"
+    },
+    {
+      "file": "fifth-build-formatted.log.gz",
+      "command": "/workspace/spatial-build/run.sh make -j3 DEBUG_OPTS='-O0 -g0' CXX='ccache clang++ -isystem /usr/include/poppler -isystem /usr/include/poppler/cpp'",
+      "exit_code": 0,
+      "uncompressed_bytes": 422946,
+      "uncompressed_sha256": "3444f14e11c7f702bcf6db50afc97dfdf8b8c77c5bcc8b190edb48d2a04adab1",
+      "compressed_sha256": "085405c791e51abd6202159f940831e19920856cc8706169f08f7498941f7a51"
+    },
+    {
+      "file": "fifth-build-test-repair.log.gz",
+      "command": "/workspace/spatial-build/run.sh make -j3 DEBUG_OPTS='-O0 -g0' CXX='ccache clang++ -isystem /usr/include/poppler -isystem /usr/include/poppler/cpp'",
+      "exit_code": 0,
+      "uncompressed_bytes": 31753,
+      "uncompressed_sha256": "3eef89953cb60d726fcbf696cb2915953ec07263b4e4d165f1bc1dec6c650cba",
+      "compressed_sha256": "7be2c3f6b9b2534fe1480e4be8a20afe1afc055a0a5f292c0d14e7f874b55363"
+    },
+    {
+      "file": "fifth-format-check.log.gz",
+      "command": "/workspace/spatial-build/run.sh make format-check",
+      "exit_code": 0,
+      "uncompressed_bytes": 37389,
+      "uncompressed_sha256": "d2a6268f36ce6d60cf3ebf8f8fd57a2aa2386ae96d0519ed6e59664fa3f6c2a9",
+      "compressed_sha256": "a49e35238175701c8541447cac9e37160a7bdbdd877f58e10893bbaed4bf27c2"
+    },
+    {
+      "file": "fifth-lint.log.gz",
+      "command": "/workspace/spatial-build/run.sh make lint",
+      "exit_code": 2,
+      "uncompressed_bytes": 16437,
+      "uncompressed_sha256": "e27ee2285021fd24fca8a3c5a1e7df06779d3b6a75009b6e65d3e7f8161f2696",
+      "compressed_sha256": "ff78d1efbb43971137765d5fe5091b994a1a51a07bd9c2fb0357199de61d3029"
+    },
+    {
+      "file": "fifth-ui-text-policy.log.gz",
+      "command": "python3 tools/check-ui-text-policy.py",
+      "exit_code": 0,
+      "uncompressed_bytes": 0,
+      "uncompressed_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_sha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec"
+    },
+    {
+      "file": "fifth-format-check-final.log.gz",
+      "command": "/workspace/spatial-build/run.sh make format-check",
+      "exit_code": 0,
+      "uncompressed_bytes": 37389,
+      "uncompressed_sha256": "d2a6268f36ce6d60cf3ebf8f8fd57a2aa2386ae96d0519ed6e59664fa3f6c2a9",
+      "compressed_sha256": "a49e35238175701c8541447cac9e37160a7bdbdd877f58e10893bbaed4bf27c2"
+    }
+  ]
+}

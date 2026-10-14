@@ -1,0 +1,13 @@
+binary_sha256=52dadabe6cfee1e5994a5e2e297ea35b6e9e6eef150f7f68012e9ff3a949cdf7
+left_endset_members=2
+right_endset_members=1
+source=Alpha\ left.\ Beta\ left.
+source_bytes=22
+target=Gamma\ right.
+target_bytes=12
+backend=opengl
+size=1024,768
+profile_data=/workspace/spatial-build/run-GiShtM/data
+profile_config=/workspace/spatial-build/run-GiShtM/config
+profile_cache=/workspace/spatial-build/run-GiShtM/cache
+argv=./build/xuzz --backend opengl --resize 1024\,768 --chord Ctrl+N --type Alpha\ left.\ Beta\ left. --select 0\,11 --chord Ctrl+Alt+\[ --select 12\,22 --chord Ctrl+Alt+\[ --chord Ctrl+N --type Gamma\ right. --select 0\,12 --chord Ctrl+Alt+\] --chord Ctrl+Alt+L --chord Alt+Shift+N --wait-ms 6000 --dump-a11y --capture /workspace/spatial-build/fifth-occurrence-native/selected-raw/00-link-selected.ppm --wait-ms 30000 --chord Alt+Shift+I --wait-ms 1500 --dump-a11y --capture /workspace/spatial-build/fifth-occurrence-native/selected-raw/01-controls.ppm --chord Ctrl+Alt+I --wait-ms 1500 --dump-a11y --capture /workspace/spatial-build/fifth-occurrence-native/selected-raw/02-inspect.ppm --chord Alt+Shift+J --wait-ms 1500 --dump-a11y --capture /workspace/spatial-build/fifth-occurrence-native/selected-raw/03-member-next.ppm --chord Alt+Shift+X --wait-ms 1500 --dump-a11y --capture /workspace/spatial-build/fifth-occurrence-native/selected-raw/04-cross.ppm --chord Alt+Shift+L --wait-ms 1500 --dump-a11y --capture /workspace/spatial-build/fifth-occurrence-native/selected-raw/05-occurrence-next.ppm --chord Alt+Shift+Escape --wait-ms 1500 --dump-a11y --capture /workspace/spatial-build/fifth-occurrence-native/selected-raw/06-cancel-at-origin.ppm --wait-ms 30000 --chord Alt+Shift+Return --wait-ms 3000 --dump-a11y --capture /workspace/spatial-build/fifth-occurrence-native/selected-raw/07-enter.ppm --chord Alt+Shift+B --wait-ms 3000 --dump-a11y --capture /workspace/spatial-build/fifth-occurrence-native/selected-raw/08-activity-back.ppm --chord Ctrl+W --wait-ms 1500 --dump-a11y --capture /workspace/spatial-build/fifth-occurrence-native/selected-raw/09-close.ppm --key Escape --wait-ms 1200 --dump-a11y --capture /workspace/spatial-build/fifth-occurrence-native/selected-raw/10-after-escape.ppm --chord Ctrl+Q

@@ -1,0 +1,15 @@
+captured_utc=2026-10-14T18:48:58Z
+git_head=975d8b1b0fb2b08659aa3db04ed81071d0526a43
+git_branch=feat/spatial-ui-overhaul
+xuzz_sha256=13e0efc05161179adac8ebc5f1f71c7f5d9279bf865cf6a8e957219cb0bc0a08  /workspace/gleditor/build/xuzz
+backend=opengl
+dimensions=1440,1000
+ui_font_scale=1.5
+source_bytes=654
+source_lines=8
+target_bytes=23
+profile_data=/workspace/spatial-build/run-D19TYG/data
+profile_config=/workspace/spatial-build/run-D19TYG/config
+profile_cache=/workspace/spatial-build/run-D19TYG/cache
+permascroll=/workspace/spatial-build/run-D19TYG/data/xuzz/permascroll/default
+argv=./build/xuzz --backend opengl --resize 1440\,1000 --strict-diagnostics --profile /workspace/spatial-build/run-D19TYG/data/profile --capture /workspace/spatial-build/fifthscratch/raw/font-native/1440-1000-opengl/00-default.ppm --dump-a11y --chord Ctrl+Alt+Shift+F --wait-ms 1200 --dump-a11y --capture /workspace/spatial-build/fifthscratch/raw/font-native/1440-1000-opengl/01-font-form.ppm --key backspace --type 1.5 --key enter --wait-ms 1500 --dump-a11y --capture /workspace/spatial-build/fifthscratch/raw/font-native/1440-1000-opengl/02-font-scale-live.ppm --chord Ctrl+N --type $'The selected passage remains readable while this Link carries its exact source text.\nThe selected passage remains readable while this Link carries its exact source text.\nThe selected passage remains readable while this Link carries its exact source text.\nThe selected passage remains readable while this Link carries its exact source text.\nThe selected passage remains readable while this Link carries its exact source text.\nThe selected passage remains readable while this Link carries its exact source text.\nThe selected passage remains readable while this Link carries its exact source text.\nThe selected passage remains readable while this now indeed' --select 0\,654 --chord Ctrl+Alt+\[ --chord Ctrl+N --type Distant\ target\ passage. --select 0\,23 --chord Ctrl+Alt+\] --chord Ctrl+Alt+L --chord Alt+Shift+N --wait-ms 5000 --dump-a11y --capture /workspace/spatial-build/fifthscratch/raw/font-native/1440-1000-opengl/03-link-selected.ppm --wait-ms 12000 --click-label Enter --await-a11y 60000\,Doc\ 2=selected --wait-ms 1500 --dump-a11y --capture /workspace/spatial-build/fifthscratch/raw/font-native/1440-1000-opengl/04-enter-source.ppm --click-label Controls --wait-ms 1200 --dump-a11y --capture /workspace/spatial-build/fifthscratch/raw/font-native/1440-1000-opengl/04a-controls-at-source.ppm --click-label Origin --wait-ms 1500 --dump-a11y --capture /workspace/spatial-build/fifthscratch/raw/font-native/1440-1000-opengl/05-origin.ppm --click-label Back --wait-ms 1500 --dump-a11y --capture /workspace/spatial-build/fifthscratch/raw/font-native/1440-1000-opengl/06-back-root.ppm --chord Ctrl+Alt+I --wait-ms 1500 --dump-a11y --capture /workspace/spatial-build/fifthscratch/raw/font-native/1440-1000-opengl/07-inspect-folded-link.ppm --wait-ms 1500 --chord Ctrl+Q

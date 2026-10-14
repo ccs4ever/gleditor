@@ -152,6 +152,7 @@ public:
 
   void publishCurrent(const std::string &salt);
   void publicationStatus();
+  void editUiFontScale();
   void publishAnswers(const MicroversionId &version, std::uint32_t which,
                       std::size_t storeIdx,
                       const std::vector<gleditor::Form::Field> &answers);

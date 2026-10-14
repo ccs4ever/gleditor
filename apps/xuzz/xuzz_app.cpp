@@ -2291,6 +2291,9 @@ int XuzzApp::run(const int argc, char **argv) {
         views.publicationUpdates();
       });
   app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapUiFontScale), "UI font scale",
+      [&views] { views.editUiFontScale(); });
+  app.commands().registerAction(
       std::string(xanadu::settings::kKeymapTelescopeToggle),
       "toggle decentralized swarm telescope overlay", toggleTelescopeAction);
   app.commands().registerAction(

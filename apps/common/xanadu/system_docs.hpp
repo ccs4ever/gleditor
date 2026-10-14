@@ -413,9 +413,10 @@ inline constexpr std::string_view kKeymapLinksResponses =
     "std:xudu/links_responses";
 inline constexpr std::string_view kKeymapPublicationUpdates =
     "std:xudu/publication_updates";
-inline constexpr std::string_view kKeymapHistory   = "std:xudu/history";
-inline constexpr std::string_view kKeymapDelete    = "std:xudu/delete";
-inline constexpr std::string_view kKeymapPageBreak = "std:xudu/page_break";
+inline constexpr std::string_view kKeymapUiFontScale = "std:xudu/ui_font_scale";
+inline constexpr std::string_view kKeymapHistory     = "std:xudu/history";
+inline constexpr std::string_view kKeymapDelete      = "std:xudu/delete";
+inline constexpr std::string_view kKeymapPageBreak   = "std:xudu/page_break";
 inline constexpr std::string_view kKeymapHypertimeMap =
     "std:xudu/hypertime_map";
 inline constexpr std::string_view kKeymapRadialMenu = "std:xudu/radial_menu";

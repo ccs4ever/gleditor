@@ -1,0 +1,6 @@
+binary_sha256=52dadabe6cfee1e5994a5e2e297ea35b6e9e6eef150f7f68012e9ff3a949cdf7
+selected_source_bytes=7439
+selected_source_lines=80
+target_bytes=60
+size=800,600
+backend=opengl

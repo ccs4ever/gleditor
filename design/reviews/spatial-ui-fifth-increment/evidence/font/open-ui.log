@@ -1,0 +1,1086 @@
+[2026-10-14 15:35:24.194] [xuzz.keymap] [warning] std:xudu/publish and std:zigzag/save_store are on the same key; only std:xudu/publish can run
+xuzz 0.0.1.911.gc1ab2314: 0 operations in /workspace/spatial-build/run-CJfw8p/data/xudu/xanadocs/default, opening 0
+xuzz commands:
+  std:xudu/quit -- save and close
+  std:xudu/save -- save or preserve active document
+  std:xudu/close -- close the active document
+  std:xudu/next_doc -- switch to next document
+  std:xudu/prev_doc -- switch to previous document
+  doc-1 -- switch to document 1
+  doc-2 -- switch to document 2
+  doc-3 -- switch to document 3
+  doc-4 -- switch to document 4
+  doc-5 -- switch to document 5
+  doc-6 -- switch to document 6
+  doc-7 -- switch to document 7
+  doc-8 -- switch to document 8
+  doc-9 -- switch to document 9
+  std:xudu/hypertime_map -- show or hide the hypertime map
+  std:xudu/radial_menu -- open radial menu for formatting and alignment
+  std:xudu/back -- go to the previous state, losing nothing
+  std:xudu/new_doc -- create a new sovereign document quad
+  std:xudu/forward -- go to the next state in hypertime
+  std:xudu/open_doc -- open a document or system xanadoc
+  std:xudu/onion_skin -- toggle 3D multi-document onion skinning mode
+  std:xudu/pouch_toggle -- toggle screen-edge pouch drawer and clasp bench
+  std:xudu/pouch_toggle_f2 -- toggle screen-edge pouch drawer and clasp bench
+  std:xudu/publication_discovery -- discover signed publications by topic or author key
+  std:xudu/link_package_publish -- publish independent links
+  std:xudu/links_responses -- discover links and responses
+  std:xudu/publication_updates -- review verified publication updates
+  std:xudu/telescope_toggle -- toggle decentralized swarm telescope overlay
+  std:xudu/telescope_toggle_f3 -- toggle decentralized swarm telescope overlay
+  std:xudu/quotation_toggle -- toggle quoted structure builder overlay
+  std:xudu/quotation_toggle_f9 -- toggle quoted structure builder overlay (F9)
+  std:xudu/tension_physics_toggle -- toggle 3-way tension spring layout simulation
+  std:xudu/unlock_transcopyright_f5 -- unlock transcopyright span at caret or selection
+  std:xudu/unlock_transcopyright_ctrl_u -- unlock transcopyright span at caret or selection
+  std:xudu/scrub_forward -- scrub forward in hypertime history
+  std:xudu/scrub_backward -- scrub backward in hypertime history
+  std:xudu/transclude -- transclude the selection into a second document
+  std:xudu/xanalink -- mark one end of a xanalink, then join it to another selection -- in this document or any other open one
+  std:edit/cancel_quotation -- cancel a quotation pickup or pending drop
+  std:xudu/cancel_link -- forget a xanalink that was begun and not finished
+  std:xudu/beams -- show or hide the links and transclusions between documents
+  std:xudu/sworph -- let a link coming into view bring its far document over
+  std:xudu/publish -- publish the document the caret is in, so it can be read off this machine
+  std:xudu/publication_status -- review publication status and retry
+  publication-status -- review publication status and retry
+  std:xudu/history -- print every state to the terminal
+  std:xudu/delete -- stop pointing at the selection
+  std:edit/delete_forward -- delete the selection or the character after the caret
+  std:edit/newline -- start a new line at the caret
+  std:edit/caret_left -- move the caret a character left
+  std:edit/select_left -- extend the selection a character left
+  std:edit/caret_right -- move the caret a character right
+  std:edit/select_right -- extend the selection a character right
+  std:edit/caret_up -- move the caret up a line
+  std:edit/select_up -- extend the selection up a line
+  std:edit/caret_down -- move the caret down a line
+  std:edit/select_down -- extend the selection down a line
+  std:edit/caret_word_left -- move the caret to the previous word
+  std:edit/select_word_left -- extend the selection to the previous word
+  std:edit/caret_word_right -- move the caret to the next word
+  std:edit/select_word_right -- extend the selection to the next word
+  std:edit/caret_line_start -- move the caret to the start of the line
+  std:edit/select_line_start -- extend the selection to the start of the line
+  std:edit/caret_line_end -- move the caret to the end of the line
+  std:edit/select_line_end -- extend the selection to the end of the line
+  std:edit/caret_doc_start -- move the caret to the start of the document
+  std:edit/caret_doc_end -- move the caret to the end of the document
+  std:xudu/page_break -- insert a page break at the caret position
+  format-bold -- toggle bold on selected text
+  format-italic -- toggle italic on selected text
+  format-underline -- toggle underline on selected text
+  format-strikethrough -- toggle strikethrough on selected text
+  format-superscript -- toggle superscript on selected text
+  format-subscript -- toggle subscript on selected text
+  save -- save or preserve active document
+  save-document -- save or preserve active document
+  close -- close active document
+  close-doc -- close active document
+  next-doc -- switch to next document
+  prev-doc -- switch to previous document
+  map -- show or hide the hypertime map
+  radial-menu -- open radial menu for formatting and alignment
+  pouch-toggle -- toggle pouch drawer
+  telescope-toggle -- toggle swarm telescope
+  quotation-toggle -- toggle quoted structure builder overlay
+  store-manager-toggle -- toggle store object manager drawer
+  physics-toggle -- toggle 3-way tension spring layout physics
+  unlock-transcopyright -- unlock transcopyright span under caret
+  scrub-forward -- step forward in microversion history
+  scrub-backward -- step backward in microversion history
+  scrub-back -- step backward in microversion history
+  transclude -- transclude selection into new version
+  xanalink -- connect selection with an xanalink
+  cancel-link -- drop link begun earlier
+  cancel link -- drop link begun earlier
+  beams -- show or hide the ribbons connecting documents
+  sworph -- bring far end of link into view on approach
+  publish -- sign and seal opening document
+  history -- list all microversions and operations to stdout
+  delete -- delete selected range in active document
+  page-break -- insert a page break at the caret
+  insert-break -- insert a page break at the caret position
+  onion-skin -- toggle 3D onion skin visualization
+  back -- navigate to parent microversion
+  forward -- navigate to child microversion
+  new-doc -- create new sovereign document
+  open-doc -- open document or system xanadoc palette
+  export-osmic -- export OSMIC text spool representation
+  std:xudu/pouch_drop_left -- drop selection onto clasp homestead bench (left)
+  std:xudu/pouch_drop_right -- drop selection onto clasp toward bench (right)
+  std:xudu/pouch_drop -- drop selection into active pouch zone
+  std:xudu/pouch_drop_notes -- drop selection into notes pouch zone
+  std:xudu/pouch_drop_scratch -- drop selection into scratch pouch zone
+  std:xudu/pouch_drop_to_link_left -- drop selection into to-link-left pouch zone
+  std:xudu/pouch_drop_to_link_right -- drop selection into to-link-right pouch zone
+  pouch-drop-left -- drop selection onto clasp homestead bench (left)
+  pouch-drop-right -- drop selection onto clasp toward bench (right)
+  pouch-drop -- drop selection into active pouch zone
+  pouch-drop-notes -- drop selection into notes pouch zone
+  pouch-drop-scratch -- drop selection into scratch pouch zone
+  pouch-drop-to-link-left -- drop selection into to-link-left pouch zone
+  pouch-drop-to-link-right -- drop selection into to-link-right pouch zone
+  std:xudu/forge_clasp -- forge bilateral clasp link from items on bench
+  forge-clasp -- forge bilateral clasp link from items on bench
+  clear-bench -- clear items from clasp forge bench
+  std:xuzz/link_next -- select the next link on screen
+  std:xuzz/link_previous -- select the previous link on screen
+  std:xuzz/link_member_next -- choose the next member on the active side
+  std:xuzz/link_member_previous -- choose the previous member on the active side
+  std:xuzz/link_occurrence_next -- choose the next place the member appears
+  std:xuzz/link_occurrence_previous -- choose the previous place the member appears
+  std:xuzz/link_cross -- make the other side of the link active
+  std:xuzz/link_enter -- go to the chosen place
+  std:xuzz/link_cancel_entry -- cancel pending endpoint entry
+  std:xuzz/link_origin -- return to where the link was selected
+  std:xuzz/link_dismiss -- put the selected link away
+  std:xuzz/activity_back -- return to the previous visit
+  std:xuzz/link_controls_previous -- previous link controls page
+  std:xuzz/link_controls_next -- next link controls page
+  std:xuzz/link_controls -- show link controls or return to reading
+  std:xuzz/investigation -- expand or fold exact Link investigation
+  std:xudu/overview_toggle -- show or hide the overview of every open page
+  std:ui/view_mode_content_1 -- switch to Cell Content View (full content & XYZ alignment)
+  std:ui/zigzag_view_mode_content -- switch to Cell Content View (full content & XYZ alignment)
+  std:ui/view_mode_content_v -- switch to Cell Content View (full content & XYZ alignment)
+  std:ui/view_mode_topology -- switch to Topology View (fixed-size cells & lattice geometry)
+  std:ui/zigzag_view_mode_topology -- switch to Topology View (fixed-size cells & lattice geometry)
+  std:ui/view_mode_topology_t -- switch to Topology View (fixed-size cells & lattice geometry)
+  std:ui/bundle_execution -- switch to Execution dimension bundle (d.spin, d.step, d.branch)
+  std:ui/zigzag_bundle_execution -- switch to Execution dimension bundle (d.spin, d.step, d.branch)
+  std:ui/bundle_scope -- switch to Scope dimension bundle (d.lexical, d.dynamic, d.env)
+  std:ui/zigzag_bundle_scope -- switch to Scope dimension bundle (d.lexical, d.dynamic, d.env)
+  std:ui/bundle_contract -- switch to Contract dimension bundle (d.require, d.ensure, d.invariant)
+  std:ui/zigzag_bundle_contract -- switch to Contract dimension bundle (d.require, d.ensure, d.invariant)
+  std:ui/bundle_logic -- switch to Logic dimension bundle (d.clause, d.predicate, d.var)
+  std:ui/zigzag_bundle_logic -- switch to Logic dimension bundle (d.clause, d.predicate, d.var)
+  std:ui/bundle_stdlib -- switch to Stdlib dimension bundle (d.stdlib, d.symbol, d.version)
+  std:ui/zigzag_bundle_stdlib -- switch to Stdlib dimension bundle (d.stdlib, d.symbol, d.version)
+  std:ui/bundle_cycle -- cycle active dimension bundle forward
+  std:ui/zigzag_bundle_cycle -- cycle active dimension bundle forward
+  std:ui/toggle_palette -- toggle Vortex opcode and library palette HUD
+  std:ui/zigzag_toggle_palette -- toggle Vortex opcode and library palette HUD
+  std:ui/vql_translate_attach -- translate VQL filter text and attach to active chain
+  std:ui/zigzag_vql_translate_attach -- translate VQL filter text and attach to active chain
+  std:ui/toggle_command_bar -- toggle interactive VQL Command Omnibar
+  std:ui/zigzag_toggle_command_bar -- toggle interactive VQL Command Omnibar
+  std:ui/open_command_bar_slash -- open VQL Command Omnibar with '/' navigation prefix
+  std:ui/zigzag_open_command_bar_slash -- open VQL Command Omnibar with '/' navigation prefix
+  std:ui/open_command_bar_colon -- open VQL Command Omnibar with ':' command prefix
+  std:ui/zigzag_open_command_bar_colon -- open VQL Command Omnibar with ':' command prefix
+  std:ui/confirm_action -- run the Omnibar, clone the palette's symbol, or follow the focused cell
+  std:ui/dismiss_overlay -- dismiss the Omnibar or palette, or leave ZigZag
+  std:nav/step_x_pos -- step focus positive along X dimension
+  std:nav/zigzag_step_x_pos -- step focus positive along X dimension
+  std:nav/step_x_neg -- step focus negative along X dimension
+  std:nav/zigzag_step_x_neg -- step focus negative along X dimension
+  std:nav/step_y_pos -- step focus positive along Y dimension
+  std:nav/zigzag_step_y_pos -- step focus positive along Y dimension
+  std:nav/step_y_neg -- step focus negative along Y dimension
+  std:nav/zigzag_step_y_neg -- step focus negative along Y dimension
+  std:nav/step_z_pos -- step focus positive along Z dimension
+  std:nav/zigzag_step_z_pos -- step focus positive along Z dimension
+  std:nav/step_z_neg -- step focus negative along Z dimension
+  std:nav/zigzag_step_z_neg -- step focus negative along Z dimension
+  std:ui/swap_axes -- swap X and Y dimension bindings
+  std:ui/zigzag_swap_xy -- swap X and Y dimension bindings
+  std:ui/cycle_dims_forward -- cycle active dimension bindings forward
+  std:ui/zigzag_cycle_dims_forward -- cycle active dimension bindings forward
+  std:ui/cycle_dims_backward -- cycle active dimension bindings backward
+  std:ui/zigzag_cycle_dims_backward -- cycle active dimension bindings backward
+  std:nav/jump_home -- jump focus to home cell
+  std:nav/zigzag_jump_home -- jump focus to home cell
+  std:nav/hop_head -- hop to head of current rank along X dimension
+  std:nav/zigzag_hop_head -- hop to head of current rank along X dimension
+  std:nav/hop_tail -- hop to tail of current rank along X dimension
+  std:nav/zigzag_hop_tail -- hop to tail of current rank along X dimension
+  std:zigzag/duplicate -- duplicate focused cell along d.clone
+  std:zigzag/zigzag_duplicate_cell -- duplicate focused cell along d.clone
+  std:zigzag/insert_cell_x_pos -- insert connected cell positive along active X dimension
+  std:zigzag/insert_cell_x_neg -- insert connected cell negative along active X dimension
+  std:zigzag/insert_cell_y_pos -- insert connected cell positive along active Y dimension
+  std:zigzag/insert_cell_y_neg -- insert connected cell negative along active Y dimension
+  std:zigzag/unlink_x_pos -- unlink focused cell along positive X dimension
+  std:zigzag/unlink_x_neg -- unlink focused cell along negative X dimension
+  std:zigzag/edit_cell -- edit the focused cell's text
+  std:zigzag/mark_cell -- mark the focused cell as the far end of the next link
+  std:zigzag/link_marked_x_pos -- link the marked cell after the focused one along X
+  std:zigzag/link_marked_x_neg -- link the marked cell before the focused one along X
+  std:zigzag/delete_focus_cell -- delete currently focused cell
+  std:zigzag/delete_focus_cell_bksp -- delete currently focused cell
+  std:xuzz/new_slice -- start a new ZigZag slice, in a new xanadoc of its own
+  std:xuzz/new_slice_in_store -- add a ZigZag slice to the current document's store
+  std:xuzz/focus_toggle -- move the keyboard between the document and ZigZag
+  std:xuzz/view_xanadocs -- show only xanadocs
+  std:xuzz/view_slices -- show only slices
+  std:xuzz/view_both -- show xanadocs and slices together
+  std:xuzz/link_add_cell -- add the focused cell to the pending document link
+  std:xuzz/link_finish -- finish the pending document-to-cell link
+  std:xuzz/transclude_cell_to_doc -- transclude the focused cell content at the document caret
+  std:xuzz/transclude_cell_to_cell -- transclude the same content into a new connected cell
+  std:xuzz/insert_extern_ref -- choose a cell in another loaded slice and reference its birth
+  std:xuzz/activity_forward -- choose one of the current visit's forward branches
+  std:xuzz/walks -- preview, restore, reference and annotate saved walks
+  std:xuzz/cycle_view_mode -- cycle view mode (Unified <-> Xanadoc <-> ZigZag)
+  std:xuzz/view_unified -- switch to Unified view (Xanadoc + ZigZag bridge)
+  std:xuzz/view_xanadoc -- switch to Xanadoc Only view (ZigZag suspended)
+  std:xuzz/view_zigzag -- switch to ZigZag Only view (Hypergrid centered)
+  std:zigzag/rasterize_print -- Custom keymap action: std:zigzag/rasterize_print
+  std:zigzag/export_link_package -- Custom keymap action: std:zigzag/export_link_package
+  std:zigzag/save_store -- Custom keymap action: std:zigzag/save_store
+  std:zigzag/zigzag_save_store -- Custom keymap action: std:zigzag/zigzag_save_store
+accessibility: not in this build
+render: opengl device, version 4.5 (Core Profile) Mesa 25.0.7-2+deb13u1
+glyph cache: atlas 512x512 x1 layers, growing to at most 16384x16384 x64 (device allows 16384x16384 x2048, the vertex encoding 64 layers)
+[TIMING] First page rendered: 1308.91 ms (docs in render: 1)
+xudu: opened system document system://ui (store 5)
+wrote screenshot /workspace/gleditor/design/reviews/spatial-ui-fifth-increment/evidence/font/open-ui.ppm (800x600)
+window "Xuzz"
+  multiline text input "default"
+    text run
+  multiline text input "system://ui" [caret 0]
+    text run = "Schema and Purpose
+"
+    text run = "
+"
+    text run = "Purpose:
+"
+    text run = "The sovereign UI system xanadoc configures visibility of chrome bars, status indicators, hypertime navigation overlays, and interactive radial action wheels.
+"
+    text run = "
+"
+    text run = "Schema:
+"
+    text run = "notificationPosition: Screen location for system notifications. Default is top-right.
+"
+    text run = "notificationDurationMs: Duration in milliseconds before notifications dismiss. Default is 3000.
+"
+    text run = "tabBarVisible: Flag indicating whether top document tab bar is visible. Default is true.
+"
+    text run = "statusBarVisible: Flag indicating whether bottom status bar is visible. Default is true.
+"
+    text run = "hypertimeMapVisible: Flag indicating whether hypertime graph overlay is open. Default is false.
+"
+    text run = "ui.scale and ui.fontScale: Positive finite geometry and typography multipliers; both default to 1. ui.safeMarginShare: Safe-area margin fraction, 0 to 0.5, default 0.05. ui.minFontPx and "
+    text run = "ui.minTouchPx: Positive finite minimum font and touch sizes in pixels, defaults 9 and 44.
+"
+    text run = "ui.font.caption, ui.font.label, ui.font.body, ui.font.title and ui.font.mono: Each role has family and points settings. Defaults are Sans 10, Sans 12, Sans 12, Sans Bold 18 and Monospace 12. Family "
+    text run = "must be nonempty; point size must be positive and finite. Document fonts remain in system://settings.
+"
+    text run = "Input and text presentation: FocusManager owns scope registration, activation order and modal isolation. Each modal blocks background input and permits only configured global commands. Labels use "
+    text run = "typed typography roles and TextFit boxes; full accessible names remain available when visual labels are ellipsized or hidden.
+"
+    text run = "radialMenu: Nested configuration dictionary defining action items, icons, and radial radius.
+"
+    text run = "overview.visible, overview.widthPx, overview.heightPx, overview.leftPx, overview.bottomPx: Whether the overview panel is shown -- every open page condensed into the lower left, with the camera's view "
+    text run = "outlined -- its size, and its distance from the window's left and bottom edges, in logical pixels. Defaults are true, 220, 160, 16 and 56.
+"
+    text run = "overview.backgroundColour, overview.pageColour, overview.viewportColour, overview.markColour: Its colours as RGBA integers; marks show the selected link's chosen places and the focused ZigZag card.
+"
+    text run = "tether: A temporary quotation tendril. rootWidthPx and tipWidthPx default to 4.5 and 1 logical pixels. sagPx and sagShare bound the curve (40 and 0.18). pointerRadiusPx and pointerGapPx keep the "
+    text run = "target clear (6 and 2). texturePeriodPx and textureStrength control stationary fibres (24 and 0.25). colour is packed RGBA (0xDDB441DC). reducedMotion follows input directly and cancels without a "
+    text run = "spring transition (false).
+"
+    text run = "satelloidCard, tetherCard and hullCard: Preferred widthPx and heightPx in logical pixels, defaults 200 by 180, 190 by 88 and 260 by 46. Positive finite lengths grow for typography within "
+    text run = "maxWidthShare and maxHeightShare (0.1 to 1, default 0.9). maxLines bounds preview lines (1 to 10, default 3). World labels hide below the typography minimum projected font size; full names and card "
+    text run = "selection remain available.
+"
+    text run = "quotationModal, telescopeModal and hypertimeModal: Preferred widthPx and heightPx in logical pixels, defaults 840 by 560, 860 by 560 and 640 by 460. Positive finite values are required. Their "
+    text run = "maxWidthShare and maxHeightShare bound the modal to safe-area shares, range 0.1 to 1, default 0.95.
+"
+    text run = "pouchPanel.widthPx and storePanel.widthPx: Preferred panel widths in logical pixels, defaults 320 and 340. Positive finite values are required. The panels grow for readable controls within their "
+    text run = "safe-area limits.
+"
+    text run = "pouchPanel.maxWidthShare, pouchPanel.maxHeightShare, storePanel.maxWidthShare and storePanel.maxHeightShare: Maximum shares of safe width and height, range 0.1 to 1. Width defaults are 0.9 and height "
+    text run = "defaults are 1.
+"
+    text run = "linkPanel.font: Caption, label, body, title or mono role name (lowercase); default is label. Empty also follows label. Legacy explicit font descriptions remain accepted and follow display and font "
+    text run = "scales.
+"
+    text run = "linkPanel.maxLines: Maximum wrapped description lines; default 3, range 1 to 20. linkPanel.maxWidthShare and linkPanel.maxHeightShare: Maximum shares of the safe area; width default 0.9, height "
+    text run = "default 1, range 0.1 to 1.
+"
+    text run = "linkPanel.marginPx, linkPanel.topPx, linkPanel.paddingPx, linkPanel.lineGapPx: The panel's distance from the window's right and top edges, its inner space and its line spacing, in logical pixels. "
+    text run = "Defaults are 16, 44, 10 and 4.
+"
+    text run = "linkPanel.backgroundColour, linkPanel.textColour, linkPanel.mutedColour, linkPanel.buttonColour: Panel colours as RGBA integers, the muted one for unset choices, members not in view and buttons that "
+    text run = "would be refused.
+"
+    text run = "linkPanel.chosenEdgeWidthPx, linkPanel.memberEdgeWidthPx: Same-hue edge widths for the active chosen occurrence and secondary occurrences, in device pixels. Defaults are 2.5 and 1.
+"
+    text run = "Notes
+"
+    text run = "
+"
+    text run = "User Annotations and Customization Record:
+"
+    text run = "Edit ui.scale or ui.fontScale to resize chrome independently of documents. Set ui.font.<role>.family and ui.font.<role>.points to customize caption, label, body, title or mono. Each setting's native "
+    text run = "d.schemas and d.notes ranks describe its value and defaults. Choose a role in linkPanel.font to keep that panel following live typography; existing explicit font descriptions still work.
+"
+    text run = "
+"
+    text run = "Labels grow with UI and font scales. Increase pouchPanel.widthPx or drag the pouch drawer edge to give labels more room. World cards retain full accessible names when their projected labels hide. Tab "
+    text run = "follows layout order inside the active scope; Escape closes it. Modal global commands remain subject to the keymap allow list.
+"
+    text run = "
+"
+    text run = "This page is reserved for author notes, workflow preferences, and custom radial action mappings.
+"
+    text run
+  group "Xanadu ZigZag: Xudu/Zigzag unified store"
+    group "Active View Dimensions: X=d.links, Y=d.notes, Z=d.3"
+    list item "Cell #6: Dimensions in use:
+- d.dims: dimension registry (posward from home)
+- d.vars: master setting names (posward from home) and group member clones
+- d.values: active setting values (posward from setting name)
+- d.groups: top-level group rank (posward from home; 1st cell is blank empty group) and sibling groups
+- d.subgroups: hierarchical subgroup rank (posward from parent group)
+- d.clone: master setting to group clone, and prototype type cell to schema type clone
+- d.notes: store description (posward from home) and setting description (posward from setting)
+- d.schemas: schema shape blank cell (posward from setting), and expected type clones
+- d.alternates: alternative schema shape choices (posward between blank cells)
+- d.default: default value cell (posward from each schema type clone) [home] [value kind: none] (Focused)"
+    list item "Cell #7: d.dims [dimension] [value kind: none]"
+    list item "Cell #9: d.links [dimension] [value kind: none]"
+    list item "Cell #11: d.from [dimension] [value kind: none]"
+    list item "Cell #13: d.to [dimension] [value kind: none]"
+    list item "Cell #15: d.linktype [dimension] [value kind: none]"
+    list item "Cell #17: d.linktier [dimension] [value kind: none]"
+    list item "Cell #19: d.owner [dimension] [value kind: none]"
+    list item "Cell #21: d.curator [dimension] [value kind: none]"
+    list item "Cell #23:  [value kind: none]"
+    list item "Cell #25: Schema and Purpose [value kind: none]"
+    list item "Cell #27: bold [value kind: none]"
+    list item "Cell #29: format [value kind: none]"
+    list item "Cell #31: author [value kind: none]"
+    list item "Cell #33: system [value kind: none]"
+    list item "Cell #35:  [value kind: none]"
+    list item "Cell #37: Schema and Purpose [value kind: none]"
+    list item "Cell #39: align-centre [value kind: none]"
+    list item "Cell #41: format [value kind: none]"
+    list item "Cell #43: author [value kind: none]"
+    list item "Cell #45: system [value kind: none]"
+    list item "Cell #47:  [value kind: none]"
+    list item "Cell #49: Notes [value kind: none]"
+    list item "Cell #51: bold [value kind: none]"
+    list item "Cell #53: format [value kind: none]"
+    list item "Cell #55: author [value kind: none]"
+    list item "Cell #57: system [value kind: none]"
+    list item "Cell #59:  [value kind: none]"
+    list item "Cell #61: Notes [value kind: none]"
+    list item "Cell #63: align-centre [value kind: none]"
+    list item "Cell #65: format [value kind: none]"
+    list item "Cell #67: author [value kind: none]"
+    list item "Cell #69: system [value kind: none]"
+    list item "Cell #71:  [value kind: none]"
+    list item "Cell #73: Schema and Purpose
+
+Purpose:
+The sovereign UI system xanadoc configures visibility of chrome bars, status indicators, hypertime navigation overlays, and interactive radial action wheels.
+
+Schema:
+notificationPosition: Screen location for system notifications. Default is top-right.
+notificationDurationMs: Duration in milliseconds before notifications dismiss. Default is 3000.
+tabBarVisible: Flag indicating whether top document tab bar is visible. Default is true.
+statusBarVisible: Flag indicating whether bottom status bar is visible. Default is true.
+hypertimeMapVisible: Flag indicating whether hypertime graph overlay is open. Default is false.
+ui.scale and ui.fontScale: Positive finite geometry and typography multipliers; both default to 1. ui.safeMarginShare: Safe-area margin fraction, 0 to 0.5, default 0.05. ui.minFontPx and ui.minTouchPx: Positive finite minimum font and touch sizes in pixels, defaults 9 and 44.
+ui.font.caption, ui.font.label, ui.font.body, ui.font.title and ui.font.mono: Each role has family and points settings. Defaults are Sans 10, Sans 12, Sans 12, Sans Bold 18 and Monospace 12. Family must be nonempty; point size must be positive and finite. Document fonts remain in system://settings.
+Input and text presentation: FocusManager owns scope registration, activation order and modal isolation. Each modal blocks background input and permits only configured global commands. Labels use typed typography roles and TextFit boxes; full accessible names remain available when visual labels are ellipsized or hidden.
+radialMenu: Nested configuration dictionary defining action items, icons, and radial radius.
+overview.visible, overview.widthPx, overview.heightPx, overview.leftPx, overview.bottomPx: Whether the overview panel is shown -- every open page condensed into the lower left, with the camera's view outlined -- its size, and its distance from the window's left and bottom edges, in logical pixels. Defaults are true, 220, 160, 16 and 56.
+overview.backgroundColour, overview.pageColour, overview.viewportColour, overview.markColour: Its colours as RGBA integers; marks show the selected link's chosen places and the focused ZigZag card.
+tether: A temporary quotation tendril. rootWidthPx and tipWidthPx default to 4.5 and 1 logical pixels. sagPx and sagShare bound the curve (40 and 0.18). pointerRadiusPx and pointerGapPx keep the target clear (6 and 2). texturePeriodPx and textureStrength control stationary fibres (24 and 0.25). colour is packed RGBA (0xDDB441DC). reducedMotion follows input directly and cancels without a spring transition (false).
+satelloidCard, tetherCard and hullCard: Preferred widthPx and heightPx in logical pixels, defaults 200 by 180, 190 by 88 and 260 by 46. Positive finite lengths grow for typography within maxWidthShare and maxHeightShare (0.1 to 1, default 0.9). maxLines bounds preview lines (1 to 10, default 3). World labels hide below the typography minimum projected font size; full names and card selection remain available.
+quotationModal, telescopeModal and hypertimeModal: Preferred widthPx and heightPx in logical pixels, defaults 840 by 560, 860 by 560 and 640 by 460. Positive finite values are required. Their maxWidthShare and maxHeightShare bound the modal to safe-area shares, range 0.1 to 1, default 0.95.
+pouchPanel.widthPx and storePanel.widthPx: Preferred panel widths in logical pixels, defaults 320 and 340. Positive finite values are required. The panels grow for readable controls within their safe-area limits.
+pouchPanel.maxWidthShare, pouchPanel.maxHeightShare, storePanel.maxWidthShare and storePanel.maxHeightShare: Maximum shares of safe width and height, range 0.1 to 1. Width defaults are 0.9 and height defaults are 1.
+linkPanel.font: Caption, label, body, title or mono role name (lowercase); default is label. Empty also follows label. Legacy explicit font descriptions remain accepted and follow display and font scales.
+linkPanel.maxLines: Maximum wrapped description lines; default 3, range 1 to 20. linkPanel.maxWidthShare and linkPanel.maxHeightShare: Maximum shares of the safe area; width default 0.9, height default 1, range 0.1 to 1.
+linkPanel.marginPx, linkPanel.topPx, linkPanel.paddingPx, linkPanel.lineGapPx: The panel's distance from the window's right and top edges, its inner space and its line spacing, in logical pixels. Defaults are 16, 44, 10 and 4.
+linkPanel.backgroundColour, linkPanel.textColour, linkPanel.mutedColour, linkPanel.buttonColour: Panel colours as RGBA integers, the muted one for unset choices, members not in view and buttons that would be refused.
+linkPanel.chosenEdgeWidthPx, linkPanel.memberEdgeWidthPx: Same-hue edge widths for the active chosen occurrence and secondary occurrences, in device pixels. Defaults are 2.5 and 1.
+ [value kind: none]"
+    list item "Cell #75: Notes
+
+User Annotations and Customization Record:
+Edit ui.scale or ui.fontScale to resize chrome independently of documents. Set ui.font.<role>.family and ui.font.<role>.points to customize caption, label, body, title or mono. Each setting's native d.schemas and d.notes ranks describe its value and defaults. Choose a role in linkPanel.font to keep that panel following live typography; existing explicit font descriptions still work.
+
+Labels grow with UI and font scales. Increase pouchPanel.widthPx or drag the pouch drawer edge to give labels more room. World cards retain full accessible names when their projected labels hide. Tab follows layout order inside the active scope; Escape closes it. Modal global commands remain subject to the keymap allow list.
+
+This page is reserved for author notes, workflow preferences, and custom radial action mappings.
+ [value kind: none]"
+    list item "Cell #77: comment [value kind: none]"
+    list item "Cell #79: author [value kind: none]"
+    list item "Cell #81: system [value kind: none]"
+    list item "Cell #83: d.vars [dimension] [value kind: none]"
+    list item "Cell #85: d.values [dimension] [value kind: none]"
+    list item "Cell #87: d.groups [dimension] [value kind: none]"
+    list item "Cell #89: d.subgroups [dimension] [value kind: none]"
+    list item "Cell #91: d.clone [dimension] [value kind: none]"
+    list item "Cell #93: d.notes [dimension] [value kind: none]"
+    list item "Cell #95: d.schemas [dimension] [value kind: none]"
+    list item "Cell #97: d.alternates [dimension] [value kind: none]"
+    list item "Cell #99: d.default [dimension] [value kind: none]"
+    list item "Cell #102: Sovereign system store managing ui configuration. [value kind: none]"
+    list item "Cell #104:  [value kind: none]"
+    list item "Cell #106: float [value kind: none]"
+    list item "Cell #108: integer [value kind: none]"
+    list item "Cell #110: bool [value kind: none]"
+    list item "Cell #112: string [value kind: none]"
+    list item "Cell #114: ui [value kind: none]"
+    list item "Cell #116: ui.scale [value kind: none]"
+    list item "Cell #118: scale [value kind: none] [Clone of #116]"
+    list item "Cell #121: Positive finite UI geometry scale [value kind: none]"
+    list item "Cell #123:  [value kind: none]"
+    list item "Cell #125: float [value kind: none]"
+    list item "Cell #128: 1 [number] [value kind: double]"
+    list item "Cell #130: 1 [number] [value kind: double]"
+    list item "Cell #132: ui.fontScale [value kind: none]"
+    list item "Cell #134: fontScale [value kind: none] [Clone of #132]"
+    list item "Cell #137: Positive finite UI font scale [value kind: none]"
+    list item "Cell #139:  [value kind: none]"
+    list item "Cell #141: float [value kind: none]"
+    list item "Cell #144: 1 [number] [value kind: double]"
+    list item "Cell #146: 1 [number] [value kind: double]"
+    list item "Cell #148: ui.safeMarginShare [value kind: none]"
+    list item "Cell #150: safeMarginShare [value kind: none] [Clone of #148]"
+    list item "Cell #153: Safe-area margin fraction, range 0 to 0.5 [value kind: none]"
+    list item "Cell #155:  [value kind: none]"
+    list item "Cell #157: float [value kind: none]"
+    list item "Cell #160: 0.05000000074505806 [number] [value kind: double]"
+    list item "Cell #162: 0.05000000074505806 [number] [value kind: double]"
+    list item "Cell #164: ui.minFontPx [value kind: none]"
+    list item "Cell #166: minFontPx [value kind: none] [Clone of #164]"
+    list item "Cell #169: Positive finite minimum readable font size in pixels [value kind: none]"
+    list item "Cell #171:  [value kind: none]"
+    list item "Cell #173: float [value kind: none]"
+    list item "Cell #176: 9 [number] [value kind: double]"
+    list item "Cell #178: 9 [number] [value kind: double]"
+    list item "Cell #180: ui.minTouchPx [value kind: none]"
+    list item "Cell #182: minTouchPx [value kind: none] [Clone of #180]"
+    list item "Cell #185: Positive finite minimum touch target in logical pixels [value kind: none]"
+    list item "Cell #187:  [value kind: none]"
+    list item "Cell #189: float [value kind: none]"
+    list item "Cell #192: 44 [number] [value kind: double]"
+    list item "Cell #194: 44 [number] [value kind: double]"
+    list item "Cell #196: satelloidCard [value kind: none]"
+    list item "Cell #198: satelloidCard.widthPx [value kind: none]"
+    list item "Cell #200: widthPx [value kind: none] [Clone of #198]"
+    list item "Cell #203: SatelloidCard preferred width in logical pixels [value kind: none]"
+    list item "Cell #205:  [value kind: none]"
+    list item "Cell #207: float [value kind: none]"
+    list item "Cell #210: 200 [number] [value kind: double]"
+    list item "Cell #212: 200 [number] [value kind: double]"
+    list item "Cell #214: satelloidCard.heightPx [value kind: none]"
+    list item "Cell #216: heightPx [value kind: none] [Clone of #214]"
+    list item "Cell #219: SatelloidCard preferred height in logical pixels [value kind: none]"
+    list item "Cell #221:  [value kind: none]"
+    list item "Cell #223: float [value kind: none]"
+    list item "Cell #226: 180 [number] [value kind: double]"
+    list item "Cell #228: 180 [number] [value kind: double]"
+    list item "Cell #230: satelloidCard.maxWidthShare [value kind: none]"
+    list item "Cell #232: maxWidthShare [value kind: none] [Clone of #230]"
+    list item "Cell #235: SatelloidCard maximum share of safe width, range 0.1 to 1 [value kind: none]"
+    list item "Cell #237:  [value kind: none]"
+    list item "Cell #239: float [value kind: none]"
+    list item "Cell #242: 0.8999999761581421 [number] [value kind: double]"
+    list item "Cell #244: 0.8999999761581421 [number] [value kind: double]"
+    list item "Cell #246: satelloidCard.maxHeightShare [value kind: none]"
+    list item "Cell #248: maxHeightShare [value kind: none] [Clone of #246]"
+    list item "Cell #251: SatelloidCard maximum share of safe height, range 0.1 to 1 [value kind: none]"
+    list item "Cell #253:  [value kind: none]"
+    list item "Cell #255: float [value kind: none]"
+    list item "Cell #258: 0.8999999761581421 [number] [value kind: double]"
+    list item "Cell #260: 0.8999999761581421 [number] [value kind: double]"
+    list item "Cell #262: satelloidCard.maxLines [value kind: none]"
+    list item "Cell #264: maxLines [value kind: none] [Clone of #262]"
+    list item "Cell #267: SatelloidCard preview line limit, range 1 to 10 [value kind: none]"
+    list item "Cell #269:  [value kind: none]"
+    list item "Cell #271: integer [value kind: none]"
+    list item "Cell #274: 3 [number] [value kind: int64]"
+    list item "Cell #276: 3 [number] [value kind: int64]"
+    list item "Cell #278: tether [value kind: none]"
+    list item "Cell #280: tether.rootWidthPx [value kind: none]"
+    list item "Cell #282: rootWidthPx [value kind: none] [Clone of #280]"
+    list item "Cell #285: Root width in logical pixels, range 1 to 24 [value kind: none]"
+    list item "Cell #287:  [value kind: none]"
+    list item "Cell #289: float [value kind: none]"
+    list item "Cell #292: 4.5 [number] [value kind: double]"
+    list item "Cell #294: 4.5 [number] [value kind: double]"
+    list item "Cell #296: tether.tipWidthPx [value kind: none]"
+    list item "Cell #298: tipWidthPx [value kind: none] [Clone of #296]"
+    list item "Cell #301: Tip width in logical pixels, range 0.5 to root width [value kind: none]"
+    list item "Cell #303:  [value kind: none]"
+    list item "Cell #305: float [value kind: none]"
+    list item "Cell #308: 1 [number] [value kind: double]"
+    list item "Cell #310: 1 [number] [value kind: double]"
+    list item "Cell #312: tether.sagPx [value kind: none]"
+    list item "Cell #314: sagPx [value kind: none] [Clone of #312]"
+    list item "Cell #317: Maximum curve sag in logical pixels, range 0 to 200 [value kind: none]"
+    list item "Cell #319:  [value kind: none]"
+    list item "Cell #321: float [value kind: none]"
+    list item "Cell #324: 40 [number] [value kind: double]"
+    list item "Cell #326: 40 [number] [value kind: double]"
+    list item "Cell #328: tether.sagShare [value kind: none]"
+    list item "Cell #330: sagShare [value kind: none] [Clone of #328]"
+    list item "Cell #333: Curve sag fraction of distance, range 0 to 0.5 [value kind: none]"
+    list item "Cell #335:  [value kind: none]"
+    list item "Cell #337: float [value kind: none]"
+    list item "Cell #340: 0.18000000715255737 [number] [value kind: double]"
+    list item "Cell #342: 0.18000000715255737 [number] [value kind: double]"
+    list item "Cell #344: tether.pointerRadiusPx [value kind: none]"
+    list item "Cell #346: pointerRadiusPx [value kind: none] [Clone of #344]"
+    list item "Cell #349: Hollow pointer marker radius in logical pixels, range 3 to 24 [value kind: none]"
+    list item "Cell #351:  [value kind: none]"
+    list item "Cell #353: float [value kind: none]"
+    list item "Cell #356: 6 [number] [value kind: double]"
+    list item "Cell #358: 6 [number] [value kind: double]"
+    list item "Cell #360: tether.pointerGapPx [value kind: none]"
+    list item "Cell #362: pointerGapPx [value kind: none] [Clone of #360]"
+    list item "Cell #365: Clear gap beyond pointer marker in logical pixels, range 1 to 24 [value kind: none]"
+    list item "Cell #367:  [value kind: none]"
+    list item "Cell #369: float [value kind: none]"
+    list item "Cell #372: 2 [number] [value kind: double]"
+    list item "Cell #374: 2 [number] [value kind: double]"
+    list item "Cell #376: tether.texturePeriodPx [value kind: none]"
+    list item "Cell #378: texturePeriodPx [value kind: none] [Clone of #376]"
+    list item "Cell #381: Stationary fibre texture period in logical pixels, range 4 to 128 [value kind: none]"
+    list item "Cell #383:  [value kind: none]"
+    list item "Cell #385: float [value kind: none]"
+    list item "Cell #388: 24 [number] [value kind: double]"
+    list item "Cell #390: 24 [number] [value kind: double]"
+    list item "Cell #392: tether.textureStrength [value kind: none]"
+    list item "Cell #394: textureStrength [value kind: none] [Clone of #392]"
+    list item "Cell #397: Quiet fibre modulation, range 0 to 0.5 [value kind: none]"
+    list item "Cell #399:  [value kind: none]"
+    list item "Cell #401: float [value kind: none]"
+    list item "Cell #404: 0.25 [number] [value kind: double]"
+    list item "Cell #406: 0.25 [number] [value kind: double]"
+    list item "Cell #408: tether.colour [value kind: none]"
+    list item "Cell #410: colour [value kind: none] [Clone of #408]"
+    list item "Cell #413: Quotation tendril RGBA colour; distinct from persistent prism geometry [value kind: none]"
+    list item "Cell #415:  [value kind: none]"
+    list item "Cell #417: integer [value kind: none]"
+    list item "Cell #420: 3719578076 [number] [value kind: int64]"
+    list item "Cell #422: 3719578076 [number] [value kind: int64]"
+    list item "Cell #424: tether.reducedMotion [value kind: none]"
+    list item "Cell #426: reducedMotion [value kind: none] [Clone of #424]"
+    list item "Cell #429: Follow the pointer directly and complete quotation cancellation immediately [value kind: none]"
+    list item "Cell #431:  [value kind: none]"
+    list item "Cell #433: bool [value kind: none]"
+    list item "Cell #436: false [boolean] [value kind: bool]"
+    list item "Cell #438: false [boolean] [value kind: bool]"
+    list item "Cell #440: tetherCard [value kind: none]"
+    list item "Cell #442: tetherCard.widthPx [value kind: none]"
+    list item "Cell #444: widthPx [value kind: none] [Clone of #442]"
+    list item "Cell #447: TetherCard preferred width in logical pixels [value kind: none]"
+    list item "Cell #449:  [value kind: none]"
+    list item "Cell #451: float [value kind: none]"
+    list item "Cell #454: 190 [number] [value kind: double]"
+    list item "Cell #456: 190 [number] [value kind: double]"
+    list item "Cell #458: tetherCard.heightPx [value kind: none]"
+    list item "Cell #460: heightPx [value kind: none] [Clone of #458]"
+    list item "Cell #463: TetherCard preferred height in logical pixels [value kind: none]"
+    list item "Cell #465:  [value kind: none]"
+    list item "Cell #467: float [value kind: none]"
+    list item "Cell #470: 88 [number] [value kind: double]"
+    list item "Cell #472: 88 [number] [value kind: double]"
+    list item "Cell #474: tetherCard.maxWidthShare [value kind: none]"
+    list item "Cell #476: maxWidthShare [value kind: none] [Clone of #474]"
+    list item "Cell #479: TetherCard maximum share of safe width, range 0.1 to 1 [value kind: none]"
+    list item "Cell #481:  [value kind: none]"
+    list item "Cell #483: float [value kind: none]"
+    list item "Cell #486: 0.8999999761581421 [number] [value kind: double]"
+    list item "Cell #488: 0.8999999761581421 [number] [value kind: double]"
+    list item "Cell #490: tetherCard.maxHeightShare [value kind: none]"
+    list item "Cell #492: maxHeightShare [value kind: none] [Clone of #490]"
+    list item "Cell #495: TetherCard maximum share of safe height, range 0.1 to 1 [value kind: none]"
+    list item "Cell #497:  [value kind: none]"
+    list item "Cell #499: float [value kind: none]"
+    list item "Cell #502: 0.8999999761581421 [number] [value kind: double]"
+    list item "Cell #504: 0.8999999761581421 [number] [value kind: double]"
+    list item "Cell #506: tetherCard.maxLines [value kind: none]"
+    list item "Cell #508: maxLines [value kind: none] [Clone of #506]"
+    list item "Cell #511: TetherCard preview line limit, range 1 to 10 [value kind: none]"
+    list item "Cell #513:  [value kind: none]"
+    list item "Cell #515: integer [value kind: none]"
+    list item "Cell #518: 3 [number] [value kind: int64]"
+    list item "Cell #520: 3 [number] [value kind: int64]"
+    list item "Cell #522: hullCard [value kind: none]"
+    list item "Cell #524: hullCard.widthPx [value kind: none]"
+    list item "Cell #526: widthPx [value kind: none] [Clone of #524]"
+    list item "Cell #529: HullCard preferred width in logical pixels [value kind: none]"
+    list item "Cell #531:  [value kind: none]"
+    list item "Cell #533: float [value kind: none]"
+    list item "Cell #536: 260 [number] [value kind: double]"
+    list item "Cell #538: 260 [number] [value kind: double]"
+    list item "Cell #540: hullCard.heightPx [value kind: none]"
+    list item "Cell #542: heightPx [value kind: none] [Clone of #540]"
+    list item "Cell #545: HullCard preferred height in logical pixels [value kind: none]"
+    list item "Cell #547:  [value kind: none]"
+    list item "Cell #549: float [value kind: none]"
+    list item "Cell #552: 46 [number] [value kind: double]"
+    list item "Cell #554: 46 [number] [value kind: double]"
+    list item "Cell #556: hullCard.maxWidthShare [value kind: none]"
+    list item "Cell #558: maxWidthShare [value kind: none] [Clone of #556]"
+    list item "Cell #561: HullCard maximum share of safe width, range 0.1 to 1 [value kind: none]"
+    list item "Cell #563:  [value kind: none]"
+    list item "Cell #565: float [value kind: none]"
+    list item "Cell #568: 0.8999999761581421 [number] [value kind: double]"
+    list item "Cell #570: 0.8999999761581421 [number] [value kind: double]"
+    list item "Cell #572: hullCard.maxHeightShare [value kind: none]"
+    list item "Cell #574: maxHeightShare [value kind: none] [Clone of #572]"
+    list item "Cell #577: HullCard maximum share of safe height, range 0.1 to 1 [value kind: none]"
+    list item "Cell #579:  [value kind: none]"
+    list item "Cell #581: float [value kind: none]"
+    list item "Cell #584: 0.8999999761581421 [number] [value kind: double]"
+    list item "Cell #586: 0.8999999761581421 [number] [value kind: double]"
+    list item "Cell #588: hullCard.maxLines [value kind: none]"
+    list item "Cell #590: maxLines [value kind: none] [Clone of #588]"
+    list item "Cell #593: HullCard preview line limit, range 1 to 10 [value kind: none]"
+    list item "Cell #595:  [value kind: none]"
+    list item "Cell #597: integer [value kind: none]"
+    list item "Cell #600: 3 [number] [value kind: int64]"
+    list item "Cell #602: 3 [number] [value kind: int64]"
+    list item "Cell #604: quotationModal [value kind: none]"
+    list item "Cell #606: quotationModal.widthPx [value kind: none]"
+    list item "Cell #608: widthPx [value kind: none] [Clone of #606]"
+    list item "Cell #611: Quotation modal preferred width in logical pixels [value kind: none]"
+    list item "Cell #613:  [value kind: none]"
+    list item "Cell #615: float [value kind: none]"
+    list item "Cell #618: 840 [number] [value kind: double]"
+    list item "Cell #620: 840 [number] [value kind: double]"
+    list item "Cell #622: quotationModal.heightPx [value kind: none]"
+    list item "Cell #624: heightPx [value kind: none] [Clone of #622]"
+    list item "Cell #627: Quotation modal preferred height in logical pixels [value kind: none]"
+    list item "Cell #629:  [value kind: none]"
+    list item "Cell #631: float [value kind: none]"
+    list item "Cell #634: 560 [number] [value kind: double]"
+    list item "Cell #636: 560 [number] [value kind: double]"
+    list item "Cell #638: quotationModal.maxWidthShare [value kind: none]"
+    list item "Cell #640: maxWidthShare [value kind: none] [Clone of #638]"
+    list item "Cell #643: Quotation modal maximum share of safe width, range 0.1 to 1 [value kind: none]"
+    list item "Cell #645:  [value kind: none]"
+    list item "Cell #647: float [value kind: none]"
+    list item "Cell #650: 0.949999988079071 [number] [value kind: double]"
+    list item "Cell #652: 0.949999988079071 [number] [value kind: double]"
+    list item "Cell #654: quotationModal.maxHeightShare [value kind: none]"
+    list item "Cell #656: maxHeightShare [value kind: none] [Clone of #654]"
+    list item "Cell #659: Quotation modal maximum share of safe height, range 0.1 to 1 [value kind: none]"
+    list item "Cell #661:  [value kind: none]"
+    list item "Cell #663: float [value kind: none]"
+    list item "Cell #666: 0.949999988079071 [number] [value kind: double]"
+    list item "Cell #668: 0.949999988079071 [number] [value kind: double]"
+    list item "Cell #670: telescopeModal [value kind: none]"
+    list item "Cell #672: telescopeModal.widthPx [value kind: none]"
+    list item "Cell #674: widthPx [value kind: none] [Clone of #672]"
+    list item "Cell #677: Telescope modal preferred width in logical pixels [value kind: none]"
+    list item "Cell #679:  [value kind: none]"
+    list item "Cell #681: float [value kind: none]"
+    list item "Cell #684: 860 [number] [value kind: double]"
+    list item "Cell #686: 860 [number] [value kind: double]"
+    list item "Cell #688: telescopeModal.heightPx [value kind: none]"
+    list item "Cell #690: heightPx [value kind: none] [Clone of #688]"
+    list item "Cell #693: Telescope modal preferred height in logical pixels [value kind: none]"
+    list item "Cell #695:  [value kind: none]"
+    list item "Cell #697: float [value kind: none]"
+    list item "Cell #700: 560 [number] [value kind: double]"
+    list item "Cell #702: 560 [number] [value kind: double]"
+    list item "Cell #704: telescopeModal.maxWidthShare [value kind: none]"
+    list item "Cell #706: maxWidthShare [value kind: none] [Clone of #704]"
+    list item "Cell #709: Telescope modal maximum share of safe width, range 0.1 to 1 [value kind: none]"
+    list item "Cell #711:  [value kind: none]"
+    list item "Cell #713: float [value kind: none]"
+    list item "Cell #716: 0.949999988079071 [number] [value kind: double]"
+    list item "Cell #718: 0.949999988079071 [number] [value kind: double]"
+    list item "Cell #720: telescopeModal.maxHeightShare [value kind: none]"
+    list item "Cell #722: maxHeightShare [value kind: none] [Clone of #720]"
+    list item "Cell #725: Telescope modal maximum share of safe height, range 0.1 to 1 [value kind: none]"
+    list item "Cell #727:  [value kind: none]"
+    list item "Cell #729: float [value kind: none]"
+    list item "Cell #732: 0.949999988079071 [number] [value kind: double]"
+    list item "Cell #734: 0.949999988079071 [number] [value kind: double]"
+    list item "Cell #736: hypertimeModal [value kind: none]"
+    list item "Cell #738: hypertimeModal.widthPx [value kind: none]"
+    list item "Cell #740: widthPx [value kind: none] [Clone of #738]"
+    list item "Cell #743: Hypertime modal preferred width in logical pixels [value kind: none]"
+    list item "Cell #745:  [value kind: none]"
+    list item "Cell #747: float [value kind: none]"
+    list item "Cell #750: 640 [number] [value kind: double]"
+    list item "Cell #752: 640 [number] [value kind: double]"
+    list item "Cell #754: hypertimeModal.heightPx [value kind: none]"
+    list item "Cell #756: heightPx [value kind: none] [Clone of #754]"
+    list item "Cell #759: Hypertime modal preferred height in logical pixels [value kind: none]"
+    list item "Cell #761:  [value kind: none]"
+    list item "Cell #763: float [value kind: none]"
+    list item "Cell #766: 460 [number] [value kind: double]"
+    list item "Cell #768: 460 [number] [value kind: double]"
+    list item "Cell #770: hypertimeModal.maxWidthShare [value kind: none]"
+    list item "Cell #772: maxWidthShare [value kind: none] [Clone of #770]"
+    list item "Cell #775: Hypertime modal maximum share of safe width, range 0.1 to 1 [value kind: none]"
+    list item "Cell #777:  [value kind: none]"
+    list item "Cell #779: float [value kind: none]"
+    list item "Cell #782: 0.949999988079071 [number] [value kind: double]"
+    list item "Cell #784: 0.949999988079071 [number] [value kind: double]"
+    list item "Cell #786: hypertimeModal.maxHeightShare [value kind: none]"
+    list item "Cell #788: maxHeightShare [value kind: none] [Clone of #786]"
+    list item "Cell #791: Hypertime modal maximum share of safe height, range 0.1 to 1 [value kind: none]"
+    list item "Cell #793:  [value kind: none]"
+    list item "Cell #795: float [value kind: none]"
+    list item "Cell #798: 0.949999988079071 [number] [value kind: double]"
+    list item "Cell #800: 0.949999988079071 [number] [value kind: double]"
+    list item "Cell #802: pouchPanel [value kind: none]"
+    list item "Cell #804: pouchPanel.widthPx [value kind: none]"
+    list item "Cell #806: widthPx [value kind: none] [Clone of #804]"
+    list item "Cell #809: Pouch dock preferred width in logical pixels [value kind: none]"
+    list item "Cell #811:  [value kind: none]"
+    list item "Cell #813: float [value kind: none]"
+    list item "Cell #816: 320 [number] [value kind: double]"
+    list item "Cell #818: 320 [number] [value kind: double]"
+    list item "Cell #820: pouchPanel.maxWidthShare [value kind: none]"
+    list item "Cell #822: maxWidthShare [value kind: none] [Clone of #820]"
+    list item "Cell #825: Pouch dock maximum share of safe width, range 0.1 to 1 [value kind: none]"
+    list item "Cell #827:  [value kind: none]"
+    list item "Cell #829: float [value kind: none]"
+    list item "Cell #832: 0.8999999761581421 [number] [value kind: double]"
+    list item "Cell #834: 0.8999999761581421 [number] [value kind: double]"
+    list item "Cell #836: pouchPanel.maxHeightShare [value kind: none]"
+    list item "Cell #838: maxHeightShare [value kind: none] [Clone of #836]"
+    list item "Cell #841: Pouch dock maximum share of safe height, range 0.1 to 1 [value kind: none]"
+    list item "Cell #843:  [value kind: none]"
+    list item "Cell #845: float [value kind: none]"
+    list item "Cell #848: 1 [number] [value kind: double]"
+    list item "Cell #850: 1 [number] [value kind: double]"
+    list item "Cell #852: storePanel [value kind: none]"
+    list item "Cell #854: storePanel.widthPx [value kind: none]"
+    list item "Cell #856: widthPx [value kind: none] [Clone of #854]"
+    list item "Cell #859: Store object panel preferred width in logical pixels [value kind: none]"
+    list item "Cell #861:  [value kind: none]"
+    list item "Cell #863: float [value kind: none]"
+    list item "Cell #866: 340 [number] [value kind: double]"
+    list item "Cell #868: 340 [number] [value kind: double]"
+    list item "Cell #870: storePanel.maxWidthShare [value kind: none]"
+    list item "Cell #872: maxWidthShare [value kind: none] [Clone of #870]"
+    list item "Cell #875: Store object panel maximum share of safe width, range 0.1 to 1 [value kind: none]"
+    list item "Cell #877:  [value kind: none]"
+    list item "Cell #879: float [value kind: none]"
+    list item "Cell #882: 0.8999999761581421 [number] [value kind: double]"
+    list item "Cell #884: 0.8999999761581421 [number] [value kind: double]"
+    list item "Cell #886: storePanel.maxHeightShare [value kind: none]"
+    list item "Cell #888: maxHeightShare [value kind: none] [Clone of #886]"
+    list item "Cell #891: Store object panel maximum share of safe height, range 0.1 to 1 [value kind: none]"
+    list item "Cell #893:  [value kind: none]"
+    list item "Cell #895: float [value kind: none]"
+    list item "Cell #898: 1 [number] [value kind: double]"
+    list item "Cell #900: 1 [number] [value kind: double]"
+    list item "Cell #902: overview [value kind: none]"
+    list item "Cell #904: overview.visible [value kind: none]"
+    list item "Cell #906: visible [value kind: none] [Clone of #904]"
+    list item "Cell #909: Whether the overview panel is shown [value kind: none]"
+    list item "Cell #911:  [value kind: none]"
+    list item "Cell #913: bool [value kind: none]"
+    list item "Cell #916: true [boolean] [value kind: bool]"
+    list item "Cell #918: true [boolean] [value kind: bool]"
+    list item "Cell #920: overview.widthPx [value kind: none]"
+    list item "Cell #922: widthPx [value kind: none] [Clone of #920]"
+    list item "Cell #925: Overview panel width in pixels [value kind: none]"
+    list item "Cell #927:  [value kind: none]"
+    list item "Cell #929: float [value kind: none]"
+    list item "Cell #932: 220 [number] [value kind: double]"
+    list item "Cell #934: 220 [number] [value kind: double]"
+    list item "Cell #936: overview.heightPx [value kind: none]"
+    list item "Cell #938: heightPx [value kind: none] [Clone of #936]"
+    list item "Cell #941: Overview panel height in pixels [value kind: none]"
+    list item "Cell #943:  [value kind: none]"
+    list item "Cell #945: float [value kind: none]"
+    list item "Cell #948: 160 [number] [value kind: double]"
+    list item "Cell #950: 160 [number] [value kind: double]"
+    list item "Cell #952: overview.leftPx [value kind: none]"
+    list item "Cell #954: leftPx [value kind: none] [Clone of #952]"
+    list item "Cell #957: Gap between the overview and the window's left edge [value kind: none]"
+    list item "Cell #959:  [value kind: none]"
+    list item "Cell #961: float [value kind: none]"
+    list item "Cell #964: 16 [number] [value kind: double]"
+    list item "Cell #966: 16 [number] [value kind: double]"
+    list item "Cell #968: overview.bottomPx [value kind: none]"
+    list item "Cell #970: bottomPx [value kind: none] [Clone of #968]"
+    list item "Cell #973: Gap between the overview and the window's bottom edge [value kind: none]"
+    list item "Cell #975:  [value kind: none]"
+    list item "Cell #977: float [value kind: none]"
+    list item "Cell #980: 56 [number] [value kind: double]"
+    list item "Cell #982: 56 [number] [value kind: double]"
+    list item "Cell #984: overview.backgroundColour [value kind: none]"
+    list item "Cell #986: backgroundColour [value kind: none] [Clone of #984]"
+    list item "Cell #989: Overview background RGBA hexadecimal colour [value kind: none]"
+    list item "Cell #991:  [value kind: none]"
+    list item "Cell #993: integer [value kind: none]"
+    list item "Cell #996: 253176544 [number] [value kind: int64]"
+    list item "Cell #998: 253176544 [number] [value kind: int64]"
+    list item "Cell #1000: overview.pageColour [value kind: none]"
+    list item "Cell #1002: pageColour [value kind: none] [Clone of #1000]"
+    list item "Cell #1005: Overview page RGBA hexadecimal colour [value kind: none]"
+    list item "Cell #1007:  [value kind: none]"
+    list item "Cell #1009: integer [value kind: none]"
+    list item "Cell #1012: 3419791871 [number] [value kind: int64]"
+    list item "Cell #1014: 3419791871 [number] [value kind: int64]"
+    list item "Cell #1016: overview.viewportColour [value kind: none]"
+    list item "Cell #1018: viewportColour [value kind: none] [Clone of #1016]"
+    list item "Cell #1021: Overview outline of the camera's view, RGBA hexadecimal [value kind: none]"
+    list item "Cell #1023:  [value kind: none]"
+    list item "Cell #1025: integer [value kind: none]"
+    list item "Cell #1028: 4207678975 [number] [value kind: int64]"
+    list item "Cell #1030: 4207678975 [number] [value kind: int64]"
+    list item "Cell #1032: overview.markColour [value kind: none]"
+    list item "Cell #1034: markColour [value kind: none] [Clone of #1032]"
+    list item "Cell #1037: Overview marks for chosen link places, RGBA hexadecimal [value kind: none]"
+    list item "Cell #1039:  [value kind: none]"
+    list item "Cell #1041: integer [value kind: none]"
+    list item "Cell #1044: 4101158655 [number] [value kind: int64]"
+    list item "Cell #1046: 4101158655 [number] [value kind: int64]"
+    list item "Cell #1048: tabBarVisible [value kind: none]"
+    list item "Cell #1050: tabBarVisible [value kind: none] [Clone of #1048]"
+    list item "Cell #1053: Visibility of the document tab switcher bar [value kind: none]"
+    list item "Cell #1055:  [value kind: none]"
+    list item "Cell #1057: bool [value kind: none]"
+    list item "Cell #1060: true [boolean] [value kind: bool]"
+    list item "Cell #1062: true [boolean] [value kind: bool]"
+    list item "Cell #1064: statusBarVisible [value kind: none]"
+    list item "Cell #1066: statusBarVisible [value kind: none] [Clone of #1064]"
+    list item "Cell #1069: Visibility of the status bar [value kind: none]"
+    list item "Cell #1071:  [value kind: none]"
+    list item "Cell #1073: bool [value kind: none]"
+    list item "Cell #1076: true [boolean] [value kind: bool]"
+    list item "Cell #1078: true [boolean] [value kind: bool]"
+    list item "Cell #1080: hypertimeMapVisible [value kind: none]"
+    list item "Cell #1082: hypertimeMapVisible [value kind: none] [Clone of #1080]"
+    list item "Cell #1085: Visibility of the hypertime map [value kind: none]"
+    list item "Cell #1087:  [value kind: none]"
+    list item "Cell #1089: bool [value kind: none] [Clone of #110]"
+    list item "Cell #1092: false [boolean] [value kind: bool]"
+    list item "Cell #1094: false [boolean] [value kind: bool]"
+    list item "Cell #1096: notificationPosition [value kind: none]"
+    list item "Cell #1098: notificationPosition [value kind: none] [Clone of #1096]"
+    list item "Cell #1101: Screen position for toast notifications [value kind: none]"
+    list item "Cell #1103:  [value kind: none]"
+    list item "Cell #1105: string [value kind: none]"
+    list item "Cell #1108: top-right [value kind: none]"
+    list item "Cell #1110: top-right [value kind: none]"
+    list item "Cell #1112: notificationDurationMs [value kind: none]"
+    list item "Cell #1114: notificationDurationMs [value kind: none] [Clone of #1112]"
+    list item "Cell #1117: Toast notification duration in milliseconds [value kind: none]"
+    list item "Cell #1119:  [value kind: none]"
+    list item "Cell #1121: integer [value kind: none]"
+    list item "Cell #1124: 3000 [number] [value kind: int64]"
+    list item "Cell #1126: 3000 [number] [value kind: int64]"
+    list item "Cell #1128: radialMenu [value kind: none]"
+    list item "Cell #1130: radialMenu.radius [value kind: none]"
+    list item "Cell #1132: radius [value kind: none] [Clone of #1130]"
+    list item "Cell #1135: Outer radius of radial context menu in pixels [value kind: none]"
+    list item "Cell #1137:  [value kind: none]"
+    list item "Cell #1139: float [value kind: none]"
+    list item "Cell #1142: 130 [number] [value kind: double]"
+    list item "Cell #1144: 130 [number] [value kind: double]"
+    list item "Cell #1146: radialMenu.innerRadius [value kind: none]"
+    list item "Cell #1148: innerRadius [value kind: none] [Clone of #1146]"
+    list item "Cell #1151: Inner deadzone radius of radial menu in pixels [value kind: none]"
+    list item "Cell #1153:  [value kind: none]"
+    list item "Cell #1155: float [value kind: none]"
+    list item "Cell #1158: 42 [number] [value kind: double]"
+    list item "Cell #1160: 42 [number] [value kind: double]"
+    list item "Cell #1162: linkPanel [value kind: none]"
+    list item "Cell #1164: linkPanel.font [value kind: none]"
+    list item "Cell #1166: font [value kind: none] [Clone of #1164]"
+    list item "Cell #1169: Typography role name (caption, label, body, title, mono); empty follows label; legacy font descriptions are accepted [value kind: none]"
+    list item "Cell #1171:  [value kind: none]"
+    list item "Cell #1173: string [value kind: none]"
+    list item "Cell #1176: label [value kind: none]"
+    list item "Cell #1178: label [value kind: none]"
+    list item "Cell #1180: linkPanel.maxLines [value kind: none]"
+    list item "Cell #1182: maxLines [value kind: none] [Clone of #1180]"
+    list item "Cell #1185: Maximum wrapped lines per link-panel description [value kind: none]"
+    list item "Cell #1187:  [value kind: none]"
+    list item "Cell #1189: integer [value kind: none]"
+    list item "Cell #1192: 3 [number] [value kind: int64]"
+    list item "Cell #1194: 3 [number] [value kind: int64]"
+    list item "Cell #1196: linkPanel.maxWidthShare [value kind: none]"
+    list item "Cell #1198: maxWidthShare [value kind: none] [Clone of #1196]"
+    list item "Cell #1201: Maximum share of safe width occupied by the link panel [value kind: none]"
+    list item "Cell #1203:  [value kind: none]"
+    list item "Cell #1205: float [value kind: none]"
+    list item "Cell #1208: 0.8999999761581421 [number] [value kind: double]"
+    list item "Cell #1210: 0.8999999761581421 [number] [value kind: double]"
+    list item "Cell #1212: linkPanel.maxHeightShare [value kind: none]"
+    list item "Cell #1214: maxHeightShare [value kind: none] [Clone of #1212]"
+    list item "Cell #1217: Maximum share of safe height occupied by the link panel [value kind: none]"
+    list item "Cell #1219:  [value kind: none]"
+    list item "Cell #1221: float [value kind: none]"
+    list item "Cell #1224: 1 [number] [value kind: double]"
+    list item "Cell #1226: 1 [number] [value kind: double]"
+    list item "Cell #1228: linkPanel.marginPx [value kind: none]"
+    list item "Cell #1230: marginPx [value kind: none] [Clone of #1228]"
+    list item "Cell #1233: Gap between the link panel and the window edge in pixels [value kind: none]"
+    list item "Cell #1235:  [value kind: none]"
+    list item "Cell #1237: float [value kind: none]"
+    list item "Cell #1240: 16 [number] [value kind: double]"
+    list item "Cell #1242: 16 [number] [value kind: double]"
+    list item "Cell #1244: linkPanel.dockMaxHeightShare [value kind: none]"
+    list item "Cell #1246: dockMaxHeightShare [value kind: none] [Clone of #1244]"
+    list item "Cell #1249: Maximum share of reading space used by the link inspector dock [value kind: none]"
+    list item "Cell #1251:  [value kind: none]"
+    list item "Cell #1253: float [value kind: none]"
+    list item "Cell #1256: 0.65 [number] [value kind: double]"
+    list item "Cell #1258: 0.65 [number] [value kind: double]"
+    list item "Cell #1260: linkPanel.topPx [value kind: none]"
+    list item "Cell #1262: topPx [value kind: none] [Clone of #1260]"
+    list item "Cell #1265: Gap between the link panel and the window top in pixels [value kind: none]"
+    list item "Cell #1267:  [value kind: none]"
+    list item "Cell #1269: float [value kind: none]"
+    list item "Cell #1272: 44 [number] [value kind: double]"
+    list item "Cell #1274: 44 [number] [value kind: double]"
+    list item "Cell #1276: linkPanel.paddingPx [value kind: none]"
+    list item "Cell #1278: paddingPx [value kind: none] [Clone of #1276]"
+    list item "Cell #1281: Space inside the link panel's border in pixels [value kind: none]"
+    list item "Cell #1283:  [value kind: none]"
+    list item "Cell #1285: float [value kind: none]"
+    list item "Cell #1288: 10 [number] [value kind: double]"
+    list item "Cell #1290: 10 [number] [value kind: double]"
+    list item "Cell #1292: linkPanel.lineGapPx [value kind: none]"
+    list item "Cell #1294: lineGapPx [value kind: none] [Clone of #1292]"
+    list item "Cell #1297: Space between the link panel's lines in pixels [value kind: none]"
+    list item "Cell #1299:  [value kind: none]"
+    list item "Cell #1301: float [value kind: none]"
+    list item "Cell #1304: 4 [number] [value kind: double]"
+    list item "Cell #1306: 4 [number] [value kind: double]"
+    list item "Cell #1308: linkPanel.backgroundColour [value kind: none]"
+    list item "Cell #1310: backgroundColour [value kind: none] [Clone of #1308]"
+    list item "Cell #1313: Link panel background RGBA hexadecimal colour [value kind: none]"
+    list item "Cell #1315:  [value kind: none]"
+    list item "Cell #1317: integer [value kind: none]"
+    list item "Cell #1320: 506018790 [number] [value kind: int64]"
+    list item "Cell #1322: 506018790 [number] [value kind: int64]"
+    list item "Cell #1324: linkPanel.textColour [value kind: none]"
+    list item "Cell #1326: textColour [value kind: none] [Clone of #1324]"
+    list item "Cell #1329: Link panel text RGBA hexadecimal colour [value kind: none]"
+    list item "Cell #1331:  [value kind: none]"
+    list item "Cell #1333: integer [value kind: none]"
+    list item "Cell #1336: 3806916863 [number] [value kind: int64]"
+    list item "Cell #1338: 3806916863 [number] [value kind: int64]"
+    list item "Cell #1340: linkPanel.mutedColour [value kind: none]"
+    list item "Cell #1342: mutedColour [value kind: none] [Clone of #1340]"
+    list item "Cell #1345: Link panel colour for unset and out-of-view entries [value kind: none]"
+    list item "Cell #1347:  [value kind: none]"
+    list item "Cell #1349: integer [value kind: none]"
+    list item "Cell #1352: 2493757695 [number] [value kind: int64]"
+    list item "Cell #1354: 2493757695 [number] [value kind: int64]"
+    list item "Cell #1356: linkPanel.buttonColour [value kind: none]"
+    list item "Cell #1358: buttonColour [value kind: none] [Clone of #1356]"
+    list item "Cell #1361: Link panel button RGBA hexadecimal colour [value kind: none]"
+    list item "Cell #1363:  [value kind: none]"
+    list item "Cell #1365: integer [value kind: none] [Clone of #108]"
+    list item "Cell #1368: 859919871 [number] [value kind: int64]"
+    list item "Cell #1370: 859919871 [number] [value kind: int64]"
+    list item "Cell #1372: linkPanel.chosenEdgeWidthPx [value kind: none]"
+    list item "Cell #1374: chosenEdgeWidthPx [value kind: none] [Clone of #1372]"
+    list item "Cell #1377: Same-hue edge width of the active occurrence in pixels [value kind: none]"
+    list item "Cell #1379:  [value kind: none]"
+    list item "Cell #1381: float [value kind: none]"
+    list item "Cell #1384: 2.5 [number] [value kind: double]"
+    list item "Cell #1386: 2.5 [number] [value kind: double]"
+    list item "Cell #1388: linkPanel.memberEdgeWidthPx [value kind: none]"
+    list item "Cell #1390: memberEdgeWidthPx [value kind: none] [Clone of #1388]"
+    list item "Cell #1393: Same-hue edge width of secondary occurrences in pixels [value kind: none]"
+    list item "Cell #1395:  [value kind: none]"
+    list item "Cell #1397: float [value kind: none]"
+    list item "Cell #1400: 1 [number] [value kind: double]"
+    list item "Cell #1402: 1 [number] [value kind: double]"
+    list item "Cell #1404: font [value kind: none]"
+    list item "Cell #1406: caption [value kind: none]"
+    list item "Cell #1408: ui.font.caption.family [value kind: none]"
+    list item "Cell #1410: family [value kind: none] [Clone of #1408]"
+    list item "Cell #1413: Nonempty typography font family and style [value kind: none]"
+    list item "Cell #1415:  [value kind: none]"
+    list item "Cell #1417: string [value kind: none]"
+    list item "Cell #1420: Sans [value kind: none]"
+    list item "Cell #1422: Sans [value kind: none]"
+    list item "Cell #1424: ui.font.caption.points [value kind: none]"
+    list item "Cell #1426: points [value kind: none] [Clone of #1424]"
+    list item "Cell #1429: Positive finite typography font size in points [value kind: none]"
+    list item "Cell #1431:  [value kind: none]"
+    list item "Cell #1433: float [value kind: none]"
+    list item "Cell #1436: 10 [number] [value kind: double]"
+    list item "Cell #1438: 10 [number] [value kind: double]"
+    list item "Cell #1440: label [value kind: none]"
+    list item "Cell #1442: ui.font.label.family [value kind: none]"
+    list item "Cell #1444: family [value kind: none] [Clone of #1442]"
+    list item "Cell #1447: Nonempty typography font family and style [value kind: none]"
+    list item "Cell #1449:  [value kind: none]"
+    list item "Cell #1451: string [value kind: none]"
+    list item "Cell #1454: Sans [value kind: none]"
+    list item "Cell #1456: Sans [value kind: none]"
+    list item "Cell #1458: ui.font.label.points [value kind: none]"
+    list item "Cell #1460: points [value kind: none] [Clone of #1458]"
+    list item "Cell #1463: Positive finite typography font size in points [value kind: none]"
+    list item "Cell #1465:  [value kind: none]"
+    list item "Cell #1467: float [value kind: none]"
+    list item "Cell #1470: 12 [number] [value kind: double]"
+    list item "Cell #1472: 12 [number] [value kind: double]"
+    list item "Cell #1474: body [value kind: none]"
+    list item "Cell #1476: ui.font.body.family [value kind: none]"
+    list item "Cell #1478: family [value kind: none] [Clone of #1476]"
+    list item "Cell #1481: Nonempty typography font family and style [value kind: none]"
+    list item "Cell #1483:  [value kind: none]"
+    list item "Cell #1485: string [value kind: none]"
+    list item "Cell #1488: Sans [value kind: none]"
+    list item "Cell #1490: Sans [value kind: none]"
+    list item "Cell #1492: ui.font.body.points [value kind: none]"
+    list item "Cell #1494: points [value kind: none] [Clone of #1492]"
+    list item "Cell #1497: Positive finite typography font size in points [value kind: none]"
+    list item "Cell #1499:  [value kind: none]"
+    list item "Cell #1501: float [value kind: none]"
+    list item "Cell #1504: 12 [number] [value kind: double]"
+    list item "Cell #1506: 12 [number] [value kind: double]"
+    list item "Cell #1508: title [value kind: none]"
+    list item "Cell #1510: ui.font.title.family [value kind: none]"
+    list item "Cell #1512: family [value kind: none] [Clone of #1510]"
+    list item "Cell #1515: Nonempty typography font family and style [value kind: none]"
+    list item "Cell #1517:  [value kind: none]"
+    list item "Cell #1519: string [value kind: none]"
+    list item "Cell #1522: Sans Bold [value kind: none]"
+    list item "Cell #1524: Sans Bold [value kind: none]"
+    list item "Cell #1526: ui.font.title.points [value kind: none]"
+    list item "Cell #1528: points [value kind: none] [Clone of #1526]"
+    list item "Cell #1531: Positive finite typography font size in points [value kind: none]"
+    list item "Cell #1533:  [value kind: none]"
+    list item "Cell #1535: float [value kind: none]"
+    list item "Cell #1538: 18 [number] [value kind: double]"
+    list item "Cell #1540: 18 [number] [value kind: double]"
+    list item "Cell #1542: mono [value kind: none]"
+    list item "Cell #1544: ui.font.mono.family [value kind: none]"
+    list item "Cell #1546: family [value kind: none] [Clone of #1544]"
+    list item "Cell #1549: Nonempty typography font family and style [value kind: none]"
+    list item "Cell #1551:  [value kind: none]"
+    list item "Cell #1553: string [value kind: none] [Clone of #112]"
+    list item "Cell #1556: Monospace [value kind: none]"
+    list item "Cell #1558: Monospace [value kind: none]"
+    list item "Cell #1560: ui.font.mono.points [value kind: none]"
+    list item "Cell #1562: points [value kind: none] [Clone of #1560]"
+    list item "Cell #1565: Positive finite typography font size in points [value kind: none]"
+    list item "Cell #1567:  [value kind: none]"
+    list item "Cell #1569: float [value kind: none] [Clone of #106]"
+    list item "Cell #1572: 12 [number] [value kind: double]"
+    list item "Cell #1574: 12 [number] [value kind: double]"
+  list "Open Documents"
+    list item "default" [off]
+    button "Close default"
+    list item "⚙ system://ui" = "selected" [on]
+    button "Close ⚙ system://ui"
+    button "Store Object Manager"
+    button "New Document"
+  list "links between the open documents"
+    link "comment link, 1 left and 1 right members"
+  button "Overview: move camera to scene centre"
+focus: system://ui

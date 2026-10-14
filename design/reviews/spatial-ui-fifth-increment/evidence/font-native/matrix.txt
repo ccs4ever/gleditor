@@ -1,0 +1,4 @@
+git_head=975d8b1b0fb2b08659aa3db04ed81071d0526a43
+git_branch=feat/spatial-ui-overhaul
+matrix=800x600/opengl,800x600/opengles,800x600/vulkan,1440x1000/opengl
+purpose=native font-scale and link journey; visual inspection only

@@ -1,0 +1,11 @@
+binary_sha256=52dadabe6cfee1e5994a5e2e297ea35b6e9e6eef150f7f68012e9ff3a949cdf7
+source=Left\ endpoint\ authored\ in\ the\ first\ document.
+source_bytes=45
+target=Right\ endpoint\ authored\ in\ the\ second\ document.
+target_bytes=47
+backend=opengl
+size=1024,768
+profile_data=/workspace/spatial-build/run-C0cTmO/data
+profile_config=/workspace/spatial-build/run-C0cTmO/config
+profile_cache=/workspace/spatial-build/run-C0cTmO/cache
+argv=./build/xuzz --backend opengl --resize 1024\,768 --chord Ctrl+N --type Left\ endpoint\ authored\ in\ the\ first\ document. --select 0\,45 --chord Ctrl+Alt+\[ --chord Ctrl+N --type Right\ endpoint\ authored\ in\ the\ second\ document. --select 0\,47 --chord Ctrl+Alt+\] --chord Ctrl+Alt+L --wait-ms 30000 --dump-a11y --capture /workspace/spatial-build/fifth-occurrence-native/raw/00-link-created.ppm --wait-ms 60000 --chord Alt+Shift+I --wait-ms 1500 --dump-a11y --capture /workspace/spatial-build/fifth-occurrence-native/raw/01-docked-controls.ppm --chord Ctrl+Alt+I --wait-ms 1500 --dump-a11y --capture /workspace/spatial-build/fifth-occurrence-native/raw/02-inspect.ppm --chord Alt+Shift+J --wait-ms 1200 --dump-a11y --capture /workspace/spatial-build/fifth-occurrence-native/raw/03-member-next.ppm --chord Alt+Shift+X --wait-ms 1200 --dump-a11y --capture /workspace/spatial-build/fifth-occurrence-native/raw/04-cross.ppm --chord Alt+Shift+L --wait-ms 1200 --dump-a11y --capture /workspace/spatial-build/fifth-occurrence-native/raw/05-occurrence-next.ppm --chord Alt+Shift+Escape --wait-ms 1200 --dump-a11y --capture /workspace/spatial-build/fifth-occurrence-native/raw/06-cancel-entry.ppm --chord Ctrl+W --wait-ms 1500 --dump-a11y --capture /workspace/spatial-build/fifth-occurrence-native/raw/07-close-request.ppm --key Escape --wait-ms 1200 --dump-a11y --capture /workspace/spatial-build/fifth-occurrence-native/raw/08-close-cancelled.ppm --chord Ctrl+Q

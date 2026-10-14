@@ -1,0 +1,6 @@
+{
+  "setting": "ui.fontScale (system://ui value cell #144 was listed in prior native UI dump)",
+  "before": null,
+  "after": null,
+  "status": "No setting edit occurred. The attempted accessible click on the numeric value failed before selection; the follow-up E path ran on the document's prose focus and was cancelled without typing. Each run used a fresh isolated XDG data/config/cache profile. The primary store opened with 0 operations. No source-operation delta is claimed."
+}

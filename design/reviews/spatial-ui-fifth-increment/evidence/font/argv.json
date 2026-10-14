@@ -1,0 +1,35 @@
+{
+  "container": "spatial-native-session via /workspace/spatial-build/run.sh",
+  "build_reported_version": "xuzz 0.0.1.911.gc1ab2314",
+  "source_checkout_head": "975d8b1b0fb2b08659aa3db04ed81071d0526a43",
+  "environment": {
+    "SDL_VIDEODRIVER": "offscreen",
+    "SDL_AUDIODRIVER": "dummy",
+    "LIBGL_ALWAYS_SOFTWARE": "1",
+    "XDG_DATA_HOME": "fresh /workspace/spatial-build/run-* per invocation",
+    "XDG_CONFIG_HOME": "fresh /workspace/spatial-build/run-* per invocation",
+    "XDG_CACHE_HOME": "fresh /workspace/spatial-build/run-* per invocation"
+  },
+  "runs": [
+    {
+      "profile": "run-CJfw8p",
+      "argv": ["./build/xuzz", "--resize", "800,600", "--chord", "Ctrl+O", "--key", "right", "--key", "right", "--key", "right", "--key", "enter", "--key", "enter", "--key", "tab", "--key", "enter", "--wait-ms", "2000", "--capture", "open-ui.ppm", "--dump-a11y", "--chord", "Ctrl+Q"],
+      "result": "opened system://ui through chooser"
+    },
+    {
+      "profile": "run-l15N5i",
+      "argv": ["./build/xuzz", "--resize", "800,600", "--chord", "Ctrl+O", "--key", "right", "--key", "right", "--key", "right", "--key", "enter", "--key", "enter", "--key", "tab", "--key", "enter", "--wait-ms", "1200", "--click-label", "Cell #144: 1 [number] [value kind: double]", "--capture", "value-focused.ppm", "--dump-a11y", "--chord", "E", "--capture", "edit-open.ppm", "--dump-a11y", "--key", "Escape", "--chord", "Ctrl+Q"],
+      "result": "click-label failed: expected one visible actionable control with that label, found 0; no edit action ran"
+    },
+    {
+      "profile": "run-d1I80R",
+      "argv": ["./build/xuzz", "--resize", "800,600", "--chord", "Ctrl+O", "--key", "right", "--key", "right", "--key", "right", "--key", "enter", "--key", "enter", "--key", "tab", "--key", "enter", "--wait-ms", "900", "--capture", "ui-focus-initial.ppm", "--chord", "Alt+Home", "--wait-ms", "250", "--capture", "ui-focus-home.ppm", "--chord", "Alt+Right", "--wait-ms", "250", "--capture", "ui-focus-x1.ppm", "--chord", "Alt+Right", "--wait-ms", "250", "--capture", "ui-focus-x2.ppm", "--chord", "Ctrl+Q"],
+      "result": "native keyboard focus moved through blank structural cells #23 and #35; numeric value was not reached"
+    },
+    {
+      "profile": "run-EWkGzE",
+      "argv": ["./build/xuzz", "--resize", "800,600", "--chord", "Ctrl+O", "--key", "right", "--key", "right", "--key", "right", "--key", "enter", "--key", "enter", "--key", "tab", "--key", "enter", "--wait-ms", "900", "--chord", "E", "--wait-ms", "250", "--capture", "text-editor.ppm", "--key", "escape", "--chord", "Ctrl+Q"],
+      "result": "opened system://ui and invoked E on the current prose focus; no text was entered and the edit was cancelled"
+    }
+  ]
+}

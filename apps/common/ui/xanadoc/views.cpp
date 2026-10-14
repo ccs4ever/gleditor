@@ -6,6 +6,8 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <format>
@@ -63,6 +65,67 @@ Views::Views(Session &aSession, RendererRef aRenderer, HypertimeMap &aMap,
       switcher(std::move(aSwitcher)) {}
 
 Views::~Views() = default;
+
+void Views::editUiFontScale() {
+  renderer->runWithState([this](RenderState &) {
+    const auto values = getSetting(session.systemStore(SystemDocKind::UI),
+                                   settings::kUiFontScale);
+    if (values.size() != 1 || !std::holds_alternative<double>(values.front())) {
+      renderer->push(
+          RenderItemNotification("Could not read the UI font scale setting.",
+                                 render::DiagnosticSeverity::Error));
+      return;
+    }
+
+    gleditor::Form::Field scale;
+    scale.label    = "UI font scale";
+    scale.value    = std::format("{:.17g}", std::get<double>(values.front()));
+    scale.hint     = "positive finite number, e.g. 1.5";
+    scale.required = true;
+    form.open(
+        "UI font scale",
+        "Scales application chrome typography. Document text size is separate.",
+        {std::move(scale)},
+        [this](const std::vector<gleditor::Form::Field> &answers) {
+          if (answers.size() != 1) return;
+          const auto input = answers.front().answer();
+          double nextScale{};
+          const auto parsed =
+              std::from_chars(input.data(), input.data() + input.size(),
+                              nextScale, std::chars_format::general);
+          if (input.empty() || parsed.ec != std::errc{} ||
+              parsed.ptr != input.data() + input.size() ||
+              !std::isfinite(nextScale) || nextScale <= 0.0 ||
+              nextScale >
+                  static_cast<double>(std::numeric_limits<float>::max()) ||
+              nextScale < static_cast<double>(
+                              std::numeric_limits<float>::denorm_min()) ||
+              !std::isfinite(static_cast<float>(nextScale)) ||
+              static_cast<float>(nextScale) <= 0.0F) {
+            renderer->push(RenderItemNotification(
+                "UI font scale must be a positive finite number representable "
+                "by the UI; no setting was changed.",
+                render::DiagnosticSeverity::Error));
+            return;
+          }
+
+          renderer->runWithState([this, nextScale](RenderState &) {
+            try {
+              auto &uiStore = session.systemStore(SystemDocKind::UI);
+              const std::array<CellValue, 1> typedValue{nextScale};
+              const auto version = SystemStoreModel::updateSetting(
+                  uiStore, uiStore.primaryCurrentVersion(),
+                  settings::kUiFontScale, typedValue);
+              session.repointSystemDoc(SystemDocKind::UI, version);
+            } catch (const std::exception &error) {
+              renderer->push(RenderItemNotification(
+                  std::string("Could not save UI font scale: ") + error.what(),
+                  render::DiagnosticSeverity::Error));
+            }
+          });
+        });
+  });
+}
 
 void Views::deviceReady(render::RenderDevice &device,
                         const render::PipelineDesc &documentPipeline) {

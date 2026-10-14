@@ -876,6 +876,93 @@ TEST(E2EBinaryOrchestrationTest, defaultViewDrawsTextAtAReadableSize) {
   exportToPng(ppmPath, screenshotDir / "default_view_readable.png");
 }
 
+TEST(E2EBinaryOrchestrationTest, uiFontScaleUsesGovernedNativeForm) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+  const auto root = fs::current_path() / "build" / "integration_ui_font_scale";
+  fs::remove_all(root);
+  fs::create_directories(root);
+
+  const auto permascroll = permascrollAt(root / "permascroll");
+  const auto configPath  = root / "config/xuzz/system/ui";
+  Store ui(permascroll);
+  xanadu::initializeSystemStore(ui, xanadu::SystemDocKind::UI);
+  ui.save(configPath.string());
+  const auto baselineOps = ui.opCount();
+
+  const auto beforeCapture = root / "before.ppm";
+  const auto afterCapture  = root / "after.ppm";
+  const auto launch        = "XDG_CONFIG_HOME=" + (root / "config").string() +
+                      " XDG_DATA_HOME=" + (root / "data").string() +
+                      " XDG_CACHE_HOME=" + (root / "cache").string() +
+                      " timeout 120 " + xuduBin.string() +
+                      permascrollFlag(root / "permascroll") + " --backend " +
+                      activeBackend() + " --strict-diagnostics --profile " +
+                      (root / "workspace").string();
+  const auto invalid = executeProcess(
+      launch + " --chord Ctrl+Alt+Shift+F --key backspace --type 1.5junk "
+               "--key enter --chord Ctrl+Alt+Shift+F --key backspace "
+               "--type 1e300 --key enter --chord Ctrl+Alt+Shift+F "
+               "--key backspace --type 1e-300 --key enter --dump-a11y");
+  ASSERT_EQ(invalid.exitCode, 0) << invalid.output;
+  EXPECT_THAT(invalid.output,
+              testing::HasSubstr("UI font scale must be a positive finite"));
+  Store afterInvalid(permascroll);
+  afterInvalid.load(configPath.string());
+  EXPECT_EQ(afterInvalid.opCount(), baselineOps);
+
+  const auto cancelled = executeProcess(
+      launch + " --chord Ctrl+Alt+Shift+F --key backspace --type 1.6 "
+               "--key escape --dump-a11y");
+  ASSERT_EQ(cancelled.exitCode, 0) << cancelled.output;
+  Store afterCancel(permascroll);
+  afterCancel.load(configPath.string());
+  EXPECT_EQ(afterCancel.opCount(), baselineOps);
+
+  const auto result = executeProcess(
+      launch + " --capture " + beforeCapture.string() +
+      " --chord Ctrl+Alt+Shift+F --key backspace --type 1.5 --key enter "
+      "--wait-ms 500"
+      " --capture " +
+      afterCapture.string() + " --dump-a11y");
+  std::ofstream(root / "transcript.log")
+      << invalid.output << cancelled.output << result.output;
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_THAT(result.output,
+              testing::HasSubstr("system doc updated (system://ui)"));
+
+  Store savedUi(permascroll);
+  savedUi.load(configPath.string());
+  EXPECT_GT(savedUi.opCount(), baselineOps);
+  const auto storedScale =
+      xanadu::getSetting(savedUi, xanadu::settings::kUiFontScale);
+  ASSERT_EQ(storedScale.size(), 1U);
+  ASSERT_TRUE(std::holds_alternative<double>(storedScale.front()));
+  EXPECT_DOUBLE_EQ(std::get<double>(storedScale.front()), 1.5);
+  EXPECT_TRUE(inspectPpm(beforeCapture).valid);
+  EXPECT_TRUE(inspectPpm(afterCapture).valid);
+
+  // Reopen the same profile: the UI system doc remains authoritative after
+  // restart, and a fresh capture records the persisted chrome scale.
+  const auto restartedCapture = root / "restarted.ppm";
+  const auto restarted        = executeProcess(
+      "XDG_CONFIG_HOME=" + (root / "config").string() +
+      " XDG_DATA_HOME=" + (root / "data").string() + " XDG_CACHE_HOME=" +
+      (root / "cache").string() + " timeout 120 " + xuduBin.string() +
+      permascrollFlag(root / "permascroll") + " --backend " + activeBackend() +
+      " --strict-diagnostics --profile " + (root / "workspace").string() +
+      " --capture " + restartedCapture.string() + " --dump-a11y");
+  ASSERT_EQ(restarted.exitCode, 0) << restarted.output;
+  EXPECT_TRUE(inspectPpm(restartedCapture).valid);
+  Store reopenedUi(permascroll);
+  reopenedUi.load(configPath.string());
+  const auto reopenedScale =
+      xanadu::getSetting(reopenedUi, xanadu::settings::kUiFontScale);
+  ASSERT_EQ(reopenedScale.size(), 1U);
+  ASSERT_TRUE(std::holds_alternative<double>(reopenedScale.front()));
+  EXPECT_DOUBLE_EQ(std::get<double>(reopenedScale.front()), 1.5);
+}
+
 // A new xanadoc is where a person starts, so it has to settle -- an empty
 // document once counted as still loading, so nothing after Ctrl+N ever ran --
 // show a page, take the caret and the camera, and keep its first line clear

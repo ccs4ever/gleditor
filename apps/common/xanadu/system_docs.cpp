@@ -327,8 +327,11 @@ std::string defaultSystemDocNotes(const SystemDocKind kind) {
   case SystemDocKind::UI:
     return "Notes\n\n"
            "User Annotations and Customization Record:\n"
-           "Edit ui.scale or ui.fontScale to resize chrome independently of "
-           "documents. Set ui.font.<role>.family and ui.font.<role>.points "
+           "Use the UI font scale action (Ctrl+Alt+Shift+F) to change "
+           "ui.fontScale for application chrome. It does not change document "
+           "text size. Edit ui.scale separately to resize chrome geometry. "
+           "These controls resize chrome independently of documents. Set "
+           "ui.font.<role>.family and ui.font.<role>.points "
            "to customize caption, label, body, title or mono. Each setting's "
            "native d.schemas and d.notes ranks describe its value and "
            "defaults. "
@@ -1249,6 +1252,10 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
                     "subscriptions",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"Ctrl+Shift+U"}}}}},
+        {.name    = std::string(settings::kKeymapUiFontScale),
+         .notes   = "Edit the UI font scale for application chrome",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+Shift+F"}}}}},
         {.name    = std::string(settings::kKeymapTensionPhysicsToggle),
          .notes   = "Function key to toggle 3-way tension spring layout",
          .schemas = {{.expectedTypes = {"string"},

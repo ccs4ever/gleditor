@@ -1,0 +1,49 @@
+Fifth increment validation evidence manifest
+Date: 2026-10-14 UTC
+Repository HEAD/base: 975d8b1b0fb2b08659aa3db04ed81071d0526a43
+Application: build/xuzz, SHA-256 13e0efc05161179adac8ebc5f1f71c7f5d9279bf865cf6a8e957219cb0bc0a08
+Owning E2E test binary: build/xudu_test, SHA-256 e53564fb6da78a65749d945c757b1ae54ac473547a22d1988c08e2ea21d31101
+Xuzz test binary: build/xuzz_test, SHA-256 cc87bb380a46758c2ac8341906c190ae5a9e38feece03a39fa16b4f7c45b05b3
+UI test binary: build/zigzag_test, SHA-256 8b4f7e6992cfe37c0cd4dc8b6e965f320686c5f295d3619dbe065fd9614da6de
+Core library test binary: build/gleditor_test, SHA-256 3d23a7f6f09ea7d5161e5bd9e9a4c23dd3a34b59e2475141550cf2a0d3488615 (unchanged; prior 785/785 result reused)
+Core renderer comparison binary: build/gleditor, SHA-256 9d25646af8e667b684000eae1c0c0491a78e1957a4298dc5ffff8b5b385773c4
+Final build and corrected test relink: /workspace/spatial-build/fifth-build-test-repair.log, root-confirmed exit 0
+
+Patch hash scopes (sha256 of `git diff --binary -- <listed files>`):
+Product source only (five apps/common and apps/xuzz files): 2b8a96d23b42a4f56229a46fecc60cc9f040b42c7e00d812fb0d93eb4b3f56f5
+Product source plus owning E2E test (same five files plus tests/xudu/e2e_binary_orchestration_test.cpp): 51bb7a1bdb7a68bc43d86ddaef3fb8edcc9bc378a3b613a7c005f36f206e03d1
+
+Native test runner: /workspace/spatial-build/run.sh, container spatial-native-session.
+Each run used fresh XDG data/config/cache roots. OpenGL and OpenGL ES used the headless offscreen
+driver; Vulkan and compare-backends used SDL_VIDEODRIVER=x11 under Xvfb with -noreset.
+
+Passed checks and exact scopes:
+- `./build/zigzag_test`: exit 0, 233/233 tests; log `unit/zigzag-test.log.gz`.
+- `./build/xuzz_test`: exit 0, 99/99 tests; log `unit/xuzz-test.log.gz`.
+- `./build/xudu_test --gtest_filter=SystemDocsTest.*`: exit 0, 24/24 tests; log `unit/system-docs.log.gz`.
+- `./build/xudu_test --gtest_filter=E2EBinaryOrchestrationTest.uiFontScaleUsesGovernedNativeForm`:
+  exit 0, 1/1 for each XUDU_BACKEND=opengl, opengles and vulkan. The Vulkan run used
+  `xvfb-run -a -s '-noreset -screen 0 1440x1000x24'`. Per-backend test output and transcript are
+  gzip-compressed under `font-scale/800x600-*/`.
+- `./tools/compare-backends.sh`: exit 0 under Xvfb, with `XUDU_TEST_BIN` explicitly set to the
+  nonexistent `/workspace/spatial-build/disabled-xudu-test` to exclude the broad E2E extension.
+  OpenGL/OpenGL ES differ by 0/480000 pixels; Vulkan differs from OpenGL by 1186/480000 (0.2471%).
+  Log is `backend-compare/compare-backends.log.gz`.
+
+The initial OpenGL form-E2E attempt failed because its test fixture seeded
+`config/xudu/system/ui`; the app reads `config/xuzz/system/ui`. Only the test fixture path changed.
+The app SHA stayed 13e0efc... and corrected test SHA e53564fb... passed all three backends. The
+initial gtest failure log is retained as `diagnostics/font-form-gl-wrong-config-root.log.gz`. The
+test's separate transcript was not preserved: the corrected test recreated the same fixed fixture
+directory before its transcript could be archived. The corrected GL/GLES/Vulkan transcripts are
+retained separately and are not represented as the initial failed transcript.
+
+An accidental unfiltered `xudu_test` launch was stopped after the scope was identified. It was not
+the 233-case UI suite; the partial old-binary log includes the known 89-vs-100 whole-page ink check
+and the original incorrect fixture path. It is retained only as
+`diagnostics/unfiltered-xudu-run-old-fixture.log.gz`; it is not a fifth-increment suite result.
+
+Core compare-backends PNGs are lossless conversions of the corresponding PPM captures under
+/workspace/spatial-build/fifth-compare-raw/. Font E2E PNGs are lossless and pixel-identical to the
+raw PPMs under `/workspace/spatial-build/fifth-test-raw/font-scale/`; exact raw and PNG hashes are
+in `SHA256SUMS`.
