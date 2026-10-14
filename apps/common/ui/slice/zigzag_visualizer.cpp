@@ -1884,11 +1884,13 @@ void ZigzagVisualizer::drawScene(gleditor::FrameContext &ctx) {
     // A beam runs from card centre to card centre. Where both cards lie in
     // the plane the cards are drawn in, the ends of the beam lie in it too,
     // and which of the two shows there is a depth tie. When the beams were
-    // drawn first, the cards won it; drawn after them among the translucent
-    // draws, the beams would. So the beam stops at each card's edge, border
-    // included, and keeps the share of the run it had, so that it is shaded
-    // as it was. Cards are drawn opaque even while they fade (see shown()),
-    // so nothing that showed is lost.
+    // drawn first, the cards won the exact ties and the beams the near ones,
+    // so a beam's end showed over some cards and not others; drawn after the
+    // cards among the translucent draws, the beams would win every one and
+    // cross every card they join. So the beam stops at each card's edge,
+    // border included, and keeps the share of the run it had, so that it is
+    // shaded as it was. Cards are drawn opaque even while they fade (see
+    // shown()), so nothing a card did not already cover is lost.
     const float borderHalf = scene_.border_thickness / 2.0F;
     const float inPlane    = presentation_config_.connectionBeamWidthPx / 2.0F;
     const auto cardOf =
