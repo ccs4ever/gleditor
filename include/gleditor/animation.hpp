@@ -26,6 +26,17 @@ namespace gleditor::anim {
 inline constexpr double docArrival = 0.45;
 
 /**
+ * @brief Frames a scripted capture waits, after the frame it was due on, for
+ *        work that frame started to finish.
+ *
+ * Two seconds at sixty frames a second: longer than any animation or camera
+ * placement the program starts (docArrival is under half a second), and the
+ * bound that matters for what never finishes -- a live video is busy for as
+ * long as it plays, and a capture of it is wanted all the same.
+ */
+inline constexpr int captureSettleFrames = 120;
+
+/**
  * @brief How far in front of its resting place a document starts.
  *
  * Along +Z, which is towards the camera, so a document arrives by receding
