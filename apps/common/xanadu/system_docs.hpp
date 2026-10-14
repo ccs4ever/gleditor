@@ -171,7 +171,19 @@ inline constexpr std::string_view kSliceSubviewField       = ".subview";
 [[nodiscard]] std::string slicePresentationKey(std::string_view sliceId);
 /// Which sub-view of its view a slice shows, by the id its descriptor gives
 /// it (U7a); empty is the view's first, its default.
-[[nodiscard]] std::string sliceSubviewKey(std::string_view sliceId);
+[[nodiscard]] std::string sliceSubviewKey(std::string_view sliceId,
+                                          std::string_view viewKind);
+/// What a slice's placement keeps beside its presentation (view-system.md
+/// §7.5): the bindings, the groups, the ring order and the cell in focus. One
+/// setting each, keyed by the store's DocumentId.
+inline constexpr std::string_view kSliceAxesField      = ".axes";
+inline constexpr std::string_view kSliceGroupsField    = ".groups";
+inline constexpr std::string_view kSliceRingOrderField = ".ringOrder";
+inline constexpr std::string_view kSliceFocusField     = ".focus";
+[[nodiscard]] std::string sliceAxesKey(std::string_view sliceId);
+[[nodiscard]] std::string sliceGroupsKey(std::string_view sliceId);
+[[nodiscard]] std::string sliceRingOrderKey(std::string_view sliceId);
+[[nodiscard]] std::string sliceFocusKey(std::string_view sliceId);
 inline constexpr std::string_view kPhysicsKRepel   = "physics.kRepel";
 inline constexpr std::string_view kPhysicsKPlane   = "physics.kPlane";
 inline constexpr std::string_view kPhysicsKAlign   = "physics.kAlign";
@@ -1010,8 +1022,19 @@ dimensionCueSettingSpecs(std::string_view dimension, std::uint32_t colour,
 /// defaultSettingSpecs(): which slices a reader opens is known only then.
 [[nodiscard]] SettingSpec
 slicePresentationSettingSpec(std::string_view sliceId);
-/// The same for the sub-view of that view, by its descriptor's id (U7a).
-[[nodiscard]] SettingSpec sliceSubviewSettingSpec(std::string_view sliceId);
+/// The same for the sub-view that view @p viewKind shows the slice in, by its
+/// descriptor's id (U7a): each view of a slice has its own, since an id means
+/// something only to the view that has it.
+[[nodiscard]] SettingSpec sliceSubviewSettingSpec(std::string_view sliceId,
+                                                  std::string_view viewKind);
+/// The three settings a slice's bindings are kept in -- axes, groups and ring
+/// order, in that order -- which are lists of any length, as the schema says
+/// with a repeated type ("string*").
+[[nodiscard]] std::vector<SettingSpec>
+sliceBindingSettingSpecs(std::string_view sliceId);
+/// The cell a slice was last focused on: its operation index, or no value for
+/// none yet ("integer*").
+[[nodiscard]] SettingSpec sliceFocusSettingSpec(std::string_view sliceId);
 
 /// Keyboard scopes a key binding can be confined to (gleditor::Command::scope):
 /// the pane that has the keyboard.

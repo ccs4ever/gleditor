@@ -54,9 +54,26 @@ std::string settings::slicePresentationKey(const std::string_view sliceId) {
   return std::string{kSlicePrefix} + std::string{sliceId} +
          std::string{kSlicePresentationField};
 }
-std::string settings::sliceSubviewKey(const std::string_view sliceId) {
+std::string settings::sliceSubviewKey(const std::string_view sliceId,
+                                      const std::string_view viewKind) {
+  return std::string{kSlicePrefix} + std::string{sliceId} + "." +
+         std::string{viewKind} + std::string{kSliceSubviewField};
+}
+std::string settings::sliceAxesKey(const std::string_view sliceId) {
   return std::string{kSlicePrefix} + std::string{sliceId} +
-         std::string{kSliceSubviewField};
+         std::string{kSliceAxesField};
+}
+std::string settings::sliceGroupsKey(const std::string_view sliceId) {
+  return std::string{kSlicePrefix} + std::string{sliceId} +
+         std::string{kSliceGroupsField};
+}
+std::string settings::sliceRingOrderKey(const std::string_view sliceId) {
+  return std::string{kSlicePrefix} + std::string{sliceId} +
+         std::string{kSliceRingOrderField};
+}
+std::string settings::sliceFocusKey(const std::string_view sliceId) {
+  return std::string{kSlicePrefix} + std::string{sliceId} +
+         std::string{kSliceFocusField};
 }
 std::string settings::dimensionDashKey(const std::string_view dimension) {
   return std::string{kDimensionPrefix} + std::string{dimension} +
@@ -531,20 +548,31 @@ MicroversionId makeValueCell(Store &store, MicroversionId cur,
   return cur;
 }
 
+/// A shape's last type may end in '*': any number of values of that type,
+/// none included, stand in its place. A list that grows with what the reader
+/// does -- a slice's saved bindings -- cannot be given a count in advance.
+constexpr char kRepeatedType = '*';
+
 bool matchShape(const SettingSchemaShape &shape,
                 const std::span<const CellValue> values,
                 std::string *const errOut) {
-  if (values.size() != shape.expectedTypes.size()) {
+  const auto &types  = shape.expectedTypes;
+  const bool repeats = !types.empty() && !types.back().empty() &&
+                       kRepeatedType == types.back().back();
+  const auto fixed = repeats ? types.size() - 1 : types.size();
+  if (repeats ? values.size() < fixed : values.size() != fixed) {
     if (errOut != nullptr) {
       *errOut = "Element count mismatch: expected " +
-                std::to_string(shape.expectedTypes.size()) + ", got " +
+                std::string(repeats ? "at least " : "") +
+                std::to_string(fixed) + ", got " +
                 std::to_string(values.size());
     }
     return false;
   }
   for (std::size_t i = 0; i < values.size(); ++i) {
-    const auto &expected = shape.expectedTypes[i];
-    const auto &val      = values[i];
+    const auto expected =
+        i < fixed ? types[i] : types.back().substr(0, types.back().size() - 1);
+    const auto &val = values[i];
     if (expected == "float" || expected == "double") {
       if (!std::holds_alternative<double>(val) &&
           !std::holds_alternative<std::int64_t>(val)) {
@@ -2084,9 +2112,38 @@ dimensionCueSettingSpecs(const std::string_view dimension,
   };
 }
 
-SettingSpec sliceSubviewSettingSpec(const std::string_view sliceId) {
-  return {.name    = settings::sliceSubviewKey(sliceId),
-          .notes   = "Which sub-view of its view this slice shows, by id; "
+SettingSpec sliceFocusSettingSpec(const std::string_view sliceId) {
+  return {.name    = settings::sliceFocusKey(sliceId),
+          .notes   = "The cell this slice was last focused on, by its "
+                     "operation index; empty for a slice never moved in",
+          .schemas = {{.expectedTypes = {"integer*"}, .defaultValues = {}}}};
+}
+
+std::vector<SettingSpec>
+sliceBindingSettingSpecs(const std::string_view sliceId) {
+  const auto list = [](std::string name, std::string notes) {
+    return SettingSpec{
+        .name    = std::move(name),
+        .notes   = std::move(notes),
+        .schemas = {{.expectedTypes = {"string*"}, .defaultValues = {}}}};
+  };
+  return {
+      list(settings::sliceAxesKey(sliceId),
+           "What each binding point of this slice shows: the point's name, "
+           "dimension, group or nothing, then the dimension's name or the "
+           "group's place in the groups, for each point"),
+      list(settings::sliceGroupsKey(sliceId),
+           "The groups of dimensions made for this slice: a group's name, how "
+           "many members it has, then a kind and a name or place for each"),
+      list(settings::sliceRingOrderKey(sliceId),
+           "The order of this slice's dimensions round the ring, by name"),
+  };
+}
+
+SettingSpec sliceSubviewSettingSpec(const std::string_view sliceId,
+                                    const std::string_view viewKind) {
+  return {.name    = settings::sliceSubviewKey(sliceId, viewKind),
+          .notes   = "Which sub-view of this view the slice shows, by id; "
                      "empty is the view's first",
           .schemas = {
               {.expectedTypes = {"string"}, .defaultValues = {std::string{}}}}};
@@ -2961,6 +3018,12 @@ SystemStoreModel::updateSetting(Store &store, const MicroversionId &parent,
                                   " dimension");
     }
     auto prev = entry->nameCell;
+    if (values.empty() && !entry->value.valueCells.empty()) {
+      // A list that has been emptied: the rank has to be cut from its name,
+      // or the values it held would still be read.
+      cur = store.setLink(cur, prev, *valuesDim, zigzag::DimVector::POS,
+                          zigzag::noCell);
+    }
     for (const auto &v : values) {
       zigzag::CellRef valRef{zigzag::noCell};
       cur    = makeValueCell(store, cur, v, valRef);
