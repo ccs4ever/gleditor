@@ -23,7 +23,40 @@ namespace {
   return text;
 }
 
+[[nodiscard]] bool sameLetters(const std::string_view a,
+                               const std::string_view b) noexcept {
+  return std::ranges::equal(a, b, [](const char x, const char y) {
+    return std::tolower(static_cast<unsigned char>(x)) ==
+           std::tolower(static_cast<unsigned char>(y));
+  });
+}
+
+/// The point a reader means by @p name: the one spelt exactly so, or else the
+/// one that differs only in case ('X' for x), when that is only one.
+[[nodiscard]] std::optional<ViewAxisId>
+pointNamed(const ViewAxisSet &axes, const std::string_view name) {
+  if (const auto exact = axes.axisNamed(name)) {
+    return exact;
+  }
+  std::optional<ViewAxisId> found;
+  for (ViewAxisId axis = 0; axis < axes.axisCount(); ++axis) {
+    if (const auto point = axes.pointName(axis);
+        point && sameLetters(*point, name)) {
+      if (found) {
+        return std::nullopt;
+      }
+      found = axis;
+    }
+  }
+  return found;
+}
+
 } // namespace
+
+std::optional<ViewAxisId> bindingPointNamed(const ViewAxisSet &axes,
+                                            const std::string_view name) {
+  return pointNamed(axes, name);
+}
 
 std::optional<BindCommand> parseBindCommand(const std::string_view text) {
   const auto line = trimmed(text);
@@ -41,11 +74,34 @@ std::optional<BindCommand> parseBindCommand(const std::string_view text) {
                      .target = std::string(target)};
 }
 
+BindingChoices bindingChoicesOf(const ViewManifold &space,
+                                const SpanReader &reader) {
+  const auto &axes = space.axes();
+  BindingChoices choices;
+  for (ViewAxisId axis = 0; axis < axes.axisCount(); ++axis) {
+    if (auto point = axes.pointName(axis)) {
+      choices.points.push_back(std::move(*point));
+    }
+  }
+  for (const auto dim : space.base().dimensions()) {
+    if (auto name = space.base().textOf(dim, reader);
+        !name.empty() && name != kDimDims) {
+      choices.dimensions.push_back(std::move(name));
+    }
+  }
+  axes.forEachGroup([&](const BindTarget group) {
+    if (auto name = axes.groupName(group)) {
+      choices.groups.push_back(std::move(*name));
+    }
+  });
+  return choices;
+}
+
 std::expected<Bound, ViewError> bindByName(ViewManifold &space,
                                            const SpanReader &reader,
                                            const BindCommand &command) {
   auto &axes      = space.axes();
-  const auto axis = axes.axisNamed(command.point);
+  const auto axis = pointNamed(axes, command.point);
   if (!axis) {
     return std::unexpected{ViewError::UnknownAxis};
   }

@@ -6,6 +6,7 @@
  *        finds a dimension or a group by name and refuses what it cannot, and
  *        a view's sub-views are stepped through and found by id.
  */
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -324,3 +325,43 @@ TEST(ViewCommandKeymapTest, EveryViewCommandHasADefaultChordInTheKeymap) {
 }
 
 } // namespace
+
+TEST(BindCommandTest, APointIsFoundWhateverTheCaseItWasTypedIn) {
+  ContactSlice slice;
+  const auto base = slice.manifold();
+  ViewManifold space{base};
+  configure(space);
+  const auto bound = xanadu::view::bindByName(
+      space, slice.store, {.point = "X", .target = "d.address"});
+  ASSERT_TRUE(bound);
+  EXPECT_EQ(bound->point, "x") << "the point's own spelling is reported";
+  EXPECT_EQ(space.axes().shown(0), slice.dim("d.address"));
+  EXPECT_EQ(xanadu::view::bindingPointNamed(space.axes(), "Z"), 2U);
+  EXPECT_EQ(xanadu::view::bindingPointNamed(space.axes(), "q"), std::nullopt);
+}
+
+TEST(BindCommandTest, TwoPointsThatDifferOnlyInCaseAreToldApartExactly) {
+  ContactSlice slice;
+  const auto base = slice.manifold();
+  ViewManifold space{base};
+  configure(space, {"a", "A"});
+  EXPECT_EQ(xanadu::view::bindingPointNamed(space.axes(), "a"), 0U);
+  EXPECT_EQ(xanadu::view::bindingPointNamed(space.axes(), "A"), 1U);
+}
+
+TEST(BindingChoicesTest, ListTheDimensionsAndGroupsAReaderCanName) {
+  ContactSlice slice;
+  const auto base = slice.manifold();
+  ViewManifold space{base};
+  configure(space);
+  const std::array members{slice.dim("d.email")};
+  ASSERT_TRUE(space.axes().createGroup("Contact", members));
+
+  const auto choices = xanadu::view::bindingChoicesOf(space, slice.store);
+  EXPECT_EQ(choices.points, (std::vector<std::string>{"x", "y", "z"}));
+  EXPECT_THAT(choices.dimensions,
+              testing::IsSupersetOf({"d.email", "d.phone", "d.address"}));
+  EXPECT_THAT(choices.dimensions,
+              testing::Not(testing::Contains(std::string(xanadu::kDimDims))));
+  EXPECT_EQ(choices.groups, (std::vector<std::string>{"Contact"}));
+}

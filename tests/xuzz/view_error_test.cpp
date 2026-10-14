@@ -30,8 +30,8 @@ template <typename List> constexpr bool denseFromZero(const List &list) {
 }
 static_assert(denseFromZero(kViewErrors));
 static_assert(denseFromZero(kViewMessages));
-static_assert(kViewErrors.back() == ViewError::BadCommand);
-static_assert(kViewMessages.back() == ViewMessage::ActionNotSupported);
+static_assert(kViewErrors.back() == ViewError::BadPointName);
+static_assert(kViewMessages.back() == ViewMessage::PointShowsNothing);
 
 } // namespace
 
@@ -78,4 +78,11 @@ TEST(ViewErrorTest, RefusalsTheReaderCausesUseTheWordsOfSection12) {
             "'{inner}' already contains '{outer}'.");
   EXPECT_EQ(messageText(messageKey(ViewError::PromotionRefused)),
             "This pack is too large to keep ({count} cells).");
+  EXPECT_EQ(messageText(messageKey(ViewError::BadPointName)),
+            "A binding point needs a name of its own; '{name}' will not do.");
+  EXPECT_EQ(messageText(ViewMessage::AxisAlsoShown),
+            "Showing {target} on axis {axis}; axis {other} shows it too.");
+  EXPECT_EQ(messageText(ViewMessage::VisualizerCannot),
+            "The ZigZag visualizer cannot {action}; choose a slice view from "
+            "the view palette first.");
 }

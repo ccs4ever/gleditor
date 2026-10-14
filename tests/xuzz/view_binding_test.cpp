@@ -671,3 +671,64 @@ TEST(ViewBindingTest, replayReportsEachMissingNameAndRestoresTheRest) {
 }
 
 } // namespace
+
+TEST(BindingPointsTest, ANameIsRefusedWhenItIsEmptyOrTaken) {
+  ContactSlice slice;
+  const auto base = slice.manifold();
+  ViewManifold space{base};
+  const auto &spatial = xanadu::view::spatialRole();
+  ASSERT_TRUE(space.axes().addAxis("x", spatial));
+  EXPECT_EQ(space.axes().addAxis("x", spatial),
+            std::unexpected{xanadu::view::ViewError::BadPointName});
+  EXPECT_EQ(space.axes().addAxis("", spatial),
+            std::unexpected{xanadu::view::ViewError::BadPointName});
+  // Nothing was half added: one point, and the arena sound.
+  EXPECT_EQ(space.axes().axisCount(), 1U);
+  xuzz_test::expectSound(space);
+  // Configuring again with a point already there is not an error.
+  const std::array again{
+      xanadu::view::BindingPoint{.name = "x", .role = std::cref(spatial)}};
+  EXPECT_TRUE(space.axes().configure(again));
+  EXPECT_EQ(space.axes().axisCount(), 1U);
+}
+
+TEST(SavedBindingCellsTest, RoundTripAGroupAndEveryKindOfBinding) {
+  using namespace xanadu::view;
+  SavedBindings saved;
+  saved.axes = {
+      {.point = "x", .shows = SavedTarget{SavedDimension{.name = "d.email"}}},
+      {.point = "y", .shows = SavedTarget{SavedGroupRef{.index = 1}}},
+      {.point = "z", .shows = std::nullopt}};
+  saved.groups = {
+      {.name = "Inner", .members = {SavedDimension{.name = "d.phone"}}},
+      {.name    = "Outer, with a space",
+       .members = {SavedGroupRef{.index = 0},
+                   SavedDimension{.name = "d.name"}}},
+      {.name = "Empty", .members = {}}};
+  saved.ringOrder = {"d.phone", "d.email"};
+
+  const auto cells = cellsOf(saved);
+  EXPECT_EQ(cells.axes.size(), 9U);
+  const auto back = bindingsFromCells(cells);
+  ASSERT_TRUE(back.has_value());
+  EXPECT_EQ(*back, saved);
+}
+
+TEST(SavedBindingCellsTest, CellsInAnotherShapeAreRefusedNotHalfRead) {
+  using namespace xanadu::view;
+  const auto parsed = [](SavedBindingCells cells) {
+    return bindingsFromCells(cells).has_value();
+  };
+  EXPECT_TRUE(parsed({}));
+  EXPECT_FALSE(parsed({.axes = {"x", "dimension"}}));
+  EXPECT_FALSE(parsed({.axes = {"x", "mystery", "d.a"}}));
+  EXPECT_FALSE(parsed({.axes = {"x", "group", "not a number"}}));
+  EXPECT_FALSE(parsed({.axes = {"x", "group", "0"}}))
+      << "a group that is not in the list";
+  EXPECT_FALSE(parsed({.groups = {"G", "2", "dimension", "d.a"}}))
+      << "a count that runs past the end";
+  EXPECT_FALSE(parsed({.groups = {"G", "1", "group", "5"}}));
+  EXPECT_FALSE(parsed({.groups = {"G", "1", "nothing", ""}}))
+      << "a member that is nothing";
+  EXPECT_FALSE(parsed({.groups = {"G"}}));
+}

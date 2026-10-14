@@ -368,6 +368,32 @@ struct SavedBindings {
 [[nodiscard]] SavedBindings saveBindings(const ViewManifold &space,
                                          const xanadu::SpanReader &reader);
 
+/**
+ * @brief SavedBindings as the three flat lists of strings the settings
+ *        slice.<id>.axes, .groups and .ringOrder of system://layout hold.
+ *
+ * A cell is one string, so a setting is a list of cells rather than a string
+ * to parse. The axes list is a point's name, "dimension", "group" or
+ * "nothing", then the dimension's name, the group's place in the groups list,
+ * or nothing, three cells to an axis. The groups list is a group's name, how
+ * many members it has, then a kind and a value for each. The ring order is
+ * the dimensions' names. The pouch is system://pouches' (§7.5) and is not
+ * here.
+ */
+struct SavedBindingCells {
+  std::vector<std::string> axes, groups, ringOrder;
+
+  bool operator==(const SavedBindingCells &) const = default;
+};
+
+[[nodiscard]] SavedBindingCells cellsOf(const SavedBindings &saved);
+
+/// The bindings the lists say; nothing for lists that are not in the shape
+/// cellsOf() writes (a count that runs past the end, an unknown kind, a group
+/// that is not in the list), which the host reports rather than half-applies.
+[[nodiscard]] std::optional<SavedBindings>
+bindingsFromCells(const SavedBindingCells &cells);
+
 /// One name replay could not resolve: @p message's {name} is @p name, and
 /// its {axis}, {group} or {where} is @p where.
 struct ReplayNotice {
