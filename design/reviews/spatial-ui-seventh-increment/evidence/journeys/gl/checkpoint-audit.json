@@ -1,0 +1,99 @@
+{
+  "exit_code": 0,
+  "visit_record_counts": {
+    "before": 1,
+    "enter": 2,
+    "after": 2
+  },
+  "source_operation_purity": {
+    "0": true,
+    "1": true
+  },
+  "images": [
+    {
+      "raw_path": "/workspace/spatial-build/seventh-journey-gl-raw/00-link-preview.ppm",
+      "raw_sha256": "e2416e36a36aa328c25a6c9e9836f172d6092cdf82b0faef0974d49d21947b89",
+      "png": "00-link-preview.png",
+      "png_sha256": "dddfd66c688044b00c4270e1963a52c02b0f930a57696f4e16893d0acbbc29c5",
+      "lossless_pixel_equality": true
+    },
+    {
+      "raw_path": "/workspace/spatial-build/seventh-journey-gl-raw/00a-source-selection.ppm",
+      "raw_sha256": "3bb0b77c8c37dad3d9f102453db7143b0f1b6f0f3f3058d0ac5614329c89b344",
+      "png": "00a-source-selection.png",
+      "png_sha256": "c80b2106cefe99b8e58e952e41047a57e023460e0dabf42f6bdab9e3889caddf",
+      "lossless_pixel_equality": true
+    },
+    {
+      "raw_path": "/workspace/spatial-build/seventh-journey-gl-raw/03-enter-selected.ppm",
+      "raw_sha256": "fc7bb76ec464bc3be7f8f9af19f48fe6623c2d982fd09e3d29cd34939053f398",
+      "png": "03-enter-selected.png",
+      "png_sha256": "2ccb5fa2d8c9913a323005a8289fcd35612c0e8388abbfceac7407d903c99a00",
+      "lossless_pixel_equality": true
+    },
+    {
+      "raw_path": "/workspace/spatial-build/seventh-journey-gl-raw/04-pan-1.ppm",
+      "raw_sha256": "ba16099c6172206e1d69f1ed410c9282b971b002984a1b83d3d8d0fc3ad0eeab",
+      "png": "04-pan-1.png",
+      "png_sha256": "071e2b5bba387a11376c4259e774be6c57c0bf08807e32fa5c40de4f5baca32b",
+      "lossless_pixel_equality": true
+    },
+    {
+      "raw_path": "/workspace/spatial-build/seventh-journey-gl-raw/05-pan-2.ppm",
+      "raw_sha256": "33e5450285f11c7fc7f004b0ea0a8a5ce8d66e8f71e2c30c1bb6abc6c0b537e1",
+      "png": "05-pan-2.png",
+      "png_sha256": "9cb06618abc4ddc38cb13603c5f538aa282de9e52993e99c84efd14bb1f8d16e",
+      "lossless_pixel_equality": true
+    },
+    {
+      "raw_path": "/workspace/spatial-build/seventh-journey-gl-raw/06-pan-3.ppm",
+      "raw_sha256": "e10db648be545566ce8d12131ee5f90a43776d224e2aad34008e7aa71151ad00",
+      "png": "06-pan-3.png",
+      "png_sha256": "67c289b3f940143537169bc40118a781b9e10533b29d087a0177e04349765000",
+      "lossless_pixel_equality": true
+    },
+    {
+      "raw_path": "/workspace/spatial-build/seventh-journey-gl-raw/07-pan-4.ppm",
+      "raw_sha256": "96ead2b322cdf55b5bd9d3f6c54bbbb376b6685d0ea3776d4e4d2c0996d3aecc",
+      "png": "07-pan-4.png",
+      "png_sha256": "b8a839ef4375eaba70045e316480a2b9f0beae43146257924b3feb8206a6e1d3",
+      "lossless_pixel_equality": true
+    },
+    {
+      "raw_path": "/workspace/spatial-build/seventh-journey-gl-raw/08-pan-5.ppm",
+      "raw_sha256": "4a7c4b2c33104d2cfcda43d29ed08b360d39aaa966df65a333096279c57e1204",
+      "png": "08-pan-5.png",
+      "png_sha256": "5940511cfda7a4795196a9a91be244aea44a0729aed785548d26044c22d0815e",
+      "lossless_pixel_equality": true
+    },
+    {
+      "raw_path": "/workspace/spatial-build/seventh-journey-gl-raw/09-pan-6.ppm",
+      "raw_sha256": "63e408ab055b4d89759e46016e59bb2e278d49299505e6925cde695e39766b3a",
+      "png": "09-pan-6.png",
+      "png_sha256": "ebbbc56fbfc159d6efa09904d13434cf7087b5fc5bf18edcaefd621c2ec23b46",
+      "lossless_pixel_equality": true
+    },
+    {
+      "raw_path": "/workspace/spatial-build/seventh-journey-gl-raw/10-continuation-wheel.ppm",
+      "raw_sha256": "63e408ab055b4d89759e46016e59bb2e278d49299505e6925cde695e39766b3a",
+      "png": "10-continuation-wheel.png",
+      "png_sha256": "ebbbc56fbfc159d6efa09904d13434cf7087b5fc5bf18edcaefd621c2ec23b46",
+      "lossless_pixel_equality": true
+    },
+    {
+      "raw_path": "/workspace/spatial-build/seventh-journey-gl-raw/11-back.ppm",
+      "raw_sha256": "e31dff3d1196f58c039c4620de0ca75dc1f8c1fc7bee0b5bab7f0619bf9626ea",
+      "png": "11-back.png",
+      "png_sha256": "6d5856416eee0fa41f9f1d9b1ddf405de26b899f9616398e66b17736a925d90f",
+      "lossless_pixel_equality": true
+    },
+    {
+      "raw_path": "/workspace/spatial-build/seventh-journey-gl-raw/12-origin.ppm",
+      "raw_sha256": "45ee459bd973ccc5d07b3a673e8b21cef3e93474e075bae6da15ad93b902624c",
+      "png": "12-origin.png",
+      "png_sha256": "f8d64b945708727d7edea3d7774970159f664f5707a4ef3079ed36fa346389aa",
+      "lossless_pixel_equality": true
+    }
+  ],
+  "review_status": "Captured at handoff; independent final review and full acceptance pending"
+}

@@ -1,0 +1,6 @@
+opengl-overlay-1 changed_pixels=0
+opengl-overlay-2 changed_pixels=0
+opengl-plain-1 changed_pixels=0
+opengl-plain-2 changed_pixels=0
+opengles-overlay-1 changed_pixels=0
+opengles-overlay-2 changed_pixels=0

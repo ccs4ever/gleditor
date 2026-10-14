@@ -1,0 +1,7 @@
+opengl-overlay-1 vs opengl-overlay-2 changed_pixels=0
+opengles-overlay-1 vs opengles-overlay-2 changed_pixels=0
+opengl-plain-1 vs opengl-plain-2 changed_pixels=0
+opengl-overlay-1 vs opengles-overlay-1 changed_pixels=0
+opengl-overlay-2 vs opengles-overlay-2 changed_pixels=0
+opengl-overlay-1 vs opengl-plain-1 changed_pixels=17840
+opengles-overlay-1 vs opengl-plain-1 changed_pixels=17840

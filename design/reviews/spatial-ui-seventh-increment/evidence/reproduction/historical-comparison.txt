@@ -1,0 +1,13 @@
+Historical overlay comparison
+
+Historical sixth GL: SHA-256 e217b9fb9c8800b089c035a94754a8fa1a4f301f6815679e9ad0822abeb78b2b
+Historical sixth GLES: SHA-256 7763cbc52147ac6319dff50735e179fe59488b45d2a1fc413b02b794b6a5eaa8
+Current seventh OpenGL overlay runs 1 and 2: SHA-256 7763cbc52147ac6319dff50735e179fe59488b45d2a1fc413b02b794b6a5eaa8 each
+Current seventh OpenGLES overlay runs 1 and 2: SHA-256 7763cbc52147ac6319dff50735e179fe59488b45d2a1fc413b02b794b6a5eaa8 each
+
+Historical GL vs historical GLES: 6220 changed pixels.
+Historical GL vs current OpenGL: 6220 changed pixels; max channel delta 23; mean absolute channel delta 0.060481.
+Current OpenGL vs current OpenGLES: 0 changed pixels.
+No backend comparison threshold was modified.
+
+The recorded historical sixth gate (`/workspace/spatial-build/sixth-final-gates.sh`) explicitly set SDL_VIDEODRIVER=x11 and wrapped the entire comparison script in one xvfb-run invocation. The seventh reproduction used SDL_VIDEODRIVER=x11 too, but started a separate fresh Xvfb and fresh XDG profile for each capture. Driver logs alone do not identify SDL's video driver; the wrapper command is the provenance for that setting. The differing OpenGL image remains unexplained by this reproduction.

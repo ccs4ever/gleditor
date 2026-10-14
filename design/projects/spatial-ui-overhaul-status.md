@@ -7,6 +7,31 @@ session.
 
 ## Current checkpoint
 
+Seventh restart checkpoint (2026-10-14), validation partially complete: glyph atlas allocations now
+align to the deepest existing mip block so unrelated earlier glyph requests cannot change minified
+coverage. The actual-device `m`-prefix regression fails on GL/GLES/Vulkan before the fix (80
+differing pixels, maximum channel delta 45) and passes exactly afterward. The initial `i` control
+already had an aligned shift and passed. Allocation width/height rounding and zero trailing padding
+stay in `src/glyphcache/cache.cpp`; glyph dimensions, layout, palettes and public APIs do not
+change. Backend comparison changes are comments only, with no relaxed criterion.
+
+Owning checks pass 53/53. Both strict core backend comparison rounds pass, with exact GL/GLES
+ordinary and overlay frames and 0.2471% Vulkan difference. Configured 1/4 Vulkan captures match; the
+sample does not exercise actual split recording. The broad E2E extension remains excluded. The first
+full library run passes 789/790, with the unchanged O0 incremental-resize benchmark at 3392.3 ns
+versus its 1000 ns limit. Isolated candidate and frozen old-library runs pass at 684.2 and 727.3 ns
+respectively. No performance budget is accepted. Full library rerun, UI/Xuzz suites and final
+repository gates remain for the local session.
+
+GL and Vulkan native preservation runs complete with exit 0, activity counts 1→2→2 and both source
+dumps byte-identical across before/Enter/after snapshots. The lead archives 12 lossless frames per
+run. The prepared GLES run and independent final visual review remain unexecuted at handoff; finish
+them locally before accepting the increment. Exact evidence is under
+`design/reviews/spatial-ui-seventh-increment/`. Completed checks, red proof, frozen source/binary
+hashes and lossless comparison frames are archived there. The local restart instructions are in
+`design/projects/restart-spatial-ui-overhaul-local.md`. Cloud raw PPMs, private profiles and runtime
+helpers remain outside Git; rebuild locally.
+
 Sixth checkpoint (2026-10-14): UI-authored text reflow now updates the shaped-page index beyond the
 GPU-built page frontier. The fifth checkpoint could leave Link Enter pending because its exact
 endpoint page was missing from that index. `Doc::reflowFrom()` recomputes changed metadata until an
@@ -351,23 +376,25 @@ reviews pass.
 
 ## Exact next task
 
-Resolve the strict core glyph-capture equality finding against the frozen-library control without
-weakening its criteria. Then validate actual enlarged document text through existing layout
-tunables; `ui.fontScale` has a governed native form and changes chrome only. The sixth checkpoint
-repairs authored multipage readiness and validates visible later-page continuation. Extend J24 to
-repeated occurrences, unavailable/pending cancellation and stale target replacement, then
-cell/history endpoints. Extend J25 to branching Back/Return and same-profile reopen with exact
-selected state/ranges and activity snapshots. Preserve per-backend native captures and exact
-source-operation evidence. Bounded entry, Origin and direct Back do not complete J24/J25 or
-establish full J1–J16 preservation.
+Finish seventh-checkpoint validation locally from the implementation branch and
+`restart-spatial-ui-overhaul-local.md`: fresh build/submodules, full 790-case library rerun, UI
+233-case and Xuzz 99-case suites, strict backend comparison, format/lint and actual native evidence.
+Investigate repeat O0 latency findings separately without changing the 1000 ns assertion or claiming
+optimized performance acceptance. Core capture comparisons now pass twice; preserve the failed sixth
+captures and the controlled atlas-order regression as historical proof.
 
-Investigate the whole-page ink threshold without weakening it, and resolve legacy J3, J11 and J15
-findings against the pinned baseline. The two stale drag tests are repaired; the native UI
-font-scale control and enlarged-chrome captures are implemented. Native AT-SPI, actual enlarged
-document text, optimized performance acceptance and the full 16+16 journey set remain open. Audit
-changed-region metadata shaping and reflow costs in an optimized build; the sixth repair keeps
-sparse GPU pages but shapes changed pages separately for metadata and GPU rebuild.
+Then investigate the whole-page ink threshold without weakening its 100-pixel criterion and validate
+actual enlarged document text through existing layout tunables. The governed `ui.fontScale` form
+enlarges chrome only. Continue J24 repeated occurrences, pending/unavailable cancellation and stale
+replacement, cell/history endpoints, then J25 branching Back/Return and same-profile reopen.
+Preserve exact source/activity snapshots, native per-backend frames and Link identity. Full J1–J16
+preservation and complete J17–J32 acceptance remain unverified.
 
-The next spatial service package is the publication/pin-lifecycle audit followed by D2 branch/frame
-enumeration, per the dependency map above. Do not substitute raw primedia search for historical
-occurrence coverage, or add physical tablets/another camera before L6/L7/U4a and view-host gates.
+Resolve legacy J3, J11 and J15 findings against the pinned baseline. The stale drag tests and UI
+font-scale control are repaired. Native AT-SPI, optimized performance, actual enlarged document text
+and complete 16+16 journey coverage remain open. Audit changed-region reflow costs and atlas
+allocation overhead in an optimized build; alignment can add up to seven trailing texels per axis.
+
+The next spatial service package is the publication/pin-lifecycle audit before D2 branch/frame
+enumeration. Do not substitute primedia search for historical occurrence coverage or add another
+camera/physical tablets before L6/L7/U4a and view-host gates.

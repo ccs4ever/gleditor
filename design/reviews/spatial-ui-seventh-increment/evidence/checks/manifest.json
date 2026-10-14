@@ -1,0 +1,96 @@
+{
+  "base_commit": "67435ffdfbddbd536a7d99ea43c465ccbcdd432a",
+  "build_mode": "O0 -g0; optimized performance acceptance remains open",
+  "source_files": {
+    "src/glyphcache/cache.cpp": "a29abca8f1a1805ddabfaa3c066bc4df64e0b0a09dca477feb634a17d50595ff",
+    "tests/lib/glyph_cache_mip_test.cpp": "915a276e5250b362f68abf5fb174541b19c9be29a9e169e8b8433143736d4a13",
+    "tools/compare-backends.sh": "71e3174e5233cd0b44626871a56fe1a8e6fd9f75a59f77bb9c6d44ea07693167"
+  },
+  "binaries": {
+    "build/xuzz": "66089e427a2ab6876c31675cfe6e6c0818294c6ba156a9c264caa8ef3c5d7739",
+    "build/gleditor": "fe85f02077b6f3dace4e24ad49d8742383e95e72051ed607d38dd1bdc579f55b",
+    "build/libgleditor.so.0": "419d2142fb3aa9f0181120fb084a05deae6a17935754eae61fe9cd662abf680d",
+    "build/gleditor_test": "4da5cad00f7fa109450e9761426e4490ed4e12c1cf371042206df798eaad86ef",
+    "build/zigzag_test": "9808b15b5a6a246fc95b104ea5aed3f019f0837c4b5480c15fc772a8e44da823",
+    "build/xuzz_test": "cc87bb380a46758c2ac8341906c190ae5a9e38feece03a39fa16b4f7c45b05b3"
+  },
+  "logs": [
+    {
+      "file": "seventh-build-red.log.gz",
+      "exit_code": 0,
+      "command": "canonical make; i-prefix test-only baseline",
+      "uncompressed_sha256": "3a7173aa84300d9dcd9ca8da97c34b00eb1ad1d71e8a075c3f374fd1f13046be",
+      "compressed_sha256": "252055fe626477c003ba056990df89a1351c80400db80250e1e3906ffe1605b8"
+    },
+    {
+      "file": "seventh-red-mip.log.gz",
+      "exit_code": 0,
+      "command": "baseline i-prefix aligned control:3/3",
+      "uncompressed_sha256": "2c97e735eca06f9f73a9b609f7896eecc1b672dcd8986a0b7952966834aa6aed",
+      "compressed_sha256": "e14eb79460af6da7d4da9dba6365701c07a6f435c07cfc4e861ed7814a7e668f"
+    },
+    {
+      "file": "seventh-build-red-m.log.gz",
+      "exit_code": 0,
+      "command": "canonical make; m-prefix test-only baseline",
+      "uncompressed_sha256": "c18ea1ff5fd174b2679abf0e17aaf3cc960f5e0573e0298935138ee838b7a70a",
+      "compressed_sha256": "314d8d403e5a78baf58a2db4f142c079bc18d7c434639fa1db4622d4d5f10f0b"
+    },
+    {
+      "file": "seventh-red-mip-m.log.gz",
+      "exit_code": 1,
+      "command": "baseline m-prefix actual device test:0/3;80 differingpixels max45",
+      "uncompressed_sha256": "66de73c863f21e45e8ecbe6f4c76321863296f8692cea5d52c8418cf057293bc",
+      "compressed_sha256": "420520f88d72bfe8f158694da18f6fd8c3611331fd23f98da14de1d34d57134a"
+    },
+    {
+      "file": "seventh-build-candidate.log.gz",
+      "exit_code": 0,
+      "command": "canonical make after mip-grid alignment",
+      "uncompressed_sha256": "8c7f38b84d974d9828f83a6b88cb0bdf9d347a5cb160b9b6c8ec9aa51d9fc248",
+      "compressed_sha256": "1155bc8a816bf2451535e3ac5b8f514eaddca257553cccf3e9463ddddb37b591"
+    },
+    {
+      "file": "seventh-owning.log.gz",
+      "exit_code": 0,
+      "command": "cache26 +palette24 +actualdevice3:53/53",
+      "uncompressed_sha256": "00da91eaa5391d6a3756051fd43ea0836310d5832c189667192ebdc8d9b6e818",
+      "compressed_sha256": "a2ce4c0e771bd56dcef7b1628303ab1329edd4057b8b2760cefb40c142c84333"
+    },
+    {
+      "file": "seventh-library-full.log.gz",
+      "exit_code": 1,
+      "command": "full library:789/790; O0 benchmark3392.3ns",
+      "uncompressed_sha256": "86eb2a6c041a1ce19dddd040000390d3db676bef54ef7ec1f53a0a2471885259",
+      "compressed_sha256": "55cab5db875d088074e129c3c07b7aecc17ecd9a738ee83b3c173660c13cff5c"
+    },
+    {
+      "file": "seventh-benchmark-candidate.log.gz",
+      "exit_code": 0,
+      "command": "unchanged isolated latency benchmark:684.2ns",
+      "uncompressed_sha256": "7cdbff7625bce33871ac90cab1d7fa5b5a056f455c48f1a23102b2a310181f0a",
+      "compressed_sha256": "b23469adbc93e074ec168b27ca6958dada9f20172a0763be659608adbbb50f74"
+    },
+    {
+      "file": "seventh-benchmark-baseline.log.gz",
+      "exit_code": 0,
+      "command": "same isolated test executable with frozen old library696478:727.3ns",
+      "uncompressed_sha256": "d4ff1812972d46a3c0b8afd9e7d723e4d5e38d699bd533f1d635fdf89811680b",
+      "compressed_sha256": "823b0553aa257bcad6f717eaff0f48a26289bdaa50b52e0c53b9167e57b10a0e"
+    },
+    {
+      "file": "seventh-compare-1.log.gz",
+      "exit_code": 0,
+      "command": "strict core backend compare underfreshXDG X11Xvfb; broadE2Eexcluded",
+      "uncompressed_sha256": "91c2a40731e4ba518bde3b5031a77cb9d2e70289efa51b2adb7fcbfaf8f1f44b",
+      "compressed_sha256": "daeb267c69c7bcdbb0b2c5b610139601bbe5b69ba0e3b1f8f6731553cc2e9890"
+    },
+    {
+      "file": "seventh-compare-2.log.gz",
+      "exit_code": 0,
+      "command": "second strict core comparison with same criteria andfreshprofile",
+      "uncompressed_sha256": "91c2a40731e4ba518bde3b5031a77cb9d2e70289efa51b2adb7fcbfaf8f1f44b",
+      "compressed_sha256": "daeb267c69c7bcdbb0b2c5b610139601bbe5b69ba0e3b1f8f6731553cc2e9890"
+    }
+  ]
+}

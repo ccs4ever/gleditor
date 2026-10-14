@@ -1,0 +1,7 @@
+run=opengl-overlay-2
+backend=opengl
+overlay=yes
+XDG_DATA_HOME=/workspace/spatial-build/seventh-repro/xdg/opengl-overlay-2/data
+XDG_CONFIG_HOME=/workspace/spatial-build/seventh-repro/xdg/opengl-overlay-2/config
+XDG_CACHE_HOME=/workspace/spatial-build/seventh-repro/xdg/opengl-overlay-2/cache
+argv=build/gleditor --backend opengl --profile --strict-diagnostics --toast error:GL_INVALID_ENUM\ in\ glEnable\(0xdead\) --toast warning:overlay\ parity\ check --click 300\,265 --select 20\,34 --screenshot /workspace/spatial-build/seventh-repro/raw/opengl-overlay-2.ppm tests/samples/quick_brown_fox.txt

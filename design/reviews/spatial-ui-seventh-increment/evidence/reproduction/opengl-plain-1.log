@@ -1,0 +1,10 @@
+backend: opengl, SDL2
+file: tests/samples/quick_brown_fox.txt
+accessibility: not in this build
+render: opengl device, version 4.5 (Core Profile) Mesa 25.0.7-2+deb13u1
+glyph cache: atlas 512x512 x1 layers, growing to at most 16384x16384 x64 (device allows 16384x16384 x2048, the vertex encoding 64 layers)
+[TIMING] First page rendered: 693.49 ms (docs in render: 1)
+tagged object at 300,265: kind 1 doc 16382 page 0 cluster 0
+select: doc 0 [20,34)
+wrote screenshot /workspace/spatial-build/seventh-repro/raw/opengl-plain-1.ppm (800x600)
+[TIMING] Complete render settled: 977.18 ms (docs: 1, total pages: 1, built pages: 1)

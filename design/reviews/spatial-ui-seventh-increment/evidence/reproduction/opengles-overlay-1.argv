@@ -1,0 +1,7 @@
+run=opengles-overlay-1
+backend=opengles
+overlay=yes
+XDG_DATA_HOME=/workspace/spatial-build/seventh-repro/xdg/opengles-overlay-1/data
+XDG_CONFIG_HOME=/workspace/spatial-build/seventh-repro/xdg/opengles-overlay-1/config
+XDG_CACHE_HOME=/workspace/spatial-build/seventh-repro/xdg/opengles-overlay-1/cache
+argv=build/gleditor --backend opengles --profile --strict-diagnostics --toast error:GL_INVALID_ENUM\ in\ glEnable\(0xdead\) --toast warning:overlay\ parity\ check --click 300\,265 --select 20\,34 --screenshot /workspace/spatial-build/seventh-repro/raw/opengles-overlay-1.ppm tests/samples/quick_brown_fox.txt

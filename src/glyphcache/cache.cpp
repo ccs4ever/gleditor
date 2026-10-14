@@ -94,7 +94,17 @@ int openingAtlasSize() {
  * nothing ever samples.
  */
 constexpr int atlasMipLevels = 4;
-constexpr int glyphPadding   = 1 << (atlasMipLevels - 1);
+constexpr int atlasMipBlock  = 1 << (atlasMipLevels - 1);
+constexpr int glyphPadding   = atlasMipBlock;
+
+// Padding isolates neighbours, but does not fix a glyph's phase in the global
+// mip grid. Round both allocation extents to the deepest block so lane starts
+// and cumulative offsets stay aligned regardless of earlier cache requests.
+// Extra right and bottom padding remains zero; glyph geometry is unchanged.
+constexpr int paddedGlyphExtent(const int extent) {
+  const auto padded = extent + (2 * glyphPadding);
+  return ((padded + atlasMipBlock - 1) / atlasMipBlock) * atlasMipBlock;
+}
 
 struct PaddedCoverage {
   std::vector<std::byte> data;
@@ -113,8 +123,8 @@ struct PaddedCoverage {
 PaddedCoverage
 extractPaddedCoverage(const std::span<const unsigned char> surface,
                       const int width, const int height, const int stride) {
-  const auto paddedWidth  = width + (2 * glyphPadding);
-  const auto paddedHeight = height + (2 * glyphPadding);
+  const auto paddedWidth  = paddedGlyphExtent(width);
+  const auto paddedHeight = paddedGlyphExtent(height);
   std::vector<std::byte> padded(static_cast<std::size_t>(paddedWidth) *
                                     static_cast<std::size_t>(paddedHeight),
                                 std::byte{0});
@@ -643,8 +653,8 @@ GlyphCache::addToCache(const std::string &chr, const FontPtr &font,
   // palette packs the padded box and knows nothing about the padding; the
   // texture coordinates handed back to the shader are narrowed to the glyph
   // itself below, so nothing downstream sees the border either.
-  const auto padded = Rect{.width  = Length{width + (2 * glyphPadding)},
-                           .height = Length{height + (2 * glyphPadding)}};
+  const auto padded = Rect{.width  = Length{paddedGlyphExtent(width)},
+                           .height = Length{paddedGlyphExtent(height)}};
   if (auto room = makeRoomFor(padded); !room) {
     return std::unexpected{room.error()};
   }

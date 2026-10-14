@@ -1,0 +1,7 @@
+run=opengl-plain-1
+backend=opengl
+overlay=no
+XDG_DATA_HOME=/workspace/spatial-build/seventh-repro/xdg/opengl-plain-1/data
+XDG_CONFIG_HOME=/workspace/spatial-build/seventh-repro/xdg/opengl-plain-1/config
+XDG_CACHE_HOME=/workspace/spatial-build/seventh-repro/xdg/opengl-plain-1/cache
+argv=build/gleditor --backend opengl --profile --strict-diagnostics --click 300\,265 --select 20\,34 --screenshot /workspace/spatial-build/seventh-repro/raw/opengl-plain-1.ppm tests/samples/quick_brown_fox.txt

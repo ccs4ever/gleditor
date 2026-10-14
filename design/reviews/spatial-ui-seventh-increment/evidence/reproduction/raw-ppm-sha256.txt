@@ -1,0 +1,6 @@
+7763cbc52147ac6319dff50735e179fe59488b45d2a1fc413b02b794b6a5eaa8  /workspace/spatial-build/seventh-repro/raw/opengl-overlay-1.ppm
+7763cbc52147ac6319dff50735e179fe59488b45d2a1fc413b02b794b6a5eaa8  /workspace/spatial-build/seventh-repro/raw/opengl-overlay-2.ppm
+ff1f4710db02d61c33741b4efa29de7e8f7e5585881adb697be2685e0c586099  /workspace/spatial-build/seventh-repro/raw/opengl-plain-1.ppm
+ff1f4710db02d61c33741b4efa29de7e8f7e5585881adb697be2685e0c586099  /workspace/spatial-build/seventh-repro/raw/opengl-plain-2.ppm
+7763cbc52147ac6319dff50735e179fe59488b45d2a1fc413b02b794b6a5eaa8  /workspace/spatial-build/seventh-repro/raw/opengles-overlay-1.ppm
+7763cbc52147ac6319dff50735e179fe59488b45d2a1fc413b02b794b6a5eaa8  /workspace/spatial-build/seventh-repro/raw/opengles-overlay-2.ppm

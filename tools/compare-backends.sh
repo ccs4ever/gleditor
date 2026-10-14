@@ -298,13 +298,12 @@ done
 # layer. GLEDITOR_ATLAS_SIZE starts the atlas small enough that ordinary text
 # overflows it twice over.
 #
-# Not a byte comparison, and not because the tolerance is convenient. A smaller
-# atlas packs glyphs at different texels, and a mip texel averages a block
-# aligned to level zero's grid rather than to the glyph, so the same glyph at an
-# odd offset genuinely has a different mip chain from the same glyph at an even
-# one. That shows up as a sub-level nudge over the page -- an atlas opened at
-# 256, which never grows at all, differs from one opened at 512 by the same
-# amount as one opened at 64, which grows twice.
+# Glyph allocation extents are aligned to the deepest mip block, so changing
+# insertion order or atlas size no longer changes a glyph's phase in the mip
+# grid. Earlier unaligned packing caused low-amplitude coverage differences
+# even between identical draws. The growth probe retains its established mean
+# and missing-ink limits; ordinary GL/GLES and overlay comparisons above still
+# require exact equality.
 #
 # What a failed re-upload looks like instead is glyphs missing outright, and the
 # two are easy to tell apart. The limits were set by breaking it on purpose --
