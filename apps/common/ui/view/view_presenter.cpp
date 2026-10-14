@@ -128,8 +128,10 @@ void SlicePresenter::deviceReady(render::RenderDevice &device,
   device_   = &device;
   pipeline_ = documentPipeline;
   beams_    = std::make_unique<gleditor::Beams>(&device);
+  // Tested against depth but not writing it: the beams are drawn among the
+  // frame's translucent sheets, back to front, as the UI's other beams are.
   beams_->createPipeline(gleditor::assetPath("shaders"),
-                         gleditor::assetPath("shaders/vulkan"), true);
+                         gleditor::assetPath("shaders/vulkan"), true, false);
   chrome_ = std::make_unique<gleditor::Canvas>(&device, chromeName_);
   chrome_->createPipeline(documentPipeline, false);
   planes_.clear();
