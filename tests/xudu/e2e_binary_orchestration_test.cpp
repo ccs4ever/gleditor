@@ -250,6 +250,29 @@ std::optional<std::pair<int, int>> paperRightEdge(const fs::path &path,
   return std::nullopt;
 }
 
+// The middle of the first run of at least `rows` pure-black rows down the
+// frame's centre column: bare background, in which nothing is drawn or picked.
+std::optional<std::pair<int, int>> blankBackground(const fs::path &path,
+                                                   const int rows) {
+  std::ifstream in(path, std::ios::binary);
+  std::string magic;
+  int width{}, height{}, maximum{};
+  in >> magic >> width >> height >> maximum;
+  in.get();
+  if (magic != "P6" || maximum != 255) return std::nullopt;
+  std::vector<unsigned char> rgb(static_cast<std::size_t>(width) * height * 3);
+  in.read(reinterpret_cast<char *>(rgb.data()),
+          static_cast<std::streamsize>(rgb.size()));
+  if (!in) return std::nullopt;
+  int run = 0;
+  for (int y = 0; y < height; ++y) {
+    const auto at = (static_cast<std::size_t>(y) * width + width / 2) * 3;
+    run           = rgb[at] + rgb[at + 1] + rgb[at + 2] == 0 ? run + 1 : 0;
+    if (run >= rows) return std::pair{width / 2, y - (rows / 2)};
+  }
+  return std::nullopt;
+}
+
 // The only saturated blue on this fixture is the selected text. Read its
 // drawn rectangle so changing chrome height cannot turn the drag into a tab
 // click.
@@ -1378,15 +1401,16 @@ TEST(E2EBinaryOrchestrationTest, aDraggedSelectionLandsWhereItIsDropped) {
   const auto dragTo  = [&](const std::string &drop) {
     fs::remove_all(testRoot);
     fs::create_directories(testRoot);
-    return executeProcess(
-        "XDG_CONFIG_HOME=" + (testRoot / "config").string() +
-        " XDG_DATA_HOME=" + (testRoot / "data").string() + " timeout 120 " +
-        xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
-        " --backend " + activeBackend() +
-        " --profile --chord Ctrl+N --type 'alpha beta gamma' --chord Ctrl+Left"
-         " --chord Ctrl+Left --chord Ctrl+Shift+Right" +
-        (drop.empty() ? " --capture " + capture.string()
-                       : " --drag " + start + ":" + drop));
+    return executeProcess("XDG_CONFIG_HOME=" + (testRoot / "config").string() +
+                           " XDG_DATA_HOME=" + (testRoot / "data").string() +
+                           " timeout 120 " + xuduBin.string() +
+                           permascrollFlag(testRoot / "permascroll") +
+                           " --backend " + activeBackend() +
+                           " --profile --chord Ctrl+N --type 'alpha beta gamma'"
+                            " --chord Ctrl+Left"
+                            " --chord Ctrl+Left --chord Ctrl+Shift+Right" +
+                           (drop.empty() ? " --capture " + capture.string()
+                                         : " --drag " + start + ":" + drop));
   };
   const auto untitledOps = [&] {
     for (const auto &entry :
@@ -1412,11 +1436,17 @@ TEST(E2EBinaryOrchestrationTest, aDraggedSelectionLandsWhereItIsDropped) {
   const auto paper = paperRightEdge(capture, y);
   ASSERT_TRUE(paper);
   const auto [pageRight, frameWidth] = *paper;
-  ASSERT_LT(pageRight + 2, frameWidth - 2)
-      << "the page reaches the edge of the frame, so there is no empty space "
-         "beside it to drop into";
+  // Framed for reading, a page is about as wide as the window, so the empty
+  // space is the right of the page when it is narrower, else bare background
+  // elsewhere in the frame.
+  const auto margin =
+      pageRight + 2 < frameWidth - 2
+          ? std::optional{std::pair{(pageRight + frameWidth) / 2, y}}
+          : blankBackground(capture, 12);
+  ASSERT_TRUE(margin) << "the page fills the frame, so there is no empty space "
+                         "beside it to drop into";
   const auto emptySpace =
-      std::to_string((pageRight + frameWidth) / 2) + "," + std::to_string(y);
+      std::to_string(margin->first) + "," + std::to_string(margin->second);
   // Onto the same line, past the final word, using the drawn selection's size.
   const auto onPage = dragTo(std::to_string(right + right - left + 2) + "," +
                              std::to_string(y));
@@ -1437,7 +1467,7 @@ TEST(E2EBinaryOrchestrationTest, aDraggedSelectionLandsWhereItIsDropped) {
       << ops;
   EXPECT_EQ(std::stoul(quoted[1].str()), std::stoul(typed[1].str()) + 6U);
 
-  // Into the empty space right of the page.
+  // Into the empty space beside the page.
   const auto inSpace = dragTo(emptySpace);
   ASSERT_EQ(inSpace.exitCode, 0) << inSpace.output;
   EXPECT_THAT(inSpace.output,
@@ -2757,7 +2787,12 @@ TEST(E2EBinaryOrchestrationTest, importedMediaRetainsSeedAfterSourceDeletion) {
  * presentation is chosen from the view palette, by keyboard, beside today's;
  * it draws the slice, moves with the existing step keys, says what it cannot
  * do, and stays chosen for that slice across a restart. The two captures are
- * what compare-backends.sh holds OpenGL and GLES to.
+ * what compare-backends.sh holds OpenGL and GLES to, and are taken from the
+ * restarted program: one that switched presentation in flight has already
+ * rasterised the visualizer's glyphs, in as many frames as the switch took,
+ * and the atlas offsets of the glyphs that follow -- hence their mip texels --
+ * move with that count, so two runs of the same keys differ by a few levels
+ * on the cell text. A program that opens the chosen presentation is exact.
  */
 TEST(E2EBinaryOrchestrationTest, aSliceViewIsChosenFromThePaletteAndKept) {
   const auto binary = findXuduBinary();
@@ -2818,22 +2853,16 @@ TEST(E2EBinaryOrchestrationTest, aSliceViewIsChosenFromThePaletteAndKept) {
   };
 
   // The palette's second entry is the first slice view; Enter takes it.
-  const auto chosen = xuzz(
-      " --do std:view/palette --key right --key enter --capture " +
-      ppm("chosen").string() + " --do std:nav/zigzag_step_x_pos --capture " +
-      ppm("stepped").string() +
-      " --do std:ui/zigzag_toggle_palette --dump-a11y");
+  const auto chosen =
+      xuzz(" --do std:view/palette --key right --key enter"
+           " --do std:nav/zigzag_step_x_pos --do std:ui/zigzag_toggle_palette"
+           " --dump-a11y");
   ASSERT_EQ(chosen.exitCode, 0) << chosen.output;
   EXPECT_THAT(
       chosen.output,
       testing::HasSubstr("slice presentation -> slice.stretch-vanishing"));
   EXPECT_THAT(chosen.output, testing::HasSubstr("Ada Lovelace"));
   EXPECT_THAT(chosen.output, testing::HasSubstr("cannot"));
-  for (const auto *const name : {"chosen", "stepped"}) {
-    ASSERT_TRUE(fs::exists(ppm(name))) << name;
-    exportToPng(ppm(name),
-                screenshotDir / ("slice_view_" + std::string(name) + ".png"));
-  }
 
   // Chosen for this slice, so a restart opens it the same way.
   const auto reopened = xuzz(" --dump-a11y");
@@ -2841,6 +2870,28 @@ TEST(E2EBinaryOrchestrationTest, aSliceViewIsChosenFromThePaletteAndKept) {
   EXPECT_THAT(
       reopened.output,
       testing::HasSubstr("slice presentation -> slice.stretch-vanishing"));
+
+  const auto captured = xuzz(" --capture " + ppm("chosen").string() +
+                             " --do std:nav/zigzag_step_x_pos --capture " +
+                             ppm("stepped").string());
+  ASSERT_EQ(captured.exitCode, 0) << captured.output;
+  for (const auto *const name : {"chosen", "stepped"}) {
+    ASSERT_TRUE(fs::exists(ppm(name))) << name;
+    exportToPng(ppm(name),
+                screenshotDir / ("slice_view_" + std::string(name) + ".png"));
+  }
+
+  // Run twice, the first frame is the same bytes: the camera is framed against
+  // where the document will rest, not against where its arrival has it on the
+  // frame the first page happens to be ready, so a capture is not a race.
+  const auto again = xuzz(" --capture " + ppm("again").string());
+  ASSERT_EQ(again.exitCode, 0) << again.output;
+  const auto bytes = [](const fs::path &file) {
+    std::ifstream in(file, std::ios::binary);
+    return std::string{std::istreambuf_iterator<char>(in),
+                       std::istreambuf_iterator<char>()};
+  };
+  EXPECT_EQ(bytes(ppm("again")), bytes(ppm("chosen")));
 }
 
 } // namespace

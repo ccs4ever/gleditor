@@ -124,10 +124,18 @@ void Views::frameForReading(const gleditor::FrameContext &ctx) {
   if (!distance || view.screenWidth <= 0) {
     return;
   }
-  const glm::vec3 topLeft(frame->localToWorld *
-                          glm::vec4(frame->leftPx, frame->topPx, 0.0F, 1.0F));
-  const glm::vec3 topRight(frame->localToWorld *
-                           glm::vec4(frame->rightPx, frame->topPx, 0.0F, 1.0F));
+  // Where the page will rest, not where an arrival or a move has it this
+  // frame: the camera is framed once, so framing against the animated place
+  // left it off by however far the document still had to travel -- a distance
+  // that depended on how many frames the first page took to build.
+  const glm::vec3 toRest =
+      glm::vec3(doc.getModel()[3]) - glm::vec3(doc.modelMatrix()[3]);
+  const glm::vec3 topLeft =
+      toRest + glm::vec3(frame->localToWorld *
+                         glm::vec4(frame->leftPx, frame->topPx, 0.0F, 1.0F));
+  const glm::vec3 topRight =
+      toRest + glm::vec3(frame->localToWorld *
+                         glm::vec4(frame->rightPx, frame->topPx, 0.0F, 1.0F));
   const float halfH = *distance * std::tan(glm::radians(view.fov) * 0.5F);
   const float halfW = halfH * static_cast<float>(view.screenWidth) /
                       static_cast<float>(view.screenHeight);
