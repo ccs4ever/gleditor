@@ -38,6 +38,7 @@ enum class ViewError : std::uint8_t {
   UnknownPlace,     // a member, ring or list position past the end
   UnknownName,      // a typed name that is neither a dimension nor a group
   BadCommand,       // a typed command that does not say a point and a target
+  BadPointName,     // a binding point with no name, or one already taken
 };
 
 /// Everything a view tells the reader, in a toast, the raster or an
@@ -74,6 +75,16 @@ enum class ViewMessage : std::uint8_t {
   /// An action the presentation in front cannot do yet, said rather than
   /// swallowed while a new presentation stands beside the legacy one.
   ActionNotSupported,
+  /// A binding that leaves one dimension on two points: allowed (§7.3), said.
+  AxisAlsoShown,
+  /// A view action sent while the ZigZag visualizer is in front, which has no
+  /// views to bind or sub-views to switch.
+  VisualizerCannot,
+  /// A binding point that cannot be added.
+  PointNameBad,
+  /// A step on a point that shows nothing: unlike a dead end, it is fixed by
+  /// binding something there.
+  PointShowsNothing,
 };
 
 /// Every enumerator, in declaration order, so a test can visit each one.
@@ -85,6 +96,7 @@ inline constexpr std::array kViewErrors{
     ViewError::ChordCollision,    ViewError::PromotionRefused,
     ViewError::ArenaRefused,      ViewError::UnknownPlace,
     ViewError::UnknownName,       ViewError::BadCommand,
+    ViewError::BadPointName,
 };
 
 inline constexpr std::array kViewMessages{
@@ -101,7 +113,9 @@ inline constexpr std::array kViewMessages{
     ViewMessage::SavedNameGone,       ViewMessage::AxisShows,
     ViewMessage::NameUnknown,         ViewMessage::CommandUnclear,
     ViewMessage::SubviewShown,        ViewMessage::NoSubviews,
-    ViewMessage::ActionNotSupported,
+    ViewMessage::ActionNotSupported,  ViewMessage::AxisAlsoShown,
+    ViewMessage::VisualizerCannot,    ViewMessage::PointNameBad,
+    ViewMessage::PointShowsNothing,
 };
 
 /// The message a refusal is reported with. The switch has no default, so an
@@ -136,6 +150,8 @@ inline constexpr std::array kViewMessages{
     return ViewMessage::NameUnknown;
   case ViewError::BadCommand:
     return ViewMessage::CommandUnclear;
+  case ViewError::BadPointName:
+    return ViewMessage::PointNameBad;
   }
   return ViewMessage::ViewSpaceRefused;
 }
@@ -199,6 +215,14 @@ messageId(ViewMessage message) noexcept {
     return "view.noSubviews";
   case ViewMessage::ActionNotSupported:
     return "view.actionNotSupported";
+  case ViewMessage::AxisAlsoShown:
+    return "view.axisAlsoShown";
+  case ViewMessage::VisualizerCannot:
+    return "view.visualizerCannot";
+  case ViewMessage::PointNameBad:
+    return "view.pointNameBad";
+  case ViewMessage::PointShowsNothing:
+    return "view.pointShowsNothing";
   }
   return {};
 }
@@ -266,6 +290,15 @@ messageText(ViewMessage message) noexcept {
   case ViewMessage::ActionNotSupported:
     return "{view} cannot {action} yet; the ZigZag visualizer can, from the "
            "view palette.";
+  case ViewMessage::AxisAlsoShown:
+    return "Showing {target} on axis {axis}; axis {other} shows it too.";
+  case ViewMessage::VisualizerCannot:
+    return "The ZigZag visualizer cannot {action}; choose a slice view from "
+           "the view palette first.";
+  case ViewMessage::PointNameBad:
+    return "A binding point needs a name of its own; '{name}' will not do.";
+  case ViewMessage::PointShowsNothing:
+    return "{axis} shows nothing; bind a dimension to it first.";
   }
   return {};
 }

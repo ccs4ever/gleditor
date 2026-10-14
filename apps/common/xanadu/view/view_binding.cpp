@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <set>
 #include <utility>
 
@@ -553,6 +554,12 @@ std::size_t ViewAxisSet::axisCount() const noexcept {
 
 std::expected<ViewAxisId, ViewError>
 ViewAxisSet::addAxis(const std::string_view name, const AxisRole &role) {
+  // A point is found by its name (a typed binding, a key, a saved binding),
+  // so a name that is empty or already another point's would make two points
+  // one.
+  if (name.empty() || axisNamed(name).has_value()) {
+    return std::unexpected{ViewError::BadPointName};
+  }
   const auto frame = ensureFrame();
   if (!frame) {
     return std::unexpected{frame.error()};
@@ -1291,6 +1298,46 @@ SavedBindings saveBindings(const ViewManifold &space,
 
 namespace {
 
+constexpr std::string_view kKindNothing   = "nothing";
+constexpr std::string_view kKindDimension = "dimension";
+constexpr std::string_view kKindGroup     = "group";
+
+void appendTarget(std::vector<std::string> &into,
+                  const std::optional<SavedTarget> &target) {
+  if (!target.has_value()) {
+    into.emplace_back(kKindNothing);
+    into.emplace_back();
+  } else if (const auto *const dim = std::get_if<SavedDimension>(&*target)) {
+    into.emplace_back(kKindDimension);
+    into.push_back(dim->name);
+  } else {
+    into.emplace_back(kKindGroup);
+    into.push_back(std::to_string(std::get<SavedGroupRef>(*target).index));
+  }
+}
+
+/// Nothing for a kind that is not one of the three or a place that is not a
+/// number; the inner optional is "shows nothing".
+std::optional<std::optional<SavedTarget>> targetFrom(const std::string &kind,
+                                                     const std::string &value) {
+  if (kKindNothing == kind) {
+    return std::optional<SavedTarget>{};
+  }
+  if (kKindDimension == kind) {
+    return std::optional<SavedTarget>{SavedDimension{.name = value}};
+  }
+  if (kKindGroup == kind) {
+    std::size_t index{};
+    const auto *const end    = value.data() + value.size();
+    const auto [stop, error] = std::from_chars(value.data(), end, index);
+    if (error != std::errc{} || stop != end) {
+      return std::nullopt;
+    }
+    return std::optional<SavedTarget>{SavedGroupRef{.index = index}};
+  }
+  return std::nullopt;
+}
+
 /// The saved groups in an order that makes every member group before the
 /// group that holds it (G9), and the members that would close a cycle.
 struct GroupOrder {
@@ -1337,6 +1384,83 @@ GroupOrder leavesFirst(const std::vector<SavedGroup> &groups) {
 }
 
 } // namespace
+
+SavedBindingCells cellsOf(const SavedBindings &saved) {
+  SavedBindingCells cells;
+  for (const auto &axis : saved.axes) {
+    cells.axes.push_back(axis.point);
+    appendTarget(cells.axes, axis.shows);
+  }
+  for (const auto &group : saved.groups) {
+    cells.groups.push_back(group.name);
+    cells.groups.push_back(std::to_string(group.members.size()));
+    for (const auto &member : group.members) {
+      appendTarget(cells.groups, member);
+    }
+  }
+  cells.ringOrder = saved.ringOrder;
+  return cells;
+}
+
+std::optional<SavedBindings> bindingsFromCells(const SavedBindingCells &cells) {
+  constexpr std::size_t kAxisCells = 3;
+  if (cells.axes.size() % kAxisCells != 0) {
+    return std::nullopt;
+  }
+  SavedBindings saved;
+  for (std::size_t i = 0; i < cells.axes.size(); i += kAxisCells) {
+    const auto shows = targetFrom(cells.axes[i + 1], cells.axes[i + 2]);
+    if (!shows.has_value()) {
+      return std::nullopt;
+    }
+    saved.axes.push_back(SavedAxis{.point = cells.axes[i], .shows = *shows});
+  }
+  constexpr std::size_t kMemberCells = 2;
+  for (std::size_t i = 0; i < cells.groups.size();) {
+    if (i + 1 >= cells.groups.size()) {
+      return std::nullopt;
+    }
+    std::size_t count{};
+    const auto &text         = cells.groups[i + 1];
+    const auto *const end    = text.data() + text.size();
+    const auto [stop, error] = std::from_chars(text.data(), end, count);
+    const std::size_t first  = i + 2;
+    if (error != std::errc{} || stop != end ||
+        count > (cells.groups.size() - first) / kMemberCells) {
+      return std::nullopt;
+    }
+    SavedGroup group{.name = cells.groups[i], .members = {}};
+    for (std::size_t m = 0; m < count; ++m) {
+      const auto at     = first + (m * kMemberCells);
+      const auto member = targetFrom(cells.groups[at], cells.groups[at + 1]);
+      if (!member.has_value() || !member->has_value()) {
+        return std::nullopt;
+      }
+      group.members.push_back(**member);
+    }
+    saved.groups.push_back(std::move(group));
+    i = first + (count * kMemberCells);
+  }
+  for (const auto &group : saved.groups) {
+    for (const auto &member : group.members) {
+      if (const auto *const ref = std::get_if<SavedGroupRef>(&member);
+          ref != nullptr && ref->index >= saved.groups.size()) {
+        return std::nullopt;
+      }
+    }
+  }
+  for (const auto &axis : saved.axes) {
+    if (!axis.shows.has_value()) {
+      continue;
+    }
+    if (const auto *const ref = std::get_if<SavedGroupRef>(&*axis.shows);
+        ref != nullptr && ref->index >= saved.groups.size()) {
+      return std::nullopt;
+    }
+  }
+  saved.ringOrder = cells.ringOrder;
+  return saved;
+}
 
 ReplayReport replayBindings(ViewManifold &space, const SavedBindings &saved,
                             const xanadu::SpanReader &reader) {

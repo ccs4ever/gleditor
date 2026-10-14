@@ -11,6 +11,7 @@
 #include <fstream>
 #include <map>
 #include <memory>
+#include <span>
 #include <string>
 #include <utility>
 #include <variant>
@@ -1075,4 +1076,78 @@ TEST(SystemDocsTest,
   EXPECT_FLOAT_EQ(config.uiSafeMarginShare, defaults.uiSafeMarginShare);
   EXPECT_THROW(edit(xanadu::settings::kUiScale, std::string{"invalid"}),
                std::invalid_argument);
+}
+
+TEST(SystemDocsTest, ASliceKeepsItsBindingsInListsOfAnyLength) {
+  namespace settings = xanadu::settings;
+  EXPECT_EQ(settings::sliceAxesKey("abc"), "slice.abc.axes");
+  EXPECT_EQ(settings::sliceGroupsKey("abc"), "slice.abc.groups");
+  EXPECT_EQ(settings::sliceRingOrderKey("abc"), "slice.abc.ringOrder");
+  EXPECT_EQ(settings::sliceFocusKey("abc"), "slice.abc.focus");
+
+  Store store;
+  store.setSystem(true);
+  xanadu::initializeSystemStore(store, SystemDocKind::Layout);
+  auto ver   = store.primaryCurrentVersion();
+  auto specs = xanadu::sliceBindingSettingSpecs("abc");
+  EXPECT_EQ(specs.size(), 3U);
+  specs.push_back(xanadu::sliceFocusSettingSpec("abc"));
+  for (const auto &spec : specs) {
+    EXPECT_FALSE(spec.notes.empty());
+    ver = xanadu::ensureSetting(store, ver, spec);
+  }
+  store.repointCurrentVersion(ver);
+
+  // Nothing kept yet is an empty list, not a missing key.
+  const auto model = [&] { return xanadu::SystemStoreModel::fromStore(store); };
+  EXPECT_TRUE(model().getStringList(settings::sliceAxesKey("abc")).empty());
+  EXPECT_TRUE(model().getInt64List(settings::sliceFocusKey("abc")).empty());
+
+  // The same setting takes three values, then five, then none: the schema's
+  // repeated type is "any number of these".
+  const auto write = [&](const std::vector<std::string> &strings) {
+    std::vector<xanadu::CellValue> values(strings.begin(), strings.end());
+    ver = xanadu::setSetting(store, ver, settings::sliceAxesKey("abc"),
+                             std::span<const xanadu::CellValue>{values});
+    store.repointCurrentVersion(ver);
+  };
+  write({"x", "dimension", "d.across"});
+  EXPECT_EQ(model().getStringList(settings::sliceAxesKey("abc")),
+            (std::vector<std::string>{"x", "dimension", "d.across"}));
+  write({"x", "dimension", "d.across", "y", "nothing"});
+  EXPECT_EQ(model().getStringList(settings::sliceAxesKey("abc")).size(), 5U);
+  write({});
+  EXPECT_TRUE(model().getStringList(settings::sliceAxesKey("abc")).empty());
+
+  ver = xanadu::setSetting(store, ver, settings::sliceFocusKey("abc"),
+                           std::int64_t{42});
+  store.repointCurrentVersion(ver);
+  EXPECT_EQ(model().getInt64List(settings::sliceFocusKey("abc")),
+            (std::vector<std::int64_t>{42}));
+}
+
+TEST(SystemDocsTest, ASubviewIsKeptPerSliceAndPerView) {
+  namespace settings = xanadu::settings;
+  EXPECT_EQ(settings::sliceSubviewKey("abc", "slice.stretch-vanishing"),
+            "slice.abc.slice.stretch-vanishing.subview");
+  EXPECT_NE(settings::sliceSubviewKey("abc", "slice.a"),
+            settings::sliceSubviewKey("abc", "slice.b"));
+
+  Store store;
+  store.setSystem(true);
+  xanadu::initializeSystemStore(store, SystemDocKind::Layout);
+  auto ver = store.primaryCurrentVersion();
+  for (const auto *const kind : {"slice.a", "slice.b"}) {
+    ver = xanadu::ensureSetting(store, ver,
+                                xanadu::sliceSubviewSettingSpec("abc", kind));
+  }
+  ver = xanadu::setSetting(store, ver,
+                           settings::sliceSubviewKey("abc", "slice.a"),
+                           std::string{"plain"});
+  store.repointCurrentVersion(ver);
+  const auto model = xanadu::SystemStoreModel::fromStore(store);
+  EXPECT_EQ(model.getString(settings::sliceSubviewKey("abc", "slice.a"), "?"),
+            "plain");
+  EXPECT_EQ(model.getString(settings::sliceSubviewKey("abc", "slice.b"), "?"),
+            "");
 }

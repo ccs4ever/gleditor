@@ -17,6 +17,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "common/xanadu/view/view.hpp"
 #include "common/xanadu/view/view_binding.hpp"
@@ -41,6 +42,22 @@ struct BindCommand {
 /// Nothing for text that does not name both a point and a target.
 [[nodiscard]] std::optional<BindCommand>
 parseBindCommand(std::string_view text);
+
+/// The binding point a reader means by @p name: the one spelt exactly so, or
+/// the only one that differs from it in case ('X' for x). Nothing for a name
+/// that fits none, or fits two.
+[[nodiscard]] std::optional<ViewAxisId>
+bindingPointNamed(const ViewAxisSet &axes, std::string_view name);
+
+/// What a reader may type in a binding: the points, then the slice's
+/// dimensions in the order the slice lists them, then the groups made for it.
+/// The slice's own list of dimensions is left out, as bindByName() refuses it.
+struct BindingChoices {
+  std::vector<std::string> points, dimensions, groups;
+};
+
+[[nodiscard]] BindingChoices bindingChoicesOf(const ViewManifold &space,
+                                              const SpanReader &reader);
 
 /// What a typed binding did.
 struct Bound {

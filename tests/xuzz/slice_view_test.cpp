@@ -384,3 +384,23 @@ TEST(SliceViewTest, aStepFromInsideAPackActsOnTheCellUnderTheCursor) {
 }
 
 } // namespace
+
+TEST(SliceViewTest, aCellLinkedToItselfHasNowhereToGo) {
+  ContactSlice slice;
+  slice.at =
+      slice.store.setLink(slice.at, slice.cell("n1"), slice.dim("d.spare"),
+                          DimVector::POS, slice.cell("n1"));
+  const auto base = slice.manifold();
+  ViewManifold space{base};
+  configure(space);
+  ASSERT_TRUE(space.axes().bind(x, slice.dim("d.spare")));
+  const PlainView view;
+
+  const SliceCursor cursor{.origin = slice.cell("n1")};
+  const auto out = view.move(space, cursor, along(x, DimVector::POS));
+  // Staying put is not a move: nothing moved, so no visit is made of it.
+  EXPECT_FALSE(out.moved);
+  EXPECT_FALSE(out.originChanged);
+  EXPECT_EQ(out.cursor, cursor);
+  EXPECT_EQ(out.step, std::nullopt);
+}

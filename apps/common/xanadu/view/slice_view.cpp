@@ -33,7 +33,9 @@ MoveOutcome stepAlong(const ViewManifold &space, const SliceCursor &cursor,
     return out;
   }
   const auto there = space.base().linked(*here, dimension, direction);
-  if (!there.has_value()) {
+  // A cell linked to itself has nowhere to go: staying put is not a move, and
+  // must not be recorded as a visit.
+  if (!there.has_value() || *there == *here) {
     return out;
   }
   out.cursor        = originAt(*there, cursor);

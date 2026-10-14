@@ -61,6 +61,7 @@
 #include "common/xanadu/view/slice/stretch_vanishing_view.hpp"
 #include "common/xanadu/view/slice_view.hpp"
 #include "common/xanadu/view/view.hpp"
+#include "common/xanadu/view/view_binding.hpp"
 #include "common/xanadu/view/view_commands.hpp"
 #include "common/xanadu/view/view_manifold.hpp"
 #include "common/xanadu/view/view_records.hpp"
@@ -118,8 +119,12 @@ public:
   /// system://layout, so it survives a restart.
   ViewSlicePresentation *cycleSubview(int by);
   /// Bind what @p command names ('x d.across', 'y Contact') to its point, or
-  /// say why not. True when the binding was made.
+  /// say why not (notice() has the words). True when the binding was made.
+  /// Runs on the owner thread; dispatchAction() is the way from any other.
   bool bindTyped(std::string_view command);
+  /// What a reader can type in a binding: the points, the slice's dimensions
+  /// and its groups. Empty until a slice is bound.
+  [[nodiscard]] BindingChoices bindingChoices() const;
   /// What each binding point is bound to, as the compass shows it.
   [[nodiscard]] std::span<const CompassArm> compass() const;
   /// The placement's binding arena, for the host and its tests; none until a
@@ -138,6 +143,9 @@ public:
   }
   /// The latest message, empty for none.
   [[nodiscard]] std::string notice() const;
+  /// What the placement says when it has no message: the view and the
+  /// sub-view it is showing, "Stretch vanishing: Plain".
+  [[nodiscard]] const std::string &status() const noexcept { return status_; }
   [[nodiscard]] std::vector<std::string> breadcrumbs() const;
   /// Layouts run so far: a settled frame runs none.
   [[nodiscard]] std::uint64_t layouts() const noexcept { return layouts_; }
@@ -244,7 +252,26 @@ private:
   /// Fold the slice and bind its axes, if the store or version changed.
   void ensureSpace() const;
   void buildSpace();
-  void bindAxes(const std::vector<std::string> &wanted);
+  /// Open a slice that has no bindings of its own yet showing what its origin
+  /// links along, or @p wanted where it names dimensions (view-system.md
+  /// §7.3). Seeding happens once, when the slice is first folded; arriving
+  /// somewhere never binds anything.
+  void seedAxes(const std::vector<std::string> &wanted);
+  /// Bind the slice as it was kept: carried over a re-fold, or read from
+  /// system://layout. True when there was something to restore.
+  bool restoreBindings(const std::optional<SavedBindings> &carried);
+  [[nodiscard]] std::optional<SavedBindings> keptBindings() const;
+  /// Arriving at a cell that links along something, with no spatial point
+  /// showing anything, binds them as a slice does on opening and says so.
+  void bindWhatIsLeftUnbound();
+  void persistBindings();
+  void persistFocus();
+  void announce(const ReplayReport &report);
+  /// The name of the @p ordinal-th spatial binding point, in order: where the
+  /// plane's steps, hops and swaps go, whatever the points are called.
+  [[nodiscard]] std::optional<std::string>
+  spatialPoint(std::size_t ordinal) const;
+  void refreshStatus();
   void mintCues();
   void relayout(const PaneFrame &frame);
   [[nodiscard]] glm::mat4 placementToWorld() const;
@@ -252,7 +279,7 @@ private:
                                     const glm::mat4 &unscaled) const;
   [[nodiscard]] ZigzagPresentationConfig cellsInPixels() const;
   void step(const std::string &point, zigzag::DimVector direction);
-  void hop(const std::string &point, zigzag::DimVector direction);
+  void hop(zigzag::DimVector direction);
   void jumpHome();
   void swapAxes();
   /// The bindings changed: toss what was derived, lay out again, and tell the
@@ -284,8 +311,12 @@ private:
   mutable bool dirty_{};
   mutable std::unique_ptr<zigzag::Manifold> manifold_;
   mutable std::unique_ptr<ViewManifold> space_;
-  /// The dimensions the axes showed, by name, kept across a re-fold.
-  mutable std::vector<std::string> axisNames_;
+  /// The store the space was folded from, so a re-fold of another slice does
+  /// not carry this one's bindings over.
+  mutable const Store *builtFrom_{};
+  /// The legacy visualizer's axes, by name, offered to a first fold.
+  mutable std::vector<std::string> adopted_;
+  bool focusDirty_{};
   mutable std::optional<zigzag::CellRef> wantedFocus_;
   mutable zigzag::ViewAxisBinding legacyView_;
   SliceCursor cursor_{.origin = zigzag::noCell};
@@ -330,7 +361,7 @@ private:
   InMemoryActivityLog ownLog_;
   ActivityLog *log_{&ownLog_};
   std::vector<std::string> breadcrumbs_;
-  std::string notice_;
+  std::string notice_, status_;
   std::uint64_t chromeRevision_{1};
   std::string hintsHere_, hintsElsewhere_;
   std::atomic<bool> keyboardHere_{true};
