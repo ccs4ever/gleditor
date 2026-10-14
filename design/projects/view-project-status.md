@@ -8,12 +8,12 @@ Last updated: 2026-10-14.
 
 ## Where it stands
 
-| Milestone                 | State                            |
-| ------------------------- | -------------------------------- |
-| M0, the tree in its shape | A1 and A2 done; closed           |
-| M1, spikes                | done; closed                     |
-| M2, the spine             | every package in; gate under way |
-| M3 onward                 | not started                      |
+| Milestone                 | State                                     |
+| ------------------------- | ----------------------------------------- |
+| M0, the tree in its shape | A1 and A2 done; closed                    |
+| M1, spikes                | done; closed                              |
+| M2, the spine             | gate: no-go until the closing round below |
+| M3 onward                 | not started                               |
 
 ## Done
 
@@ -77,11 +77,25 @@ changed.
 
 ## Next
 
-1. **M2's gate**: the red team, the frame inspector (colours 0, 6 and 27; off-axis beam width; the
-   xanadoc page behind the new slice presentation; wide neighbours fading to bars), the UX validator
-   on the M2 journey, then go or no-go here.
-1. After M2: M3 (packs), one milestone at a time, finished before the next starts (owner,
-   2026-10-14).
+1. **M2's closing round**, then the three reviews again. The gate (2026-10-14) found no blocker but
+   enough should-fix items that M2 is not complete; the owner asked for few things fully done.
+   - Behaviour, in the new presentation: movement replaces a typed group binding and fills an
+     unbound axis by itself; the legacy presentation swallows the bind chord silently; hop, swap and
+     the fallback point list use the literal names x, y, z; hop in a cyclic rank ends anywhere; a
+     self-link counts as a move; `addAxis` takes duplicate and empty names; the stored sub-view is
+     per slice, not per view kind; typed bindings and focus are lost on reopen; the bind dialog
+     names nothing and closes on a refusal; the current sub-view is shown nowhere.
+   - Drawing and chrome: the white page behind the slice (dim it; frame the focus row clear of it);
+     strands through labels; the d.down strand near-invisible; the hints bar shows the legacy view's
+     keys and none of the view chords; per-frame allocation in the presenter while anything moves;
+     layout hangs on a non-finite measure; presenter stroke constants are not settings.
+   - Tests: `aSliceViewIsChosenFromThePaletteAndKept` is a race on page arrival (3 in 24 runs), not
+     a flake; frames for ghosts, a wide neighbour, an off-axis beam, and a link ribbon beside
+     dimension strands.
+   - The M2 row's "every layer, end to end" is not yet true: nothing in the program mints a derived
+     view cell until packs (M3). The milestone claims the binding arena and stretch layout end to
+     end.
+1. Then M3 (packs), one milestone at a time.
 
 ## Fixed along the way
 
@@ -186,6 +200,9 @@ What a fresh Ubuntu 24.04 container needs, beyond the submodules:
   for now, so it does not go red on this.
 
 ## Decisions taken
+
+- M2's gate (2026-10-14): no-go until the closing round. Red team, frame inspector and UX validator
+  found no blocker; the closing round fixes their should-fix items rather than deferring them.
 
 - M1 (the plan's §3.1): P2 steps to a velocity threshold with a cap, parity against the `docSlots`
   row; `PlaneSet` is one draw with a per-plane table; the glyph stage gets a "coverage is alpha"
