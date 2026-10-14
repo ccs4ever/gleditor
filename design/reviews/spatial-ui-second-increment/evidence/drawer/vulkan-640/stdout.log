@@ -1,0 +1,434 @@
+xuzz 0.0.1.909.g4f2d3fac: 0 operations in /workspace/spatial-build/second/drawer-ydqu2old/data/xudu/xanadocs/default, opening 0
+xuzz commands:
+  std:xudu/quit -- save and close
+  std:xudu/save -- save or preserve active document
+  std:xudu/close -- close the active document
+  std:xudu/next_doc -- switch to next document
+  std:xudu/prev_doc -- switch to previous document
+  doc-1 -- switch to document 1
+  doc-2 -- switch to document 2
+  doc-3 -- switch to document 3
+  doc-4 -- switch to document 4
+  doc-5 -- switch to document 5
+  doc-6 -- switch to document 6
+  doc-7 -- switch to document 7
+  doc-8 -- switch to document 8
+  doc-9 -- switch to document 9
+  std:xudu/hypertime_map -- show or hide the hypertime map
+  std:xudu/radial_menu -- open radial menu for formatting and alignment
+  std:xudu/back -- go to the previous state, losing nothing
+  std:xudu/new_doc -- create a new sovereign document quad
+  std:xudu/forward -- go to the next state in hypertime
+  std:xudu/open_doc -- open a document or system xanadoc
+  std:xudu/onion_skin -- toggle 3D multi-document onion skinning mode
+  std:xudu/pouch_toggle -- toggle screen-edge pouch drawer and clasp bench
+  std:xudu/pouch_toggle_f2 -- toggle screen-edge pouch drawer and clasp bench
+  std:xudu/publication_discovery -- discover signed publications by topic or author key
+  std:xudu/link_package_publish -- publish independent links
+  std:xudu/links_responses -- discover links and responses
+  std:xudu/publication_updates -- review verified publication updates
+  std:xudu/telescope_toggle -- toggle decentralized swarm telescope overlay
+  std:xudu/telescope_toggle_f3 -- toggle decentralized swarm telescope overlay
+  std:xudu/quotation_toggle -- toggle quoted structure builder overlay
+  std:xudu/quotation_toggle_f9 -- toggle quoted structure builder overlay (F9)
+  std:xudu/tension_physics_toggle -- toggle 3-way tension spring layout simulation
+  std:xudu/unlock_transcopyright_f5 -- unlock transcopyright span at caret or selection
+  std:xudu/unlock_transcopyright_ctrl_u -- unlock transcopyright span at caret or selection
+  std:xudu/scrub_forward -- scrub forward in hypertime history
+  std:xudu/scrub_backward -- scrub backward in hypertime history
+  std:xudu/transclude -- transclude the selection into a second document
+  std:xudu/xanalink -- mark one end of a xanalink, then join it to another selection -- in this document or any other open one
+  std:edit/cancel_quotation -- cancel a quotation pickup or pending drop
+  std:xudu/cancel_link -- forget a xanalink that was begun and not finished
+  std:xudu/beams -- show or hide the links and transclusions between documents
+  std:xudu/sworph -- let a link coming into view bring its far document over
+  std:xudu/publish -- publish the document the caret is in, so it can be read off this machine
+  std:xudu/publication_status -- review publication status and retry
+  publication-status -- review publication status and retry
+  std:xudu/history -- print every state to the terminal
+  std:xudu/delete -- stop pointing at the selection
+  std:edit/delete_forward -- delete the selection or the character after the caret
+  std:edit/newline -- start a new line at the caret
+  std:edit/caret_left -- move the caret a character left
+  std:edit/select_left -- extend the selection a character left
+  std:edit/caret_right -- move the caret a character right
+  std:edit/select_right -- extend the selection a character right
+  std:edit/caret_up -- move the caret up a line
+  std:edit/select_up -- extend the selection up a line
+  std:edit/caret_down -- move the caret down a line
+  std:edit/select_down -- extend the selection down a line
+  std:edit/caret_word_left -- move the caret to the previous word
+  std:edit/select_word_left -- extend the selection to the previous word
+  std:edit/caret_word_right -- move the caret to the next word
+  std:edit/select_word_right -- extend the selection to the next word
+  std:edit/caret_line_start -- move the caret to the start of the line
+  std:edit/select_line_start -- extend the selection to the start of the line
+  std:edit/caret_line_end -- move the caret to the end of the line
+  std:edit/select_line_end -- extend the selection to the end of the line
+  std:edit/caret_doc_start -- move the caret to the start of the document
+  std:edit/caret_doc_end -- move the caret to the end of the document
+  std:xudu/page_break -- insert a page break at the caret position
+  format-bold -- toggle bold on selected text
+  format-italic -- toggle italic on selected text
+  format-underline -- toggle underline on selected text
+  format-strikethrough -- toggle strikethrough on selected text
+  format-superscript -- toggle superscript on selected text
+  format-subscript -- toggle subscript on selected text
+  save -- save or preserve active document
+  save-document -- save or preserve active document
+  close -- close active document
+  close-doc -- close active document
+  next-doc -- switch to next document
+  prev-doc -- switch to previous document
+  map -- show or hide the hypertime map
+  radial-menu -- open radial menu for formatting and alignment
+  pouch-toggle -- toggle pouch drawer
+  telescope-toggle -- toggle swarm telescope
+  quotation-toggle -- toggle quoted structure builder overlay
+  store-manager-toggle -- toggle store object manager drawer
+  physics-toggle -- toggle 3-way tension spring layout physics
+  unlock-transcopyright -- unlock transcopyright span under caret
+  scrub-forward -- step forward in microversion history
+  scrub-backward -- step backward in microversion history
+  scrub-back -- step backward in microversion history
+  transclude -- transclude selection into new version
+  xanalink -- connect selection with an xanalink
+  cancel-link -- drop link begun earlier
+  cancel link -- drop link begun earlier
+  beams -- show or hide the ribbons connecting documents
+  sworph -- bring far end of link into view on approach
+  publish -- sign and seal opening document
+  history -- list all microversions and operations to stdout
+  delete -- delete selected range in active document
+  page-break -- insert a page break at the caret
+  insert-break -- insert a page break at the caret position
+  onion-skin -- toggle 3D onion skin visualization
+  back -- navigate to parent microversion
+  forward -- navigate to child microversion
+  new-doc -- create new sovereign document
+  open-doc -- open document or system xanadoc palette
+  export-osmic -- export OSMIC text spool representation
+  std:xudu/pouch_drop_left -- drop selection onto clasp homestead bench (left)
+  std:xudu/pouch_drop_right -- drop selection onto clasp toward bench (right)
+  std:xudu/pouch_drop -- drop selection into active pouch zone
+  std:xudu/pouch_drop_notes -- drop selection into notes pouch zone
+  std:xudu/pouch_drop_scratch -- drop selection into scratch pouch zone
+  std:xudu/pouch_drop_to_link_left -- drop selection into to-link-left pouch zone
+  std:xudu/pouch_drop_to_link_right -- drop selection into to-link-right pouch zone
+  pouch-drop-left -- drop selection onto clasp homestead bench (left)
+  pouch-drop-right -- drop selection onto clasp toward bench (right)
+  pouch-drop -- drop selection into active pouch zone
+  pouch-drop-notes -- drop selection into notes pouch zone
+  pouch-drop-scratch -- drop selection into scratch pouch zone
+  pouch-drop-to-link-left -- drop selection into to-link-left pouch zone
+  pouch-drop-to-link-right -- drop selection into to-link-right pouch zone
+  std:xudu/forge_clasp -- forge bilateral clasp link from items on bench
+  forge-clasp -- forge bilateral clasp link from items on bench
+  clear-bench -- clear items from clasp forge bench
+  std:xuzz/link_next -- select the next link on screen
+  std:xuzz/link_previous -- select the previous link on screen
+  std:xuzz/link_member_next -- choose the next member on the active side
+  std:xuzz/link_member_previous -- choose the previous member on the active side
+  std:xuzz/link_occurrence_next -- choose the next place the member appears
+  std:xuzz/link_occurrence_previous -- choose the previous place the member appears
+  std:xuzz/link_cross -- make the other side of the link active
+  std:xuzz/link_enter -- go to the chosen place
+  std:xuzz/link_cancel_entry -- cancel pending endpoint entry
+  std:xuzz/link_origin -- return to where the link was selected
+  std:xuzz/link_dismiss -- put the selected link away
+  std:xuzz/activity_back -- return to the previous visit
+  std:xuzz/link_controls_previous -- previous link controls page
+  std:xuzz/link_controls_next -- next link controls page
+  std:xuzz/link_controls -- show link controls or return to reading
+  std:xuzz/investigation -- expand or fold exact Link investigation
+  std:xudu/overview_toggle -- show or hide the overview of every open page
+  std:ui/view_mode_content_1 -- switch to Cell Content View (full content & XYZ alignment)
+  std:ui/zigzag_view_mode_content -- switch to Cell Content View (full content & XYZ alignment)
+  std:ui/view_mode_content_v -- switch to Cell Content View (full content & XYZ alignment)
+  std:ui/view_mode_topology -- switch to Topology View (fixed-size cells & lattice geometry)
+  std:ui/zigzag_view_mode_topology -- switch to Topology View (fixed-size cells & lattice geometry)
+  std:ui/view_mode_topology_t -- switch to Topology View (fixed-size cells & lattice geometry)
+  std:ui/bundle_execution -- switch to Execution dimension bundle (d.spin, d.step, d.branch)
+  std:ui/zigzag_bundle_execution -- switch to Execution dimension bundle (d.spin, d.step, d.branch)
+  std:ui/bundle_scope -- switch to Scope dimension bundle (d.lexical, d.dynamic, d.env)
+  std:ui/zigzag_bundle_scope -- switch to Scope dimension bundle (d.lexical, d.dynamic, d.env)
+  std:ui/bundle_contract -- switch to Contract dimension bundle (d.require, d.ensure, d.invariant)
+  std:ui/zigzag_bundle_contract -- switch to Contract dimension bundle (d.require, d.ensure, d.invariant)
+  std:ui/bundle_logic -- switch to Logic dimension bundle (d.clause, d.predicate, d.var)
+  std:ui/zigzag_bundle_logic -- switch to Logic dimension bundle (d.clause, d.predicate, d.var)
+  std:ui/bundle_stdlib -- switch to Stdlib dimension bundle (d.stdlib, d.symbol, d.version)
+  std:ui/zigzag_bundle_stdlib -- switch to Stdlib dimension bundle (d.stdlib, d.symbol, d.version)
+  std:ui/bundle_cycle -- cycle active dimension bundle forward
+  std:ui/zigzag_bundle_cycle -- cycle active dimension bundle forward
+  std:ui/toggle_palette -- toggle Vortex opcode and library palette HUD
+  std:ui/zigzag_toggle_palette -- toggle Vortex opcode and library palette HUD
+  std:ui/vql_translate_attach -- translate VQL filter text and attach to active chain
+  std:ui/zigzag_vql_translate_attach -- translate VQL filter text and attach to active chain
+  std:ui/toggle_command_bar -- toggle interactive VQL Command Omnibar
+  std:ui/zigzag_toggle_command_bar -- toggle interactive VQL Command Omnibar
+  std:ui/open_command_bar_slash -- open VQL Command Omnibar with '/' navigation prefix
+  std:ui/zigzag_open_command_bar_slash -- open VQL Command Omnibar with '/' navigation prefix
+  std:ui/open_command_bar_colon -- open VQL Command Omnibar with ':' command prefix
+  std:ui/zigzag_open_command_bar_colon -- open VQL Command Omnibar with ':' command prefix
+  std:ui/confirm_action -- run the Omnibar, clone the palette's symbol, or follow the focused cell
+  std:ui/dismiss_overlay -- dismiss the Omnibar or palette, or leave ZigZag
+  std:nav/step_x_pos -- step focus positive along X dimension
+  std:nav/zigzag_step_x_pos -- step focus positive along X dimension
+  std:nav/step_x_neg -- step focus negative along X dimension
+  std:nav/zigzag_step_x_neg -- step focus negative along X dimension
+  std:nav/step_y_pos -- step focus positive along Y dimension
+  std:nav/zigzag_step_y_pos -- step focus positive along Y dimension
+  std:nav/step_y_neg -- step focus negative along Y dimension
+  std:nav/zigzag_step_y_neg -- step focus negative along Y dimension
+  std:nav/step_z_pos -- step focus positive along Z dimension
+  std:nav/zigzag_step_z_pos -- step focus positive along Z dimension
+  std:nav/step_z_neg -- step focus negative along Z dimension
+  std:nav/zigzag_step_z_neg -- step focus negative along Z dimension
+  std:ui/swap_axes -- swap X and Y dimension bindings
+  std:ui/zigzag_swap_xy -- swap X and Y dimension bindings
+  std:ui/cycle_dims_forward -- cycle active dimension bindings forward
+  std:ui/zigzag_cycle_dims_forward -- cycle active dimension bindings forward
+  std:ui/cycle_dims_backward -- cycle active dimension bindings backward
+  std:ui/zigzag_cycle_dims_backward -- cycle active dimension bindings backward
+  std:nav/jump_home -- jump focus to home cell
+  std:nav/zigzag_jump_home -- jump focus to home cell
+  std:nav/hop_head -- hop to head of current rank along X dimension
+  std:nav/zigzag_hop_head -- hop to head of current rank along X dimension
+  std:nav/hop_tail -- hop to tail of current rank along X dimension
+  std:nav/zigzag_hop_tail -- hop to tail of current rank along X dimension
+  std:zigzag/duplicate -- duplicate focused cell along d.clone
+  std:zigzag/zigzag_duplicate_cell -- duplicate focused cell along d.clone
+  std:zigzag/insert_cell_x_pos -- insert connected cell positive along active X dimension
+  std:zigzag/insert_cell_x_neg -- insert connected cell negative along active X dimension
+  std:zigzag/insert_cell_y_pos -- insert connected cell positive along active Y dimension
+  std:zigzag/insert_cell_y_neg -- insert connected cell negative along active Y dimension
+  std:zigzag/unlink_x_pos -- unlink focused cell along positive X dimension
+  std:zigzag/unlink_x_neg -- unlink focused cell along negative X dimension
+  std:zigzag/edit_cell -- edit the focused cell's text
+  std:zigzag/mark_cell -- mark the focused cell as the far end of the next link
+  std:zigzag/link_marked_x_pos -- link the marked cell after the focused one along X
+  std:zigzag/link_marked_x_neg -- link the marked cell before the focused one along X
+  std:zigzag/delete_focus_cell -- delete currently focused cell
+  std:zigzag/delete_focus_cell_bksp -- delete currently focused cell
+  std:xuzz/new_slice -- start a new ZigZag slice, in a new xanadoc of its own
+  std:xuzz/new_slice_in_store -- add a ZigZag slice to the current document's store
+  std:xuzz/focus_toggle -- move the keyboard between the document and ZigZag
+  std:xuzz/view_xanadocs -- show only xanadocs
+  std:xuzz/view_slices -- show only slices
+  std:xuzz/view_both -- show xanadocs and slices together
+  std:xuzz/link_add_cell -- add the focused cell to the pending document link
+  std:xuzz/link_finish -- finish the pending document-to-cell link
+  std:xuzz/transclude_cell_to_doc -- transclude the focused cell content at the document caret
+  std:xuzz/transclude_cell_to_cell -- transclude the same content into a new connected cell
+  std:xuzz/insert_extern_ref -- choose a cell in another loaded slice and reference its birth
+  std:xuzz/activity_forward -- choose one of the current visit's forward branches
+  std:xuzz/walks -- preview, restore, reference and annotate saved walks
+  std:xuzz/cycle_view_mode -- cycle view mode (Unified <-> Xanadoc <-> ZigZag)
+  std:xuzz/view_unified -- switch to Unified view (Xanadoc + ZigZag bridge)
+  std:xuzz/view_xanadoc -- switch to Xanadoc Only view (ZigZag suspended)
+  std:xuzz/view_zigzag -- switch to ZigZag Only view (Hypergrid centered)
+  std:zigzag/rasterize_print -- Custom keymap action: std:zigzag/rasterize_print
+  std:zigzag/export_link_package -- Custom keymap action: std:zigzag/export_link_package
+  std:zigzag/save_store -- Custom keymap action: std:zigzag/save_store
+  std:zigzag/zigzag_save_store -- Custom keymap action: std:zigzag/zigzag_save_store
+accessibility: not in this build
+render: vulkan device, llvmpipe (LLVM 19.1.7, 256 bits) (API 1.4.305)
+[TIMING] First page rendered: 388.44 ms (docs in render: 1)
+xudu: created new sovereign document (store 6)
+click-label "Store Object Manager": 542,108
+tagged object at 542,108: kind 1 doc 16382 page 0 cluster 5
+window "Xuzz"
+  multiline text input "default"
+    text run
+  multiline text input "document" [caret 49]
+    text run = "Original passage retained during object creation."
+  group "Xanadu ZigZag: Xudu/Zigzag unified store"
+    group "Active View Dimensions: X=d.1, Y=d.2, Z=d.3"
+  list "Open Documents"
+    list item "default" [off]
+    button "Close default"
+    list item "Doc 2" = "selected" [on]
+    button "Close Doc 2"
+    button "Store Object Manager"
+    button "New Document"
+  button "Overview: move camera to scene centre"
+  dialog [modal]
+    group
+      label "Store Object Manager"
+      button "Close Drawer"
+    group
+      button "New Slice"
+      button "New Xanadoc"
+    label "No documents or slices yet. Create a Xanadoc or Slice to initialize this store."
+focus: Close Drawer
+wrote screenshot /workspace/gleditor/design/reviews/spatial-ui-second-increment/evidence/drawer/vulkan-640/before.ppm (640x480)
+click-label "New Xanadoc": 526,245
+window "Xuzz"
+  multiline text input "default"
+    text run
+  multiline text input "document" [caret 49]
+    text run = "Original passage retained during object creation."
+  multiline text input "Document 1"
+    text run
+  multiline text input "Document 1"
+    text run
+  group "Xanadu ZigZag: Xudu/Zigzag unified store"
+    group "Active View Dimensions: X=d.1, Y=d.2, Z=d.3"
+  list "Open Documents"
+    list item "default" [off]
+    button "Close default"
+    list item "Doc 2" = "selected" [on]
+    button "Close Doc 2"
+    list item "Document 1" [off]
+    button "Close Document 1"
+    list item "Document 1" [off]
+    button "Close Document 1"
+    button "Store Object Manager"
+    button "New Document"
+  button "Overview: move camera to scene centre"
+  dialog [modal]
+    group
+      label "Store Object Manager"
+      button "Close Drawer"
+    group
+      button "New Slice"
+      button "New Xanadoc"
+    group
+      list
+        list item "Closed [DOC] Document 1"
+      list
+        list item "Close Document 1"
+focus: Close Drawer
+wrote screenshot /workspace/gleditor/design/reviews/spatial-ui-second-increment/evidence/drawer/vulkan-640/new-document.ppm (640x480)
+click-label "New Slice": 364,245
+window "Xuzz"
+  multiline text input "default"
+    text run
+  multiline text input "document" [caret 49]
+    text run = "Original passage retained during object creation."
+  multiline text input "Document 1"
+    text run
+  multiline text input "Document 1"
+    text run
+  multiline text input "Doc 5"
+    text run
+  multiline text input "Slice 2"
+    text run
+  group "Xanadu ZigZag: Xudu/Zigzag unified store"
+    group "Active View Dimensions: X=d.1, Y=d.2, Z=d.3"
+  list "Open Documents"
+    list item "default" [off]
+    button "Close default"
+    list item "Doc 2" = "selected" [on]
+    button "Close Doc 2"
+    list item "Document 1" [off]
+    button "Close Document 1"
+    list item "Document 1" [off]
+    button "Close Document 1"
+    list item "Doc 5" [off]
+    button "Close Doc 5"
+    list item "Slice 2" [off]
+    button "Close Slice 2"
+    button "Store Object Manager"
+    button "New Document"
+  button "Overview: move camera to scene centre"
+  dialog [modal]
+    group
+      label "Store Object Manager"
+      button "Close Drawer"
+    group
+      button "New Slice"
+      button "New Xanadoc"
+    group
+      list
+        list item "Open [DOC] Document 1"
+        list item "Closed [SLICE] Slice 2"
+      list
+        list item "Close Document 1"
+        list item "Close Slice 2"
+focus: Close Drawer
+wrote screenshot /workspace/gleditor/design/reviews/spatial-ui-second-increment/evidence/drawer/vulkan-640/new-slice.ppm (640x480)
+click-label "Close Drawer": 546,186
+window "Xuzz"
+  multiline text input "default"
+    text run
+  multiline text input "document" [caret 49]
+    text run = "Original passage retained during object creation."
+  multiline text input "Document 1"
+    text run
+  multiline text input "Document 1"
+    text run
+  multiline text input "Doc 5"
+    text run
+  multiline text input "Slice 2"
+    text run
+  group "Xanadu ZigZag: Xudu/Zigzag unified store"
+    group "Active View Dimensions: X=d.1, Y=d.2, Z=d.3"
+  list "Open Documents"
+    list item "default" [off]
+    button "Close default"
+    list item "Doc 2" = "selected" [on]
+    button "Close Doc 2"
+    list item "Document 1" [off]
+    button "Close Document 1"
+    list item "Document 1" [off]
+    button "Close Document 1"
+    list item "Doc 5" [off]
+    button "Close Doc 5"
+    list item "Slice 2" [off]
+    button "Close Slice 2"
+    button "Store Object Manager"
+    button "New Document"
+  button "Overview: move camera to scene centre"
+focus: document
+wrote screenshot /workspace/gleditor/design/reviews/spatial-ui-second-increment/evidence/drawer/vulkan-640/closed.ppm (640x480)
+click-label "Store Object Manager": 542,108
+tagged object at 542,108: kind 1 doc 16382 page 0 cluster 13
+window "Xuzz"
+  multiline text input "default"
+    text run
+  multiline text input "document" [caret 49]
+    text run = "Original passage retained during object creation."
+  multiline text input "Document 1"
+    text run
+  multiline text input "Document 1"
+    text run
+  multiline text input "Doc 5"
+    text run
+  multiline text input "Slice 2"
+    text run
+  group "Xanadu ZigZag: Xudu/Zigzag unified store"
+    group "Active View Dimensions: X=d.1, Y=d.2, Z=d.3"
+  list "Open Documents"
+    list item "default" [off]
+    button "Close default"
+    list item "Doc 2" = "selected" [on]
+    button "Close Doc 2"
+    list item "Document 1" [off]
+    button "Close Document 1"
+    list item "Document 1" [off]
+    button "Close Document 1"
+    list item "Doc 5" [off]
+    button "Close Doc 5"
+    list item "Slice 2" [off]
+    button "Close Slice 2"
+    button "Store Object Manager"
+    button "New Document"
+  button "Overview: move camera to scene centre"
+  dialog [modal]
+    group
+      label "Store Object Manager"
+      button "Close Drawer"
+    group
+      button "New Slice"
+      button "New Xanadoc"
+    group
+      list
+        list item "Open [DOC] Document 1"
+        list item "Open [SLICE] Slice 2"
+      list
+        list item "Close Document 1"
+        list item "Close Slice 2"
+focus: Close Drawer
+wrote screenshot /workspace/gleditor/design/reviews/spatial-ui-second-increment/evidence/drawer/vulkan-640/reopened.ppm (640x480)
+xudu: kept untitled xanadoc at /workspace/spatial-build/second/drawer-ydqu2old/data/xudu/xanadocs/untitled-20261014-044640

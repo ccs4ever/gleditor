@@ -7,6 +7,28 @@ session.
 
 ## Current checkpoint
 
+Second checkpoint (2026-10-14): the pinned-baseline comparison classifies all four original broader
+E2E failures as pre-existing. The drawer's missing visible New Xanadoc and Close Drawer controls are
+repaired by reserving whole-pixel measured padding through nested containers and flooring the header
+width. No settings, object creation semantics, stored identities or stale-action checks change. The
+full native UI suite now passes **233/233**, the four owning drawer checks pass their 48
+size/font-scale/family combinations, and the named-control creation E2E check passes.
+
+The scoped Luna follow-up UI-authors a two-document Link and verifies logical Enter/Origin/Back, two
+distinct sibling visits (2 and 3 under parent 1), current visit 3 after the second Enter and current
+visit 1 after Back. Source dumps match an independently UI-authored control fixture, not a
+same-profile before/after snapshot. The left landing clips the passage beginning beyond the
+viewport; full readable landing, cell/historical targets, unavailable/cancel and branch reopen
+remain unaccepted. The report preserves those limits explicitly.
+
+Actual Store Object Manager → New Xanadoc → New Slice → Close Drawer → reopen sequences pass at
+640×480 and 1440×1000 on OpenGL, OpenGL ES and Vulkan, using visible controls. Independent review
+accepts the bounded repair; dense and enlarged-text captures, keyboard-only creation and AT remain
+open. Evidence and the baseline classification are in `design/reviews/spatial-ui-second-increment/`.
+The unchanged whole-page frames are pixel-identical; the two original drag checks use stale
+destination assumptions. Those three E2E checks still fail and are not accepted by reclassifying
+them.
+
 Inventory and the first runnable native prerequisite increment are implemented. The default build
 and 100 owning checks pass. Native UI authoring, complete 2-by-3 member controls and a readable
 same-document quiet/expanded/refolded sequence are evidenced. No complete J17–J32 journey or full
@@ -137,13 +159,12 @@ reviews pass.
   Activity metadata checkpoints are expected writes to the private reader store. Earlier blank
   source frames and clipped preview headers are retained as diagnostic limitations.
 
-- Full native Xuzz suite: 99/99. Full native UI suite: 232/233, with an isolated object-manager
-  layout failure (`FittedRowsShareSafeGeometryAndFullLabels`) outside modified panel code; its
-  pinned-baseline classification remains unresolved. Full library suite: 781/782 under Xvfb;
-  unchanged O0 incremental-resize benchmark exceeds its 1000 ns threshold (4625 ns measured). These
-  are open gates, not a full-suite pass. Initial offscreen suite cannot create Vulkan windows; use
-  Xvfb with `-noreset` to retain the server across repeated SDL initialization. Do not treat the
-  offscreen driver limitation as a product failure.
+- Full native Xuzz suite: 99/99. First-checkpoint native UI suite: 232/233; its object-manager
+  layout failure is now repaired and the second-checkpoint suite passes 233/233. Full library suite:
+  781/782 under Xvfb; unchanged O0 incremental-resize benchmark exceeds its 1000 ns threshold (4625
+  ns measured). These are open gates, not a full-suite pass. Initial offscreen suite cannot create
+  Vulkan windows; use Xvfb with `-noreset` to retain the server across repeated SDL initialization.
+  Do not treat the offscreen driver limitation as a product failure.
 
 - AccessKit is absent from this build and `dbus-run-session` is absent from the runner. Internal
   accessible-tree/actions and actual keyboard/pointer inputs are exercised; native AT-SPI parity
@@ -153,8 +174,9 @@ reviews pass.
 - Store suite: 1325/1327 initially outside E2E/network suites; unchanged O0 memoization throughput
   benchmark fails. Generated sample permascroll changes were restored and its purity check passes.
   Broad backend E2E extension: 32/36 OpenGL checks pass; whole-page text, object creation and two
-  drag cases fail, preventing the other backend E2E runs. Baseline classification is unresolved.
-  Renderer core comparisons and separate new inspector frames pass on OpenGL/OpenGL ES/Vulkan.
+  drag cases fail, preventing the other backend E2E runs. All four now reproduce on the pinned
+  baseline; the drawer creation case is repaired. Renderer core comparisons and separate new
+  inspector frames pass on OpenGL/OpenGL ES/Vulkan.
 
 - Network namespace tests skip in this runner. Format check passes. Lint has the same 37 pinned
   Markdown diagnostics and no new touched-document failures; other lint checks pass.
@@ -164,12 +186,15 @@ reviews pass.
 
 ## Exact next task
 
-After this tested checkpoint, establish full J24 source/activity invariants for distant cell and
-historical document endpoints, unavailable/cancel and repeated occurrences, then J25 branching
-Back/Return/reopen. Keep native anchor captures at narrow/enlarged text and all backends. Resolve
-legacy J3 pouch insertion, J11 stale drag authoring and J15 stale version-selection replay findings
-against the pinned baseline before calling them regressions. Preserve the three Luna native reports
-and open AT/performance gates.
+After this tested checkpoint, establish readable cross-document landing and align tab selection with
+the restored reading focus through the existing coordinator. Establish full J24 source/activity
+invariants for distant cell and historical document endpoints, unavailable/cancel and repeated
+occurrences, then J25 branching Back/Return/reopen. Keep native anchor captures at narrow/enlarged
+text and all backends. Correct the two broad E2E drag tests from actual drawn targets and
+investigate the whole-page ink threshold without weakening it. Resolve legacy J3 pouch insertion,
+J11 stale drag authoring and J15 stale version-selection replay findings against the pinned baseline
+before calling them regressions. Preserve the three Luna native reports and open AT/performance
+gates.
 
 The next spatial service package is the publication/pin-lifecycle audit followed by D2 branch/frame
 enumeration, per the dependency map above. Do not substitute raw primedia search for historical

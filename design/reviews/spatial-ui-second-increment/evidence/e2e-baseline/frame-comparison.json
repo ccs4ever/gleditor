@@ -1,0 +1,30 @@
+{
+  "whole-page": {
+    "size": [
+      800,
+      600
+    ],
+    "identicalRGB": true
+  },
+  "foreign-selection": {
+    "size": [
+      800,
+      600
+    ],
+    "identicalRGB": false
+  },
+  "foreign-dropped": {
+    "size": [
+      800,
+      600
+    ],
+    "identicalRGB": false
+  },
+  "drawer": {
+    "size": [
+      800,
+      600
+    ],
+    "identicalRGB": false
+  }
+}

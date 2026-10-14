@@ -209,7 +209,9 @@ StoreObjectManager::prepare(const ui::UiMetrics &metrics,
   const auto requested = std::isfinite(config_.widthPx)
                              ? std::max(0.0F, metrics.px(config_.widthPx))
                              : metrics.px(StorePanelConfig{}.widthPx);
-  const auto padding   = font->metrics().lineHeight * theme.paddingEm;
+  // Each nested widget rounds its inset to pixel edges. Reserve whole-pixel
+  // padding so fractional insets cannot wrap a measured row into clipped space.
+  const auto padding = std::ceil(font->metrics().lineHeight * theme.paddingEm);
   const auto actionWidth =
       std::max(measurements_.fitted("New Slice", font, {}).widthPx,
                measurements_.fitted("New Xanadoc", font, {}).widthPx) +
@@ -224,7 +226,7 @@ StoreObjectManager::prepare(const ui::UiMetrics &metrics,
       safe.width * share(config_.maxWidthShare, .9F)));
   const auto height =
       std::floor(safe.height * share(config_.maxHeightShare, 1));
-  const auto pad      = font->metrics().lineHeight * theme.paddingEm;
+  const auto pad      = padding;
   const auto gap      = font->metrics().lineHeight * theme.gapEm;
   const auto interior = std::max(0.0F, width - pad * 2);
   const auto buttonHeight =
@@ -242,8 +244,8 @@ StoreObjectManager::prepare(const ui::UiMetrics &metrics,
   header.children = {
       {.id        = 3,
        .model     = ui::Label{"Store Object Manager"},
-       .preferred = {metrics.logical(
-                         std::max(0.0F, interior - pad * 2 - gap - closeWidth)),
+       .preferred = {metrics.logical(std::floor(std::max(
+                         0.0F, interior - pad * 2 - gap - closeWidth))),
                      metrics.logical(buttonHeight)}},
       {.id        = closeId_,
        .model     = ui::Button{"Close Drawer", "close-drawer"},

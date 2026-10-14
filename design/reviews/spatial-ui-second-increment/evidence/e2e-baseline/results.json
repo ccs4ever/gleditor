@@ -1,0 +1,15 @@
+{
+  "scope": "baseline classification of exactly four failing OpenGL native E2E checks; not journey acceptance",
+  "pinned": {
+    "passed": 0,
+    "failed": 4,
+    "elapsedMs": 126161
+  },
+  "firstIncrement": {
+    "passed": 0,
+    "failed": 4,
+    "elapsedMs": 148988
+  },
+  "classification": "all four assertions reproduce on repaired pinned and original first increment binaries",
+  "performanceAccepted": false
+}

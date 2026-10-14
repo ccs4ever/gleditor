@@ -1,0 +1,26 @@
+{
+  "argv": [
+    "/workspace/spatial-build/e2e-followup/pinned/build/xudu",
+    "--permascroll",
+    "/workspace/spatial-build/e2e-followup/pinned/build/integration_workspace_panel_objects/permascroll",
+    "--backend",
+    "opengl",
+    "--profile",
+    "--do",
+    "store-manager-toggle",
+    "--dump-a11y",
+    "--capture",
+    "/workspace/spatial-build/e2e-followup/pinned/drawer.ppm",
+    "/workspace/spatial-build/e2e-followup/pinned/build/integration_workspace_panel_objects/store"
+  ],
+  "cwd": "/workspace/spatial-build/e2e-followup/pinned",
+  "exitCode": 0,
+  "environment": {
+    "SDL_VIDEODRIVER": "offscreen",
+    "SDL_AUDIODRIVER": "dummy",
+    "LIBGL_ALWAYS_SOFTWARE": "1",
+    "XDG_DATA_HOME": "/workspace/spatial-build/e2e-followup/pinned/drawer-capture-profile/data",
+    "XDG_CONFIG_HOME": "/workspace/spatial-build/e2e-followup/pinned/drawer-capture-profile/config",
+    "XDG_CACHE_HOME": "/workspace/spatial-build/e2e-followup/pinned/drawer-capture-profile/cache"
+  }
+}

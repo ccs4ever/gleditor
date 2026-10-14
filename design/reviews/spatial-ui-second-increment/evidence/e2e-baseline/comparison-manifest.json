@@ -1,0 +1,33 @@
+{
+  "pinnedCommit": "e9726a6b3825e794ab86db6cd54f18d9258e75c0",
+  "implementationCommit": "4f2d3fac6fc4e5aa59d11618ae25dd647f6151c8",
+  "backend": "opengl",
+  "setup": "existing spatial-native-session; isolated CWD roots, symlinked assets/tests, fresh six-variable headless runner; O0 behavior build; no external AT",
+  "filter": "E2EBinaryOrchestrationTest.textSurvivesAtWholePageDistance:E2EBinaryOrchestrationTest.storePanelCreatesObjectsThroughNamedDrawnControls:E2EBinaryOrchestrationTest.aDraggedSelectionLandsWhereItIsDropped:E2EBinaryOrchestrationTest.ForeignRunDragCreatesAReaderOwnedStore",
+  "hashes": {
+    "pinnedBinary": {
+      "path": "/workspace/spatial-build/baseline-bin/xuzz",
+      "sha256": "2e26e05e75298e6c05cc9d77229a34fbaa87463eddd9bc4ebdf68a0cea39fb63"
+    },
+    "pinnedLibrary": {
+      "path": "/workspace/spatial-build/baseline-bin/libgleditor.so.0",
+      "sha256": "e03735947659221fde35e5ed2bb0629f02b88a8a66a91ea99b46d005738df684"
+    },
+    "implementationBinary": {
+      "path": "/workspace/spatial-build/e2e-followup/current-bin/xuzz",
+      "sha256": "2f5e5ff2a82aee1cc08187480d3ea70c469d6175d7b95eb73de25cb0620f7b29"
+    },
+    "implementationLibrary": {
+      "path": "/workspace/spatial-build/e2e-followup/current-bin/libgleditor.so.0",
+      "sha256": "e03735947659221fde35e5ed2bb0629f02b88a8a66a91ea99b46d005738df684"
+    },
+    "testDriver": {
+      "path": "/workspace/gleditor/build/xudu_test",
+      "sha256": "2c05bc5e04e5c5aaf5deccaa838743326b7d6a8525dec52845de54a65bcfab0b"
+    },
+    "testSource": {
+      "path": "/workspace/gleditor/tests/xudu/e2e_binary_orchestration_test.cpp",
+      "sha256": "36093025f8312010d6c8330ad7f77f6c45739ce800e0edcf22f193d359d7808e"
+    }
+  }
+}

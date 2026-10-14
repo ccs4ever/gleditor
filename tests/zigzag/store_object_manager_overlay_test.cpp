@@ -73,6 +73,14 @@ TEST(StoreObjectManagerOverlayTest, FittedRowsShareSafeGeometryAndFullLabels) {
           if (visual->action == "create-slice" ||
               visual->action == "create-xanadoc" ||
               visual->action == "close-drawer") {
+            SCOPED_TRACE(
+                testing::Message()
+                << visual->action << ' ' << box.contentRect.width << 'x'
+                << box.contentRect.height << " in " << box.rect.width << 'x'
+                << box.rect.height << " parent "
+                << scene->layout.find(box.parentId)->contentRect.width
+                << " root " << scene->layout.find(1)->rect.width
+                << " header label " << scene->layout.find(3)->rect.width);
             EXPECT_FALSE(visual->fitted.shaping.glyphs.empty());
             EXPECT_GT(visual->fitted.lines, 0U);
             EXPECT_GT(visual->fitted.visibleBytes, 0U);

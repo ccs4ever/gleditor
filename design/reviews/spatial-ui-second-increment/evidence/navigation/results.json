@@ -1,0 +1,61 @@
+{
+  "build_head": "4f2d3fac6fc4e5aa59d11618ae25dd647f6151c8",
+  "scope": "scoped J24/J25 native Xuzz navigation; not full journey validation",
+  "fixture": "authored through native UI: two documents and one link; endpoints 0-21 and 0-29 bytes",
+  "results": [
+    {
+      "journey": "J24",
+      "step": "Enter distant endpoint",
+      "status": "Pass",
+      "affordance": "visible Enter button",
+      "evidence": "loaded-enter.png, loaded-session.log"
+    },
+    {
+      "journey": "J24",
+      "step": "Origin return",
+      "status": "Pass",
+      "affordance": "visible Origin button",
+      "evidence": "loaded-origin.png, loaded-session.log"
+    },
+    {
+      "journey": "J24",
+      "step": "Back to root checkpoint",
+      "status": "Pass",
+      "affordance": "visible Back button",
+      "evidence": "loaded-back.png, loaded-session.log"
+    },
+    {
+      "journey": "J25",
+      "step": "Two child visits from root",
+      "status": "Pass",
+      "affordance": "visible Enter button twice, with Back between",
+      "evidence": "loaded-session.log, same-session-activity-after.txt"
+    },
+    {
+      "journey": "J25",
+      "step": "Restore root after second entry",
+      "status": "Pass",
+      "affordance": "visible Back button",
+      "activity_current_after_back": 1,
+      "evidence": "loaded-back-second.png, same-session-activity-after.txt"
+    },
+    {
+      "journey": "J24",
+      "step": "Unavailable/cancel handling",
+      "status": "Missing",
+      "reason": "No unavailable target or pending confirmation appeared in the local two-document fixture",
+      "exercised": false
+    },
+    {
+      "journey": "J24/J25",
+      "step": "Repeated occurrences, alternate branch, close/reopen resume",
+      "status": "Missing",
+      "reason": "Outside this scoped fixture/run",
+      "exercised": false
+    }
+  ],
+  "limits": [
+    "Enter verifies logical reading/range transition but left passage begins outside viewport; readable landing/camera framing is not accepted.",
+    "Final Back restores default focus/caret0 and root activity1; Doc3 tab stays selected, so tab/focus coherence remains unaccepted. First Back after Origin is a root no-op."
+  ]
+}

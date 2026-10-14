@@ -1,0 +1,19 @@
+Running main() from gmock_main.cc
+Note: Google Test filter = StoreObjectManagerOverlayTest.*
+[==========] Running 4 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 4 tests from StoreObjectManagerOverlayTest
+[ RUN      ] StoreObjectManagerOverlayTest.FittedRowsShareSafeGeometryAndFullLabels
+[       OK ] StoreObjectManagerOverlayTest.FittedRowsShareSafeGeometryAndFullLabels (186 ms)
+[ RUN      ] StoreObjectManagerOverlayTest.RetainsDrawingAndQueuesStableBirthActions
+glyph cache: atlas 512x512 x1 layers, growing to at most 2048x2048 x10 (device allows 2048x2048 x10, the vertex encoding 64 layers)
+[       OK ] StoreObjectManagerOverlayTest.RetainsDrawingAndQueuesStableBirthActions (13 ms)
+[ RUN      ] StoreObjectManagerOverlayTest.ScrollAndModalFocusReachRemainingObjects
+[       OK ] StoreObjectManagerOverlayTest.ScrollAndModalFocusReachRemainingObjects (14 ms)
+[ RUN      ] StoreObjectManagerOverlayTest.AccessibilityActionsRejectHiddenReopenedDrawer
+[       OK ] StoreObjectManagerOverlayTest.AccessibilityActionsRejectHiddenReopenedDrawer (3 ms)
+[----------] 4 tests from StoreObjectManagerOverlayTest (218 ms total)
+
+[----------] Global test environment tear-down
+[==========] 4 tests from 1 test suite ran. (218 ms total)
+[  PASSED  ] 4 tests.

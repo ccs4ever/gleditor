@@ -1,0 +1,2 @@
+[2026-10-14 04:46:38.069] [xuzz.keymap] [warning] std:xudu/publish and std:zigzag/save_store are on the same key; only std:xudu/publish can run
+glyph cache: atlas 512x512 x1 layers, growing to at most 16384x16384 x64 (device allows 16384x16384 x2048, the vertex encoding 64 layers)
