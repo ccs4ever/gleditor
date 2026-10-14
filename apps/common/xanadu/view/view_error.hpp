@@ -36,6 +36,8 @@ enum class ViewError : std::uint8_t {
   PromotionRefused, // promote()'s own budget or refusal
   ArenaRefused,     // the arena refused; carries nothing more
   UnknownPlace,     // a member, ring or list position past the end
+  UnknownName,      // a typed name that is neither a dimension nor a group
+  BadCommand,       // a typed command that does not say a point and a target
 };
 
 /// Everything a view tells the reader, in a toast, the raster or an
@@ -62,6 +64,13 @@ enum class ViewMessage : std::uint8_t {
   BindingsReplayed,
   SavedMemberGone,
   SavedNameGone,
+  /// What a binding command did and the typed words it could not use, said as
+  /// a reader would say them (U7a).
+  AxisShows,
+  NameUnknown,
+  CommandUnclear,
+  SubviewShown,
+  NoSubviews,
   /// An action the presentation in front cannot do yet, said rather than
   /// swallowed while a new presentation stands beside the legacy one.
   ActionNotSupported,
@@ -75,6 +84,7 @@ inline constexpr std::array kViewErrors{
     ViewError::EmptyGroupBind,    ViewError::DuplicateViewKind,
     ViewError::ChordCollision,    ViewError::PromotionRefused,
     ViewError::ArenaRefused,      ViewError::UnknownPlace,
+    ViewError::UnknownName,       ViewError::BadCommand,
 };
 
 inline constexpr std::array kViewMessages{
@@ -88,7 +98,10 @@ inline constexpr std::array kViewMessages{
     ViewMessage::ViewKindTaken,       ViewMessage::ChordTaken,
     ViewMessage::ViewSpaceRefused,    ViewMessage::PlaceUnknown,
     ViewMessage::BindingsReplayed,    ViewMessage::SavedMemberGone,
-    ViewMessage::SavedNameGone,       ViewMessage::ActionNotSupported,
+    ViewMessage::SavedNameGone,       ViewMessage::AxisShows,
+    ViewMessage::NameUnknown,         ViewMessage::CommandUnclear,
+    ViewMessage::SubviewShown,        ViewMessage::NoSubviews,
+    ViewMessage::ActionNotSupported,
 };
 
 /// The message a refusal is reported with. The switch has no default, so an
@@ -119,6 +132,10 @@ inline constexpr std::array kViewMessages{
     return ViewMessage::ViewSpaceRefused;
   case ViewError::UnknownPlace:
     return ViewMessage::PlaceUnknown;
+  case ViewError::UnknownName:
+    return ViewMessage::NameUnknown;
+  case ViewError::BadCommand:
+    return ViewMessage::CommandUnclear;
   }
   return ViewMessage::ViewSpaceRefused;
 }
@@ -170,6 +187,16 @@ messageId(ViewMessage message) noexcept {
     return "view.savedMemberGone";
   case ViewMessage::SavedNameGone:
     return "view.savedNameGone";
+  case ViewMessage::AxisShows:
+    return "view.axisShows";
+  case ViewMessage::NameUnknown:
+    return "view.nameUnknown";
+  case ViewMessage::CommandUnclear:
+    return "view.commandUnclear";
+  case ViewMessage::SubviewShown:
+    return "view.subviewShown";
+  case ViewMessage::NoSubviews:
+    return "view.noSubviews";
   case ViewMessage::ActionNotSupported:
     return "view.actionNotSupported";
   }
@@ -226,6 +253,16 @@ messageText(ViewMessage message) noexcept {
     return "'{name}' is gone; group '{group}' no longer contains it.";
   case ViewMessage::SavedNameGone:
     return "'{name}' is gone; it is no longer in {where}.";
+  case ViewMessage::AxisShows:
+    return "Showing {target} on axis {axis}.";
+  case ViewMessage::NameUnknown:
+    return "There is no dimension or group called '{name}' in this slice.";
+  case ViewMessage::CommandUnclear:
+    return "Say which point and what it shows, as in 'x d.across'.";
+  case ViewMessage::SubviewShown:
+    return "Showing {view}, {subview} ({place} of {count}).";
+  case ViewMessage::NoSubviews:
+    return "{view} has no sub-views.";
   case ViewMessage::ActionNotSupported:
     return "{view} cannot {action} yet; the ZigZag visualizer can, from the "
            "view palette.";

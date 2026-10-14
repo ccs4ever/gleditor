@@ -137,6 +137,9 @@ struct StretchVanishingConfig {
 class StretchVanishingView final : public SliceView {
 public:
   static constexpr std::string_view kKind = "slice.stretch-vanishing";
+  /// Index of the sub-view that draws no ghosts; the descriptor lists it after
+  /// "ghosts", the default.
+  static constexpr std::uint32_t kPlainSubview = 1;
 
   explicit StretchVanishingView(StretchVanishingConfig config = {});
   StretchVanishingView(const StretchVanishingView &)            = delete;

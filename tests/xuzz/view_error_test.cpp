@@ -30,7 +30,7 @@ template <typename List> constexpr bool denseFromZero(const List &list) {
 }
 static_assert(denseFromZero(kViewErrors));
 static_assert(denseFromZero(kViewMessages));
-static_assert(kViewErrors.back() == ViewError::UnknownPlace);
+static_assert(kViewErrors.back() == ViewError::BadCommand);
 static_assert(kViewMessages.back() == ViewMessage::ActionNotSupported);
 
 } // namespace

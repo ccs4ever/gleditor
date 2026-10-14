@@ -17,6 +17,11 @@
  * palette, bundles — it says it cannot: dispatchAction() answers false and
  * the chrome and an announcement carry ActionNotSupported's words.
  *
+ * The compass (U5a) shows each binding point and what it is bound to, in the
+ * corner of the pane; the view commands (U7a) are keymap actions it receives
+ * by name: steps, home, hops along x, swapping x and y, the next and previous
+ * sub-view, and a binding typed as 'x d.across'.
+ *
  * Settings: the view's descriptor's settings are seeded into
  * system://settings when the presentation is made (view-system.md §8.1 gives
  * that to the host), and a dimension's cue is minted in system://ui the first
@@ -51,10 +56,12 @@
 #include "common/ui/view/view_presenter.hpp"
 #include "common/xanadu/link_navigation.hpp"
 #include "common/xanadu/system_docs.hpp"
+#include "common/xanadu/view/compass.hpp"
 #include "common/xanadu/view/dimension_colour.hpp"
 #include "common/xanadu/view/slice/stretch_vanishing_view.hpp"
 #include "common/xanadu/view/slice_view.hpp"
 #include "common/xanadu/view/view.hpp"
+#include "common/xanadu/view/view_commands.hpp"
 #include "common/xanadu/view/view_manifold.hpp"
 #include "common/xanadu/view/view_records.hpp"
 
@@ -103,6 +110,21 @@ public:
   /// Bind the axes to these dimensions by name, as the legacy visualizer
   /// shows them, so a reader switching presentations keeps the same axes.
   ViewSlicePresentation *adoptAxes(const zigzag::ViewAxisBinding &names);
+  /// The sub-view showing: an index into the descriptor's, and its id.
+  [[nodiscard]] std::uint32_t subview() const noexcept { return subview_; }
+  [[nodiscard]] std::string_view subviewId() const noexcept;
+  /// Show the sub-view @p by places on, wrapping; says which is showing, or
+  /// that the view has none. The choice is kept with the slice in
+  /// system://layout, so it survives a restart.
+  ViewSlicePresentation *cycleSubview(int by);
+  /// Bind what @p command names ('x d.across', 'y Contact') to its point, or
+  /// say why not. True when the binding was made.
+  bool bindTyped(std::string_view command);
+  /// What each binding point is bound to, as the compass shows it.
+  [[nodiscard]] std::span<const CompassArm> compass() const;
+  /// The placement's binding arena, for the host and its tests; none until a
+  /// slice is bound.
+  [[nodiscard]] ViewAxisSet *axisSet() const;
   /// Where completed moves are recorded and the breadcrumbs are read from.
   /// Not owned; null keeps them in a log of the presentation's own.
   ViewSlicePresentation *setActivityLog(ActivityLog *log);
@@ -180,9 +202,11 @@ public:
   ViewSlicePresentation *setHasKeyboard(bool has) noexcept override;
   ViewSlicePresentation *setKeyHints(std::string here,
                                      std::string elsewhere) override;
-  /// Steps along a binding point ("step-x-pos", "std:nav/step_x_pos") and
-  /// jumps home run on the owner thread; anything else is refused, said in
-  /// the chrome and announced.
+  /// Steps along a binding point ("step-x-pos", "std:nav/step_x_pos"), jumps
+  /// home, hops to the head or tail of the x rank, swaps x and y, the
+  /// sub-view commands and a typed binding ('std:view/bind x d.across': one
+  /// argument may follow the name after a space) run on the owner thread;
+  /// anything else is refused, said in the chrome and announced.
   bool dispatchAction(std::string_view actionName) override;
   bool
   insertConnectedTransclusion(std::span<const PrimediaSpan> spans) override;
@@ -228,7 +252,16 @@ private:
                                     const glm::mat4 &unscaled) const;
   [[nodiscard]] ZigzagPresentationConfig cellsInPixels() const;
   void step(const std::string &point, zigzag::DimVector direction);
+  void hop(const std::string &point, zigzag::DimVector direction);
   void jumpHome();
+  void swapAxes();
+  /// The bindings changed: toss what was derived, lay out again, and tell the
+  /// compass and the legacy binding.
+  void rebound(const MotionCause cause);
+  void syncLegacyView();
+  void refreshCompass();
+  void persistSubview();
+  void showSubview();
   void arrive(const MoveOutcome &outcome, bool recorded);
   void goTo(zigzag::CellRef cell, bool recorded);
   void record(zigzag::CellRef cell);
@@ -272,6 +305,10 @@ private:
   ZigzagPresentationConfig cells_;
   StretchConfig stretch_;
   DimensionCues cues_;
+  CompassConfig compassConfig_;
+  std::vector<CompassArm> compass_;
+  std::uint64_t compassStamp_{1};
+  std::uint32_t subview_{};
   std::vector<std::string> bindingPoints_;
   std::unordered_map<zigzag::CellRef, std::string> cellText_;
   std::unordered_map<std::uint64_t, std::string> labelText_;

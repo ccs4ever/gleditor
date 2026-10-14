@@ -505,6 +505,49 @@ TEST(StretchVanishingTest, NothingWithContentIsCutAndEveryCutCellIsOneGhost) {
   EXPECT_EQ(ghosts.size(), 2U);
 }
 
+TEST(StretchVanishingTest, ThePlainSubviewDrawsTheSameCellsWithoutGhosts) {
+  Slice slice{"d.x"};
+  std::vector<CellRef> rank;
+  for (int i = 0; i < 21; ++i) {
+    rank.push_back(slice.cell("c"));
+    if (i > 0) {
+      slice.link(rank[i - 1], "d.x", rank[i]);
+    }
+  }
+  const auto base = slice.manifold();
+  ViewManifold space{base};
+  configure(space);
+  ASSERT_TRUE(space.axes().bind(x, slice.dim("d.x")));
+  const Words words{slice};
+  StretchVanishingView view;
+  const auto frame = flatPane(300.0F, 100.0F);
+  const SliceCursor cursor{.origin = rank[10]};
+  ASSERT_TRUE(view.prepare(space, cursor, frame, words));
+  const auto lay = [&](const std::uint32_t subview) {
+    LayoutSink sink;
+    view.layout(SliceLayoutInput{.space   = space,
+                                 .cursor  = cursor,
+                                 .frame   = frame,
+                                 .measure = words,
+                                 .subview = subview},
+                sink);
+    return sink;
+  };
+  const auto ghosts = lay(0);
+  const auto plain  = lay(StretchVanishingView::kPlainSubview);
+  EXPECT_NE(ghostOf(ghosts, rank[5]), nullptr);
+  EXPECT_EQ(ghostOf(plain, rank[5]), nullptr);
+  EXPECT_EQ(ghostOf(plain, rank[15]), nullptr);
+  // Every cell with content is where it was: the sub-view is the one input
+  // that differs.
+  EXPECT_EQ(cellsOf(ghosts).size(), cellsOf(plain).size());
+  for (const auto *const item : cellsOf(ghosts)) {
+    const auto *const same = drawn(plain, item->id.value);
+    ASSERT_NE(same, nullptr);
+    EXPECT_EQ(same->centre, item->centre);
+  }
+}
+
 TEST(StretchVanishingTest, OpacityIsOneInTheMiddleAndTheFloorAtTheEdge) {
   const StretchConfig config;
   EXPECT_FLOAT_EQ(xanadu::view::stretchOpacity(0.5F, config), 1.0F);
@@ -964,8 +1007,9 @@ TEST(StretchVanishingTest, IsInstalledByTheBuiltInRegistration) {
   const auto found = registry.find(StretchVanishingView::kKind);
   ASSERT_TRUE(found);
   EXPECT_EQ(found->subject, xanadu::view::ViewSubject::Slice);
-  ASSERT_FALSE(found->subviews.empty());
+  ASSERT_EQ(found->subviews.size(), 2U);
   EXPECT_EQ(found->subviews.front().id, "ghosts");
+  EXPECT_EQ(found->subviews[StretchVanishingView::kPlainSubview].id, "plain");
   EXPECT_EQ(found->settings.size(), xanadu::view::stretchSettingSpecs().size());
   // Movement keeps the existing step actions; the view adds no chord.
   EXPECT_TRUE(found->chords.empty());

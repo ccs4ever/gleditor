@@ -108,7 +108,9 @@ public:
                                          std::string elsewhere) = 0;
 
   // -- Actions --------------------------------------------------------------
-  /// Runs a keymap action the application has no command of its own for.
+  /// Runs a keymap action the application has no command of its own for. A
+  /// call may carry one argument after its name and a space, as a typed
+  /// binding does ("std:view/bind x d.across").
   /// @return false for an action this presentation does not support.
   virtual bool dispatchAction(std::string_view actionName) = 0;
   /// Adds a cell holding @p spans after the focus, along the dimension bound

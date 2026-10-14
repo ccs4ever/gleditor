@@ -2782,6 +2782,46 @@ TEST(E2EBinaryOrchestrationTest, importedMediaRetainsSeedAfterSourceDeletion) {
   EXPECT_EQ(reopened.exitCode, 0) << reopened.output;
 }
 
+/// A slice of a row of four names along d.across and a column of three
+/// notes along d.down from the first, saved at @p path over a permascroll
+/// at @p scroll: what the slice-view scenarios open.
+void saveSliceViewStore(const fs::path &scroll, const fs::path &path) {
+  Store slice(permascrollAt(scroll));
+  auto head         = slice.sliceGenesis({});
+  const auto across = slice.makeDimension(head, "d.across");
+  head              = across.version;
+  const auto down   = slice.makeDimension(head, "d.down");
+  head              = down.version;
+  const auto make   = [&](const std::string &words) {
+    head = slice.makeCell(head, words);
+    return slice.cellRefOf(head);
+  };
+  const auto link = [&](const zigzag::CellRef from, const zigzag::DimRef dim,
+                        const zigzag::CellRef to) {
+    head = slice.setLink(head, from, dim, zigzag::DimVector::POS, to);
+  };
+  const std::array<std::string, 4> names{
+      "Ada Lovelace", "Analytical Engine notes, 1843", "Charles Babbage",
+      "Difference Engine No. 2"};
+  std::vector<zigzag::CellRef> row;
+  for (const auto &name : names) {
+    row.push_back(make(name));
+  }
+  link(slice.homeCell(), across.dim, row[0]);
+  for (std::size_t i = 0; i + 1 < row.size(); ++i) {
+    link(row[i], across.dim, row[i + 1]);
+  }
+  zigzag::CellRef above = slice.homeCell();
+  for (const auto *const words :
+       {"Mathematician", "Born 1815, London", "Notes on Menabrea"}) {
+    const auto cell = make(words);
+    link(above, down.dim, cell);
+    above = cell;
+  }
+  slice.repointCurrentVersion(head);
+  slice.save(path.string());
+}
+
 /**
  * U2 (view-system-implementation-plan.md §4.6): the second slice
  * presentation is chosen from the view palette, by keyboard, beside today's;
@@ -2804,42 +2844,7 @@ TEST(E2EBinaryOrchestrationTest, aSliceViewIsChosenFromThePaletteAndKept) {
   fs::create_directories(screenshotDir);
   const auto scroll = root / "permascroll";
   const auto path   = root / "store";
-  {
-    Store slice(permascrollAt(scroll));
-    auto head         = slice.sliceGenesis({});
-    const auto across = slice.makeDimension(head, "d.across");
-    head              = across.version;
-    const auto down   = slice.makeDimension(head, "d.down");
-    head              = down.version;
-    const auto make   = [&](const std::string &words) {
-      head = slice.makeCell(head, words);
-      return slice.cellRefOf(head);
-    };
-    const auto link = [&](const zigzag::CellRef from, const zigzag::DimRef dim,
-                          const zigzag::CellRef to) {
-      head = slice.setLink(head, from, dim, zigzag::DimVector::POS, to);
-    };
-    const std::array<std::string, 4> names{
-        "Ada Lovelace", "Analytical Engine notes, 1843", "Charles Babbage",
-        "Difference Engine No. 2"};
-    std::vector<zigzag::CellRef> row;
-    for (const auto &name : names) {
-      row.push_back(make(name));
-    }
-    link(slice.homeCell(), across.dim, row[0]);
-    for (std::size_t i = 0; i + 1 < row.size(); ++i) {
-      link(row[i], across.dim, row[i + 1]);
-    }
-    zigzag::CellRef above = slice.homeCell();
-    for (const auto *const words :
-         {"Mathematician", "Born 1815, London", "Notes on Menabrea"}) {
-      const auto cell = make(words);
-      link(above, down.dim, cell);
-      above = cell;
-    }
-    slice.repointCurrentVersion(head);
-    slice.save(path.string());
-  }
+  saveSliceViewStore(scroll, path);
   const auto ppm = [&](const std::string &name) {
     return screenshotDir / ("slice_view_" + name + ".ppm");
   };
@@ -2892,6 +2897,101 @@ TEST(E2EBinaryOrchestrationTest, aSliceViewIsChosenFromThePaletteAndKept) {
                        std::istreambuf_iterator<char>()};
   };
   EXPECT_EQ(bytes(ppm("again")), bytes(ppm("chosen")));
+}
+
+/**
+ * U5a and U7a (view-system-implementation-plan.md §4.6): the compass shows
+ * what each binding point is bound to; a binding is made by typing it; the
+ * sub-view is switched; and each of those is reached by its default chord from
+ * system://keymap, not by a name the test knows. Every capture is taken from a
+ * program that opened the presentation itself (see the U2 scenario's note on
+ * why), so the bound view and the plain sub-view are persisted or typed within
+ * one run that has not drawn the visualizer.
+ */
+TEST(E2EBinaryOrchestrationTest, aSliceViewShowsItsCompassAndIsBoundByTyping) {
+  const auto binary = findXuduBinary();
+  ASSERT_TRUE(fs::exists(binary)) << "xudu binary not found at " << binary;
+  const auto root = workspaceRoot() / "integration_workspace_slice_compass";
+  const auto screenshotDir = getScreenshotDir();
+  fs::remove_all(root);
+  fs::create_directories(root);
+  fs::create_directories(screenshotDir);
+  const auto scroll = root / "permascroll";
+  const auto path   = root / "store";
+  saveSliceViewStore(scroll, path);
+  const auto ppm = [&](const std::string &name) {
+    return screenshotDir / ("slice_view_" + name + ".ppm");
+  };
+  const auto xuzz = [&](const std::string &steps) {
+    return executeProcess("XDG_CONFIG_HOME=" + (root / "config").string() +
+                          " XDG_DATA_HOME=" + (root / "data").string() +
+                          " timeout 120 " + binary.string() +
+                          permascrollFlag(scroll) + " --backend " +
+                          activeBackend() + " --profile --view zigzag" + steps +
+                          " " + path.string());
+  };
+
+  // The palette lists the visualizer, then the stretch view and under it its
+  // sub-views; the second entry is the view itself.
+  const auto chosen =
+      xuzz(" --chord Ctrl+Alt+V --key right --key enter --dump-a11y");
+  ASSERT_EQ(chosen.exitCode, 0) << chosen.output;
+  EXPECT_THAT(
+      chosen.output,
+      testing::HasSubstr("slice presentation -> slice.stretch-vanishing"));
+
+  // The compass, read from a program that opened the view itself: a row for
+  // each binding point, bound or not, in the tree and on the screen.
+  const auto read =
+      xuzz(" --capture " + ppm("compass").string() + " --dump-a11y");
+  ASSERT_EQ(read.exitCode, 0) << read.output;
+  EXPECT_THAT(read.output, testing::HasSubstr("Binding points"));
+  EXPECT_THAT(read.output, testing::HasSubstr("x  d.across"));
+  EXPECT_THAT(read.output, testing::HasSubstr("y  d.down"));
+  EXPECT_THAT(read.output, testing::HasSubstr("z  nothing"));
+
+  // A binding typed into the command the keymap opens.
+  const auto bound =
+      xuzz(" --chord Ctrl+Alt+B --type \"z d.across\" --key enter"
+           " --capture " +
+           ppm("bound").string() + " --dump-a11y");
+  ASSERT_EQ(bound.exitCode, 0) << bound.output;
+  EXPECT_THAT(bound.output, testing::HasSubstr("z  d.across"));
+  EXPECT_THAT(bound.output, testing::HasSubstr("Showing d.across on axis z."));
+
+  // What cannot be bound is said, not swallowed.
+  const auto refused = xuzz(" --chord Ctrl+Alt+B --type \"x d.nothing\""
+                            " --key enter --dump-a11y");
+  ASSERT_EQ(refused.exitCode, 0) << refused.output;
+  EXPECT_THAT(refused.output,
+              testing::HasSubstr("There is no dimension or group called "
+                                 "'d.nothing' in this slice."));
+  EXPECT_THAT(refused.output, testing::HasSubstr("x  d.across"));
+
+  // The next sub-view by its chord; kept for the slice.
+  const auto switched = xuzz(" --chord Ctrl+Alt+. --dump-a11y");
+  ASSERT_EQ(switched.exitCode, 0) << switched.output;
+  EXPECT_THAT(switched.output,
+              testing::HasSubstr("Showing Stretch vanishing, Plain (2 of 2)."));
+  const auto plain = xuzz(" --capture " + ppm("plain").string());
+  ASSERT_EQ(plain.exitCode, 0) << plain.output;
+  const auto back = xuzz(" --chord Ctrl+Alt+, --dump-a11y");
+  ASSERT_EQ(back.exitCode, 0) << back.output;
+  EXPECT_THAT(back.output, testing::HasSubstr(
+                               "Showing Stretch vanishing, Ghosts (1 of 2)."));
+
+  // Presentations are cycled by their chord: the view gives way to the
+  // visualizer, which is the next of two.
+  const auto cycled = xuzz(" --chord Ctrl+Alt+Shift+V");
+  ASSERT_EQ(cycled.exitCode, 0) << cycled.output;
+  EXPECT_THAT(cycled.output,
+              testing::HasSubstr("slice presentation -> legacy"));
+
+  for (const auto *const name : {"compass", "bound", "plain"}) {
+    ASSERT_TRUE(fs::exists(ppm(name))) << name;
+    exportToPng(ppm(name),
+                screenshotDir / ("slice_view_" + std::string(name) + ".png"));
+  }
 }
 
 } // namespace

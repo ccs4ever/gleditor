@@ -48,6 +48,8 @@
 #include <gleditor/ui/theme.hpp>
 #include <gleditor/ui/world_panel.hpp>
 
+#include "common/xanadu/system_docs.hpp"
+#include "common/xanadu/view/compass.hpp"
 #include "common/xanadu/view/dimension_colour.hpp"
 #include "common/xanadu/view/view_error.hpp"
 #include "common/xanadu/view/view_marks.hpp"
@@ -145,6 +147,15 @@ struct PresentedChrome {
   std::uint64_t stamp{};
 };
 
+/// The compass for one frame: a row for each binding point, in the corner of
+/// the pane (view-system.md §7.9).
+struct PresentedCompass {
+  std::span<const CompassArm> arms;
+  CompassConfig config;
+  /// Changes whenever the arms or the config do.
+  std::uint64_t stamp{};
+};
+
 class SlicePresenter {
 public:
   /// @p fontOverride is the font description the host gives every
@@ -197,6 +208,10 @@ public:
                  const PresentedWords &words);
   /// Draw the chrome strip along the bottom edge and claim its band.
   void drawChrome(gleditor::FrameContext &ctx, const PresentedChrome &chrome);
+  /// Draw the compass in the top left corner, over the scene. It claims no
+  /// band, and keeps clear of the chrome other contributors have claimed.
+  void drawCompass(gleditor::FrameContext &ctx,
+                   const PresentedCompass &compass);
 
   // -- what was drawn ------------------------------------------------------
   /// The subject a pick landed on, if it was one of this frame's: a pick
@@ -268,6 +283,7 @@ private:
   std::vector<Plane> planes_;
   std::unique_ptr<gleditor::Beams> beams_;
   std::unique_ptr<gleditor::Canvas> chrome_;
+  std::unique_ptr<gleditor::Canvas> compass_;
 
   // What the retained geometry was built from.
   std::optional<std::uint64_t> drawnStamp_;
@@ -291,6 +307,11 @@ private:
   gleditor::ui::UiMetrics chromeMetrics_;
   gleditor::ScreenInsets chromeBase_;
   float chromeClaim_{};
+
+  std::optional<std::uint64_t> compassStamp_;
+  gleditor::ui::UiMetrics compassMetrics_;
+  gleditor::ScreenInsets compassBase_;
+  bool compassDrawn_{};
 
   std::uint64_t rebuilds_{};
 };

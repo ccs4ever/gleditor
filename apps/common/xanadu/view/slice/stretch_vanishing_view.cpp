@@ -795,6 +795,10 @@ struct StretchVanishingView::Workspace {
 
   void emit(LayoutSink &out) {
     const auto &cfg = stretch();
+    // The plain sub-view is the same layout with nothing standing for a cell
+    // the pane cuts: the sub-view is an input to the layout (V-R49).
+    const bool withholdGhosts =
+        StretchVanishingView::kPlainSubview == in->subview;
     const Legibility steps{.abbreviateBelow   = cfg.abbreviateBelow,
                            .coarseBelow       = cfg.coarseBelow,
                            .minReadableLinePx = in->frame.minReadableLinePx};
@@ -820,7 +824,7 @@ struct StretchVanishingView::Workspace {
             item.opacity, cell.content.lineHeight * seen.pixelsPerUnit, steps);
         out.push(item);
         emitted[i] = {.id = item.id, .opacity = item.opacity};
-      } else if (!seen.outside) {
+      } else if (!seen.outside && !withholdGhosts) {
         const auto ghost = ghostOf(item, cfg.ghostOpacity());
         out.push(ghost);
         emitted[i] = {.id = ghost.id, .opacity = ghost.opacity};
@@ -953,8 +957,9 @@ ViewDescriptor stretchVanishingDescriptor() {
                            "almost touching, fading towards the edge";
   descriptor.glyph       = "▦";
   descriptor.subject     = ViewSubject::Slice;
-  // Edge heat is the second sub-view, deferred beyond the spine (plan §4.1).
-  descriptor.subviews = {SubviewSpec{.id = "ghosts", .name = "Ghosts"}};
+  // Edge heat is a further sub-view, deferred beyond the spine (plan §4.1).
+  descriptor.subviews = {SubviewSpec{.id = "ghosts", .name = "Ghosts"},
+                         SubviewSpec{.id = "plain", .name = "Plain"}};
   descriptor.settings = stretchSettingSpecs();
   descriptor.make     = [] { return std::make_unique<StretchVanishingView>(); };
   return descriptor;

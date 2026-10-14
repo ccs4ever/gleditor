@@ -167,7 +167,11 @@ inline constexpr std::string_view kBindingPoints = "bindingPoints";
 inline constexpr std::string_view kSlicePrefix             = "slice.";
 inline constexpr std::string_view kSlicePresentationField  = ".presentation";
 inline constexpr std::string_view kSlicePresentationLegacy = "legacy";
+inline constexpr std::string_view kSliceSubviewField       = ".subview";
 [[nodiscard]] std::string slicePresentationKey(std::string_view sliceId);
+/// Which sub-view of its view a slice shows, by the id its descriptor gives
+/// it (U7a); empty is the view's first, its default.
+[[nodiscard]] std::string sliceSubviewKey(std::string_view sliceId);
 inline constexpr std::string_view kPhysicsKRepel   = "physics.kRepel";
 inline constexpr std::string_view kPhysicsKPlane   = "physics.kPlane";
 inline constexpr std::string_view kPhysicsKAlign   = "physics.kAlign";
@@ -324,6 +328,18 @@ inline constexpr std::string_view kViewMotionSubViewMs =
 inline constexpr std::string_view kViewMotionSubViewEase =
     "view.motion.subViewEase";
 inline constexpr std::string_view kViewMotionHintEase = "view.motion.hintEase";
+// The compass (view-system.md §7.9): the corner display of what each binding
+// point shows. Lengths are logical pixels, converted with UiMetrics::px().
+inline constexpr std::string_view kViewCompassVisible = "view.compass.visible";
+inline constexpr std::string_view kViewCompassGlyphPx = "view.compass.glyphPx";
+inline constexpr std::string_view kViewCompassSwatchPx =
+    "view.compass.swatchPx";
+inline constexpr std::string_view kViewCompassMarginPx =
+    "view.compass.marginPx";
+inline constexpr std::string_view kViewCompassPaddingPx =
+    "view.compass.paddingPx";
+inline constexpr std::string_view kViewCompassStrokePx =
+    "view.compass.strokePx";
 // The overview panel. Colours are RGBA8, most significant byte red.
 inline constexpr std::string_view kOverviewVisible  = "overview.visible";
 inline constexpr std::string_view kOverviewWidthPx  = "overview.widthPx";
@@ -658,6 +674,15 @@ inline constexpr std::string_view kKeymapViewBoth   = "std:xuzz/view_both";
 /// The view palette: which presentation shows the slice (view-system.md
 /// §12.1, view.palette).
 inline constexpr std::string_view kKeymapViewPalette = "std:view/palette";
+/// The other view commands of view-system.md §12.1 that the slice
+/// presentation in front runs (U7a): the next presentation, the next and
+/// previous sub-view, and a binding typed as 'x d.across'.
+inline constexpr std::string_view kKeymapViewCycle = "std:view/cycle";
+inline constexpr std::string_view kKeymapViewSubviewNext =
+    "std:view/subview_next";
+inline constexpr std::string_view kKeymapViewSubviewPrev =
+    "std:view/subview_prev";
+inline constexpr std::string_view kKeymapViewBind = "std:view/bind";
 // Caret movement and editing: the document pane's own keys.
 inline constexpr std::string_view kKeymapCaretLeft  = "std:edit/caret_left";
 inline constexpr std::string_view kKeymapCaretRight = "std:edit/caret_right";
@@ -985,6 +1010,8 @@ dimensionCueSettingSpecs(std::string_view dimension, std::uint32_t colour,
 /// defaultSettingSpecs(): which slices a reader opens is known only then.
 [[nodiscard]] SettingSpec
 slicePresentationSettingSpec(std::string_view sliceId);
+/// The same for the sub-view of that view, by its descriptor's id (U7a).
+[[nodiscard]] SettingSpec sliceSubviewSettingSpec(std::string_view sliceId);
 
 /// Keyboard scopes a key binding can be confined to (gleditor::Command::scope):
 /// the pane that has the keyboard.
@@ -1418,6 +1445,28 @@ struct MotionConfig {
   [[nodiscard]] static MotionConfig fromStore(const Store &store);
 };
 
+/**
+ * @brief How the compass is drawn (view-system.md §7.9, §12.3).
+ *
+ * In system://ui with the other chrome. Lengths are logical pixels.
+ */
+struct CompassConfig {
+  bool visible{true};
+  /// The cue's glyph, drawn on a square this long.
+  float glyphPx{12.0F};
+  /// The dimension's dash pattern, drawn along a line this long.
+  float swatchPx{44.0F};
+  /// Clear of the pane's top and left edges.
+  float marginPx{12.0F};
+  float paddingPx{6.0F};
+  float strokePx{2.0F};
+
+  bool operator==(const CompassConfig &) const = default;
+
+  /// A length that is not finite and positive keeps its default.
+  [[nodiscard]] static CompassConfig fromStore(const Store &store);
+};
+
 struct UIConfig {
   float uiScale{1.0F}, uiFontScale{1.0F};
   float uiSafeMarginShare{gleditor::ui::kSafeMarginShare};
@@ -1439,6 +1488,7 @@ struct UIConfig {
   ModalPresentationConfig telescopeModal{860.0F, 560.0F};
   ModalPresentationConfig hypertimeModal{640.0F, 460.0F};
   MotionConfig motion;
+  CompassConfig compass;
 
   UIConfig();
   [[nodiscard]] static UIConfig fromStore(const Store &store);

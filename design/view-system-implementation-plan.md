@@ -312,7 +312,31 @@ As built (U2), in `apps/common/ui/view/`:
   names (the spec's `layout.slice.<id>.presentation`), the legacy one by default and for a view the
   program does not have. ZigZag's shared commands step through whichever is shown.
 - The view palette (`std:view/palette`, `Ctrl+Alt+V`) is a form listing the visualizer and every
-  slice view of the registry; U5a makes it the palette proper.
+  slice view of the registry; U5a lists each view's sub-views beneath it (below).
+
+As built (U5a, U7a), in `apps/common/xanadu/view/` and `apps/common/ui/view/`:
+
+- `compassOf()` (`compass.hpp`, engine) is the compass's model: one `CompassArm` per point of the
+  placement's axes, bound or not, with the point's role and the cue of what it shows; a group shows
+  its name and member count and takes the cue of the dimension it resolves to.
+  `SlicePresenter::drawCompass()` draws it as rows in the pane's top left corner, each a dash swatch
+  and a glyph in the dimension's cue and the words, retained by stamp so a settled frame uploads
+  nothing, and the presentation announces the same words as a list. Its six settings are
+  `view.compass.*` in `system://ui` (`CompassConfig`). It is rows rather than the rose of §7.9
+  because `Canvas::addLine` is exact only for horizontal and vertical lines; the rose, with arms
+  that take a drop, is U5b's.
+- The palette lists a view's sub-views indented under it; a row's value is the view's kind or
+  `kind#subview`, and `recordSlicePresentation()` writes `slice.<id>.presentation` and, for a
+  sub-view row, `slice.<id>.subview` in `system://layout`.
+- The commands are keymap actions the presentation receives by name through `dispatchAction()`: the
+  existing steps, jump home, `hop_head`/`hop_tail` along x and `swap_axes`, plus new
+  `std:view/subview_next` (`Ctrl+Alt+.`), `std:view/subview_prev` (`Ctrl+Alt+,`), `std:view/bind`
+  (`Ctrl+Alt+B`, a form that takes 'x d.across') and `std:view/cycle` (`Ctrl+Alt+Shift+V`, the next
+  presentation). A call may carry one argument after a space. The sub-view is an input to the layout
+  (V-R49), persisted per slice; stretch vanishing gains a second sub-view, `plain`, which withholds
+  ghosts, so there is something to switch between (edge heat remains deferred).
+- Not built: `view.select(n)`, `bind.undo`, `axis.cycle`, and saving the typed bindings under
+  `layout.slice.<id>.axes` (G9's writer), so a binding lasts the session.
 
 Two choices the spec left open: a placement standing on its own takes `Doc::pixelsToWorld` as the
 legacy visualizer does, and it is enlarged in quarter steps until a line of cell text reaches

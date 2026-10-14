@@ -30,12 +30,15 @@ constexpr const char *kCategory = "view.slice";
 
 /// The accessibility tree's fixed nodes; placed things count up from
 /// kFirstNode, each keeping its number for as long as its subject is drawn.
-constexpr std::uint64_t kRootNode   = 1;
-constexpr std::uint64_t kTrailNode  = 2;
-constexpr std::uint64_t kNoticeNode = 3;
-constexpr std::uint64_t kFirstNode  = 16;
+constexpr std::uint64_t kRootNode    = 1;
+constexpr std::uint64_t kTrailNode   = 2;
+constexpr std::uint64_t kNoticeNode  = 3;
+constexpr std::uint64_t kCompassNode = 4;
+constexpr std::uint64_t kFirstNode   = 16;
 /// The breadcrumbs' items, by place in the strip, clear of placed things.
 constexpr std::uint64_t kFirstCrumbNode = std::uint64_t{1} << 40U;
+/// The compass's arms, in order, in a range of their own.
+constexpr std::uint64_t kFirstArmNode = std::uint64_t{1} << 41U;
 
 /// The names a step arrives under: the bare-key action ZigZag's commands
 /// dispatch ("step-x-pos"), and the keymap's own spellings
@@ -71,6 +74,44 @@ struct StepAction {
 [[nodiscard]] bool isJumpHome(const std::string_view action) {
   return "jump-home" == action || "std:nav/jump_home" == action ||
          "std:nav/zigzag_jump_home" == action;
+}
+
+/// Hopping to the head or the tail of the x rank, under the bare-key name and
+/// the keymap's.
+[[nodiscard]] std::optional<zigzag::DimVector>
+hopNamed(const std::string_view action) {
+  if ("hop-head" == action || "std:nav/hop_head" == action ||
+      "std:nav/zigzag_hop_head" == action) {
+    return zigzag::DimVector::NEG;
+  }
+  if ("hop-tail" == action || "std:nav/hop_tail" == action ||
+      "std:nav/zigzag_hop_tail" == action) {
+    return zigzag::DimVector::POS;
+  }
+  return std::nullopt;
+}
+
+[[nodiscard]] bool isSwapAxes(const std::string_view action) {
+  return "swap-xy" == action || "std:ui/swap_axes" == action ||
+         "std:ui/zigzag_swap_xy" == action;
+}
+
+/// A call as the keymap and a typed command spell it: the action's name, then
+/// optionally one argument after a space.
+struct Call {
+  std::string_view name, argument;
+};
+
+[[nodiscard]] Call callOf(const std::string_view action) {
+  const auto cut = action.find(' ');
+  if (std::string_view::npos == cut) {
+    return {.name = action, .argument = {}};
+  }
+  auto argument = action.substr(cut + 1);
+  while (!argument.empty() && ' ' == argument.front()) {
+    argument.remove_prefix(1);
+  }
+  return {.name = action.substr(0, cut), .argument = argument};
 }
 
 /// An action as a reader would say it: "toggle palette" for
@@ -172,11 +213,27 @@ ViewSlicePresentation *ViewSlicePresentation::applySettings() {
       bindingPoints_ = std::move(points);
       dirty_         = nullptr != store_;
     }
+    if (nullptr != store_) {
+      const auto id = model.getString(
+          settings::sliceSubviewKey(store_->documentId().str()), std::string{});
+      if (const auto found = subviewIndexOf(descriptor_, id);
+          found && *found != subview_) {
+        subview_ = *found;
+        cause_   = MotionCause::SubViewSwitch;
+      }
+    }
   }
   if (auto *const ui = store(SystemDocKind::UI)) {
     cues_ = DimensionCues::fromSettings(SystemStoreModel::fromStore(*ui));
+    if (const auto compass = CompassConfig::fromStore(*ui);
+        compass != compassConfig_) {
+      compassConfig_ = compass;
+      ++compassStamp_;
+      ++chromeRevision_;
+    }
     animation_.configure(MotionConfig::fromStore(*ui));
   }
+  refreshCompass();
   stale_ = true;
   ++stamp_;
   return this;
@@ -216,6 +273,9 @@ void ViewSlicePresentation::bindXuduStore(Store &store,
   } else if (&store != store_) {
     wantedFocus_.reset();
   }
+  if (&store != store_) {
+    subview_ = 0;
+  }
   store_ = &store;
   head_  = version;
   if (head_.isZero()) {
@@ -227,6 +287,7 @@ void ViewSlicePresentation::bindXuduStore(Store &store,
   // Folded when first needed: a presentation standing behind another costs
   // nothing until it is shown.
   dirty_ = true;
+  applySettings();
   changed();
 }
 
@@ -259,6 +320,7 @@ void ViewSlicePresentation::buildSpace() {
   cellText_.clear();
   labelText_.clear();
   if (nullptr == store_) {
+    refreshCompass();
     return;
   }
   manifold_ =
@@ -339,6 +401,12 @@ void ViewSlicePresentation::bindAxes(const std::vector<std::string> &wanted) {
     }
   }
   axes.forgetHistory();
+  syncLegacyView();
+  mintCues();
+  refreshCompass();
+}
+
+void ViewSlicePresentation::syncLegacyView() {
   // The legacy binding, for the satelloid and for a switch back.
   std::array<std::string *, 3> legacy{&legacyView_.x_dimension,
                                       &legacyView_.y_dimension,
@@ -348,7 +416,22 @@ void ViewSlicePresentation::bindAxes(const std::vector<std::string> &wanted) {
       *legacy[axis] = std::move(name);
     }
   }
-  mintCues();
+}
+
+void ViewSlicePresentation::refreshCompass() {
+  std::vector<CompassArm> arms;
+  if (space_ && nullptr != store_) {
+    arms =
+        compassOf(*space_, *store_, [this](const std::string_view dimension) {
+          return cues_.cueOf(dimension).value_or(
+              DimensionPalette::standard().cueOf(cues_.size()));
+        });
+  }
+  if (arms != compass_) {
+    compass_ = std::move(arms);
+    ++compassStamp_;
+    ++chromeRevision_;
+  }
 }
 
 void ViewSlicePresentation::mintCues() {
@@ -388,6 +471,7 @@ void ViewSlicePresentation::mintCues() {
       host_.repoint(SystemDocKind::UI, head);
     }
     cues_ = DimensionCues::fromSettings(SystemStoreModel::fromStore(*ui));
+    refreshCompass();
     ++stamp_;
   });
 }
@@ -529,7 +613,8 @@ void ViewSlicePresentation::relayout(const PaneFrame &frame) {
       view_->layout(SliceLayoutInput{.space   = *space_,
                                      .cursor  = cursor_,
                                      .frame   = frame,
-                                     .measure = measure},
+                                     .measure = measure,
+                                     .subview = subview_},
                     sink_);
     }
   }
@@ -624,6 +709,10 @@ void ViewSlicePresentation::drawFrame(gleditor::FrameContext &ctx) {
                            .paddingX    = cells_.hudHorizontalPaddingPx,
                            .paddingY    = cells_.hudVerticalPaddingPx,
                            .stamp = chromeRevision_ + keyboardMoves_.load()});
+  ensureSpace();
+  presenter_.drawCompass(ctx, PresentedCompass{.arms   = compass_,
+                                               .config = compassConfig_,
+                                               .stamp  = compassStamp_});
 }
 
 bool ViewSlicePresentation::busy() const {
@@ -643,17 +732,37 @@ void ViewSlicePresentation::runOnOwner(std::function<void()> task) {
 }
 
 bool ViewSlicePresentation::dispatchAction(const std::string_view actionName) {
-  if (auto stepping = stepNamed(actionName)) {
+  const auto [name, argument] = callOf(actionName);
+  if (auto stepping = stepNamed(name)) {
     runOnOwner([this, stepping = std::move(*stepping)] {
       step(stepping.point, stepping.direction);
     });
     return true;
   }
-  if (isJumpHome(actionName)) {
+  if (isJumpHome(name)) {
     runOnOwner([this] { jumpHome(); });
     return true;
   }
-  runOnOwner([this, action = std::string(actionName)] { refused(action); });
+  if (const auto hopping = hopNamed(name)) {
+    runOnOwner([this, direction = *hopping] { hop("x", direction); });
+    return true;
+  }
+  if (isSwapAxes(name)) {
+    runOnOwner([this] { swapAxes(); });
+    return true;
+  }
+  if (settings::kKeymapViewSubviewNext == name ||
+      settings::kKeymapViewSubviewPrev == name) {
+    runOnOwner([this, by = settings::kKeymapViewSubviewNext == name ? 1 : -1] {
+      cycleSubview(by);
+    });
+    return true;
+  }
+  if (settings::kKeymapViewBind == name) {
+    runOnOwner([this, typed = std::string(argument)] { bindTyped(typed); });
+    return true;
+  }
+  runOnOwner([this, action = std::string(name)] { refused(action); });
   return false;
 }
 
@@ -695,11 +804,185 @@ void ViewSlicePresentation::step(const std::string &point,
   arrive(outcome, true);
 }
 
+void ViewSlicePresentation::hop(const std::string &point,
+                                const zigzag::DimVector direction) {
+  ensureSpace();
+  if (!space_) {
+    return;
+  }
+  const auto axis = space_->axes().axisNamed(point);
+  if (!axis) {
+    const std::array fields{MessageField{"axis", point}};
+    say(ViewMessage::AxisUnknown, fields);
+    return;
+  }
+  // As many steps as there are cells is more than any rank can hold, so a
+  // rank that loops back on itself still ends.
+  auto at     = cursor_;
+  bool moved  = false;
+  bool origin = false;
+  for (std::size_t i = 0; i < manifold_->cellCount(); ++i) {
+    const auto outcome = view_->move(*space_, at,
+                                     MoveRequest{.kind = MoveKind::AlongAxis,
+                                                 .axis = axis,
+                                                 .direction = direction});
+    if (!outcome.moved || outcome.cursor == at) {
+      break;
+    }
+    at     = outcome.cursor;
+    moved  = true;
+    origin = origin || outcome.originChanged;
+  }
+  if (!moved) {
+    const auto name = shownName(*axis);
+    const std::array fields{
+        MessageField{"dimension", name.empty() ? point : name},
+        MessageField{"direction", zigzag::DimVector::POS == direction
+                                      ? "posward"
+                                      : "negward"}};
+    say(ViewMessage::NothingThatWay, fields);
+    return;
+  }
+  arrive(MoveOutcome{.cursor = at, .moved = true, .originChanged = origin},
+         true);
+}
+
 void ViewSlicePresentation::jumpHome() {
   ensureSpace();
   if (manifold_ && manifold_->contains(manifold_->home())) {
     goTo(manifold_->home(), true);
   }
+}
+
+void ViewSlicePresentation::swapAxes() {
+  ensureSpace();
+  if (!space_) {
+    return;
+  }
+  auto &axes   = space_->axes();
+  const auto x = axes.axisNamed("x");
+  const auto y = axes.axisNamed("y");
+  if (!x || !y) {
+    const std::array fields{MessageField{"axis", x ? "y" : "x"}};
+    say(ViewMessage::AxisUnknown, fields);
+    return;
+  }
+  if (const auto swapped = axes.swap(*x, *y); !swapped) {
+    say(messageKey(swapped.error()), {});
+    return;
+  }
+  rebound(MotionCause::Rebind);
+}
+
+void ViewSlicePresentation::rebound(const MotionCause cause) {
+  space_->toss();
+  syncLegacyView();
+  mintCues();
+  refreshCompass();
+  cause_ = cause;
+  stale_ = true;
+  changed();
+}
+
+bool ViewSlicePresentation::bindTyped(const std::string_view command) {
+  ensureSpace();
+  if (!space_ || nullptr == store_) {
+    return false;
+  }
+  const auto parsed = parseBindCommand(command);
+  if (!parsed) {
+    say(ViewMessage::CommandUnclear, {});
+    return false;
+  }
+  const auto bound = bindByName(*space_, *store_, *parsed);
+  if (!bound) {
+    switch (bound.error()) {
+    case ViewError::UnknownAxis: {
+      const std::array fields{MessageField{"axis", parsed->point}};
+      say(ViewMessage::AxisUnknown, fields);
+      break;
+    }
+    case ViewError::UnknownName: {
+      const std::array fields{MessageField{"name", parsed->target}};
+      say(ViewMessage::NameUnknown, fields);
+      break;
+    }
+    case ViewError::EmptyGroupBind: {
+      const std::array fields{MessageField{"name", parsed->target}};
+      say(ViewMessage::EmptyGroup, fields);
+      break;
+    }
+    default:
+      say(messageKey(bound.error()), {});
+      break;
+    }
+    return false;
+  }
+  rebound(MotionCause::Rebind);
+  const std::array fields{MessageField{"target", bound->shows},
+                          MessageField{"axis", bound->point}};
+  say(ViewMessage::AxisShows, fields);
+  return true;
+}
+
+std::string_view ViewSlicePresentation::subviewId() const noexcept {
+  return subview_ < descriptor_.subviews.size()
+             ? std::string_view{descriptor_.subviews[subview_].id}
+             : std::string_view{};
+}
+
+ViewSlicePresentation *ViewSlicePresentation::cycleSubview(const int by) {
+  const auto next = steppedSubview(descriptor_.subviews.size(), subview_, by);
+  if (!next) {
+    const std::array fields{MessageField{"view", descriptor_.name}};
+    say(ViewMessage::NoSubviews, fields);
+    return this;
+  }
+  subview_ = *next;
+  showSubview();
+  persistSubview();
+  return this;
+}
+
+void ViewSlicePresentation::showSubview() {
+  const auto place = std::to_string(subview_ + 1);
+  const auto count = std::to_string(descriptor_.subviews.size());
+  const std::array fields{
+      MessageField{"view", descriptor_.name},
+      MessageField{"subview", descriptor_.subviews[subview_].name},
+      MessageField{"place", place}, MessageField{"count", count}};
+  say(ViewMessage::SubviewShown, fields);
+  cause_ = MotionCause::SubViewSwitch;
+  stale_ = true;
+  changed();
+}
+
+void ViewSlicePresentation::persistSubview() {
+  if (nullptr == store_ || !host_.systemStore) {
+    return;
+  }
+  auto *const layout = host_.systemStore(SystemDocKind::Layout);
+  if (nullptr == layout) {
+    return;
+  }
+  const auto id     = store_->documentId().str();
+  const auto before = layout->primaryCurrentVersion();
+  auto head = ensureSetting(*layout, before, sliceSubviewSettingSpec(id));
+  head      = setSetting(*layout, head, settings::sliceSubviewKey(id),
+                         std::string(subviewId()));
+  if (head != before && host_.repoint) {
+    host_.repoint(SystemDocKind::Layout, head);
+  }
+}
+
+std::span<const CompassArm> ViewSlicePresentation::compass() const {
+  ensureSpace();
+  return compass_;
+}
+
+ViewAxisSet *ViewSlicePresentation::axisSet() const {
+  ensureSpace();
+  return space_ ? &space_->axes() : nullptr;
 }
 
 void ViewSlicePresentation::arrive(const MoveOutcome &outcome,
@@ -921,6 +1204,19 @@ void ViewSlicePresentation::describe(gleditor::a11y::Builder &into) {
     trail.label    = "Cells walked";
     trail.children = std::move(crumbs);
     children.push_back(into.id(kTrailNode));
+  }
+  if (compassConfig_.visible && !compass_.empty()) {
+    std::vector<std::uint64_t> arms;
+    for (std::size_t i = 0; i < compass_.size(); ++i) {
+      const auto local = kFirstArmNode + i;
+      auto &arm        = into.add(local, Role::ListItem);
+      arm.label        = compass_[i].words();
+      arms.push_back(into.id(local));
+    }
+    auto &rose    = into.add(kCompassNode, Role::List);
+    rose.label    = "Binding points";
+    rose.children = std::move(arms);
+    children.push_back(into.id(kCompassNode));
   }
   if (!notice_.empty()) {
     auto &notice = into.add(kNoticeNode, Role::Label);

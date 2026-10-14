@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <deque>
 #include <functional>
 #include <map>
@@ -526,4 +527,298 @@ TEST(ViewPresenterTest, MessagesFillTheirFields) {
   }
   EXPECT_TRUE(
       xanadu::view::dashPattern(xanadu::view::DashStyle::Solid).empty());
+}
+
+// -- the compass and the view commands (plan §4.6 U5a, U7a) ------------------
+
+namespace {
+
+/// What the compass says, one string a point, as a reader would hear it.
+std::vector<std::string>
+compassWords(const ViewSlicePresentation &presentation) {
+  std::vector<std::string> words;
+  for (const auto &arm : presentation.compass()) {
+    words.push_back(arm.words());
+  }
+  return words;
+}
+
+/// A presentation drawn once, so its cues are minted, and then again.
+std::unique_ptr<ViewSlicePresentation> settled(Fixture &fixture, Frame &frame) {
+  auto presentation = fixture.presentation();
+  presentation->deviceReady(frame.device, {});
+  frame.draw(*presentation);
+  fixture.drain();
+  frame.draw(*presentation);
+  return presentation;
+}
+
+} // namespace
+
+TEST(ViewCompassTest, ShowsEveryPointWithWhatItIsBoundTo) {
+  Fixture fixture;
+  Frame frame;
+  const auto presentation = settled(fixture, frame);
+  EXPECT_EQ(
+      compassWords(*presentation),
+      (std::vector<std::string>{"x  d.across", "y  d.down", "z  nothing"}));
+  // Each bound arm carries the cue the dimension has in system://ui.
+  const auto ui = xanadu::SystemStoreModel::fromStore(
+      *fixture.system.at(SystemDocKind::UI));
+  const auto cues   = xanadu::view::DimensionCues::fromSettings(ui);
+  const auto arms   = presentation->compass();
+  const auto across = cues.cueOf("d.across");
+  ASSERT_TRUE(across.has_value());
+  ASSERT_TRUE(arms[0].cue.has_value());
+  EXPECT_EQ(*arms[0].cue, *across);
+  EXPECT_NE(arms[0].cue, arms[1].cue);
+  EXPECT_FALSE(arms[2].cue.has_value());
+}
+
+TEST(ViewCompassTest, IsDrawnOnceAndNotAgainWhileNothingChanges) {
+  Fixture fixture;
+  Frame frame;
+  const auto presentation = settled(fixture, frame);
+  EXPECT_CALL(frame.device, updateBuffer).Times(0);
+  EXPECT_CALL(frame.device, createBuffer).Times(0);
+  for (int i = 0; i < 20; ++i) {
+    frame.draw(*presentation);
+  }
+  testing::Mock::VerifyAndClearExpectations(&frame.device);
+
+  // A binding is a change the compass draws again.
+  EXPECT_CALL(frame.device, updateBuffer).Times(testing::AtLeast(1));
+  EXPECT_TRUE(presentation->bindTyped("z d.across"));
+  frame.draw(*presentation);
+}
+
+TEST(ViewCompassTest, TheSettingHidesItAndTheTreeFollows) {
+  Fixture fixture;
+  Frame frame;
+  const auto presentation = settled(fixture, frame);
+  auto tree               = treeOf(*presentation);
+  const auto listed       = [&](const std::string_view label) {
+    return std::ranges::any_of(
+        tree.nodes, [&](const auto &node) { return node.label == label; });
+  };
+  EXPECT_TRUE(listed("Binding points"));
+  EXPECT_TRUE(listed("x  d.across"));
+  EXPECT_TRUE(listed("z  nothing"));
+
+  auto &ui = *fixture.system.at(SystemDocKind::UI);
+  ui.repointCurrentVersion(
+      xanadu::setSetting(ui, ui.primaryCurrentVersion(),
+                         xanadu::settings::kViewCompassVisible, false));
+  presentation->applySettings();
+  tree = treeOf(*presentation);
+  EXPECT_FALSE(listed("Binding points"));
+  // Still bound, still on offer to code that asks.
+  EXPECT_EQ(compassWords(*presentation).size(), 3U);
+}
+
+TEST(ViewCommandsTest, ATypedBindingChangesTheCompassAndTheLayout) {
+  Fixture fixture;
+  Frame frame;
+  const auto presentation = settled(fixture, frame);
+
+  EXPECT_TRUE(presentation->dispatchAction("std:view/bind z d.down"));
+  fixture.drain();
+  EXPECT_EQ(compassWords(*presentation)[2], "z  d.down");
+  EXPECT_EQ(presentation->notice(), "Showing d.down on axis z.");
+  EXPECT_EQ(presentation->currentView().z_dimension, "d.down");
+
+  // Typed over x: the same key now walks the other dimension.
+  EXPECT_TRUE(presentation->bindTyped("x d.down"));
+  frame.draw(*presentation);
+  EXPECT_EQ(compassWords(*presentation)[0], "x  d.down");
+  EXPECT_TRUE(presentation->dispatchAction("step-x-pos"));
+  EXPECT_EQ(presentation->focusCell(), fixture.column[0]);
+}
+
+TEST(ViewCommandsTest, ATypedBindingCanNameAGroup) {
+  Fixture fixture;
+  Frame frame;
+  const auto presentation = settled(fixture, frame);
+  auto *const axes        = presentation->axisSet();
+  ASSERT_NE(axes, nullptr);
+  const auto manifold =
+      fixture.slice.rebuildManifold(fixture.slice.primaryCurrentVersion());
+  const std::array members{*manifold.dimensionNamed("d.down", fixture.slice),
+                           *manifold.dimensionNamed("d.across", fixture.slice)};
+  ASSERT_TRUE(axes->createGroup("Both", members));
+
+  EXPECT_TRUE(presentation->bindTyped("z Both"));
+  EXPECT_EQ(compassWords(*presentation)[2], "z  Both (2)");
+  EXPECT_TRUE(presentation->compass()[2].group);
+}
+
+TEST(ViewCommandsTest, ATypedBindingThatCannotBeMadeSaysWhy) {
+  Fixture fixture;
+  Frame frame;
+  const auto presentation = settled(fixture, frame);
+  const auto before       = compassWords(*presentation);
+
+  EXPECT_FALSE(presentation->bindTyped("x d.nothing"));
+  EXPECT_EQ(presentation->notice(),
+            "There is no dimension or group called 'd.nothing' in this slice.");
+  EXPECT_FALSE(presentation->bindTyped("q d.down"));
+  EXPECT_EQ(presentation->notice(), "There is no axis q.");
+  EXPECT_FALSE(presentation->bindTyped("x"));
+  EXPECT_EQ(presentation->notice(),
+            "Say which point and what it shows, as in 'x d.across'.");
+  EXPECT_EQ(compassWords(*presentation), before);
+  // Each is announced as well as shown.
+  const auto tree = treeOf(*presentation);
+  EXPECT_TRUE(std::ranges::any_of(tree.nodes, [&](const auto &node) {
+    return node.label == presentation->notice() &&
+           gleditor::a11y::Live::Polite == node.live;
+  }));
+}
+
+TEST(ViewCommandsTest, SwapsTheTwoAxesOfThePlane) {
+  Fixture fixture;
+  Frame frame;
+  const auto presentation = settled(fixture, frame);
+  EXPECT_TRUE(presentation->dispatchAction("std:ui/swap_axes"));
+  EXPECT_EQ(compassWords(*presentation)[0], "x  d.down");
+  EXPECT_EQ(compassWords(*presentation)[1], "y  d.across");
+  // The same keys now walk the other dimension.
+  EXPECT_TRUE(presentation->dispatchAction("step-x-pos"));
+  EXPECT_EQ(presentation->focusCell(), fixture.column[0]);
+}
+
+TEST(ViewCommandsTest, HopsToTheHeadAndTheTailOfTheRank) {
+  Fixture fixture;
+  Frame frame;
+  const auto presentation = settled(fixture, frame);
+  EXPECT_TRUE(presentation->dispatchAction("std:nav/hop_tail"));
+  EXPECT_EQ(presentation->focusCell(), fixture.row.back());
+  EXPECT_EQ(presentation->breadcrumbs().size(), 1U) << "a hop is one visit";
+  EXPECT_TRUE(presentation->dispatchAction("hop-head"));
+  EXPECT_EQ(presentation->focusCell(), fixture.row.front());
+  // Already at the head: nothing further, said.
+  EXPECT_TRUE(presentation->dispatchAction("hop-head"));
+  EXPECT_EQ(presentation->notice(), "No cell further along d.across negward.");
+}
+
+TEST(ViewCommandsTest, TheSubviewIsSteppedAndKeptWithTheSlice) {
+  Fixture fixture;
+  Frame frame;
+  const auto presentation = settled(fixture, frame);
+  EXPECT_EQ(presentation->subviewId(), "ghosts");
+
+  EXPECT_TRUE(presentation->dispatchAction("std:view/subview_next"));
+  EXPECT_EQ(presentation->subviewId(), "plain");
+  EXPECT_EQ(presentation->notice(),
+            "Showing Stretch vanishing, Plain (2 of 2).");
+  EXPECT_TRUE(presentation->dispatchAction("std:view/subview_next"));
+  EXPECT_EQ(presentation->subviewId(), "ghosts") << "wraps";
+  EXPECT_TRUE(presentation->dispatchAction("std:view/subview_prev"));
+  EXPECT_EQ(presentation->subviewId(), "plain");
+
+  // Kept in system://layout under the slice's own key, so a presentation
+  // made afterwards over the same slice opens on it.
+  const auto layout = xanadu::SystemStoreModel::fromStore(
+      *fixture.system.at(SystemDocKind::Layout));
+  EXPECT_EQ(layout.getString(xanadu::settings::sliceSubviewKey(
+                                 fixture.slice.documentId().str()),
+                             ""),
+            "plain");
+  const auto again = fixture.presentation();
+  EXPECT_EQ(again->subviewId(), "plain");
+}
+
+TEST(ViewCommandsTest, TheSubviewIsAnInputToTheLayout) {
+  Fixture fixture(21);
+  Frame frame;
+  const auto presentation = settled(fixture, frame);
+  const auto ghosts       = [&] {
+    std::size_t count = 0;
+    for (std::size_t i = 0; i < presentation->presenter().drawnItems().size();
+         ++i) {
+      count += presentation->presenter().drawnAsGhost(i) ? 1U : 0U;
+    }
+    return count;
+  };
+  presentation->focusCell(fixture.row[10]);
+  frame.draw(*presentation);
+  const auto withGhosts = ghosts();
+  ASSERT_GT(withGhosts, 0U) << "a long row runs out of the pane";
+
+  EXPECT_TRUE(presentation->dispatchAction("std:view/subview_next"));
+  frame.draw(*presentation);
+  EXPECT_EQ(ghosts(), 0U);
+  EXPECT_TRUE(presentation->dispatchAction("std:view/subview_prev"));
+  frame.draw(*presentation);
+  EXPECT_EQ(ghosts(), withGhosts);
+}
+
+TEST(ViewCommandsTest, OnlyWhatItStillCannotDoIsRefused) {
+  Fixture fixture;
+  Frame frame;
+  const auto presentation = settled(fixture, frame);
+  EXPECT_FALSE(presentation->dispatchAction("std:ui/toggle_palette"));
+  EXPECT_THAT(presentation->notice(), testing::HasSubstr("cannot"));
+  for (const auto *const name :
+       {"std:nav/step_y_pos", "std:nav/jump_home", "std:nav/hop_tail",
+        "std:ui/swap_axes", "std:view/subview_next", "std:view/bind x d.down",
+        "std:view/subview_prev"}) {
+    EXPECT_TRUE(presentation->dispatchAction(name)) << name;
+  }
+}
+
+TEST(SlicePresentationPaletteTest, ListsEachViewsSubviewsBeneathIt) {
+  xanadu::view::ViewRegistry registry;
+  ASSERT_TRUE(xanadu::view::registerBuiltinViews(registry));
+  const auto field = xanadu::view::slicePresentationChoice(
+      registry, xanadu::view::StretchVanishingView::kKind, "plain");
+  const auto kind = std::string(xanadu::view::StretchVanishingView::kKind);
+  const auto view = std::ranges::find(field.optionValues, kind);
+  ASSERT_NE(view, field.optionValues.end());
+  const auto at = static_cast<std::size_t>(view - field.optionValues.begin());
+  ASSERT_GE(field.optionValues.size(), at + 3U);
+  // Under the view, in the order its descriptor gives them, set in.
+  EXPECT_EQ(field.optionValues[at + 1], kind + "#ghosts");
+  EXPECT_EQ(field.optionValues[at + 2], kind + "#plain");
+  EXPECT_THAT(field.options[at + 1], testing::StartsWith("    "));
+  EXPECT_EQ(field.options[at], "Stretch vanishing");
+  // The sub-view showing is the row that is chosen.
+  EXPECT_EQ(field.optionValues[field.chosen], kind + "#plain");
+
+  const auto choice = xanadu::view::paletteChoiceOf(kind + "#plain");
+  EXPECT_EQ(choice.presentation, kind);
+  EXPECT_EQ(choice.subview, "plain");
+  EXPECT_EQ(xanadu::view::paletteChoiceOf("legacy").subview, "");
+  EXPECT_EQ(xanadu::view::paletteValue(choice), kind + "#plain");
+}
+
+TEST(SlicePresentationPaletteTest, RecordsTheChoiceInTheLayoutPerSlice) {
+  xanadu::Store layout;
+  xanadu::initializeSystemStore(layout, SystemDocKind::Layout);
+  const auto head = xanadu::view::recordSlicePresentation(
+      layout, "slice-a",
+      {.presentation = "slice.stretch-vanishing", .subview = "plain"});
+  layout.repointCurrentVersion(head);
+  const auto model = xanadu::SystemStoreModel::fromStore(layout);
+  EXPECT_EQ(
+      model.getString(xanadu::settings::slicePresentationKey("slice-a"), ""),
+      "slice.stretch-vanishing");
+  EXPECT_EQ(model.getString(xanadu::settings::sliceSubviewKey("slice-a"), ""),
+            "plain");
+  // A choice with no sub-view leaves the one the slice has.
+  const auto next = xanadu::view::recordSlicePresentation(
+      layout, "slice-a", {.presentation = "legacy", .subview = {}});
+  layout.repointCurrentVersion(next);
+  EXPECT_EQ(xanadu::SystemStoreModel::fromStore(layout).getString(
+                xanadu::settings::sliceSubviewKey("slice-a"), ""),
+            "plain");
+}
+
+TEST(SlicePresentationPaletteTest, CyclingStepsThroughPresentationsAndWraps) {
+  const std::vector<std::string> kinds{"legacy", "slice.a", "slice.b"};
+  EXPECT_EQ(xanadu::view::steppedPresentation(kinds, "legacy", 1), "slice.a");
+  EXPECT_EQ(xanadu::view::steppedPresentation(kinds, "slice.b", 1), "legacy");
+  EXPECT_EQ(xanadu::view::steppedPresentation(kinds, "legacy", -1), "slice.b");
+  EXPECT_EQ(xanadu::view::steppedPresentation(kinds, "unknown", 1), "slice.a");
+  EXPECT_EQ(xanadu::view::steppedPresentation({}, "legacy", 1), "legacy");
 }

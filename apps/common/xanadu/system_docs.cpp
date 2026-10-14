@@ -54,6 +54,10 @@ std::string settings::slicePresentationKey(const std::string_view sliceId) {
   return std::string{kSlicePrefix} + std::string{sliceId} +
          std::string{kSlicePresentationField};
 }
+std::string settings::sliceSubviewKey(const std::string_view sliceId) {
+  return std::string{kSlicePrefix} + std::string{sliceId} +
+         std::string{kSliceSubviewField};
+}
 std::string settings::dimensionDashKey(const std::string_view dimension) {
   return std::string{kDimensionPrefix} + std::string{dimension} +
          std::string{kDimensionDashField};
@@ -1257,6 +1261,35 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
             easeSpec(settings::kViewMotionHintEase,
                      "Curve of a move a view times itself", motion.hint),
         });
+    const CompassConfig compass;
+    specs.push_back({.name    = std::string(settings::kViewCompassVisible),
+                     .notes   = "Show the compass, the corner display of what "
+                                "each binding point shows",
+                     .schemas = {{.expectedTypes = {"bool"},
+                                  .defaultValues = {compass.visible}}}});
+    specs.insert(
+        specs.end(),
+        {
+            lengthSpec(settings::kViewCompassGlyphPx,
+                       "Side of the square a dimension's glyph is drawn on "
+                       "in the compass, in logical pixels",
+                       compass.glyphPx),
+            lengthSpec(settings::kViewCompassSwatchPx,
+                       "Length of the line a dimension's dash pattern is "
+                       "drawn along in the compass, in logical pixels",
+                       compass.swatchPx),
+            lengthSpec(settings::kViewCompassMarginPx,
+                       "Distance of the compass from the pane's top and left "
+                       "edges, in logical pixels",
+                       compass.marginPx),
+            lengthSpec(settings::kViewCompassPaddingPx,
+                       "Space inside the compass's panel, in logical pixels",
+                       compass.paddingPx),
+            lengthSpec(settings::kViewCompassStrokePx,
+                       "Thickness of the compass's dash swatches, in logical "
+                       "pixels",
+                       compass.strokePx),
+        });
     for (std::size_t i = 0; i < gleditor::ui::kFontRoleCount; ++i) {
       const auto role  = static_cast<gleditor::ui::FontRole>(i);
       const auto &font = modals.uiTheme.font(role);
@@ -1586,6 +1619,23 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Choose which presentation shows the slice",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"Ctrl+Alt+V"}}}}},
+        {.name    = std::string(settings::kKeymapViewCycle),
+         .notes   = "Show the next presentation of the slice",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+Shift+V"}}}}},
+        {.name    = std::string(settings::kKeymapViewSubviewNext),
+         .notes   = "Show the next sub-view of the slice's view",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+."}}}}},
+        {.name    = std::string(settings::kKeymapViewSubviewPrev),
+         .notes   = "Show the previous sub-view of the slice's view",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+,"}}}}},
+        {.name    = std::string(settings::kKeymapViewBind),
+         .notes   = "Type which dimension or group a binding point shows, as "
+                    "in 'x d.across'",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+B"}}}}},
         {.name    = std::string(settings::kKeymapNewSlice),
          .notes   = "Shortcut to start a new ZigZag slice in a new store",
          .schemas = {{.expectedTypes = {"string"},
@@ -2032,6 +2082,14 @@ dimensionCueSettingSpecs(const std::string_view dimension,
        .schemas = {{.expectedTypes = {"string"},
                     .defaultValues = {std::string{dash}}}}},
   };
+}
+
+SettingSpec sliceSubviewSettingSpec(const std::string_view sliceId) {
+  return {.name    = settings::sliceSubviewKey(sliceId),
+          .notes   = "Which sub-view of its view this slice shows, by id; "
+                     "empty is the view's first",
+          .schemas = {
+              {.expectedTypes = {"string"}, .defaultValues = {std::string{}}}}};
 }
 
 SettingSpec slicePresentationSettingSpec(const std::string_view sliceId) {
@@ -3573,6 +3631,27 @@ MotionConfig MotionConfig::fromStore(const Store &store) {
   return cfg;
 }
 
+CompassConfig CompassConfig::fromStore(const Store &store) {
+  CompassConfig cfg;
+  if (store.opCount() == 0 || store.homeCell() == zigzag::noCell) {
+    return cfg;
+  }
+  const auto model    = SystemStoreModel::fromStore(store);
+  const auto positive = [&model](std::string_view key, float &into) {
+    const auto value = static_cast<float>(model.getDouble(key, double{into}));
+    if (std::isfinite(value) && value > 0) {
+      into = value;
+    }
+  };
+  cfg.visible = model.getBool(settings::kViewCompassVisible, cfg.visible);
+  positive(settings::kViewCompassGlyphPx, cfg.glyphPx);
+  positive(settings::kViewCompassSwatchPx, cfg.swatchPx);
+  positive(settings::kViewCompassMarginPx, cfg.marginPx);
+  positive(settings::kViewCompassPaddingPx, cfg.paddingPx);
+  positive(settings::kViewCompassStrokePx, cfg.strokePx);
+  return cfg;
+}
+
 UIConfig::UIConfig() : radialMenu(createDefaultRadialConfig()) {}
 
 UIConfig UIConfig::fromStore(const Store &store) {
@@ -3581,6 +3660,7 @@ UIConfig UIConfig::fromStore(const Store &store) {
     return cfg;
   }
   cfg.motion          = MotionConfig::fromStore(store);
+  cfg.compass         = CompassConfig::fromStore(store);
   const auto model    = SystemStoreModel::fromStore(store);
   const auto positive = [&model](std::string_view key, float fallback) {
     const auto value =

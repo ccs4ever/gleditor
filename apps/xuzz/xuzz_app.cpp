@@ -2499,38 +2499,65 @@ int XuzzApp::run(const int argc, char **argv) {
                     xanadu::settings::kSlicePresentationLegacy;
            }});
 
-  // The view palette: which presentation shows the slice. The choice is the
-  // slice's own setting in system://layout, so it survives a restart and the
-  // layout watcher below applies it.
+  // The view palette: which presentation shows the slice, and under each view
+  // its sub-views. The choice is the slice's own setting in system://layout,
+  // so it survives a restart and the layout watcher below applies it.
+  const auto recordPresentation =
+      [&renderer, &session,
+       slicePresentations](const xanadu::view::PaletteChoice &choice) {
+        renderer->runWithState([&session, slicePresentations,
+                                choice](RenderState &) {
+          const auto *const slice = slicePresentations->store();
+          if (nullptr == slice) {
+            return;
+          }
+          auto &layout    = session->systemStore(xanadu::SystemDocKind::Layout);
+          const auto head = xanadu::view::recordSlicePresentation(
+              layout, slice->documentId().str(), choice);
+          session->repointSystemDoc(xanadu::SystemDocKind::Layout, head);
+        });
+      };
+  const auto shownSubview = [slicePresentations, viewPresentations]() {
+    for (const auto &presentation : viewPresentations) {
+      if (presentation->viewKind() == slicePresentations->shownKind()) {
+        return std::string(presentation->subviewId());
+      }
+    }
+    return std::string{};
+  };
   app.commands().registerAction(
       std::string(xanadu::settings::kKeymapViewPalette),
-      "choose which view shows the slice",
-      [&renderer, &publishForm, &viewRegistry, &session, slicePresentations] {
-        renderer->runWithState([&renderer, &publishForm, &viewRegistry,
-                                &session, slicePresentations](RenderState &) {
+      "choose which view shows the slice, and its sub-view",
+      [&renderer, &publishForm, &viewRegistry, slicePresentations, shownSubview,
+       recordPresentation] {
+        renderer->runWithState([&publishForm, &viewRegistry, slicePresentations,
+                                shownSubview,
+                                recordPresentation](RenderState &) {
           xanadu::view::openSlicePresentationPalette(
               publishForm, viewRegistry, slicePresentations->shownKind(),
-              [&renderer, &session, slicePresentations](std::string chosen) {
-                renderer->runWithState(
-                    [&session, slicePresentations,
-                     chosen = std::move(chosen)](RenderState &) {
-                      const auto *const slice = slicePresentations->store();
-                      if (nullptr == slice) {
-                        return;
-                      }
-                      auto &layout =
-                          session->systemStore(xanadu::SystemDocKind::Layout);
-                      const auto id = slice->documentId().str();
-                      auto head     = xanadu::ensureSetting(
-                          layout, layout.primaryCurrentVersion(),
-                          xanadu::slicePresentationSettingSpec(id));
-                      head = xanadu::setSetting(
-                          layout, head,
-                          xanadu::settings::slicePresentationKey(id), chosen);
-                      session->repointSystemDoc(xanadu::SystemDocKind::Layout,
-                                                head);
-                    });
-              });
+              shownSubview(), recordPresentation);
+        });
+      });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapViewCycle),
+      "show the next presentation of the slice",
+      [slicePresentations, recordPresentation] {
+        recordPresentation({.presentation = xanadu::view::steppedPresentation(
+                                slicePresentations->kinds(),
+                                slicePresentations->shownKind(), 1),
+                            .subview = {}});
+      });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapViewBind),
+      "type which dimension or group a binding point shows",
+      [&renderer, &publishForm, zigzagPresentation] {
+        renderer->runWithState([&publishForm,
+                                zigzagPresentation](RenderState &) {
+          xanadu::view::openBindingCommand(publishForm, [zigzagPresentation](
+                                                            std::string typed) {
+            std::ignore = zigzagPresentation->dispatchAction(
+                std::string(xanadu::settings::kKeymapViewBind) + " " + typed);
+          });
         });
       });
 

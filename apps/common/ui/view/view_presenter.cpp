@@ -8,7 +8,9 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <format>
 #include <limits>
+#include <string>
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -134,9 +136,12 @@ void SlicePresenter::deviceReady(render::RenderDevice &device,
                          gleditor::assetPath("shaders/vulkan"), true, false);
   chrome_ = std::make_unique<gleditor::Canvas>(&device, chromeName_);
   chrome_->createPipeline(documentPipeline, false);
+  compass_ = std::make_unique<gleditor::Canvas>(&device, chromeName_);
+  compass_->createPipeline(documentPipeline, false);
   planes_.clear();
   drawnStamp_.reset();
   chromeStamp_.reset();
+  compassStamp_.reset();
 }
 
 bool SlicePresenter::setTypography(const ui::UiMetrics &metrics,
@@ -167,8 +172,12 @@ bool SlicePresenter::setTypography(const ui::UiMetrics &metrics,
   if (chrome_) {
     chrome_->setFontDescription(chromeName_);
   }
+  if (compass_) {
+    compass_->setFontDescription(chromeName_);
+  }
   ++typographyStamp_;
   chromeStamp_.reset();
+  compassStamp_.reset();
   return true;
 }
 
@@ -632,6 +641,201 @@ void SlicePresenter::drawChrome(gleditor::FrameContext &ctx,
         glm::ortho( // NOLINT(readability-suspicious-call-argument)
             0.0F, width, 0.0F, height, -1.0F, 1.0F);
     chrome_->draw(ctx.state, ortho, 1.0F);
+  }
+}
+
+namespace {
+
+/// Whether the point (@p u, @p v), each in [-1, 1] across the glyph's square
+/// and v up, is inside @p glyph. The marks are axis-aligned fills on the
+/// canvas's grid because its lines are exact only when horizontal or
+/// vertical; the proportions are what tell seven marks apart at 12 pixels.
+[[nodiscard]] bool insideGlyph(const CueGlyph glyph, const double u,
+                               const double v) noexcept {
+  constexpr double kRingHole = 0.45;
+  constexpr double kSquare   = 0.85;
+  constexpr double kBar      = 0.25;
+  constexpr double kDiagonal = 0.3;
+  const double au            = std::abs(u);
+  const double av            = std::abs(v);
+  switch (glyph) {
+  case CueGlyph::Circle:
+    return (u * u) + (v * v) <= 1.0;
+  case CueGlyph::Ring: {
+    const double r = (u * u) + (v * v);
+    return r <= 1.0 && r >= kRingHole * kRingHole;
+  }
+  case CueGlyph::Square:
+    return au <= kSquare && av <= kSquare;
+  case CueGlyph::Diamond:
+    return au + av <= 1.0;
+  case CueGlyph::Triangle:
+    return au <= (1.0 - v) / 2.0;
+  case CueGlyph::Plus:
+    return au <= kBar || av <= kBar;
+  case CueGlyph::Cross:
+    return std::abs(au - av) <= kDiagonal;
+  }
+  return false;
+}
+
+/// @p glyph on a square @p size pixels across whose bottom left is
+/// (@p left, @p bottom), as the runs of its rows.
+void addGlyph(gleditor::Canvas &canvas, const CueGlyph glyph, const float left,
+              const float bottom, const float size,
+              const std::uint32_t colour) {
+  const int cells  = std::max(1, static_cast<int>(std::lround(size)));
+  const float step = size / static_cast<float>(cells);
+  for (int row = 0; row < cells; ++row) {
+    const double v = 1.0 - ((2.0 * (row + 0.5)) / cells);
+    int runStart   = -1;
+    for (int column = 0; column <= cells; ++column) {
+      const double u    = ((2.0 * (column + 0.5)) / cells) - 1.0;
+      const bool inside = column < cells && insideGlyph(glyph, u, v);
+      if (inside && runStart < 0) {
+        runStart = column;
+      } else if (!inside && runStart >= 0) {
+        canvas.addRect(left + (static_cast<float>(runStart) * step),
+                       bottom + size - (static_cast<float>(row + 1) * step),
+                       static_cast<float>(column - runStart) * step, step,
+                       colour);
+        runStart = -1;
+      }
+    }
+  }
+}
+
+/// A line of @p thickness along y = @p middle from @p from to @p to, drawn
+/// with @p style's pattern in units of the thickness; solid when it has none.
+void addDashed(gleditor::Canvas &canvas, const float from, const float to,
+               const float middle, const float thickness, const DashStyle style,
+               const std::uint32_t colour) {
+  const auto pattern = dashPattern(style);
+  const float bottom = middle - (thickness / 2.0F);
+  if (pattern.empty()) {
+    canvas.addRect(from, bottom, to - from, thickness, colour);
+    return;
+  }
+  float at = from;
+  for (std::size_t k = 0; at < to; k = (k + 1) % pattern.size()) {
+    const float length = pattern[k] * thickness;
+    if (0 == k % 2) {
+      canvas.addRect(at, bottom, std::min(length, to - at), thickness, colour);
+    }
+    at += length;
+  }
+}
+
+} // namespace
+
+void SlicePresenter::drawCompass(gleditor::FrameContext &ctx,
+                                 const PresentedCompass &compass) {
+  if (!compass_ || !chromeFont_) {
+    return;
+  }
+  const auto width  = static_cast<float>(ctx.screenWidth);
+  const auto height = static_cast<float>(ctx.screenHeight);
+  if (!compass.config.visible || compass.arms.empty()) {
+    compassDrawn_ = false;
+    compassStamp_.reset();
+    return;
+  }
+  // What other contributors claimed last frame counts too: the tab bar is
+  // drawn after this and has not claimed its band yet on the frame it appears.
+  const gleditor::ScreenInsets clear{
+      .top    = std::max(ctx.chrome.top, ctx.settledChrome.top),
+      .bottom = std::max(ctx.chrome.bottom, ctx.settledChrome.bottom),
+      .left   = std::max(ctx.chrome.left, ctx.settledChrome.left),
+      .right  = std::max(ctx.chrome.right, ctx.settledChrome.right)};
+  if (!compassStamp_ || *compassStamp_ != compass.stamp ||
+      compassMetrics_ != metrics_ || compassBase_ != clear) {
+    compass_->clear();
+    compass_->setTag(render::tagKindNone, 0);
+    const auto &cfg    = compass.config;
+    const float glyph  = metrics_.px(cfg.glyphPx);
+    const float swatch = metrics_.px(cfg.swatchPx);
+    const float margin = metrics_.px(cfg.marginPx);
+    const float pad    = metrics_.px(cfg.paddingPx);
+    const float stroke = metrics_.px(cfg.strokePx);
+    const float line   = std::ceil(chromeFont_->metrics().lineHeight);
+    const float row    = std::max(line, glyph);
+    const float gap    = pad;
+
+    // A column for the point's name, then what it is drawn with, then what
+    // it shows; the widest of each sets the column.
+    float pointColumn = 0.0F;
+    for (const auto &arm : compass.arms) {
+      pointColumn =
+          std::max(pointColumn, oneLine(arm.point, chromeFont_, width).widthPx);
+    }
+    const auto label = [](const CompassArm &arm) {
+      if (!arm.bound()) {
+        return std::string{"nothing"};
+      }
+      return arm.group ? std::format("{} ({})", arm.shows, arm.members)
+                       : arm.shows;
+    };
+    const float left = clear.left + margin;
+    const float top  = height - clear.top - margin;
+    const float fixed =
+        (2.0F * pad) + pointColumn + gap + swatch + gap + glyph + gap;
+    const float room  = std::max(0.0F, width - left - margin - fixed);
+    float labelColumn = 0.0F;
+    for (const auto &arm : compass.arms) {
+      labelColumn =
+          std::max(labelColumn, oneLine(label(arm), chromeFont_, room).widthPx);
+    }
+    const float panelW = fixed + labelColumn;
+    const auto rows    = static_cast<float>(compass.arms.size());
+    const float panelH = (2.0F * pad) + (rows * row) + ((rows - 1.0F) * gap);
+    const float bottom = top - panelH;
+
+    const auto surface = ui::rgba(theme_.colours.surface);
+    const auto border  = ui::rgba(theme_.colours.border);
+    const auto ink     = ui::rgba(theme_.colours.text);
+    const auto muted   = ui::rgba(theme_.colours.muted);
+    const float hair   = metrics_.px(PresenterStrokes::kCellBorderPx);
+    compass_->addRect(left, bottom, panelW, panelH, surface);
+    compass_->addRect(left, bottom, panelW, hair, border);
+    compass_->addRect(left, top - hair, panelW, hair, border);
+    compass_->addRect(left, bottom, hair, panelH, border);
+    compass_->addRect(left + panelW - hair, bottom, hair, panelH, border);
+
+    float rowTop = top - pad;
+    for (const auto &arm : compass.arms) {
+      const float rowBottom = rowTop - row;
+      const float middle    = rowBottom + (row / 2.0F);
+      float x               = left + pad;
+      compass_->addText(
+          ctx.state, {x, middle - (line / 2.0F), pointColumn, line},
+          oneLine(arm.point, chromeFont_, pointColumn), ink, surface);
+      x += pointColumn + gap;
+      // Colour is never the only cue: the dash and the glyph repeat it, and an
+      // empty point is drawn dotted and hollow.
+      const auto colour = arm.cue ? arm.cue->colour : muted;
+      const auto dash   = arm.cue ? arm.cue->dash : DashStyle::Dot;
+      const auto mark   = arm.cue ? arm.cue->glyph : CueGlyph::Ring;
+      addDashed(*compass_, x, x + swatch, middle, stroke, dash, colour);
+      x += swatch + gap;
+      addGlyph(*compass_, mark, x, middle - (glyph / 2.0F), glyph, colour);
+      x += glyph + gap;
+      compass_->addText(ctx.state,
+                        {x, middle - (line / 2.0F), labelColumn, line},
+                        oneLine(label(arm), chromeFont_, labelColumn),
+                        arm.bound() ? ink : muted, surface);
+      rowTop = rowBottom - gap;
+    }
+    compass_->commit();
+    compassStamp_   = compass.stamp;
+    compassMetrics_ = metrics_;
+    compassBase_    = clear;
+    compassDrawn_   = true;
+  }
+  if (compassDrawn_) {
+    const glm::mat4 ortho =
+        glm::ortho( // NOLINT(readability-suspicious-call-argument)
+            0.0F, width, 0.0F, height, -1.0F, 1.0F);
+    compass_->draw(ctx.state, ortho, 1.0F);
   }
 }
 
