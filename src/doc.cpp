@@ -724,12 +724,10 @@ void Doc::refreshPageIndexFilade() const {
   std::vector<gleditor::enfilade::LayoutEntry> entriesSnapshot;
   {
     std::scoped_lock lock(shapingMutex);
-    if (pageEntries.size() > pageIndexFiladeBuiltFor) {
-      entriesSnapshot = pageEntries;
+    if (pageEntries.size() == pageIndexFiladeBuiltFor) {
+      return;
     }
-  }
-  if (entriesSnapshot.empty()) {
-    return;
+    entriesSnapshot = pageEntries;
   }
   pageIndexFiladeBuiltFor = entriesSnapshot.size();
   pageIndexFilade =
@@ -1276,6 +1274,85 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
   // pages[firstPage] itself, and everything before it, already exist.
   ensurePagesBuiltThrough(state, firstPage + 1);
 
+  // Keep a copy of the old pagination index before touching Page objects.
+  // GPU-built pages may be sparse, and pageEntries also covers shaped pages
+  // that have not been built yet, so it is the source of truth for the tail.
+  std::vector<gleditor::enfilade::LayoutEntry> oldPageEntries;
+  {
+    std::scoped_lock lock(shapingMutex);
+    oldPageEntries = pageEntries;
+  }
+
+  // Rebuild shaped-page metadata from the changed page until pagination
+  // meets an old page boundary again. This is separate from the Page loop:
+  // it indexes the unbuilt tail without allocating GPU pages for it.
+  const auto shift = static_cast<std::int64_t>(delta);
+  std::vector<std::uint32_t> oldPageStarts;
+  oldPageStarts.reserve(oldPageEntries.size());
+  std::uint32_t oldStart = 0;
+  for (const auto &entry : oldPageEntries) {
+    oldPageStarts.push_back(oldStart);
+    oldStart += entry.byteLength;
+  }
+
+  std::vector<gleditor::enfilade::LayoutEntry> updatedEntries;
+  updatedEntries.insert(updatedEntries.end(), oldPageEntries.begin(),
+                        oldPageEntries.begin() +
+                            static_cast<std::ptrdiff_t>(
+                                std::min(firstPage, oldPageEntries.size())));
+  std::uint32_t metadataOffset =
+      firstPage < oldPageStarts.size() ? oldPageStarts[firstPage] : 0U;
+  std::size_t oldTailIndex = oldPageEntries.size();
+  while (metadataOffset < text.size()) {
+    const auto shifted = static_cast<std::int64_t>(metadataOffset) - shift;
+    if (shifted >= 0) {
+      const auto oldBoundary = std::lower_bound(
+          oldPageStarts.begin() + static_cast<std::ptrdiff_t>(std::min(
+                                      firstPage + 1, oldPageStarts.size())),
+          oldPageStarts.end(), static_cast<std::uint32_t>(shifted));
+      if (oldBoundary != oldPageStarts.end() &&
+          *oldBoundary == static_cast<std::uint32_t>(shifted)) {
+        oldTailIndex = static_cast<std::size_t>(
+            std::distance(oldPageStarts.begin(), oldBoundary));
+        break;
+      }
+    }
+    auto shaping        = layoutFrom(metadataOffset);
+    const auto consumed = static_cast<std::uint32_t>(shaping.limit);
+    if (0U == consumed) {
+      break;
+    }
+    updatedEntries.push_back(gleditor::enfilade::LayoutEntry{
+        .byteLength = consumed,
+        .heightPx   = pageBoxFor(shaping).height + pageGapPx,
+    });
+    metadataOffset += consumed;
+  }
+  if (oldTailIndex < oldPageEntries.size()) {
+    updatedEntries.insert(updatedEntries.end(),
+                          oldPageEntries.begin() +
+                              static_cast<std::ptrdiff_t>(oldTailIndex),
+                          oldPageEntries.end());
+  }
+  if (text.empty()) {
+    const bool fixedPage = gleditor::PageSizing::Fixed == pageGeometry.mode &&
+                           pageGeometry.widthPx > 0.0F;
+    PageShaping blank;
+    blank.page         = pageGeometry;
+    blank.textWidthPx  = static_cast<int>(fixedPage ? pageGeometry.textWidthPx()
+                                                    : Doc::textWidthPx);
+    blank.textHeightPx = static_cast<int>(
+        fixedPage ? pageGeometry.textHeightPx() : Doc::textHeightPx);
+    updatedEntries = {gleditor::enfilade::LayoutEntry{
+        .byteLength = 0U,
+        .heightPx   = pageBoxFor(blank).height + pageGapPx,
+    }};
+  }
+  const auto newTailIndex =
+      oldTailIndex < oldPageEntries.size()
+          ? updatedEntries.size() - (oldPageEntries.size() - oldTailIndex)
+          : updatedEntries.size();
+
   // Lay the edited page out again and see how far the damage reaches.
   //
   // Pagination re-syncs as soon as a page ends where it used to, shifted by
@@ -1288,7 +1365,6 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
   // makes the shift negative, and every offset in sight is unsigned: the
   // re-sync test would otherwise be an unsigned subtraction that wraps rather
   // than going below zero, and would match at a wildly wrong page.
-  const auto shift = static_cast<std::int64_t>(delta);
   std::vector<std::pair<std::uint32_t, PageShaping>> rebuilt;
   // pages[firstPage] is guaranteed built by ensurePagesBuiltThrough() above.
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
@@ -1329,6 +1405,9 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
     if (pageCursor >= pages.size()) {
       break; // ran past the pages that existed; the tail is being rebuilt.
     }
+    if (!pages[pageCursor]) {
+      break; // keep an unbuilt slot sparse; its shaped metadata lives below.
+    }
     // pages[pageCursor] is expected to already be built here -- nothing
     // before Stage 3 builds out of order -- but a missing one simply never
     // re-syncs early rather than dereferencing a gap.
@@ -1366,15 +1445,16 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
   }
   inherited.resize(std::min(inherited.size(), rebuilt.size()));
 
-  const auto tailFrom = std::min(lastRebuilt, pages.size());
-  std::vector<Page> tail;
+  const auto tailFrom = std::min(oldTailIndex, pages.size());
+  for (std::size_t i = lastRebuilt; i < tailFrom; i++) {
+    if (pages[i]) {
+      pool->release(pages[i]->allocation());
+    }
+  }
+  std::vector<std::optional<Page>> tail;
   tail.reserve(pages.size() - tailFrom);
   for (std::size_t i = tailFrom; i < pages.size(); i++) {
-    // Guaranteed built: everything past firstPage was dense before this
-    // reflow started (nothing before Stage 3 builds out of order), and
-    // ensurePagesBuiltThrough() above only had to cover up to firstPage.
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    tail.push_back(std::move(*pages[i]));
+    tail.push_back(std::move(pages[i]));
   }
   pages.erase(pages.begin() + static_cast<std::ptrdiff_t>(firstPage),
               pages.end());
@@ -1407,10 +1487,30 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
     currentTopY =
         (centerY - (pageHeightWorld / 2.0F)) - (pageGapPx * pixelsToWorld);
   }
+  while (pages.size() < newTailIndex) {
+    const auto index = pages.size();
+    pages.emplace_back(std::nullopt);
+    if (index < updatedEntries.size()) {
+      currentTopY -= updatedEntries[index].heightPx * pixelsToWorld;
+    }
+  }
   // Untouched pages keep their shaping and their vertex rows; only the offset
   // they report moves. Update their model matrix with the new vertical
   // position.
-  for (auto &page : tail) {
+  for (std::size_t i = 0; i < tail.size(); i++) {
+    auto &slot = tail[i];
+    if (!slot) {
+      // Retain an unbuilt slot without making a Page or GPU allocation for
+      // it. Its existing shaped height still contributes to the next page's
+      // vertical position.
+      pages.emplace_back(std::nullopt);
+      if (newTailIndex + i < updatedEntries.size()) {
+        currentTopY -=
+            updatedEntries[newTailIndex + i].heightPx * pixelsToWorld;
+      }
+      continue;
+    }
+    auto &page = *slot;
     page.shiftBaseOffset(delta);
     const float pageHeightWorld = page.heightPixels() * pixelsToWorld;
     const float centerY         = currentTopY - (pageHeightWorld / 2.0F);
@@ -1422,6 +1522,28 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
     currentTopY =
         (centerY - (pageHeightWorld / 2.0F)) - (pageGapPx * pixelsToWorld);
   }
+
+  {
+    std::scoped_lock lock(shapingMutex);
+    pageEntries = std::move(updatedEntries);
+    // Any queued shaping used offsets from the old pagination. Building can
+    // lazily reshape by indexed start byte, so discard those stale entries.
+    pendingShapings.clear();
+    if (text.empty()) {
+      const bool fixedPage = gleditor::PageSizing::Fixed == pageGeometry.mode &&
+                             pageGeometry.widthPx > 0.0F;
+      PageShaping blank;
+      blank.page        = pageGeometry;
+      blank.textWidthPx = static_cast<int>(
+          fixedPage ? pageGeometry.textWidthPx() : Doc::textWidthPx);
+      blank.textHeightPx = static_cast<int>(
+          fixedPage ? pageGeometry.textHeightPx() : Doc::textHeightPx);
+      pendingShapings.emplace(
+          0U, PendingShaping{.shaping = std::move(blank), .textOffset = 0U});
+    }
+  }
+  pageIndexFiladeBuiltFor = std::numeric_limits<std::size_t>::max();
+  refreshPageIndexFilade();
 
   reflowScope = scope;
   reflowPages = rebuilt.size();

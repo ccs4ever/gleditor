@@ -1,0 +1,71 @@
+{
+  "gate": "failed GL/GLES overlay exact equality; diagnostics, not acceptance",
+  "images": [
+    {
+      "raw_path": "/workspace/spatial-build/sixth-compare-raw/opengl.ppm",
+      "raw_sha256": "6fc78ad16e7e2a11a74bc0175f316ac3652ef51b37c9e8a06d8d5560fe5d4489",
+      "png": "opengl.png",
+      "png_sha256": "8ad9d2a63cdadf31a5ecad1b36104a6c4f38831a84440c7f1cf340d0dbbc42f7",
+      "size": [
+        800,
+        600
+      ],
+      "lossless_pixel_equality": true
+    },
+    {
+      "raw_path": "/workspace/spatial-build/sixth-compare-raw/opengl.toast.ppm",
+      "raw_sha256": "e217b9fb9c8800b089c035a94754a8fa1a4f301f6815679e9ad0822abeb78b2b",
+      "png": "opengl.toast.png",
+      "png_sha256": "3980e5f43216ac0dc23cd5cc4c3def4cf30c2257f8353592454c179705112e6a",
+      "size": [
+        800,
+        600
+      ],
+      "lossless_pixel_equality": true
+    },
+    {
+      "raw_path": "/workspace/spatial-build/sixth-compare-raw/opengles.ppm",
+      "raw_sha256": "6fc78ad16e7e2a11a74bc0175f316ac3652ef51b37c9e8a06d8d5560fe5d4489",
+      "png": "opengles.png",
+      "png_sha256": "8ad9d2a63cdadf31a5ecad1b36104a6c4f38831a84440c7f1cf340d0dbbc42f7",
+      "size": [
+        800,
+        600
+      ],
+      "lossless_pixel_equality": true
+    },
+    {
+      "raw_path": "/workspace/spatial-build/sixth-compare-raw/opengles.toast.ppm",
+      "raw_sha256": "7763cbc52147ac6319dff50735e179fe59488b45d2a1fc413b02b794b6a5eaa8",
+      "png": "opengles.toast.png",
+      "png_sha256": "ef078aafc92f60a3b7dc6afcea2e020bdd443a36168ebcdb7fdf2fc96d5269e3",
+      "size": [
+        800,
+        600
+      ],
+      "lossless_pixel_equality": true
+    },
+    {
+      "raw_path": "/workspace/spatial-build/sixth-compare-raw/vulkan.ppm",
+      "raw_sha256": "99e720517e3338fbe13ff5e3ff6a2a7522053e521962925935ae5f3eae32e827",
+      "png": "vulkan.png",
+      "png_sha256": "5e177db0fe7272d476f0d09f4b92b604b43200b2c64ffc06c091adb30d4c9c3d",
+      "size": [
+        800,
+        600
+      ],
+      "lossless_pixel_equality": true
+    },
+    {
+      "raw_path": "/workspace/spatial-build/sixth-compare-raw/vulkan.toast.ppm",
+      "raw_sha256": "8604adfc0251b7835f014f9f1155d884553d0b9e6db76845c6d99f16e98c0bb9",
+      "png": "vulkan.toast.png",
+      "png_sha256": "239dbc6f3e9ea627c8e5224c1b9331760541b97b957a43902f6649faaea1b851",
+      "size": [
+        800,
+        600
+      ],
+      "lossless_pixel_equality": true
+    }
+  ]
+}

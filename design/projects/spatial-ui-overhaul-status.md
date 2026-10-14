@@ -7,6 +7,47 @@ session.
 
 ## Current checkpoint
 
+Sixth checkpoint (2026-10-14): UI-authored text reflow now updates the shaped-page index beyond the
+GPU-built page frontier. The fifth checkpoint could leave Link Enter pending because its exact
+endpoint page was missing from that index. `Doc::reflowFrom()` recomputes changed metadata until an
+unchanged pagination boundary, retains suffix metadata and sparse GPU slots, shifts retained page
+offsets/poses, and invalidates same-count byte-length changes. Stale queued shaping is discarded;
+the existing priority/budgeted builder obtains the endpoint. No Link command, reader activity,
+serialization, camera, public API or application-specific code changes.
+
+The append-after-break regression fails against the old library; the candidate passes all 25 owning
+DocGap/DocPageBudget checks. A sequential full library run passes 787/787, the UI suite 233/233 and
+Xuzz suite 99/99. The earlier concurrent library run passes 786/787 with one single-call budget
+assertion failure; both logs are retained. Three Luna validators demonstrate actual authored normal
+`[0,7439)` and forced `[0,7438)` multipage Enter and selected later-page continuation on GL, GLES
+and Vulkan. GL also covers 1440×1000; enlarged chrome uses the governed native font-scale form.
+Origin and direct Back restoration are distinguished from Back-at-root no-ops. Sources remain
+unchanged across observed navigation snapshots. Some snapshots named `before` were taken after
+Enter; true pre-entry activity deltas are established separately and must not be inferred from those
+late snapshots. A supplemental GLES forced run captures root visit 1 before Enter, visit 2 after
+Enter, and the same two records after wheel/Back/Origin, with both source dumps byte-identical
+throughout.
+
+The core renderer gate remains open: three strict comparison runs fail exact glyph-pixel equality in
+an overlay or configured Vulkan recording comparison. The same overlay glyph difference is
+reproduced using the frozen old library with the same plain-editor executable; no tolerance was
+weakened. The sequential run passes ordinary frames, overlays, picking, culling, atlas-growth and
+minified-text checks before its later configured-thread capture mismatch. The small sample does not
+exercise an actual split recording path. This is an unresolved capture finding, not a fully passed
+backend gate. Exact logs, lossless PNGs and binary hashes are in
+`design/reviews/spatial-ui-sixth-increment/validation.md`.
+
+Repository format, configuration harmony and UI text policy checks pass. Lint has exactly the same
+37 baseline Markdown diagnostics and none in touched files. The strict core capture comparison is an
+open finding; it is not included in those passed gates. `origin/main` remains at the recorded base;
+only the implementation branch is pushed.
+
+Metadata preparation remains outside drawing, but shapes changed pages separately from rebuilding
+GPU pages. No optimized performance-budget acceptance follows from this O0-g0 build. Pending and
+stale-target cancellation, repeated occurrences, cell/history, branch reopen, actual enlarged
+document text, native AT-SPI, publication-service audit/D2, whole-page ink and the full 16+16
+journey set remain open. Do not claim complete J24/J25, J17–J32 or full J1–J16 preservation.
+
 Fifth checkpoint (2026-10-14), validation complete: the native UI now has a governed
 `Ctrl+Alt+Shift+F` action for editing `ui.fontScale`. It opens the existing native form, validates a
 positive finite value representable by the UI, writes the typed setting through the existing system
@@ -39,15 +80,15 @@ continuation or return behavior is validated. See
 `design/reviews/spatial-ui-fifth-increment/evidence/occurrence/validation.md` and
 `design/reviews/spatial-ui-fifth-increment/evidence/multipage/report.md`.
 
-The next task is to investigate UI-authored multiline Link entry through the existing page-readiness
-and pending-anchor lifecycle: both selected range endpoints must be ready before the bounded
-preprojection fit, while an ordinary `Ctrl+Return` page break must not trigger an invented Enter
-visit or visited-source write. Then validate actual enlarged document text using existing layout
-tunables, followed by cell/history, pending/cancel and branch reopen. Audit the publication services
-before advancing the separate D2 history prerequisites. Do not claim full J1–J16 preservation or
-complete J17–J32 coverage. Repeated occurrences, unavailable/pending cancellation, branch reopen,
-cell/history, actual enlarged document text, native AT-SPI, optimized performance, whole-page ink
-and complete 16+16 journey coverage remain open.
+At the fifth checkpoint, the next task was UI-authored multiline Link entry through the existing
+page-readiness and pending-anchor lifecycle: both selected range endpoints must be ready before the
+bounded preprojection fit, while an ordinary `Ctrl+Return` page break must not trigger an invented
+Enter visit or visited-source write. Then validate actual enlarged document text using existing
+layout tunables, followed by cell/history, pending/cancel and branch reopen. Audit the publication
+services before advancing the separate D2 history prerequisites. Do not claim full J1–J16
+preservation or complete J17–J32 coverage. Repeated occurrences, unavailable/pending cancellation,
+branch reopen, cell/history, actual enlarged document text, native AT-SPI, optimized performance,
+whole-page ink and complete 16+16 journey coverage remain open.
 
 Fourth checkpoint (2026-10-14), validation complete: multiline Link landing uses retained page-range
 bounds and the existing camera placement seam. The fit accounts for live and settled chrome on all
@@ -170,6 +211,13 @@ subsequent main changes to integrate. No previous implementation worktree existe
 The view specification and plan still call some completed seams unbuilt and cite removed paths.
 Current code is authoritative for implementation status. Conversely, the completed HTML review does
 not establish native backend, persistence, network, cryptographic or authoring behavior.
+
+Sixth-checkpoint inventory correction: `src/doc.cpp` owns `pageEntries`/`pageIndexFilade` for all
+shaped pages, distinct from sparse GPU-built `pages`. `reflowFrom()` previously updated only built
+pages and left appended pagination absent from the index. The repaired splice retains unchanged
+suffix metadata, invalidates same-count byte-length changes, preserves null GPU slots and makes new
+exact endpoints available to the existing priority builder. The fix and its regressions stay in the
+generic library; no Xuzz model or plain-editor dependency changes.
 
 ## Dependency map and package order
 
@@ -303,17 +351,22 @@ reviews pass.
 
 ## Exact next task
 
-Continue from the accepted bounded landing into enlarged-text and multipage ranges, then cell and
-historical endpoints through the existing rendering seams. Complete the pending J24 variants:
-repeated occurrences, unavailable targets and cancellation with same-profile source/activity
-snapshots. Then complete J25 branching Back/Return and reopen behavior. Keep per-backend native
-captures and exact state/source evidence. The safe-margin sizes and backends above do not establish
-these journeys.
+Resolve the strict core glyph-capture equality finding against the frozen-library control without
+weakening its criteria. Then validate actual enlarged document text through existing layout
+tunables; `ui.fontScale` has a governed native form and changes chrome only. The sixth checkpoint
+repairs authored multipage readiness and validates visible later-page continuation. Extend J24 to
+repeated occurrences, unavailable/pending cancellation and stale target replacement, then
+cell/history endpoints. Extend J25 to branching Back/Return and same-profile reopen with exact
+selected state/ranges and activity snapshots. Preserve per-backend native captures and exact
+source-operation evidence. Bounded entry, Origin and direct Back do not complete J24/J25 or
+establish full J1–J16 preservation.
 
-Investigate the whole-page ink threshold without weakening it, and resolve the legacy J3, J11 and
-J15 findings against the pinned baseline. The two stale drag tests are repaired and pass on the
-final build; do not list them as outstanding work. Keep native AT-SPI, discovery of a UI text-scale
-control, optimized-build performance acceptance, and the full 16+16 journey set open.
+Investigate the whole-page ink threshold without weakening it, and resolve legacy J3, J11 and J15
+findings against the pinned baseline. The two stale drag tests are repaired; the native UI
+font-scale control and enlarged-chrome captures are implemented. Native AT-SPI, actual enlarged
+document text, optimized performance acceptance and the full 16+16 journey set remain open. Audit
+changed-region metadata shaping and reflow costs in an optimized build; the sixth repair keeps
+sparse GPU pages but shapes changed pages separately for metadata and GPU rebuild.
 
 The next spatial service package is the publication/pin-lifecycle audit followed by D2 branch/frame
 enumeration, per the dependency map above. Do not substitute raw primedia search for historical

@@ -1,0 +1,138 @@
+{
+  "base_commit": "78f692e5cf1d5005381120459e6b09c63add6105",
+  "product_and_test_diff_sha256": "c68b1a28f5c828eddddd163594811e39e9a2292ee754310ca1c4118cdd17618e",
+  "binaries": {
+    "build/xuzz": "404c21bc477c8dd5324bbba7957545f9de50ba52b0f96f38b94dfb3bd68a6cbd",
+    "build/libgleditor.so.0": "6964780c202365c8da5ada84fad51f0d21fc621a0c2db72ad0ebc792b75ffcf6",
+    "build/gleditor_test": "e550b8a10e3015a725458f6012e2b8365c3d69cf6240332eb9141bf0f3f1594a",
+    "build/zigzag_test": "9808b15b5a6a246fc95b104ea5aed3f019f0837c4b5480c15fc772a8e44da823",
+    "build/xuzz_test": "cc87bb380a46758c2ac8341906c190ae5a9e38feece03a39fa16b4f7c45b05b3",
+    "build/gleditor": "8ff8d62122112af470f9b6583f0f9a1029a6088aa95c5cac4bef569c674451aa",
+    "build/xudu-dump": "183b63931fdf1bde179633758e17f7409f9270262ac52f5fb22f1c16415feb79"
+  },
+  "source_files": {
+    "src/doc.cpp": "fff2f4b806f32495f3175d56ab6152db4bf3d83ad79bcd33f7a7e82f787fe924",
+    "tests/lib/doc_gap_test.cpp": "933edf23fd749159cdd18aacb06704b4384a53b3667ff2957b32ad1ef4d0823a"
+  },
+  "build_mode": "O0 -g0; no optimized performance acceptance",
+  "logs": [
+    {
+      "file": "sixth-red-regression.log.gz",
+      "exit_code": 1,
+      "command": "build/gleditor_test --gtest_filter=DocGapTest.ReflowIndexesTextAppendedAfterAnAuthoredPageBreak (old library)",
+      "uncompressed_sha256": "eb1ac57ae772b09e546de2a5dfb5465083b3b104315cde889843e7753eecee34",
+      "compressed_sha256": "8a1b9ecc1b579285abc8123628a2a338a12b69869b2ca2e6ef5c7e5fa140d9b0"
+    },
+    {
+      "file": "sixth-owning-tests.log.gz",
+      "exit_code": 0,
+      "command": "build/gleditor_test --gtest_filter=DocGapTest.*:DocPageBudgetTest.*",
+      "uncompressed_sha256": "206fdd5e02d37c5c375f1af6725811df2e4b6ffeab3c86e6850002e0aaafcd03",
+      "compressed_sha256": "6fc2f3f459d2472d6ec09ac0d363cda8813a7b8700a3e76b7d3b0a0dc6768709"
+    },
+    {
+      "file": "sixth-build-candidate.log.gz",
+      "exit_code": 2,
+      "command": "canonical make; failed private friend test access",
+      "uncompressed_sha256": "4666ade1ddd8e2feb607b96fd11f96b6b9ab9ed851a7852c78c3131b3c29e1f9",
+      "compressed_sha256": "ef895aed80f665b0b7681045b2b9b06994c45498e5785e07f1190fa1d1796b52"
+    },
+    {
+      "file": "sixth-build-candidate-repair.log.gz",
+      "exit_code": 0,
+      "command": "make -j3 DEBUG_OPTS='-O0 -g0' CXX='ccache clang++ -isystem /usr/include/poppler -isystem /usr/include/poppler/cpp'",
+      "uncompressed_sha256": "322172fdfb44253dd3f83e67c0484649ef9ae96a5956e473690d4acc10263c19",
+      "compressed_sha256": "c038dd8fe6c8837f146f30c39884c0ffcba2320aef9ed9a422140c85ac4b524e"
+    },
+    {
+      "file": "sixth-build-red-test.log.gz",
+      "exit_code": 0,
+      "command": "canonical make; baseline product + red owning test",
+      "uncompressed_sha256": "67ac3cd985130082f98e0fdd4addc9f999bc24ae2dccd548edeb369aebc25be8",
+      "compressed_sha256": "eb856842eed922093c2333f08704a174ad9c0f87e8294fe5ac8a5b44614498d2"
+    },
+    {
+      "file": "sixth-library-full.log.gz",
+      "exit_code": 1,
+      "command": "build/gleditor_test (concurrent run:786/787; budget single-call failure)",
+      "uncompressed_sha256": "0704307a6bf17ca749073e28e286b1bc62d2ce93a2297ab1dc3b0b0b1307b943",
+      "compressed_sha256": "44291274cbe2ac3c52a44789953ca5b9b9bd0d15d9c086b6a7142f2b8d16fae7"
+    },
+    {
+      "file": "sixth-ui-full.log.gz",
+      "exit_code": 0,
+      "command": "build/zigzag_test",
+      "uncompressed_sha256": "9170d8baa99016d1de78ca92983f0e7558e5b0899f8a08e7322d34c0b275da0e",
+      "compressed_sha256": "88153236651d9151754ab9e8b3db91b2cd9af89d4027706d3b2cdc1fdf025ca2"
+    },
+    {
+      "file": "sixth-backend-compare.log.gz",
+      "exit_code": 1,
+      "command": "tools/compare-backends.sh; XUDU_TEST_BIN=/workspace/spatial-build/excluded-broad-e2e (concurrent overlay mismatch)",
+      "uncompressed_sha256": "0ba42a66735025477a6507b6ca3c444e4ec56fd651bd9e2ac550573e0de4061a",
+      "compressed_sha256": "69f243584986aee4bd0bbc7ffd2c0520287d3d97d725abb5ed1700ee168dba40"
+    },
+    {
+      "file": "sixth-xuzz-full.log.gz",
+      "exit_code": 0,
+      "command": "build/xuzz_test",
+      "uncompressed_sha256": "b8395b9454ab68f86f6e9c709e27f91091855bd5a708db528cae0efb8b5a36f7",
+      "compressed_sha256": "3193265818b1318d74cce1a94bd45a666b6ed31127988669fac6bc240a5cd019"
+    },
+    {
+      "file": "sixth-library-serial.log.gz",
+      "exit_code": 0,
+      "command": "build/gleditor_test; sequential run787/787",
+      "uncompressed_sha256": "5696332fdd0c19fb4f148a7bd7da09835482861604eee86317853e675143e582",
+      "compressed_sha256": "9cc36a5c6ac3c3cdd630cbaf0a81425ec49a989e9c084fbb3520d3b6a0edf0f8"
+    },
+    {
+      "file": "sixth-backend-compare-serial.log.gz",
+      "exit_code": 1,
+      "command": "strict compare-backends.sh; Vulkan configured1vs4 capture mismatch",
+      "uncompressed_sha256": "dd754a3e628877782d8e3ead65c93d23e66a90f8a17d6dea0d4027fe5cfeae48",
+      "compressed_sha256": "961bebd655db7982e058afb5a2501ae1af1c760a04b37281d8f30c5d5bbf2ea3"
+    },
+    {
+      "file": "sixth-compare-baseline-control.log.gz",
+      "exit_code": 1,
+      "command": "frozen old library5257e33 + same candidate plain binary; strict threaded and overlay capture control",
+      "uncompressed_sha256": "d6d678ffe7a3acbfa631034bd742f41218b7604bb773715639c366581441045e",
+      "compressed_sha256": "ced5862b6ccf2a979d39e4603ffc1aaf414eac7b31b942e36bf65a533d69a222"
+    },
+    {
+      "file": "sixth-backend-compare-final.log.gz",
+      "exit_code": 1,
+      "command": "strict compare-backends.sh; isolated overlay mismatch reproduced with baseline library control",
+      "uncompressed_sha256": "73bf56c12550cab411ec2d754a678745d211fd82b0f43bb34450de8ad24d726f",
+      "compressed_sha256": "23e5389bedb6e1b55aad47557635e7448e2dc697aa21d6825b5513d2f5ebe517"
+    },
+    {
+      "file": "sixth-doc-format-final.log.gz",
+      "exit_code": 0,
+      "command": "mdformat --wrap100 on finalized sixth reports and status",
+      "uncompressed_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_sha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec"
+    },
+    {
+      "file": "sixth-format-check-final.log.gz",
+      "exit_code": 0,
+      "command": "make format-check",
+      "uncompressed_sha256": "59dfcb851cc8879967e7bb2528fb29c99001bad7eed68873082fa4f114744426",
+      "compressed_sha256": "06329e0c79efdf5c2f76992b066341091553133d36bda10f260bbf9fe5254824"
+    },
+    {
+      "file": "sixth-lint-final.log.gz",
+      "exit_code": 2,
+      "command": "make lint; exact37 inherited Markdown diagnostics; UI text policy and7 tooling tests pass",
+      "uncompressed_sha256": "6d424d32c0b390f95262f0624afd38fcaa9ad2d333e3f7281d15df42b45ae2e4",
+      "compressed_sha256": "35669184e2a6a5eefc4bb9e7c8bb0f92ba5df142a048fb150a0ace936c818e76"
+    }
+  ],
+  "baseline_control_shared_library_sha256": "5257e33b1de539b487bce0082e287ea7d5539932f915da50e8182738afeb3054",
+  "lint_baseline_comparison": {
+    "same_diagnostics": true,
+    "count": 37,
+    "new_diagnostics": []
+  }
+}

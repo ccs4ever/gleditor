@@ -1,0 +1,13 @@
+Supplemental forced-break visit delta
+
+Candidate: xuzz SHA-256 404c21bc477c8dd5324bbba7957545f9de50ba52b0f96f38b94dfb3bd68a6cbd; GLES; 800x600; font scale 1.5.
+Fixture: 80 lines, 7438 bytes, Ctrl+Return at byte 3719; linked source range [0,7438), target text "Distant target passage!" (23 bytes).
+
+Timing evidence: pre-navigation-marker.txt is "yes". The runner waits until the line-buffered log reports the 00-link-preview.ppm capture, snapshots activity-before, and the recorded xuzz argument stream then has --wait-ms 20000 before the single click-label Enter. The Enter screenshot is emitted after that click. The exact runner used is identified in supplement-script-sha256.txt.
+
+Raw activity records:
+- Before Enter: one visit2 make-cell, "visit2 0"; d.activity-current is 1.
+- At the Enter capture: two visit2 make-cells, including the newly appended "visit2 1"; d.activity-current is 2.
+- After the journey: two visit2 make-cells; no additional visit was recorded by Back or Origin.
+
+Both stored document operation dumps (source-before/enter/after-0.txt and -1.txt) are byte-identical across all three snapshots. Back visibly selects default (11-back.png); Origin then selects Doc 3 (12-origin.png). The continuation page is visible with P041+ at 09-pan-6.png. Each PNG matches its corresponding original PPM with zero changed pixels.

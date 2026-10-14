@@ -1,0 +1,36 @@
+{
+  "base_commit": "78f692e5cf1d5005381120459e6b09c63add6105",
+  "logs": [
+    {
+      "file": "sixth-format-check-final.log.gz",
+      "command": "/workspace/spatial-build/run.sh make format-check",
+      "exit_code": 0,
+      "uncompressed_sha256": "59dfcb851cc8879967e7bb2528fb29c99001bad7eed68873082fa4f114744426",
+      "compressed_sha256": "06329e0c79efdf5c2f76992b066341091553133d36bda10f260bbf9fe5254824"
+    },
+    {
+      "file": "sixth-lint-final.log.gz",
+      "command": "/workspace/spatial-build/run.sh make lint",
+      "exit_code": 2,
+      "uncompressed_sha256": "61224c9f1ca23fc228dd0204a620e84c6e579627d70c3efe4d2e4cd59ea67480",
+      "compressed_sha256": "936a1730e154e9b61d539a8e1029634a583b1e12b35a09e4ead8209a6329cd52"
+    },
+    {
+      "file": "sixth-doc-format-final.log.gz",
+      "command": "mdformat --wrap100 on finalized review reports and status",
+      "exit_code": 0,
+      "uncompressed_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_sha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec"
+    },
+    {
+      "file": "sixth-root-doc-final.log.gz",
+      "command": "mdformat --wrap100 on final validation/status results",
+      "exit_code": 0,
+      "uncompressed_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_sha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec"
+    }
+  ],
+  "lint_baseline_diagnostics": 37,
+  "lint_touched_file_diagnostics": 0,
+  "core_backend_comparison": "open: unchanged strict gate failed; baseline overlay control reproduces document glyph mismatch"
+}

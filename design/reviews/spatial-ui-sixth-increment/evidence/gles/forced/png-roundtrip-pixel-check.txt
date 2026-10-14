@@ -1,0 +1,12 @@
+changed_pixels=0 00-link-preview
+changed_pixels=0 00a-source-selection
+changed_pixels=0 03-enter-selected
+changed_pixels=0 04-pan-1
+changed_pixels=0 05-pan-2
+changed_pixels=0 06-pan-3
+changed_pixels=0 07-pan-4
+changed_pixels=0 08-pan-5
+changed_pixels=0 09-pan-6
+changed_pixels=0 10-continuation-wheel
+changed_pixels=0 11-back
+changed_pixels=0 12-origin

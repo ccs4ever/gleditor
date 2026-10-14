@@ -1,0 +1,2 @@
+# Preserve captured log bytes for recorded evidence hashes.
+*.log -text whitespace=cr-at-eol

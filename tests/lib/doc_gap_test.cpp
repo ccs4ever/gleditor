@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -87,6 +88,20 @@ public:
   }
 };
 
+class ForcedBreakMemorySource : public MemoryTextSource {
+public:
+  ForcedBreakMemorySource(std::string text, const std::uint32_t breakAt)
+      : MemoryTextSource(std::move(text), "forced-break-reflow"),
+        breaks{breakAt} {}
+
+  [[nodiscard]] std::vector<std::uint32_t> forcedBreaks() const override {
+    return breaks;
+  }
+
+private:
+  std::vector<std::uint32_t> breaks;
+};
+
 } // namespace
 
 class DocGapTest : public testing::Test {
@@ -157,6 +172,36 @@ protected:
     doc->text.insert(0, prefix);
     doc->reflowFrom(*state, 0, 0, static_cast<std::int32_t>(prefix.size()),
                     oldStarts, oldConsumed);
+  }
+
+  void appendAndReflow(const std::string &suffix) {
+    const auto at        = static_cast<std::uint32_t>(doc->text.size());
+    const auto oldStarts = doc->lineBreaksAround(at);
+    ASSERT_TRUE(doc->page(0));
+    const auto oldConsumed = doc->page(0)->textLength();
+    doc->text += suffix;
+    doc->reflowFrom(*state, 0, at, static_cast<std::int32_t>(suffix.size()),
+                    oldStarts, oldConsumed);
+  }
+
+  void insertAndReflow(const std::size_t pageIndex, const std::uint32_t at,
+                       const std::string &inserted) {
+    const auto oldStarts = doc->lineBreaksAround(at);
+    ASSERT_TRUE(doc->page(pageIndex));
+    const auto oldConsumed = doc->page(pageIndex)->textLength();
+    doc->text.insert(at, inserted);
+    callReflowFrom(pageIndex, at, static_cast<std::int32_t>(inserted.size()),
+                   oldStarts, oldConsumed);
+  }
+
+  void eraseAndReflow(const std::size_t pageIndex, const std::uint32_t at,
+                      const std::uint32_t bytes) {
+    const auto oldStarts = doc->lineBreaksAround(at);
+    ASSERT_TRUE(doc->page(pageIndex));
+    const auto oldConsumed = doc->page(pageIndex)->textLength();
+    doc->text.erase(at, bytes);
+    callReflowFrom(pageIndex, at, -static_cast<std::int32_t>(bytes), oldStarts,
+                   oldConsumed);
   }
 };
 
@@ -699,4 +744,77 @@ TEST_F(DocGapTest, ReflowReplacesRetainedCaretGeometry) {
   }
   EXPECT_EQ(shaping.stats().layoutCalls, 0U);
   EXPECT_EQ(shaping.stats().harfbuzzCalls, 0U);
+}
+
+TEST_F(DocGapTest, ReflowIndexesTextAppendedAfterAnAuthoredPageBreak) {
+  const std::string first = "The first page ends here.";
+  const std::string tail  = "The second page has its own endpoint.";
+  doc                     = Doc::create(
+      renderer, device.get(), glm::mat4(1.0F),
+      ForcedBreakMemorySource(first, static_cast<std::uint32_t>(first.size())));
+  doc->makePages();
+  ASSERT_EQ(doc->numPages(), 1U);
+  buildPageDirectly(0);
+
+  appendAndReflow(tail);
+
+  ASSERT_EQ(doc->numPages(), 2U);
+  const auto lastByte = static_cast<std::uint32_t>(doc->contents().size() - 1U);
+  const auto firstPage  = doc->pageIndexForOffset(0);
+  const auto secondPage = doc->pageIndexForOffset(lastByte);
+  ASSERT_TRUE(firstPage);
+  ASSERT_TRUE(secondPage);
+  EXPECT_EQ(*firstPage, 0U);
+  EXPECT_EQ(*secondPage, 1U);
+
+  doc->setPriorityOffsets(std::array{lastByte});
+  static_cast<void>(doc->buildPendingPages(*state));
+  const auto endpoint = doc->anchorFor(lastByte);
+  ASSERT_TRUE(endpoint);
+  EXPECT_EQ(endpoint->pageIndex, 1U);
+
+  // Reindexing must also notice changed lengths when the page count stays
+  // the same, then drop the final entry when that tail is erased.
+  ASSERT_TRUE(doc->page(1));
+  const auto tailStart    = static_cast<std::uint32_t>(first.size());
+  const auto editAt       = static_cast<std::uint32_t>(doc->contents().size());
+  const std::string extra = " more";
+  insertAndReflow(1, editAt, extra);
+  EXPECT_EQ(doc->numPages(), 2U);
+  EXPECT_EQ(doc->pageIndexForOffset(editAt), 1U);
+  EXPECT_EQ(doc->pageIndexForOffset(
+                static_cast<std::uint32_t>(doc->contents().size() - 1U)),
+            1U);
+
+  const auto eraseAt = tailStart;
+  const auto eraseBytes =
+      static_cast<std::uint32_t>(doc->contents().size()) - eraseAt;
+  eraseAndReflow(1, eraseAt, eraseBytes);
+  EXPECT_EQ(doc->numPages(), 1U);
+  EXPECT_FALSE(doc->page(1));
+  EXPECT_EQ(doc->builtPageCount(), 1U);
+  EXPECT_EQ(doc->pageIndexForOffset(
+                static_cast<std::uint32_t>(doc->contents().size() - 1U)),
+            0U);
+}
+
+TEST_F(DocGapTest, ReflowKeepsAnUnbuiltPageSlotSparse) {
+  doc->makePages();
+  ASSERT_GT(doc->numPages(), 2U);
+  buildPageDirectly(0);
+  const auto firstPageLength = doc->page(0)->textLength();
+  const auto oldPageTwo      = buildPageDirectly(2);
+  ASSERT_FALSE(doc->page(1));
+  ASSERT_TRUE(doc->page(2));
+  const auto prefix = doc->contents().substr(0, firstPageLength);
+
+  prependAndReflow(prefix);
+
+  EXPECT_FALSE(doc->page(1));
+  EXPECT_FALSE(doc->page(2));
+  ASSERT_TRUE(doc->page(3));
+  EXPECT_EQ(doc->page(3)->baseOffset(), oldPageTwo.startByte + prefix.size());
+  EXPECT_EQ(doc->pageIndexForOffset(static_cast<std::uint32_t>(
+                oldPageTwo.startByte + prefix.size())),
+            3U);
 }
