@@ -137,8 +137,11 @@ TEST_F(GlyphCacheTest, addsLayersOnceTheLayerCannotGrow) {
   const auto cache = makeCache(512, 8);
   const auto face  = font("Serif 150");
 
+  // Stop at the growth this test owns: the total glyph capacity depends on
+  // the resolved font's bounds and the atlas allocation alignment.
   for (const auto &chr : alphabet(16)) {
-    EXPECT_TRUE(cache->put(chr, face).has_value());
+    ASSERT_TRUE(cache->put(chr, face).has_value());
+    if (cache->atlasLayers() > 1) break;
   }
 
   EXPECT_EQ(cache->atlasSize(), 512);

@@ -7,6 +7,22 @@ session.
 
 ## Current checkpoint
 
+Local validation checkpoint (2026-10-14): new worktree at `fbd4169c`, submodules initialized,
+canonical optimized local build passes. The cache layer-growth test now stops at the layer
+transition instead of assuming 16 host-resolved large glyphs fit the aligned eight-layer atlas. Only
+this test changes; no product code or comparison/latency/ink criterion changes. Final local library
+passes 799/799, owning checks 53/53, UI 233/233 and Xuzz 99/99. Strict core GL/GLES and offscreen
+RADV Vulkan comparisons pass. The unchanged whole-page ink test passes on OpenGL.
+
+Three independent native runs retain source purity and visits 1→2→2. GL/GLES needed a confirmed
+Enter chord retry because the visible Enter click target was absent; Back panels differ across
+GL/Vulkan. Independent review retains these as open findings. Local repository gates stop on
+archived seventh-checkpoint shell formatting/lint; separate Markdown lint reports one existing
+MD013, while C++19, Markdown format, YAML, configuration harmony and text policy pass. No full
+journey, native AT-SPI or optimized-budget acceptance is claimed. Exact local evidence and next
+task:
+[local validation](../reviews/spatial-ui-seventh-increment/local-validation-2026-10-14/README.md).
+
 Seventh restart checkpoint (2026-10-14), validation partially complete: glyph atlas allocations now
 align to the deepest existing mip block so unrelated earlier glyph requests cannot change minified
 coverage. The actual-device `m`-prefix regression fails on GL/GLES/Vulkan before the fix (80
@@ -376,19 +392,19 @@ reviews pass.
 
 ## Exact next task
 
-Finish seventh-checkpoint validation locally from the implementation branch and
-`restart-spatial-ui-overhaul-local.md`: fresh build/submodules, full 790-case library rerun, UI
-233-case and Xuzz 99-case suites, strict backend comparison, format/lint and actual native evidence.
-Investigate repeat O0 latency findings separately without changing the 1000 ns assertion or claiming
-optimized performance acceptance. Core capture comparisons now pass twice; preserve the failed sixth
-captures and the controlled atlas-order regression as historical proof.
+Resolve the local visible Enter and Back-panel findings and the archived seventh-checkpoint shell
+format/lint and Markdown findings. Preserve the historical scripts and their provenance when making
+reviewable harness changes. Local build, full library 799/799, UI 233/233, Xuzz 99/99, owning 53/53,
+strict core backend comparison and three native source/visit proofs are now recorded in the local
+validation report. Full J24/J25 restoration parity remains open. Retain the earlier O0 latency
+finding separately; no optimized performance acceptance follows from the local default build.
 
-Then investigate the whole-page ink threshold without weakening its 100-pixel criterion and validate
-actual enlarged document text through existing layout tunables. The governed `ui.fontScale` form
-enlarges chrome only. Continue J24 repeated occurrences, pending/unavailable cancellation and stale
-replacement, cell/history endpoints, then J25 branching Back/Return and same-profile reopen.
-Preserve exact source/activity snapshots, native per-backend frames and Link identity. Full J1–J16
-preservation and complete J17–J32 acceptance remain unverified.
+The unchanged whole-page ink test now passes on local OpenGL; broader backend/font coverage remains
+unverified. Validate actual enlarged document text through existing layout tunables. The governed
+`ui.fontScale` form enlarges chrome only. Continue J24 repeated occurrences, pending/unavailable
+cancellation and stale replacement, cell/history endpoints, then J25 branching Back/Return and
+same-profile reopen. Preserve exact source/activity snapshots, native per-backend frames and Link
+identity. Full J1–J16 preservation and complete J17–J32 acceptance remain unverified.
 
 Resolve legacy J3, J11 and J15 findings against the pinned baseline. The stale drag tests and UI
 font-scale control are repaired. Native AT-SPI, optimized performance, actual enlarged document text

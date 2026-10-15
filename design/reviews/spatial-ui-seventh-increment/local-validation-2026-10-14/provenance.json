@@ -1,0 +1,19 @@
+{
+  "source_commit": "fbd4169c89dc04e5227754fd90148b7e813a196c",
+  "mode": "Make default -O3 -g; SDL3; no optimized budget acceptance",
+  "raw_root": "/tmp/spatial-local-validation.W4mSRr",
+  "binaries": {
+    "build/xuzz": "ca0d8dba068a58e0c23780e2d3134f2a68450f75e50ea5647196b2f8d27f4d98",
+    "build/libgleditor.so.0": "ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9",
+    "build/gleditor_test": "44562f4e4ea437f8f3c575a8005d5847367860f9b4d4714d2d1b6516cf014f8a",
+    "build/xuzz_test": "9ae669a13aba5a1a4ff57507ee335b0c5ab7b4362b1c16f85357cbf54d5f2676",
+    "build/zigzag_test": "cec3c335d8dce29ebac0dad829e59ac62fe6caa6adbfcbfa180b4b60d8e3ded6"
+  },
+  "font": "NotoSerif-Regular.ttf: \"Noto Serif\" \"Regular\"",
+  "source_files": {
+    "tests/lib/glyph_cache.cpp": "30ef376f6be1c4110022050221c41c06f645348cf5582af52420bc092ea9e80f",
+    "src/glyphcache/cache.cpp": "a29abca8f1a1805ddabfaa3c066bc4df64e0b0a09dca477feb634a17d50595ff",
+    "tests/lib/glyph_cache_mip_test.cpp": "915a276e5250b362f68abf5fb174541b19c9be29a9e169e8b8433143736d4a13",
+    "tools/compare-backends.sh": "71e3174e5233cd0b44626871a56fe1a8e6fd9f75a59f77bb9c6d44ea07693167"
+  }
+}

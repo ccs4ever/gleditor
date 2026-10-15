@@ -1,0 +1,8 @@
+retry=1
+reason=visible Enter action absent from accessibility actionable set; use keymap-confirmed link_enter default binding
+input_chord=Alt+Shift+Return
+runner_sha256=a52fd534a9d006fa5a74e2666a8079afa4d3843bbe8f88d5b45d7ffac2dda37a
+parent_runner_sha256=4590216464c038d21a444651f4c62077110ebee33dd8796ca66700a297c2748c
+xuzz_sha256=ca0d8dba068a58e0c23780e2d3134f2a68450f75e50ea5647196b2f8d27f4d98
+libgleditor.so.0_sha256=ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9
+fresh_profile=/tmp/spatial-local-validation.W4mSRr/gles/retry/profile

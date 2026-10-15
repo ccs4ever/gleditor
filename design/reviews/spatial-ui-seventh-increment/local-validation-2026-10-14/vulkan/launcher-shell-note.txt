@@ -1,0 +1,1 @@
+original outer shell ended with: zsh: read-only variable: status
