@@ -17,6 +17,7 @@
 #include <gleditor/doc.hpp>
 #include <gleditor/render/types.hpp>
 #include <gleditor/render_state.hpp>
+#include <gleditor/spatial.hpp>
 
 namespace xanadu {
 
@@ -60,12 +61,13 @@ void OverviewOverlay::drawFrame(gleditor::FrameContext &ctx) {
   metrics.screenWidth  = ctx.screenWidth;
   metrics.screenHeight = ctx.screenHeight;
   metrics.chrome       = ctx.chrome;
-  Stamp stamp{.width   = ctx.screenWidth,
-              .height  = ctx.screenHeight,
-              .marks   = markRevision ? markRevision() : 0,
-              .config  = configRevision,
-              .visible = isVisible(),
-              .metrics = metrics};
+  Stamp stamp{.width    = ctx.screenWidth,
+              .height   = ctx.screenHeight,
+              .marks    = markRevision ? markRevision() : 0,
+              .config   = configRevision,
+              .occupied = obstacles ? obstacles->revision() : 0,
+              .visible  = isVisible(),
+              .metrics  = metrics};
   {
     std::scoped_lock locker(state->view);
     stamp.camera = state->view.pos;
@@ -188,9 +190,32 @@ void OverviewOverlay::rebuild(gleditor::FrameContext &ctx, const Stamp &stamp) {
   const glm::vec2 viewLo(stamp.camera.x - halfW, stamp.camera.y - halfH);
   const glm::vec2 viewHi(stamp.camera.x + halfW, stamp.camera.y + halfH);
 
-  const auto bounds = panelBounds(config, stamp.metrics);
-  panelMin          = {bounds.left, bounds.bottom};
-  panelSize         = {bounds.width, bounds.height};
+  hardScratch.clear();
+  pageScratch.clear();
+  if (obstacles) {
+    obstacles->forEach([this](const gleditor::ui::Rect &rect) {
+      hardScratch.push_back(rect);
+    });
+  }
+  if (!hardScratch.empty()) {
+    // The pages as the reader sees them, to leave their text alone if there
+    // is a choice.
+    const auto width  = static_cast<float>(ctx.screenWidth);
+    const auto height = static_cast<float>(ctx.screenHeight);
+    for (const auto &[pageLo, pageHi] : pages) {
+      const auto a = gleditor::spatial::projectToScreen(
+          ctx.viewProjection, glm::vec3(pageLo, 0.0F), width, height);
+      const auto b = gleditor::spatial::projectToScreen(
+          ctx.viewProjection, glm::vec3(pageHi, 0.0F), width, height);
+      pageScratch.push_back(
+          gleditor::ui::Rect{std::min(a.x, b.x), std::min(a.y, b.y),
+                             std::abs(b.x - a.x), std::abs(b.y - a.y)});
+    }
+  }
+  const auto bounds =
+      panelClear(config, stamp.metrics, hardScratch, pageScratch);
+  panelMin  = {bounds.left, bounds.bottom};
+  panelSize = {bounds.width, bounds.height};
   if (bounds.width <= 0 || bounds.height <= 0) {
     canvas->commit();
     return;
@@ -280,6 +305,23 @@ OverviewOverlay::panelBounds(const xanadu::OverviewConfig &config,
                        metrics.px(config.widthPx),
                        metrics.px(config.heightPx)}),
       metrics.pixelSafeArea());
+}
+
+gleditor::ui::Rect
+OverviewOverlay::panelClear(const xanadu::OverviewConfig &config,
+                            const gleditor::ui::UiMetrics &metrics,
+                            const std::span<const gleditor::ui::Rect> hard,
+                            const std::span<const gleditor::ui::Rect> pages) {
+  const auto wanted = panelBounds(config, metrics);
+  const auto soft   = [&](const gleditor::ui::Rect &at) {
+    float sum = 0.0F;
+    for (const auto &page : pages) {
+      sum += overlapArea(at, page);
+    }
+    return sum;
+  };
+  return placeClear(wanted, metrics.pixelSafeArea(), metrics.px(config.leftPx),
+                    hard, soft);
 }
 
 void OverviewOverlay::describe(gleditor::a11y::Builder &builder) {

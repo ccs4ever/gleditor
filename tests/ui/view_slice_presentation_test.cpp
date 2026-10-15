@@ -33,6 +33,7 @@
 
 #include "../lib/mocks/device.hpp"
 #include "allocation_count.hpp"
+#include "common/ui/occupied_regions.hpp"
 #include "common/ui/slice/zigzag_visualizer.hpp"
 #include "common/ui/view/presentation_palette.hpp"
 #include "common/ui/view/slice_presentation_switch.hpp"
@@ -110,6 +111,10 @@ struct KeptActivity {
     log = std::make_shared<xanadu::SliceFocusLog>(store.get(), directory());
   }
   void close() {
+    // As the program ending does: what was filed in memory is written.
+    if (log) {
+      std::ignore = log->save();
+    }
     log.reset();
     store.reset();
   }
@@ -121,6 +126,8 @@ struct KeptActivity {
 struct Fixture {
   /// Where the reader's resting place is kept; none unless a test gives one.
   std::shared_ptr<xanadu::SliceFocusLog> focus;
+  /// Where the cells are on screen, when a test wants to read it.
+  std::shared_ptr<xanadu::OccupiedRegions> occupied;
   xanadu::Store slice;
   std::vector<CellRef> row, column;
   std::map<SystemDocKind, std::unique_ptr<xanadu::Store>> system;
@@ -185,7 +192,8 @@ struct Fixture {
                        const xanadu::MicroversionId &version) {
                   system.at(kind)->repointCurrentVersion(version);
                 },
-            .focus = focus};
+            .focus    = focus,
+            .occupied = occupied};
   }
 
   std::unique_ptr<ViewSlicePresentation> presentation() {
@@ -1358,6 +1366,89 @@ TEST(ViewFocusTest, TheLayoutStoreDoesNotGrowWithTheReadersSteps) {
   presentation->flushFocus();
   EXPECT_EQ(layout.opCount(), before)
       << "where the reader is is activity, not a setting";
+}
+
+namespace {
+
+/// Make @p other a slice of one cell, for the reader to open instead.
+void anotherSlice(xanadu::Store &other) {
+  auto at = other.sliceGenesis(xanadu::MicroversionId{});
+  at      = other.makeCell(at, "elsewhere");
+  other.repointCurrentVersion(at);
+}
+
+} // namespace
+
+TEST(ViewFocusTest, OpeningAnotherSliceKeepsTheMoveMadeJustBeforeInTheFirst) {
+  Fixture fixture;
+  KeptActivity activity;
+  fixture.focus = activity.log;
+  Frame frame;
+  const auto presentation = settled(fixture, frame);
+  ASSERT_TRUE(presentation->dispatchAction("step-x-pos"));
+  frame.draw(*presentation);
+  ASSERT_EQ(presentation->focusCell(), fixture.row[1]);
+  ASSERT_EQ(activity.log->records(), 0U) << "not yet paused on";
+
+  xanadu::Store other;
+  anotherSlice(other);
+  presentation->bindXuduStore(other, other.primaryCurrentVersion());
+  EXPECT_EQ(activity.log->last(fixture.slice.documentId()), fixture.row[1]);
+  EXPECT_FALSE(activity.log->last(other.documentId()))
+      << "and not under the slice they went to";
+}
+
+TEST(SlicePresentationSwitchTest,
+     OpeningAnotherSliceKeepsTheMoveMadeJustBeforeInTheFirst) {
+  Fixture fixture;
+  KeptActivity activity;
+  fixture.focus     = activity.log;
+  const auto legacy = std::make_shared<zigzag::ZigzagVisualizer>("");
+  legacy->bindXuduStore(fixture.slice, fixture.slice.primaryCurrentVersion());
+  xanadu::view::SlicePresentationSwitch presentations(legacy);
+  presentations.setFocusLog(activity.log);
+  legacy->focusCell(fixture.row[2]);
+
+  xanadu::Store other;
+  anotherSlice(other);
+  presentations.bindXuduStore(other, other.primaryCurrentVersion());
+  EXPECT_EQ(activity.log->last(fixture.slice.documentId()), fixture.row[2]);
+}
+
+TEST(ViewStatusTest, AMessageDoesNotSurviveTheViewBeingHiddenAndShown) {
+  Fixture fixture;
+  Frame frame;
+  const auto presentation = settled(fixture, frame);
+  EXPECT_TRUE(presentation->dispatchAction("std:nav/step_x_neg"));
+  ASSERT_NE(presentation->notice(), "");
+  presentation->setPresentationVisible(false);
+  presentation->setPresentationVisible(true);
+  EXPECT_EQ(presentation->notice(), "");
+}
+
+TEST(ViewOccupiedTest, TheCellsOnScreenArePublishedAndRetiredWithTheView) {
+  Fixture fixture;
+  fixture.occupied = std::make_shared<xanadu::OccupiedRegions>();
+  Frame frame;
+  const auto presentation = settled(fixture, frame);
+  frame.draw(*presentation);
+  std::vector<gleditor::ui::Rect> seen;
+  fixture.occupied->forEach(
+      [&](const gleditor::ui::Rect &rect) { seen.push_back(rect); });
+  ASSERT_FALSE(seen.empty()) << "a slice with cells occupies the screen";
+  for (const auto &rect : seen) {
+    EXPECT_GT(rect.width, 0.0F);
+    EXPECT_GT(rect.height, 0.0F);
+    EXPECT_LE(rect.bottom, static_cast<float>(kHeight));
+  }
+  const auto revision = fixture.occupied->revision();
+  frame.draw(*presentation);
+  EXPECT_EQ(fixture.occupied->revision(), revision)
+      << "a frame that draws the same cells publishes no change";
+
+  presentation->setPresentationVisible(false);
+  EXPECT_TRUE(fixture.occupied->empty())
+      << "a hidden view leaves nothing for a panel to dodge";
 }
 
 TEST(ViewFocusTest, AMoveJustBeforeLeavingIsKeptAndTheSliceReopensThere) {

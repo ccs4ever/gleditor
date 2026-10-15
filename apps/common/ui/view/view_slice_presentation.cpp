@@ -281,6 +281,11 @@ ViewSlicePresentation *ViewSlicePresentation::setActivityLog(ActivityLog *log) {
 
 void ViewSlicePresentation::bindXuduStore(Store &store,
                                           const MicroversionId &version) {
+  if (&store != store_) {
+    // A move the reader has not yet paused on belongs to the slice they are
+    // leaving, and would otherwise be filed under the next one or not at all.
+    flushFocus();
+  }
   if (cursor_.origin != zigzag::noCell && &store == store_) {
     wantedFocus_ = cursor_.origin;
   } else if (&store != store_) {
@@ -831,10 +836,33 @@ void ViewSlicePresentation::drawScene(gleditor::FrameContext &ctx) {
               }});
 }
 
+void ViewSlicePresentation::publishOccupied(const int screenHeight) {
+  if (!host_.occupied) {
+    return;
+  }
+  occupiedScratch_.clear();
+  const auto items = presenter_.drawnItems();
+  for (std::size_t i = 0; i < items.size(); ++i) {
+    if (SubjectKind::Cell != items[i].id.kind) {
+      continue;
+    }
+    if (const auto box = presenter_.screenBounds(i)) {
+      // The a11y rectangle is Y down from the top; panels place in Y up.
+      const auto h = static_cast<float>(screenHeight);
+      occupiedScratch_.push_back(gleditor::ui::Rect{
+          static_cast<float>(box->left), h - static_cast<float>(box->bottom),
+          static_cast<float>(box->right - box->left),
+          static_cast<float>(box->bottom - box->top)});
+    }
+  }
+  host_.occupied->publish(this, occupiedScratch_);
+}
+
 void ViewSlicePresentation::drawFrame(gleditor::FrameContext &ctx) {
   if (!visible_) {
     return;
   }
+  publishOccupied(ctx.screenHeight);
   const auto chromeStamp = chromeRevision_ + keyboardMoves_.load();
   drawnChrome_           = chromeStamp;
   drawnCompass_          = compassStamp_;
@@ -1575,6 +1603,15 @@ ViewSlicePresentation::setPresentationVisible(const bool visible) {
   if (visible_ != visible) {
     if (!visible) {
       flushFocus();
+      if (host_.occupied) {
+        host_.occupied->publish(this, {});
+      }
+      // What was said was said to a view that was in front; shown again after
+      // the reader has been elsewhere, it would be read as news.
+      if (!notice_.empty()) {
+        notice_.clear();
+        ++chromeRevision_;
+      }
     }
     visible_ = visible;
     stale_   = true;

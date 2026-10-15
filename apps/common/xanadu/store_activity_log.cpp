@@ -3,6 +3,7 @@
 #include <array>
 #include <charconv>
 #include <limits>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -18,6 +19,16 @@ namespace {
 constexpr std::string_view kVisits  = "d.activity-visits";
 constexpr std::string_view kCurrent = "d.activity-current";
 constexpr std::string_view kFocus   = "d.activity-focus";
+
+/// Everything that writes the reader's activity store takes this. A visit is
+/// filed from whichever thread the reader's gesture arrived on (a dialog's
+/// answer comes in on the event thread), a resting place from the render
+/// thread, and a Store is not safe to append to from two at once. There is one
+/// activity store per program, so one lock.
+std::mutex &activityGuard() {
+  static std::mutex guard;
+  return guard;
+}
 
 } // namespace
 
@@ -48,6 +59,7 @@ DocumentId parseActivityId(const std::string_view hex) {
 void appendActivityRecord(Store &store, const std::filesystem::path &directory,
                           const std::string_view dimension,
                           const std::string_view text) {
+  const std::scoped_lock lock(activityGuard());
   auto at = store.latest();
   if (store.homeCell() == zigzag::noCell) at = store.sliceGenesis(at);
   auto dim = store.rebuildManifold(at).dimensionNamed(dimension, store);
@@ -238,8 +250,11 @@ SliceFocusLog::SliceFocusLog(Store *aStore, std::filesystem::path aDirectory)
   const auto manifold = store->rebuildManifold(store->latest());
   const auto dim      = manifold.dimensionNamed(kFocus, *store);
   if (!dim) return;
+  rank = dim;
+  tail = store->homeCell();
   for (auto cell                    = manifold.linked(store->homeCell(), *dim);
        cell != zigzag::noCell; cell = manifold.linked(cell, *dim)) {
+    tail             = cell;
     const auto text  = manifold.textOf(cell, *store);
     const auto split = text.find(' ');
     if (split != 32 || text.size() <= split + 1) {
@@ -269,15 +284,52 @@ std::expected<SliceFocusLog *, std::string>
 SliceFocusLog::keep(const DocumentId &slice, const zigzag::CellRef cell) {
   if (last(slice) == cell) return this;
   if (store) {
+    const auto text = activityIdText(slice) + ' ' + std::to_string(cell);
     try {
-      appendActivityRecord(*store, directory, kFocus,
-                           activityIdText(slice) + ' ' + std::to_string(cell));
+      if (!rank) {
+        // The first record makes the rank (and the store's slice) and saves,
+        // the slow way; every later one reuses what it found.
+        appendActivityRecord(*store, directory, kFocus, text);
+        locateRank();
+      } else {
+        const std::scoped_lock lock(activityGuard());
+        auto at         = store->makeCell(store->latest(), text);
+        const auto made = store->cellRefOf(at);
+        at      = store->setLink(at, tail, *rank, zigzag::DimVector::POS, made);
+        tail    = made;
+        pending = true;
+      }
     } catch (const std::exception &err) {
       return std::unexpected(err.what());
     }
   }
   latest[slice.bytes()] = cell;
   ++filed;
+  return this;
+}
+
+void SliceFocusLog::locateRank() {
+  const std::scoped_lock lock(activityGuard());
+  const auto manifold = store->rebuildManifold(store->latest());
+  rank                = manifold.dimensionNamed(kFocus, *store);
+  if (!rank) return;
+  tail = store->homeCell();
+  for (auto next = manifold.linked(tail, *rank); next != zigzag::noCell;
+       next      = manifold.linked(tail, *rank)) {
+    tail = next;
+  }
+}
+
+std::expected<SliceFocusLog *, std::string> SliceFocusLog::save() {
+  if (!store || !pending) return this;
+  const std::scoped_lock lock(activityGuard());
+  try {
+    std::filesystem::create_directories(directory);
+    store->save(directory.string());
+  } catch (const std::exception &err) {
+    return std::unexpected(err.what());
+  }
+  pending = false;
   return this;
 }
 

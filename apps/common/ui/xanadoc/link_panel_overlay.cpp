@@ -183,6 +183,24 @@ void LinkPanelOverlay::rebuildPanel(gleditor::FrameContext &ctx) {
       common_ui::linkPanelPresentation(lines, buttons, ids, builtMetrics,
                                        ctx.theme, config, anchor,
                                        measurements));
+  if (obstacles) {
+    hardScratch.clear();
+    obstacles->forEach([this](const gleditor::ui::Rect &rect) {
+      hardScratch.push_back(rect);
+    });
+    if (!hardScratch.empty()) {
+      auto placement = builtMetrics;
+      placement.chrome.top =
+          std::max(placement.chrome.top, builtMetrics.px(config.topPx));
+      const auto safe = placement.pixelSafeArea();
+      next->bounds    = gleditor::ui::clampToSafeArea(
+          builtMetrics.rounded(placeClear(
+              next->bounds, safe,
+              std::max(0.0F, builtMetrics.px(config.marginPx)), hardScratch,
+              [](const gleditor::ui::Rect &) { return 0.0F; })),
+          safe);
+    }
+  }
   panel.setModel(next->model);
   panel.setBounds(next->bounds);
   panel.setVisible(true);
@@ -271,7 +289,8 @@ void LinkPanelOverlay::drawFrame(gleditor::FrameContext &ctx) {
                     .width     = ctx.screenWidth,
                     .height    = ctx.screenHeight,
                     .reading   = context.readingStamp(),
-                    .anchors   = panelAnchors};
+                    .anchors   = panelAnchors,
+                    .occupied  = obstacles ? obstacles->revision() : 0};
   auto metrics         = ctx.metrics;
   metrics.screenWidth  = ctx.screenWidth;
   metrics.screenHeight = ctx.screenHeight;

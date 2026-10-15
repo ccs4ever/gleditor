@@ -51,6 +51,7 @@
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/ui/focus_manager.hpp>
 
+#include "common/ui/occupied_regions.hpp"
 #include "common/ui/view/slice_presentation.hpp"
 #include "common/ui/view/view_animation.hpp"
 #include "common/ui/view/view_presenter.hpp"
@@ -88,6 +89,9 @@ public:
     /// Where the reader's resting place in each slice is kept: the activity
     /// store, not a setting (view-system.md §7.5). Empty: not kept.
     std::shared_ptr<SliceFocusLog> focus;
+    /// Where the cells are on screen, published each frame for the panels
+    /// placed over the scene to stand clear of. Empty: not published.
+    std::shared_ptr<OccupiedRegions> occupied;
   };
 
   /// One placement of the slice view @p kind of @p registry, which must
@@ -279,6 +283,7 @@ private:
   /// showing anything, binds them as a slice does on opening and says so.
   void bindWhatIsLeftUnbound();
   void persistBindings();
+  void publishOccupied(int screenHeight);
   void announce(const ReplayReport &report);
   /// The name of the @p ordinal-th spatial binding point, in order: where the
   /// plane's steps, hops and swaps go, whatever the points are called.
@@ -388,6 +393,8 @@ private:
   /// showing, on a row of their own so a message never covers them, then the
   /// hints. Composed when the chrome changes, not on every frame.
   std::string chromeRows_;
+  /// The cells' screen rectangles as last published; kept for its storage.
+  std::vector<gleditor::ui::Rect> occupiedScratch_;
   std::uint64_t chromeRowsStamp_{~std::uint64_t{}};
   std::atomic<bool> keyboardHere_{true};
   std::atomic<std::uint64_t> keyboardMoves_{0};

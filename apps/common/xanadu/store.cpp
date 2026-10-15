@@ -209,14 +209,16 @@ void Store::putOp(const MicroversionId &produces, const Op &op) {
   }
 
   if (contextIdx != 0) {
+    // Ancestors always have smaller indices, so a context made after the
+    // parent cannot be one of its ancestors; the walk below decides the rest.
     if (contextIdx > parentIdx) {
       throw std::invalid_argument(
           "context operation " + std::to_string(contextIdx) +
           " is in the future relative to parent " + std::to_string(parentIdx) +
-          ": " + produces.parent().str() +
-          " is on a branch that was forked before the slice or xanadoc this "
-          "belongs to was made, so it cannot be added there; add to a "
-          "version on the branch that holds it");
+          ": version " + produces.parent().str() +
+          " predates the slice or xanadoc this belongs to and is not on its "
+          "line, so it cannot be added there; add to a version on the line "
+          "that holds it");
     }
     bool reachable = false;
     for (auto curr = parentIdx; curr != 0 && curr >= contextIdx;) {

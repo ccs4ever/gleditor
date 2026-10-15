@@ -33,6 +33,7 @@
 #include <gleditor/ui/overlay.hpp>
 
 #include "common/ui/link_panel_presentation.hpp"
+#include "common/ui/occupied_regions.hpp"
 #include "common/ui/xanadoc/link_context.hpp"
 #include "common/ui/xanadoc/session.hpp"
 #include "common/xanadu/link_panel.hpp"
@@ -67,6 +68,11 @@ public:
   }
   void setAnchorResolver(AnchorResolver resolver) {
     anchorResolver = std::move(resolver);
+  }
+  /// What the scene already occupies on screen; the panel stands clear of it
+  /// once there is anything (a slice's cells, in unified mode).
+  void setObstacles(std::shared_ptr<OccupiedRegions> regions) {
+    obstacles = std::move(regions);
   }
   void setFramingHandler(FramingHandler handler) {
     framingHandler = std::move(handler);
@@ -110,8 +116,12 @@ private:
     int height{};
     LinkContext::ReadingStamp reading;
     std::optional<std::array<glm::vec2, 2>> anchors;
+    std::uint64_t occupied{};
     bool operator==(const Stamp &) const = default;
   };
+
+  std::shared_ptr<OccupiedRegions> obstacles;
+  std::vector<gleditor::ui::Rect> hardScratch;
 
   void rebuildHighlights();
   void rebuildPanel(gleditor::FrameContext &ctx);

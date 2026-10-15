@@ -862,6 +862,13 @@ transitions already go as branching walks. So:
   over when the reader switches presentations carries the kept cell rather than the visualizer's
   home. The reading place (`ReadingPlace::zigzagFocus`) still resumes a whole session and is applied
   after.
+- Filing a rest is cheap and does not touch the disk: it appends three operations in memory, on the
+  render thread, without folding the store again (the first version folded it twice and saved, 1.4
+  to 5 ms inside the frame). The store is saved when the reader leaves and whenever another writer
+  of the activity store saves it; a crash loses the rests since. Every writer of the activity store
+  takes one lock, because a visit is filed from the thread a dialog's answer arrives on and a rest
+  from the render thread. Moving the focus log to another slice (opening one) files the move made
+  just before, under the slice it was made in.
 - An activity store that cannot be read leaves the focus kept for the session only, as the places
   are; the activity store is the reader's history and is not rewritten over.
 - Price: the activity store grows by a cell and a link per rest, the same order as a walk summary,
@@ -3009,6 +3016,16 @@ replaces it until the next move, and it comes back. The bind dialog lists the po
 dimensions and its groups under its field, and on a refusal comes back up with what was typed and
 the reason, instead of closing on a message the reader must reopen it to read.
 
+As built (M2 third closing round, F2 to F4): the slice presentation publishes the screen rectangles
+of its cells each frame (`OccupiedRegions`, `occupied_regions.hpp`; nothing allocates once its
+storage is warm, and an unchanged frame changes no revision), retired when the view is hidden. The
+overview thumbnail, the selected link's panel and the satelloid cards are placed by one rule,
+`placeClear()`: where they were put if there is nothing published, otherwise the safe area's corner
+or edge midpoint (or where they were put) that covers least of the cells and then least of the
+pages, nearest first. Pages are soft because their text cannot be told from their margin; a window
+too small to leave any of them clear covers the least. The compass is not yet published, so a panel
+can still meet it.
+
 As built (M2 second closing round, C2 to C6): the palette's row for a view itself chooses the view's
 default sub-view (the first it lists), not "whatever it was left on"; a cycle of views names none
 and keeps the reader's. A sub-view chosen elsewhere than the key retires the last announcement,
@@ -3978,3 +3995,8 @@ ______________________________________________________________________
   retire the last announcement; the message no longer covers the view and sub-view line; the key
   hints are in the accessibility tree; the bind example names what the slice has; and "Nothing that
   way" says "forward" and "back" (§12.2).
+- 2026-10-15 — §7.5, §11.7 and §12.2 as built (M2 third closing round, E4, E6, N1, N8, F2 to F4):
+  leaving a slice files the move made just before under that slice; filing a rest is in memory and
+  saved on leaving, behind one lock shared by every writer of the activity store; a message does not
+  survive its view being hidden; the thumbnail, link panel and satelloid cards stand clear of the
+  slice's published cell rectangles.

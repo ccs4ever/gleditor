@@ -313,6 +313,17 @@ void SatelloidOverlay::drawScene(gleditor::FrameContext &ctx) {
       occurrences.push_back(i);
     }
   }
+  hardScratch_.clear();
+  if (obstacles_) {
+    obstacles_->forEach([this](const gleditor::ui::Rect &rect) {
+      hardScratch_.push_back(rect);
+    });
+  }
+  // A card's place, moved clear of what is already on screen.
+  const auto clearOf = [&](const gleditor::ui::Rect wanted) {
+    return placeClear(wanted, safe, metrics.px(16), hardScratch_,
+                      [](const gleditor::ui::Rect &) { return 0.0F; });
+  };
   const bool stacked = !occurrences.empty();
   std::size_t chosen = 0;
   for (std::size_t i = 0; i < occurrences.size(); ++i) {
@@ -323,11 +334,14 @@ void SatelloidOverlay::drawScene(gleditor::FrameContext &ctx) {
                                     satelloids_[occurrences[chosen]].currentPos,
                                     screenW, screenH)
                                : glm::vec2(screenW * 0.5F, screenH * 0.5F);
-  const float stackX = std::clamp(
-      anchor.x, safe.left, std::max(safe.left, safe.left + safe.width - cardW));
-  const float stackY =
-      std::clamp(anchor.y - cardH * .5F, safe.bottom,
-                 std::max(safe.bottom, safe.bottom + safe.height - cardH));
+  const auto stackAt = clearOf(
+      {std::clamp(anchor.x, safe.left,
+                  std::max(safe.left, safe.left + safe.width - cardW)),
+       std::clamp(anchor.y - cardH * .5F, safe.bottom,
+                  std::max(safe.bottom, safe.bottom + safe.height - cardH)),
+       cardW, cardH});
+  const float stackX = stackAt.left;
+  const float stackY = stackAt.bottom;
   for (std::size_t i = 0; i < satelloids_.size(); ++i) {
     auto &s = satelloids_[i];
     if (s.occurrence && !s.active) {
@@ -345,11 +359,13 @@ void SatelloidOverlay::drawScene(gleditor::FrameContext &ctx) {
       s.stackLayer         = 0;
       const auto projected = gleditor::spatial::projectToScreen(
           ctx.viewProjection, s.currentPos, screenW, screenH);
-      s.screenTarget = {
-          std::clamp(projected.x, safe.left,
-                     std::max(safe.left, safe.left + safe.width - cardW)),
-          std::clamp(projected.y - cardH * .5F, safe.bottom,
-                     std::max(safe.bottom, safe.bottom + safe.height - cardH))};
+      const auto placed = clearOf(
+          {std::clamp(projected.x, safe.left,
+                      std::max(safe.left, safe.left + safe.width - cardW)),
+           std::clamp(projected.y - cardH * .5F, safe.bottom,
+                      std::max(safe.bottom, safe.bottom + safe.height - cardH)),
+           cardW, cardH});
+      s.screenTarget = {placed.left, placed.bottom};
     }
     if (!s.screenPlaced) {
       s.screenPos    = s.screenTarget;

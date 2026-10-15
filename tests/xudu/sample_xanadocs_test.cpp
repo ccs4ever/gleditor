@@ -495,11 +495,12 @@ TEST(SampleXanadocsTest, Beams03MultiSpanStackedLinks) {
 
 // M2 gate 2, D7: adding a cell to the unified sample was refused with "context
 // operation 5 is in the future relative to parent 4". That is the store being
-// right: it holds a text branch (a1..a3, operations 2 to 4) and a slice born
-// at operation 5 on a branch forked from operation 1, and latest() is the text
-// branch's tip, which is not a descendant of the slice. The refusal says so;
-// the slice's own tip takes the cell.
-TEST(SampleXanadocsTest, ACellCannotJoinASliceFromABranchForkedBeforeIt) {
+// right: it holds a text chain (a1..a3, operations 2 to 4) and a slice born at
+// operation 5 on a chain of its own, and latest() is the text chain's tip,
+// which predates the slice and is not on its line. (They are two roots, not a
+// fork of one version.) The refusal says that; the slice's own tip takes the
+// cell.
+TEST(SampleXanadocsTest, ACellCannotJoinASliceFromAVersionThatPredatesIt) {
   const auto unifiedDir = kSampleBaseDir / "core_hypertext" / "unified_store";
   // Filing a cell spools its text, and the shared sample permascroll is a
   // checked-in fixture every other test reads: this one writes to a copy.
@@ -519,7 +520,8 @@ TEST(SampleXanadocsTest, ACellCannotJoinASliceFromABranchForkedBeforeIt) {
     static_cast<void>(unified.makeCell(textTip, "a cell"));
     FAIL() << "a cell was filed on a branch that does not hold its slice";
   } catch (const std::invalid_argument &refused) {
-    EXPECT_THAT(refused.what(), testing::HasSubstr("forked before the slice"));
+    EXPECT_THAT(refused.what(),
+                testing::HasSubstr("predates the slice or xanadoc"));
   }
   // The slice's own tip, the last operation of the store, takes it.
   const auto sliceTip = unified.segmentedOps().idOf(

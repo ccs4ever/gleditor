@@ -77,12 +77,29 @@ public:
   std::expected<SliceFocusLog *, std::string> keep(const DocumentId &slice,
                                                    zigzag::CellRef cell);
 
+  /// Write what keep() has filed to disk. keep() itself only appends to the
+  /// store in memory, so that a rest costs a frame next to nothing; the host
+  /// saves when the reader leaves and the activity store's other writers save
+  /// whatever is in it whenever they file a visit. A crash between loses the
+  /// resting places since the last save, and no more.
+  std::expected<SliceFocusLog *, std::string> save();
+
   /// Records filed so far, for a test or a diagnostic.
   [[nodiscard]] std::size_t records() const noexcept { return filed; }
+  /// Whether keep() has filed anything save() has not yet written.
+  [[nodiscard]] bool unsaved() const noexcept { return pending; }
 
 private:
+  /// Find the focus rank in the store, and its last cell.
+  void locateRank();
+
   Store *store;
   std::filesystem::path directory;
+  /// The rank's dimension and tail once known, so that filing a record does
+  /// not fold the store again. Only this log files on the rank.
+  std::optional<zigzag::DimRef> rank;
+  zigzag::CellRef tail{zigzag::noCell};
+  bool pending{};
   std::map<std::array<std::uint8_t, 16>, zigzag::CellRef> latest;
   std::size_t filed{};
 };

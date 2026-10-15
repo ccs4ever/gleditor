@@ -775,6 +775,11 @@ int XuzzApp::run(const int argc, char **argv) {
   links.setLinkContext(&linkContext);
 
   xanadu::LinkPanelOverlay linkPanel(linkContext, *session);
+  // Where the slice's cells are on screen, which the panels over the scene
+  // stand clear of (M2 third gate, F2 to F4).
+  const auto occupiedRegions = std::make_shared<xanadu::OccupiedRegions>();
+  linkPanel.setObstacles(occupiedRegions);
+  satelloidOverlay.setObstacles(occupiedRegions);
   const auto selectedPair = [&linkContext](const RenderState &rState,
                                            const auto &cellPoint)
       -> std::optional<xanadu::LinkPanelOverlay::AnchorPair> {
@@ -850,6 +855,7 @@ int XuzzApp::run(const int argc, char **argv) {
       });
 
   xanadu::OverviewOverlay overview(state);
+  overview.setObstacles(occupiedRegions);
   const auto chosenPlaces = [&linkContext](const RenderState &rState,
                                            std::vector<glm::vec3> &out) {
     const auto selected = linkContext.selection();
@@ -937,7 +943,8 @@ int XuzzApp::run(const int argc, char **argv) {
                            const xanadu::MicroversionId &version) {
                   session->repointSystemDoc(kind, version);
                 },
-            .focus = focusLog});
+            .focus    = focusLog,
+            .occupied = occupiedRegions});
     viewPresentations.push_back(presentation);
     std::ignore = slicePresentations->add(
         descriptor.kind, presentation,
@@ -3145,6 +3152,10 @@ int XuzzApp::run(const int argc, char **argv) {
   {
     // A move made just before quitting has not been paused on yet.
     slicePresentations->flushFocus();
+    if (const auto saved = focusLog->save(); !saved) {
+      GLEDITOR_LOG_WARN("xuzz.view", "where you rested could not be saved: {}",
+                        saved.error());
+    }
     auto place              = views.finalPlace();
     place.zigzagStore       = session->path(zigzagStoreIndex);
     place.zigzagVersion     = zigzagPresentation->sliceHead().str();

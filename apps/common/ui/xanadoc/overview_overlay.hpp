@@ -20,6 +20,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <vector>
 
 #include <glm/ext/vector_float2.hpp>
@@ -30,6 +31,7 @@
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/state.hpp>
 
+#include "common/ui/occupied_regions.hpp"
 #include "common/xanadu/framing.hpp"
 #include "common/xanadu/system_docs.hpp"
 
@@ -59,7 +61,20 @@ public:
     builtFor.reset();
     markRevision = std::move(revision);
   }
+  /// What the scene already occupies on screen; the panel stands clear of it
+  /// (and, where it can, of page text) once there is anything.
+  void setObstacles(std::shared_ptr<OccupiedRegions> regions) {
+    const std::scoped_lock lock(guard);
+    obstacles = std::move(regions);
+    builtFor.reset();
+  }
   void toggle();
+  /// Where the panel stands among @p hard rectangles it must not cover, and
+  /// @p pages it would rather not.
+  [[nodiscard]] static gleditor::ui::Rect
+  panelClear(const xanadu::OverviewConfig &, const gleditor::ui::UiMetrics &,
+             std::span<const gleditor::ui::Rect> hard,
+             std::span<const gleditor::ui::Rect> pages);
   [[nodiscard]] static gleditor::ui::Rect
   panelBounds(const xanadu::OverviewConfig &, const gleditor::ui::UiMetrics &);
   void describe(gleditor::a11y::Builder &) override;
@@ -83,6 +98,7 @@ private:
     std::size_t pages{};
     std::uint64_t marks{};
     std::uint64_t config{};
+    std::uint64_t occupied{};
     bool visible{};
     gleditor::ui::UiMetrics metrics;
     std::uint64_t geometry{};
@@ -105,6 +121,9 @@ private:
   std::optional<bool> visibleOverride;
   MarkSource markSource;
   MarkRevision markRevision;
+  std::shared_ptr<OccupiedRegions> obstacles;
+  /// Kept between rebuilds so a rebuild reuses their storage.
+  std::vector<gleditor::ui::Rect> hardScratch, pageScratch;
 
   std::unique_ptr<gleditor::Canvas> canvas;
   std::optional<Stamp> builtFor;

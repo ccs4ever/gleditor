@@ -231,6 +231,9 @@ void SlicePresentationSwitch::bindXuduStore(Store &store,
   // Every presentation follows the slice; one not shown folds it only when
   // it is shown.
   const auto *const before = entries_.front().presentation->store();
+  if (before != &store) {
+    flushFocus();
+  }
   for (const auto &entry : entries_) {
     entry.presentation->bindXuduStore(store, version);
   }

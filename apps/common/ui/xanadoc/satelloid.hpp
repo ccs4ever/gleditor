@@ -38,6 +38,8 @@
 #include "common/xanadu/link_occurrences.hpp"
 #include "common/xanadu/universal_link_endpoint.hpp"
 
+#include "common/ui/occupied_regions.hpp"
+
 namespace xanadu {
 class LinkContext;
 
@@ -192,6 +194,11 @@ public:
   void setAxisNameResolver(AxisNameResolver resolver) {
     axisNameResolver_ = std::move(resolver);
   }
+  /// What the scene already occupies on screen; a card stands clear of it
+  /// rather than over a slice's cells (M2 third gate, F3).
+  void setObstacles(std::shared_ptr<OccupiedRegions> regions) {
+    obstacles_ = std::move(regions);
+  }
   void setAnchorResolver(AnchorResolver resolver) {
     anchorResolver_ = std::move(resolver);
   }
@@ -241,6 +248,8 @@ private:
   NeighborhoodRevision neighborhoodRevision_;
   AxisNameResolver axisNameResolver_;
   AnchorResolver anchorResolver_;
+  std::shared_ptr<OccupiedRegions> obstacles_;
+  std::vector<gleditor::ui::Rect> hardScratch_;
   SiteFilter siteFilter_;
   std::vector<std::size_t> drawnIndices_;
 
