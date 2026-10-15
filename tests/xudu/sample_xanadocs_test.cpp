@@ -15,6 +15,8 @@
 #include <string>
 #include <vector>
 
+#include <unistd.h>
+
 #include "common/xanadu/format.hpp"
 #include "common/xanadu/link_layout.hpp"
 #include "common/xanadu/magic_mime.hpp"
@@ -499,7 +501,16 @@ TEST(SampleXanadocsTest, Beams03MultiSpanStackedLinks) {
 // the slice's own tip takes the cell.
 TEST(SampleXanadocsTest, ACellCannotJoinASliceFromABranchForkedBeforeIt) {
   const auto unifiedDir = kSampleBaseDir / "core_hypertext" / "unified_store";
-  Store unified(samplePermascroll());
+  // Filing a cell spools its text, and the shared sample permascroll is a
+  // checked-in fixture every other test reads: this one writes to a copy.
+  const auto scrollCopy = fs::temp_directory_path() /
+                          ("xudu-sample-scroll-" + std::to_string(::getpid()));
+  fs::remove_all(scrollCopy);
+  fs::copy(kSampleBaseDir / "permascroll", scrollCopy,
+           fs::copy_options::recursive);
+  xanadu::UserPermascroll::Config config;
+  config.storageDir = scrollCopy;
+  Store unified(std::make_shared<xanadu::UserPermascroll>(std::move(config)));
   unified.load(unifiedDir.string());
   ASSERT_NE(unified.sliceBirth(), 0U);
   const auto textTip = unified.latest();
@@ -516,6 +527,7 @@ TEST(SampleXanadocsTest, ACellCannotJoinASliceFromABranchForkedBeforeIt) {
   const auto before = unified.segmentedOps().size();
   const auto added  = unified.makeCell(sliceTip, "a cell");
   EXPECT_EQ(unified.segmentedOps().indexOf(added), before + 1);
+  fs::remove_all(scrollCopy);
 }
 
 } // namespace
