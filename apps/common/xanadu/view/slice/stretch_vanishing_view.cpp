@@ -454,6 +454,24 @@ constexpr std::array kDirections{zigzag::DimVector::POS,
 
 } // namespace
 
+std::optional<PlaneExtent> paneExtentOn(const PaneFrame &frame,
+                                        const float z) noexcept {
+  const auto shown = visibleOn(frame, z);
+  if (!shown) {
+    return std::nullopt;
+  }
+  return PlaneExtent{.lo = shown->centre - shown->half,
+                     .hi = shown->centre + shown->half};
+}
+
+std::optional<std::pair<glm::vec2, glm::vec2>>
+cutSegmentTo(const glm::vec2 a, const glm::vec2 b,
+             const PlaneExtent &box) noexcept {
+  return segmentWithin(a, b,
+                       Rect{.centre = (box.lo + box.hi) / 2.0F,
+                            .half   = (box.hi - box.lo) / 2.0F});
+}
+
 // -- settings -----------------------------------------------------------------
 
 float StretchConfig::ghostOpacity() const noexcept {

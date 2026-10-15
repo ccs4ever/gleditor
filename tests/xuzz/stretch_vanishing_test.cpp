@@ -723,32 +723,36 @@ TEST(StretchVanishingTest, ADepthPlaneRecedesAndStandsClearOfTheFocus) {
   EXPECT_LE(far->opacity, config.depthFade * config.depthFade + 1e-4F);
 }
 
-TEST(StretchVanishingTest, AStrandStopsWhereThePaneDoes) {
-  // A rank running off both edges: the strands between cells that are cut
-  // end at the pane's edge, not beyond it (M2 gate 2, D4).
-  Slice slice{"d.x"};
-  std::vector<CellRef> rank;
-  for (int i = 0; i < 21; ++i) {
-    rank.push_back(slice.cell("c"));
-    if (i > 0) {
-      slice.link(rank[i - 1], "d.x", rank[i]);
-    }
-  }
-  const auto base = slice.manifold();
-  ViewManifold space{base};
-  configure(space);
-  ASSERT_TRUE(space.axes().bind(x, slice.dim("d.x")));
-  const Words words{slice};
-  StretchVanishingView view;
-  const auto frame = flatPane(300.0F, 100.0F);
-  const auto sink  = layOut(view, space, rank[10], frame, words);
-  ASSERT_FALSE(sink.edges().empty());
-  for (const auto &edge : sink.edges()) {
-    for (const auto &end : {edge.a, edge.b}) {
-      EXPECT_LE(std::abs(end.x), 150.0F + kSlack);
-      EXPECT_LE(std::abs(end.y), 50.0F + kSlack);
-    }
-  }
+TEST(StretchVanishingTest, ThePaneIsCarriedBackOntoAPlaneAndASegmentCutToIt) {
+  // M2 gate 2, D4: what a ghost and a strand are cut to. Looking straight
+  // down z, the pane's extent is the pane, and a deeper plane shows more of
+  // the world through a perspective camera.
+  const auto flat = xanadu::view::paneExtentOn(flatPane(300.0F, 100.0F), 0.0F);
+  ASSERT_TRUE(flat.has_value());
+  EXPECT_NEAR(flat->lo.x, -150.0F, 1e-2F);
+  EXPECT_NEAR(flat->hi.x, 150.0F, 1e-2F);
+  EXPECT_NEAR(flat->lo.y, -50.0F, 1e-2F);
+  EXPECT_NEAR(flat->hi.y, 50.0F, 1e-2F);
+  const auto near = xanadu::view::paneExtentOn(deepPane(), 0.0F);
+  const auto far  = xanadu::view::paneExtentOn(deepPane(), -500.0F);
+  ASSERT_TRUE(near.has_value());
+  ASSERT_TRUE(far.has_value());
+  EXPECT_GT(far->hi.x, near->hi.x);
+
+  // A strand running off the right edge ends on it; one wholly outside is
+  // nothing; one inside is left as it is.
+  const auto cut =
+      xanadu::view::cutSegmentTo({0.0F, 0.0F}, {400.0F, 0.0F}, *flat);
+  ASSERT_TRUE(cut.has_value());
+  EXPECT_NEAR(cut->second.x, 150.0F, 1e-2F);
+  EXPECT_NEAR(cut->first.x, 0.0F, 1e-2F);
+  EXPECT_FALSE(xanadu::view::cutSegmentTo({200.0F, 0.0F}, {400.0F, 0.0F}, *flat)
+                   .has_value());
+  const auto inside =
+      xanadu::view::cutSegmentTo({-10.0F, 5.0F}, {10.0F, -5.0F}, *flat);
+  ASSERT_TRUE(inside.has_value());
+  EXPECT_EQ(inside->first, glm::vec2(-10.0F, 5.0F));
+  EXPECT_EQ(inside->second, glm::vec2(10.0F, -5.0F));
 }
 
 TEST(StretchVanishingTest, FadedTextStepsDownAndTheFocusNever) {

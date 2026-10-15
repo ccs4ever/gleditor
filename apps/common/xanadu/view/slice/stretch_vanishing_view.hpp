@@ -31,6 +31,7 @@
 #include <memory>
 #include <optional>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <glm/vec3.hpp>
@@ -136,6 +137,20 @@ struct StretchConfig {
 
 /// Every stretch.* setting, with StretchConfig's defaults.
 [[nodiscard]] std::vector<SettingSpec> stretchSettingSpecs();
+
+/// A box in one plane's own x and y: its least and greatest corners.
+struct PlaneExtent {
+  glm::vec2 lo, hi;
+};
+
+/// The part of the plane at depth @p z that @p frame shows, or nothing when the
+/// plane is edge-on or behind the camera (M2 gate 2, D4).
+[[nodiscard]] std::optional<PlaneExtent> paneExtentOn(const PaneFrame &frame,
+                                                      float z) noexcept;
+
+/// The part of the segment @p a to @p b inside @p box, or nothing.
+[[nodiscard]] std::optional<std::pair<glm::vec2, glm::vec2>>
+cutSegmentTo(glm::vec2 a, glm::vec2 b, const PlaneExtent &box) noexcept;
 
 /**
  * @brief §9.1.5's fade: @p margin is a box's least distance from the pane's
