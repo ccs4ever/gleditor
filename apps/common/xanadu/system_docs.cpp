@@ -73,10 +73,6 @@ std::string settings::sliceRingOrderKey(const std::string_view sliceId) {
   return std::string{kSlicePrefix} + std::string{sliceId} +
          std::string{kSliceRingOrderField};
 }
-std::string settings::sliceFocusKey(const std::string_view sliceId) {
-  return std::string{kSlicePrefix} + std::string{sliceId} +
-         std::string{kSliceFocusField};
-}
 std::string settings::dimensionDashKey(const std::string_view dimension) {
   return std::string{kDimensionPrefix} + std::string{dimension} +
          std::string{kDimensionDashField};
@@ -2269,13 +2265,6 @@ dimensionCueSettingSpecs(const std::string_view dimension,
        .schemas = {{.expectedTypes = {"string"},
                     .defaultValues = {std::string{dash}}}}},
   };
-}
-
-SettingSpec sliceFocusSettingSpec(const std::string_view sliceId) {
-  return {.name    = settings::sliceFocusKey(sliceId),
-          .notes   = "The cell this slice was last focused on, by its "
-                     "operation index; empty for a slice never moved in",
-          .schemas = {{.expectedTypes = {"integer*"}, .defaultValues = {}}}};
 }
 
 std::vector<SettingSpec>

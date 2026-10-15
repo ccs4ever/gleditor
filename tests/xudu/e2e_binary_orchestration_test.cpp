@@ -2915,14 +2915,22 @@ TEST(E2EBinaryOrchestrationTest, aSliceViewIsChosenFromThePaletteAndKept) {
   // Run twice, the first frame is the same bytes: the camera is framed against
   // where the document will rest, not against where its arrival has it on the
   // frame the first page happens to be ready, so a capture is not a race.
+  // The step above was a move, and the slice reopens where the reader rested
+  // (view-system.md §7.5), so "chosen" is not what a third run opens on. Two
+  // runs from the same place are the same bytes.
   const auto again = xuzz(" --capture " + ppm("again").string());
   ASSERT_EQ(again.exitCode, 0) << again.output;
+  const auto thrice = xuzz(" --capture " + ppm("thrice").string());
+  ASSERT_EQ(thrice.exitCode, 0) << thrice.output;
   const auto bytes = [](const fs::path &file) {
     std::ifstream in(file, std::ios::binary);
     return std::string{std::istreambuf_iterator<char>(in),
                        std::istreambuf_iterator<char>()};
   };
-  EXPECT_EQ(bytes(ppm("again")), bytes(ppm("chosen")));
+  EXPECT_EQ(bytes(ppm("again")), bytes(ppm("thrice")));
+  // And the reader did come back to where they were: not the first frame of
+  // the run that stepped away from it.
+  EXPECT_NE(bytes(ppm("again")), bytes(ppm("chosen")));
 }
 
 /**

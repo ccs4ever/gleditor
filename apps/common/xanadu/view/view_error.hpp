@@ -232,7 +232,7 @@ messageId(ViewMessage message) noexcept {
 messageText(ViewMessage message) noexcept {
   switch (message) {
   case ViewMessage::NothingThatWay:
-    return "No cell further along {dimension} {direction}.";
+    return "No cell further {direction} along {dimension}.";
   case ViewMessage::NoPackThatWay:
     return "{group} has nothing further {direction} from here.";
   case ViewMessage::RebindDiscarded:

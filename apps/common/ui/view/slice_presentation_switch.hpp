@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "common/ui/view/slice_presentation.hpp"
+#include "common/xanadu/store_activity_log.hpp"
 
 namespace xanadu::view {
 
@@ -59,6 +60,14 @@ public:
   [[nodiscard]] SlicePresentation &shown() const noexcept;
   /// The kinds that can be shown, legacy first.
   [[nodiscard]] std::vector<std::string> kinds() const;
+
+  /// Where the reader's resting place in each slice is kept (view-system.md
+  /// §7.5). A slice opened afresh starts every presentation there, so the
+  /// seam's carrying the focus over on a switch carries the kept one and not
+  /// the visualizer's home.
+  SlicePresentationSwitch *setFocusLog(std::shared_ptr<SliceFocusLog> log);
+  /// Keep the focus of the presentation shown. For when the reader leaves.
+  SlicePresentationSwitch *flushFocus();
 
   // -- SlicePresentation
   // --------------------------------------------------------
@@ -129,6 +138,7 @@ private:
   };
 
   std::vector<Entry> entries_;
+  std::shared_ptr<SliceFocusLog> focusLog_;
   std::size_t shown_{};
   std::unique_ptr<Roles> roles_;
   bool visible_{true};

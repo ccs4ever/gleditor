@@ -825,18 +825,47 @@ number of strings", which `matchShape` reads as a type whose last element repeat
 dimension's name or the group's place in the groups), `slice.<id>.groups` (a group's name, its
 member count, then a kind and a value for each) and `slice.<id>.ringOrder` (names). `cellsOf()` and
 `bindingsFromCells()` turn `SavedBindings` into those lists and back, and a list in another shape is
-refused whole and said, not half read. The focus is `slice.<id>.focus`, the cell's operation index
-(`integer*`, empty for none), written when a walk comes to rest so a held key is one write. They are
-read when the slice is first bound in a session; the reader's saved bindings win over the legacy
-visualizer's axes. The pouch stays with `system://pouches` (§7.7, unbuilt). A sub-view is kept per
-slice **and per view kind**, as `slice.<id>.<kind>.subview`, because an id means something only to
-the view that has it. Undo keeps each edit as the links and texts it changed, applied backwards; a
-ring move alone is kept as two places, because `ringPlace()` appends at the ring's tail between
-edits without an undo entry of its own, which would leave a recorded link stale. Cells are never
-unminted: undo leaves an occurrence on no rank, unreachable, and redo links the same cell again, so
-a later entry that names a group still names it. They are not written to the slice's own store — how
-a reader looks is not a fact about the document (R8) — and not to `system://activity`, which records
-visits.
+refused whole and said, not half read. They are read when the slice is first bound in a session; the
+reader's saved bindings win over the legacy visualizer's axes. The pouch stays with
+`system://pouches` (§7.7, unbuilt). A sub-view is kept per slice **and per view kind**, as
+`slice.<id>.<kind>.subview`, because an id means something only to the view that has it. Undo keeps
+each edit as the links and texts it changed, applied backwards; a ring move alone is kept as two
+places, because `ringPlace()` appends at the ring's tail between edits without an undo entry of its
+own, which would leave a recorded link stale. Cells are never unminted: undo leaves an occurrence on
+no rank, unreachable, and redo links the same cell again, so a later entry that names a group still
+names it. They are not written to the slice's own store — how a reader looks is not a fact about the
+document (R8) — and not to `system://activity`, which records visits.
+
+**Where the reader's focus is kept (M2 second closing round, C1).** In `system://activity`, not in
+`system://layout`. The first build kept it as a layout setting, `slice.<id>.focus`, and the second
+gate found three faults that one cause explains: the setting was rewritten at every rested step
+(twenty steps grew the store by sixty operations, text spooled into the user's permascroll), the
+restore read the oldest value of a list that had only ever been appended to, and the seam between
+presentations overwrote what had been restored with the visualizer's home. A configuration store
+holds what the reader *decided*; a focus that changes with every step is what the reader *did*, and
+R8 (`store-slice-convergence.md`) puts that in the private activity store, where completed reader
+transitions already go as branching walks. So:
+
+- The focus is a record of `SliceFocusLog` (`store_activity_log.hpp`) on `d.activity-focus` in
+  `system://activity`: the slice's `DocumentId` and the cell's operation index as text. It is
+  written when the reader *rests* — a pause of `activity.settleMs`, the same pause that settles a
+  walk summary (§7.8) — so a walk of any length is one record, and a cell that is already the
+  slice's latest is not written again. It is also written when the view is hidden or switched away
+  from and when the program ends, because a move made just before leaving has not been paused on.
+  Reading takes the newest record of the slice, so the history stays and nothing is rewritten.
+- A walk summary (§7.8) was considered as the carrier, with its `ended` cell as the focus. It is
+  not: a jump, a followed link or a satelloid choice is not a step along a dimension, so it settles
+  no summary, yet it is exactly where a reader wants to come back to. The focus record is the
+  smaller thing that is always true.
+- Every presentation starts from the kept focus: a slice view reads it when it folds the slice, and
+  the switch applies it to the visualizer when a slice is first bound, so that carrying the focus
+  over when the reader switches presentations carries the kept cell rather than the visualizer's
+  home. The reading place (`ReadingPlace::zigzagFocus`) still resumes a whole session and is applied
+  after.
+- An activity store that cannot be read leaves the focus kept for the session only, as the places
+  are; the activity store is the reader's history and is not rewritten over.
+- Price: the activity store grows by a cell and a link per rest, the same order as a walk summary,
+  and nothing prunes it. Prune with the rest of the activity history when that is built.
 
 ### 7.6 Ways to bind
 
@@ -2980,6 +3009,15 @@ replaces it until the next move, and it comes back. The bind dialog lists the po
 dimensions and its groups under its field, and on a refusal comes back up with what was typed and
 the reason, instead of closing on a message the reader must reopen it to read.
 
+As built (M2 second closing round, C2 to C6): the palette's row for a view itself chooses the view's
+default sub-view (the first it lists), not "whatever it was left on"; a cycle of views names none
+and keeps the reader's. A sub-view chosen elsewhere than the key retires the last announcement,
+"Plain (2 of 2)", which would no longer be so. A swap retires the last message too. A message never
+takes the place of the view and sub-view: the strip keeps them on a row of their own, with the key
+hints beneath, and the message above. The key hints are a node of the accessibility tree with the
+words drawn. The bind dialog's example is made of the slice's own first point and first dimension
+(or group), and is only the form when it has none.
+
 ______________________________________________________________________
 
 ## 12. Interaction summary
@@ -3044,7 +3082,7 @@ a page (click, or page and link actions); scrub a deck (drag or wheel, or hold n
 
 | Situation                         | Text                                                           | Error              |
 | --------------------------------- | -------------------------------------------------------------- | ------------------ |
-| Nothing that way                  | "No cell further along *dimension* *direction*."               | none               |
+| Nothing that way                  | "No cell further *direction* along *dimension*."               | none               |
 | No pack that way                  | "*group* has nothing further *direction* from here."           | none               |
 | Rebind tossed view cells          | "Showing *target* on axis *n*. Discarded *N* view-only cells." | none               |
 | Binding an empty group            | "Group '*name*' has no dimensions yet."                        | `EmptyGroupBind`   |
@@ -3060,6 +3098,10 @@ a page (click, or page and link actions); scrub a deck (drag or wheel, or hold n
 | A view action in the visualizer   | "The ZigZag visualizer cannot *action*; choose a slice view …" | none               |
 | One dimension on two points       | "Showing *target* on axis *n*; axis *m* shows it too."         | none               |
 | A step on a point showing nothing | "*n* shows nothing; bind a dimension to it first."             | none               |
+
+The *direction* of "Nothing that way" is "forward" or "back": the plain words for a step toward or
+away from the end of a rank. "Posward" and "negward" are the engine's terms and are not what a
+reader is told, in this message or in a neighbour's accessible description.
 
 Each is also an accessibility announcement. The refusals below are faults of a view or of the host
 rather than of the reader, but a third-party view can still surface them, so each has words:
@@ -3170,8 +3212,8 @@ Each group of settings has its Schema and Notes pages (V-R41). The binding point
 `layout.bindingPoints`. A dimension's colour is `ui.dimension.<name>.colour`, assigned from a
 palette when first seen and the reader's to change; it is the one colour that dimension has
 everywhere. The dimension pouch is kept in `system://pouches`. Per-slice state —
-`layout.slice.<id>.view`, `.<kind>.subview`, `.axes`, `.groups`, `.ringOrder`, `.focus` — and
-per-document-set state — `layout.pages.<id>.view` — live in `system://layout`.
+`layout.slice.<id>.view`, `.<kind>.subview`, `.axes`, `.groups`, `.ringOrder` — and per-document-set
+state — `layout.pages.<id>.view` — live in `system://layout`. The slice's focus does not (§7.5).
 
 As built (U2): until the host replaces the legacy presentations, which presentation shows a slice is
 `layout.slice.<id>.presentation`: `legacy`, the default, or a slice view's kind. Like the keys above
@@ -3925,3 +3967,12 @@ ______________________________________________________________________
   fit; a dash pattern has a floor and a strand a cap on its dashes; `stretch.maxCellSpan` is bounded
   at 256 panes and a measure at 2^22 pixels, and the slides of the walk step by one float where a gap
   is lost to rounding.
+- 2026-10-15 — §7.5, §11.7, §12.2 and the layout list of §12 as built (M2 second closing round, C):
+  the reader's focus in a slice moved out of `system://layout` (`slice.<id>.focus` is deleted, no
+  reader kept) into `system://activity` as `SliceFocusLog` records, one per rest of
+  `activity.settleMs` and one on leaving, restored by every presentation, because a per-step setting
+  grew the store, was read oldest-first and was overwritten by the seam (§7.5 argues it); the
+  palette's row for a view selects its default sub-view; a swap and an externally chosen sub-view
+  retire the last announcement; the message no longer covers the view and sub-view line; the key
+  hints are in the accessibility tree; the bind example names what the slice has; and "Nothing that
+  way" says "forward" and "back" (§12.2).

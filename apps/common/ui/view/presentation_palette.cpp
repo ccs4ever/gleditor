@@ -38,6 +38,18 @@ PaletteChoice paletteChoiceOf(const std::string_view value) {
           .subview      = std::string(value.substr(mark + 1))};
 }
 
+PaletteChoice withDefaultSubview(const ViewRegistry &registry,
+                                 PaletteChoice choice) {
+  if (!choice.subview.empty()) {
+    return choice;
+  }
+  if (const auto view = registry.find(choice.presentation);
+      view && !view->subviews.empty()) {
+    choice.subview = view->subviews.front().id;
+  }
+  return choice;
+}
+
 gleditor::Form::Field
 slicePresentationChoice(const ViewRegistry &registry,
                         const std::string_view current,
@@ -88,10 +100,11 @@ void openSlicePresentationPalette(
   std::vector<gleditor::Form::Field> fields{
       slicePresentationChoice(registry, current, currentSubview)};
   form.open("Views", "Choose how the slice is shown", std::move(fields),
-            [chosen = std::move(chosen)](
-                const std::vector<gleditor::Form::Field> &answers) {
+            [chosen = std::move(chosen),
+             &registry](const std::vector<gleditor::Form::Field> &answers) {
               if (!answers.empty() && chosen) {
-                chosen(paletteChoiceOf(answers.front().answer()));
+                chosen(withDefaultSubview(
+                    registry, paletteChoiceOf(answers.front().answer())));
               }
             });
 }
@@ -130,12 +143,24 @@ std::string bindingNote(const BindingChoices &choices,
   return note;
 }
 
+std::string bindingExample(const BindingChoices &choices) {
+  // An example that names what is not there teaches a refusal, so it is made
+  // of the slice's own first point and first dimension, or its first group.
+  const auto &shows =
+      !choices.dimensions.empty() ? choices.dimensions : choices.groups;
+  if (choices.points.empty() || shows.empty()) {
+    return "a point, then what it shows";
+  }
+  return "a point, then what it shows: " + choices.points.front() + " " +
+         shows.front();
+}
+
 void openBindingCommand(gleditor::Form &form, BindingChoices choices,
                         BindingAttempt attempt, std::string typed,
                         const std::string_view reason) {
   gleditor::Form::Field field;
   field.label    = "Bind";
-  field.hint     = "a point, then what it shows: x d.across";
+  field.hint     = bindingExample(choices);
   field.value    = std::move(typed);
   field.required = true;
   field.kind     = gleditor::Form::Kind::Text;

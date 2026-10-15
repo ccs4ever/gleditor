@@ -17,6 +17,7 @@ namespace {
 
 constexpr std::string_view kVisits  = "d.activity-visits";
 constexpr std::string_view kCurrent = "d.activity-current";
+constexpr std::string_view kFocus   = "d.activity-focus";
 
 } // namespace
 
@@ -229,6 +230,55 @@ void StoreActivityLog::select(const VisitId id) {
     appendActivityRecord(*store, directory, kCurrent, std::to_string(id.value));
   }
   selected = id;
+}
+
+SliceFocusLog::SliceFocusLog(Store *aStore, std::filesystem::path aDirectory)
+    : store(aStore), directory(std::move(aDirectory)) {
+  if (!store || store->homeCell() == zigzag::noCell) return;
+  const auto manifold = store->rebuildManifold(store->latest());
+  const auto dim      = manifold.dimensionNamed(kFocus, *store);
+  if (!dim) return;
+  for (auto cell                    = manifold.linked(store->homeCell(), *dim);
+       cell != zigzag::noCell; cell = manifold.linked(cell, *dim)) {
+    const auto text  = manifold.textOf(cell, *store);
+    const auto split = text.find(' ');
+    if (split != 32 || text.size() <= split + 1) {
+      throw std::runtime_error("activity: malformed focus record");
+    }
+    zigzag::CellRef focus{};
+    const auto digits = std::string_view{text}.substr(split + 1);
+    const auto [end, error] =
+        std::from_chars(digits.data(), digits.data() + digits.size(), focus);
+    if (error != std::errc{} || end != digits.data() + digits.size()) {
+      throw std::runtime_error("activity: malformed focus record");
+    }
+    latest[parseActivityId(std::string_view{text}.substr(0, split)).bytes()] =
+        focus;
+    ++filed;
+  }
+}
+
+std::optional<zigzag::CellRef>
+SliceFocusLog::last(const DocumentId &slice) const {
+  const auto found = latest.find(slice.bytes());
+  if (found == latest.end()) return std::nullopt;
+  return found->second;
+}
+
+std::expected<SliceFocusLog *, std::string>
+SliceFocusLog::keep(const DocumentId &slice, const zigzag::CellRef cell) {
+  if (last(slice) == cell) return this;
+  if (store) {
+    try {
+      appendActivityRecord(*store, directory, kFocus,
+                           activityIdText(slice) + ' ' + std::to_string(cell));
+    } catch (const std::exception &err) {
+      return std::unexpected(err.what());
+    }
+  }
+  latest[slice.bytes()] = cell;
+  ++filed;
+  return this;
 }
 
 } // namespace xanadu
