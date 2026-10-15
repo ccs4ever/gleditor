@@ -433,7 +433,9 @@ void LinkPanelOverlay::drawFrame(gleditor::FrameContext &ctx) {
               continue;
             const auto &doc      = *ctx.state.docs[*view];
             const auto pageIndex = doc.pageIndexForOffset(site->range.start);
-            const auto page = pageIndex ? doc.page(*pageIndex) : std::nullopt;
+            const auto page = pageIndex
+                                  ? doc.page(*pageIndex)
+                                  : gleditor::cpp26::optional<const Page &>{};
             if (!page) continue;
             const auto band =
                 page->textBandFor(site->range.start, site->range.end);
