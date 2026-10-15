@@ -114,9 +114,9 @@ prompt that resumes it.
    - Then a short re-check: the red team on these items and the frame inspector on the frames.
 1. Then M3 (packs), one milestone at a time.
 
-The spike branches were never meant to land and stay local to the first machine
-(`worktree-agent-a1c8ca54…` V1–V3, `a2363aec…` V1b, `a418eeb9…` S1/S3/S5, `a6c0b4e5…` S2,
-`a97312af…` R1/R2/R5, `a52dc9e4…` the R3 orbit harness); their results are in the plan's §3.1.
+The spike branches were never meant to land; they are pushed for reference as `spike/v1-v3`,
+`spike/v1b`, `spike/s1-s3-s5`, `spike/s2`, `spike/r1-r2-r5` and `spike/r3` (the R3 orbit harness).
+Their results are in the plan's §3.1.
 
 ## Fixed along the way
 
