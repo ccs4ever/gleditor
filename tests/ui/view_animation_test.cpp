@@ -14,13 +14,9 @@
 #include "allocation_count.hpp"
 #include "common/ui/view/view_animation.hpp"
 
-namespace {
-
-// Allocation is counted only between start and stop on this thread, so the
-// rest of the binary is unaffected by the replacement below.
-
-} // namespace
-
+// Allocation is counted only between start and stop on this thread
+// (allocation_count.hpp), so the rest of the binary is unaffected by the
+// replacement below.
 void *operator new(const std::size_t size) {
   if (allocation_count::counting) {
     ++allocation_count::count;

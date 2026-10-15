@@ -606,7 +606,23 @@ bool Renderer::update(RenderState &state, const bool settled) {
 
   device->endFrame();
 
-  if (pendingScriptDump) {
+  // A frame judged settled when it began may have been drawn by a contributor
+  // that only then found work to do -- a view that lays out for the first
+  // time, a message it says, a camera framed once its page is built -- and
+  // that frame shows the work's first step, not its end. A capture or a dump
+  // waits for a frame that ends with nothing pending. A live video is pending
+  // for ever, so the wait is bounded and the output is then taken as it is.
+  const auto stillWorking = [this] {
+    if (hasPendingWork() &&
+        captureDeferrals < gleditor::anim::captureSettleFrames) {
+      ++captureDeferrals;
+      return true;
+    }
+    captureDeferrals = 0;
+    return false;
+  };
+
+  if (pendingScriptDump && !stillWorking()) {
     // After this frame's rebuild, so what is printed is what would be sent
     // rather than the frame before it.
     pendingScriptDump = false;
@@ -619,17 +635,7 @@ bool Renderer::update(RenderState &state, const bool settled) {
     }
   }
 
-  // A frame judged settled when it began may have been drawn by a contributor
-  // that only then found work to do -- a view that lays out for the first
-  // time, a camera that is framed once its page is built -- and that frame
-  // shows the work's first step, not its end. It is not captured: the capture
-  // waits for a frame that ends with nothing pending. A live video is pending
-  // for ever, so the wait is bounded and the capture is then taken as it is.
-  if (pendingScriptCapture.has_value() && hasPendingWork() &&
-      captureDeferrals < gleditor::anim::captureSettleFrames) {
-    ++captureDeferrals;
-  } else if (pendingScriptCapture.has_value()) {
-    captureDeferrals = 0;
+  if (pendingScriptCapture.has_value() && !stillWorking()) {
     writeScreenshot(device->captureColorTarget(), *pendingScriptCapture);
     pendingScriptCapture.reset();
     nextStep++;

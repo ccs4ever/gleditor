@@ -379,6 +379,23 @@ void exportToPng(const fs::path &ppmPath, const fs::path &pngPath) {
   std::ignore = std::system(py.c_str());
 }
 
+/// The colour at (@p x, @p y) of a binary PPM, top row first.
+std::array<int, 3> ppmPixel(const fs::path &file, const int x, const int y) {
+  std::ifstream in(file, std::ios::binary);
+  std::string magic;
+  int width = 0, height = 0, depth = 0;
+  in >> magic >> width >> height >> depth;
+  in.get();
+  in.seekg(static_cast<std::streamoff>(3) *
+               ((static_cast<std::streamoff>(y) * width) + x),
+           std::ios::cur);
+  std::array<int, 3> rgb{};
+  for (auto &channel : rgb) {
+    channel = in.get();
+  }
+  return rgb;
+}
+
 fs::path findXuduBinary() {
   std::vector<fs::path> candidates = {
       fs::current_path() / "build" / "xudu",
@@ -2886,6 +2903,15 @@ TEST(E2EBinaryOrchestrationTest, aSliceViewIsChosenFromThePaletteAndKept) {
                 screenshotDir / ("slice_view_" + std::string(name) + ".png"));
   }
 
+  // The page the slice stands over is dimmed (view.page.dim): bright white
+  // on the first run of this scenario, it is now a dark grey, and the row the
+  // reader is on sits clear above its top edge.
+  const auto page = ppmPixel(ppm("chosen"), 700, 450);
+  EXPECT_LT(page[0], 0x90) << "the page is still bright";
+  EXPECT_GT(page[0], 0x10) << "the page is gone, not dimmed";
+  const auto row = ppmPixel(ppm("chosen"), 380, 300);
+  EXPECT_LT(row[0] + row[1] + row[2], 3 * 0x90) << "the row is on the page";
+
   // Run twice, the first frame is the same bytes: the camera is framed against
   // where the document will rest, not against where its arrival has it on the
   // frame the first page happens to be ready, so a capture is not a race.
@@ -3047,7 +3073,8 @@ TEST(E2EBinaryOrchestrationTest, aSliceViewShowsItsCompassAndIsBoundByTyping) {
 /// off the plane; and, in the same store, a page of text with a link between
 /// two of its passages and a cell that quotes one of them, so a ribbon and a
 /// quotation beam can share a frame with the strands.
-void saveSliceMarksStore(const fs::path &scroll, const fs::path &path) {
+void saveSliceMarksStore(const fs::path &scroll, const fs::path &path,
+                         const bool withPage) {
   Store slice(permascrollAt(scroll));
   auto head         = slice.sliceGenesis({});
   const auto across = slice.makeDimension(head, "d.across");
@@ -3068,18 +3095,22 @@ void saveSliceMarksStore(const fs::path &scroll, const fs::path &path) {
       "Transclusion is quotation without copying: the same words, at the same "
       "addresses, wherever they are shown. A link joins what a reader "
       "joins, and neither end is moved by it.";
-  head              = slice.insert(head, 0, text);
-  const auto spanAt = [&](const std::uint32_t start, const std::uint32_t len) {
-    return slice.rebuild(head).spansFor(start, len).front();
-  };
-  xanadu::Link ribbon;
-  ribbon.type  = xanadu::LinkType::Comment;
-  ribbon.owner = "e2e";
-  ribbon.left.push_back(spanAt(0, 12));
-  ribbon.right.push_back(spanAt(80, 28));
-  head             = slice.addLink(head, ribbon);
-  head             = slice.makeCell(head, spanAt(0, 12));
-  const auto quote = slice.cellRefOf(head);
+  std::optional<zigzag::CellRef> quote;
+  if (withPage) {
+    head              = slice.insert(head, 0, text);
+    const auto spanAt = [&](const std::uint32_t start,
+                            const std::uint32_t len) {
+      return slice.rebuild(head).spansFor(start, len).front();
+    };
+    xanadu::Link ribbon;
+    ribbon.type  = xanadu::LinkType::Comment;
+    ribbon.owner = "e2e";
+    ribbon.left.push_back(spanAt(0, 12));
+    ribbon.right.push_back(spanAt(80, 28));
+    head  = slice.addLink(head, ribbon);
+    head  = slice.makeCell(head, spanAt(0, 12));
+    quote = slice.cellRefOf(head);
+  }
 
   const auto wide = make(
       "A neighbour with a good deal to say: the Analytical Engine might act "
@@ -3104,7 +3135,9 @@ void saveSliceMarksStore(const fs::path &scroll, const fs::path &path) {
     above = cell;
   }
   link(slice.homeCell(), deep.dim, make("Behind the plane"));
-  link(row.front(), down.dim, quote);
+  if (quote) {
+    link(row.front(), down.dim, *quote);
+  }
   slice.repointCurrentVersion(head);
   slice.save(path.string());
 }
@@ -3120,43 +3153,57 @@ void saveSliceMarksStore(const fs::path &scroll, const fs::path &path) {
 TEST(E2EBinaryOrchestrationTest, aSliceViewDrawsGhostsWideNeighboursAndDepth) {
   const auto binary = findXuduBinary();
   ASSERT_TRUE(fs::exists(binary)) << "xudu binary not found at " << binary;
-  const auto root = workspaceRoot() / "integration_workspace_slice_marks";
   const auto screenshotDir = getScreenshotDir();
-  fs::remove_all(root);
-  fs::create_directories(root);
   fs::create_directories(screenshotDir);
-  const auto scroll = root / "permascroll";
-  const auto path   = root / "store";
-  saveSliceMarksStore(scroll, path);
   const auto ppm = [&](const std::string &name) {
     return screenshotDir / ("slice_marks_" + name + ".ppm");
   };
-  const auto xuzz = [&](const std::string &view, const std::string &steps) {
-    return executeProcess("XDG_CONFIG_HOME=" + (root / "config").string() +
-                          " XDG_DATA_HOME=" + (root / "data").string() +
-                          " timeout 120 " + binary.string() +
-                          permascrollFlag(scroll) + " --backend " +
-                          activeBackend() + " --profile --view " + view +
-                          steps + " " + path.string());
+  // One workspace for the slice alone, one for the slice beside a page with a
+  // link and a quotation.
+  const auto run = [&](const std::string &workspace, const bool withPage,
+                       const std::string &view, const std::string &steps) {
+    const auto root = workspaceRoot() / workspace;
+    if (!fs::exists(root / "store")) {
+      fs::remove_all(root);
+      fs::create_directories(root);
+      saveSliceMarksStore(root / "permascroll", root / "store", withPage);
+    }
+    return executeProcess(
+        "XDG_CONFIG_HOME=" + (root / "config").string() +
+        " XDG_DATA_HOME=" + (root / "data").string() + " timeout 120 " +
+        binary.string() + permascrollFlag(root / "permascroll") +
+        " --backend " + activeBackend() + " --profile --view " + view + steps +
+        " " + (root / "store").string());
   };
+  fs::remove_all(workspaceRoot() / "integration_workspace_slice_marks");
+  fs::remove_all(workspaceRoot() / "integration_workspace_slice_marks_page");
+  const std::string choose = " --chord Ctrl+Alt+V --key right --key enter"
+                             " --do std:nav/zigzag_step_x_pos"
+                             " --do std:nav/zigzag_step_x_neg";
+  const std::string plain  = "integration_workspace_slice_marks";
+  const std::string paged  = "integration_workspace_slice_marks_page";
 
-  const auto chosen =
-      xuzz("zigzag",
-           " --chord Ctrl+Alt+V --key right --key enter"
-           " --do std:nav/zigzag_step_x_pos --do std:nav/zigzag_step_x_neg");
+  const auto chosen = run(plain, false, "zigzag", choose);
   ASSERT_EQ(chosen.exitCode, 0) << chosen.output;
   EXPECT_THAT(
       chosen.output,
       testing::HasSubstr("slice presentation -> slice.stretch-vanishing"));
-
-  const auto cut = xuzz("zigzag", " --capture " + ppm("ghosts").string());
+  const auto cut =
+      run(plain, false, "zigzag", " --capture " + ppm("ghosts").string());
   ASSERT_EQ(cut.exitCode, 0) << cut.output;
   const auto deepBound =
-      xuzz("zigzag", " --chord Ctrl+Alt+B --type \"z d.deep\" --key enter"
-                     " --capture " +
-                         ppm("depth").string());
+      run(plain, false, "zigzag",
+          " --chord Ctrl+Alt+B --type \"z d.deep\" --key enter --capture " +
+              ppm("depth").string());
   ASSERT_EQ(deepBound.exitCode, 0) << deepBound.output;
-  const auto unified = xuzz("unified", " --capture " + ppm("unified").string());
+
+  const auto pageChosen = run(paged, true, "unified", choose);
+  ASSERT_EQ(pageChosen.exitCode, 0) << pageChosen.output;
+  const auto unified =
+      run(paged, true, "unified",
+          " --do std:xuzz/focus_toggle --do std:nav/zigzag_step_x_pos"
+          " --capture " +
+              ppm("unified").string());
   ASSERT_EQ(unified.exitCode, 0) << unified.output;
   for (const auto *const name : {"ghosts", "depth", "unified"}) {
     ASSERT_TRUE(fs::exists(ppm(name))) << name;

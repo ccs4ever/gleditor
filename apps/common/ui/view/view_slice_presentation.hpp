@@ -363,6 +363,9 @@ private:
   std::vector<std::string> breadcrumbs_;
   std::string notice_, status_;
   std::uint64_t chromeRevision_{1};
+  /// The chrome and compass stamps last drawn, so a change not yet drawn is
+  /// work (busy()).
+  std::uint64_t drawnChrome_{}, drawnCompass_{};
   std::string hintsHere_, hintsElsewhere_;
   std::atomic<bool> keyboardHere_{true};
   std::atomic<std::uint64_t> keyboardMoves_{0};

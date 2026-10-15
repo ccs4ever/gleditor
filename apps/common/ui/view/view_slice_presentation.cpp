@@ -821,6 +821,8 @@ void ViewSlicePresentation::drawFrame(gleditor::FrameContext &ctx) {
   if (!visible_) {
     return;
   }
+  drawnChrome_  = chromeRevision_ + keyboardMoves_.load();
+  drawnCompass_ = compassStamp_;
   presenter_.drawChrome(
       ctx, PresentedChrome{.breadcrumbs = breadcrumbs_,
                            .notice      = notice_.empty() ? status_ : notice_,
@@ -836,7 +838,12 @@ void ViewSlicePresentation::drawFrame(gleditor::FrameContext &ctx) {
 }
 
 bool ViewSlicePresentation::busy() const {
-  return visible_ && animation_.animating();
+  // A message or a compass that changed after the last frame was drawn is
+  // work the next frame does, though nothing animates: a capture or a dump
+  // taken before it shows the chrome as it was (M2 finding B9).
+  return visible_ && (animation_.animating() ||
+                      drawnChrome_ != chromeRevision_ + keyboardMoves_.load() ||
+                      drawnCompass_ != compassStamp_);
 }
 
 // -- moving -------------------------------------------------------------------

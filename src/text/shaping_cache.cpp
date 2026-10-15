@@ -5,6 +5,7 @@
 #include <functional>
 #include <list>
 #include <stdexcept>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <variant>
@@ -19,11 +20,14 @@ template <class... Values> void requireFinite(Values... values) {
   }
 }
 
+/// What a lookup names, by reference: asking the cache for text it holds
+/// copies nothing, and so allocates nothing -- a presenter asks for every
+/// piece of text on every frame it rebuilds.
 struct ShapingKey {
-  std::string text;
-  FontFacePtr font;
-  LayoutOptions options;
-  TextFit constraints;
+  std::string_view text;
+  const FontFacePtr &font;
+  const LayoutOptions &options;
+  const TextFit &constraints;
   bool fitting{};
 
   bool operator==(const ShapingKey &other) const {
@@ -49,9 +53,30 @@ struct ShapingKey {
   }
 };
 
+/// The same, owned: what the map keeps once a text is shaped.
+struct OwnedKey {
+  std::string text;
+  FontFacePtr font;
+  LayoutOptions options;
+  TextFit constraints;
+  bool fitting{};
+
+  explicit OwnedKey(const ShapingKey &key)
+      : text(key.text), font(key.font), options(key.options),
+        constraints(key.constraints), fitting(key.fitting) {}
+  [[nodiscard]] ShapingKey view() const {
+    return {text, font, options, constraints, fitting};
+  }
+};
+
+[[nodiscard]] const ShapingKey &viewOf(const ShapingKey &key) { return key; }
+[[nodiscard]] ShapingKey viewOf(const OwnedKey &key) { return key.view(); }
+
 struct ShapingKeyHash {
-  std::size_t operator()(const ShapingKey &key) const noexcept {
-    std::size_t hash = std::hash<std::string>{}(key.text);
+  using is_transparent = void;
+  template <class Key> std::size_t operator()(const Key &named) const noexcept {
+    const auto &key  = viewOf(named);
+    std::size_t hash = std::hash<std::string_view>{}(key.text);
     const auto mix   = [&hash](auto value) {
       hash ^= std::hash<decltype(value)>{}(value) + 0x9e3779b97f4a7c15ULL +
               (hash << 6U) + (hash >> 2U);
@@ -109,13 +134,20 @@ struct ShapingKeyHash {
   }
 };
 
+struct ShapingKeyEqual {
+  using is_transparent = void;
+  template <class A, class B> bool operator()(const A &a, const B &b) const {
+    return viewOf(a) == viewOf(b);
+  }
+};
+
 } // namespace
 
 struct ShapingCache::Impl {
   using Result = std::variant<PageShaping, FittedText>;
   // Map node addresses survive rehashing, so recency stores only key pointers
   // rather than a second copy of every retained text and layout option.
-  using Recency = std::list<const ShapingKey *>;
+  using Recency = std::list<const OwnedKey *>;
   struct Entry {
     Result result;
     Recency::iterator position;
@@ -128,7 +160,7 @@ struct ShapingCache::Impl {
     entries.reserve(capacity);
   }
 
-  template <class Shape> const Result &get(ShapingKey key, Shape shape) {
+  template <class Shape> const Result &get(const ShapingKey &key, Shape shape) {
     if (const auto found = entries.find(key); found != entries.end()) {
       recency.splice(recency.begin(), recency, found->second.position);
       ++counters.hits;
@@ -142,7 +174,7 @@ struct ShapingCache::Impl {
       ++counters.evictions;
     }
     const auto [entry, inserted] = entries.emplace(
-        std::move(key), Entry{.result = std::move(result), .position = {}});
+        OwnedKey{key}, Entry{.result = std::move(result), .position = {}});
     recency.push_front(&entry->first);
     entry->second.position = recency.begin();
     return entry->second.result;
@@ -151,7 +183,7 @@ struct ShapingCache::Impl {
   std::size_t capacity;
   Stats counters;
   Recency recency;
-  std::unordered_map<ShapingKey, Entry, ShapingKeyHash> entries;
+  std::unordered_map<OwnedKey, Entry, ShapingKeyHash, ShapingKeyEqual> entries;
 };
 
 ShapingCache::ShapingCache(const std::size_t capacity)
@@ -172,20 +204,19 @@ const PageShaping &ShapingCache::page(const std::string_view text,
   for (const auto &style : options.blockStyles) {
     requireFinite(style.indentFirstPx, style.indentLeftPx, style.indentRightPx);
   }
-  return std::get<PageShaping>(impl_->get(
-      ShapingKey{.text = std::string(text), .font = font, .options = options},
-      [&] { return TextLayout::layoutPage(text, font, options); }));
+  static const TextFit noFit;
+  return std::get<PageShaping>(
+      impl_->get(ShapingKey{text, font, options, noFit, false},
+                 [&] { return TextLayout::layoutPage(text, font, options); }));
 }
 
 const FittedText &ShapingCache::fitted(const std::string_view text,
                                        const FontFacePtr &font,
                                        const TextFit &constraints) {
   requireFinite(constraints.maxWidthPx, constraints.maxHeightPx);
+  static const LayoutOptions noOptions;
   return std::get<FittedText>(
-      impl_->get(ShapingKey{.text        = std::string(text),
-                            .font        = font,
-                            .constraints = constraints,
-                            .fitting     = true},
+      impl_->get(ShapingKey{text, font, noOptions, constraints, true},
                  [&] { return fit(text, font, constraints); }));
 }
 

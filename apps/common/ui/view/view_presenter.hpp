@@ -262,7 +262,8 @@ private:
   [[nodiscard]] float deviceStroke(float px, const glm::vec3 &at) const;
   void drawGhost(Plane &plane, const PlacedItem &item);
   void drawLabel(RenderState &state, Plane &plane, const PlacedItem &item,
-                 std::string_view text, std::optional<std::uint32_t> rule);
+                 std::string_view text, std::optional<std::uint32_t> rule,
+                 float maxWidth);
   void addEdge(const PlacedEdge &edge, const PresentedPlacement &placement,
                const PresentedWords &words, float pxPerUnit);
   /// Add the part of @p edge between lengths @p from and @p to, minus the

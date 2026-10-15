@@ -439,7 +439,8 @@ void SlicePresenter::rebuild(gleditor::FrameContext &ctx,
       if (labelRelation_[i]) {
         rule = faded(words.cue(*labelRelation_[i]).colour, item.opacity);
       }
-      drawLabel(ctx.state, plane, item, words.text(item.id), rule);
+      drawLabel(ctx.state, plane, item, words.text(item.id), rule,
+                placement.contentMaxWidth);
       drawnContent_[i] = ContentMode::Full;
       break;
     }
@@ -521,7 +522,8 @@ void SlicePresenter::drawCell(RenderState &state, Plane &plane,
     break;
   }
   case ContentMode::Abbreviated: {
-    const auto &fitted = oneLine(words, bodyFont_, inner.width);
+    // Whole pixels, so a width that is only easing does not re-shape.
+    const auto &fitted = oneLine(words, bodyFont_, std::floor(inner.width));
     const float line   = bodyFont_->metrics().lineHeight;
     plane.body->addText(
         state,
@@ -577,13 +579,17 @@ void SlicePresenter::drawGhost(Plane &plane, const PlacedItem &item) {
 void SlicePresenter::drawLabel(RenderState &state, Plane &plane,
                                const PlacedItem &item,
                                const std::string_view words,
-                               const std::optional<std::uint32_t> rule) {
+                               const std::optional<std::uint32_t> rule,
+                               const float maxWidth) {
   if (words.empty() || !captionFont_) {
     return;
   }
   const float left   = item.centre.x - (item.width / 2.0F);
   const float bottom = item.centre.y - (item.height / 2.0F);
-  const auto &fitted = oneLine(words, captionFont_, item.width);
+  // Shaped at the width the layout measured it at, not at the box's width
+  // of this frame: a box that grows or shrinks as it fades would otherwise be
+  // a new text to shape on every frame it moves.
+  const auto &fitted = oneLine(words, captionFont_, maxWidth);
   plane.caption->addText(state, {left, bottom, item.width, item.height}, fitted,
                          themed(theme_.colours.text, item.opacity), 0U);
   if (rule) {
@@ -1007,11 +1013,13 @@ SlicePresenter::subjectOf(const render::PickingResult &pick) const {
       pick.tag.docIndex != pickScope_ || !pick.semanticTarget) {
     return std::nullopt;
   }
-  // The item this frame drew for that cell; a pick requested before the
-  // records changed names what is drawn for the cell now, or nothing.
-  for (std::size_t i = 0; i < targets_.size(); ++i) {
-    if (targets_[i] == pick.semanticTarget) {
-      return drawn_[i].id;
+  // The item the tag names, if it is still the cell the pick landed on: a
+  // pick requested before the layout changed names a slot that now holds
+  // another cell, or none, and is dropped.
+  if (pick.tag.clusterIndex >= kFirstTag) {
+    const auto index = pick.tag.clusterIndex - kFirstTag;
+    if (index < targets_.size() && targets_[index] == pick.semanticTarget) {
+      return drawn_[index].id;
     }
   }
   GLEDITOR_LOG_DEBUG(kCategory, "pick from an earlier layout dropped");
