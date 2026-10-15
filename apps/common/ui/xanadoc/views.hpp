@@ -174,9 +174,18 @@ public:
   /// While @p on, the pages keep the share of their own opacity that
   /// view.page.dim says (setPageDimShare), so a slice drawn over them is the
   /// brightest thing in the frame. Any thread.
-  void dimPages(const bool on) noexcept { pagesDimmed_.store(on); }
+  void dimPages(const bool on) noexcept {
+    pagesDimmed_.store(on ? PageDimming::Alone : PageDimming::Off);
+  }
+  /// The slice shares the frame with the pages, which are read too: they keep
+  /// the larger share view.page.dimUnified says (setPageDimUnifiedShare), so
+  /// the slice's labels no longer stand on a white page (M2 gate 2, D5).
+  void dimPagesBeside() noexcept { pagesDimmed_.store(PageDimming::Beside); }
   void setPageDimShare(const float share) noexcept {
     pageDimShare_.store(share);
+  }
+  void setPageDimUnifiedShare(const float share) noexcept {
+    pageDimUnifiedShare_.store(share);
   }
   /// How far above the top edge of the page a slice that is not placed beside
   /// it keeps its focus row, in logical pixels (view.page.clearancePx). Any
@@ -281,8 +290,10 @@ private:
   bool readingFramed_{false};
   std::weak_ptr<Doc> frameTarget_;
   std::weak_ptr<Doc> presentationAnchor_;
-  std::atomic<bool> pagesDimmed_{false};
+  enum class PageDimming : std::uint8_t { Off, Alone, Beside };
+  std::atomic<PageDimming> pagesDimmed_{PageDimming::Off};
   std::atomic<float> pageDimShare_{1.0F};
+  std::atomic<float> pageDimUnifiedShare_{1.0F};
   std::atomic<float> clearancePx_{0.0F};
   xanadu::view::PageDim pageDim_;
   std::function<bool()> pendingCamera_;

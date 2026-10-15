@@ -412,8 +412,9 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "logical pixels of a cell's border, the focus cell's border, a "
            "ghost's open outline and the rule under a tick. Positive; "
            "defaults are 1, 2.5, 1 and 2.\n"
-           "view.draw.ghostSeamShare: Share of a ghost's shorter side left "
-           "open at each corner, above 0 and at most 0.5. Default is 0.18. "
+           "view.draw.ghostCornerShare: Radius of a ghost's rounded corners "
+           "as a share of its shorter side, above 0 and at most 0.5. Default "
+           "is 0.3. "
            "view.draw.coarseBarShare: Share of a text line's height a coarse "
            "bar fills, above 0 and at most 1. Default is 0.45.\n"
            "view.draw.dash.dash, view.draw.dash.dot, "
@@ -421,7 +422,12 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "view.draw.dash.longShort: The pattern each dash style is drawn "
            "with, as positive lengths in strand widths separated by spaces, "
            "drawn then open, an even number of them. Defaults are '6 3', "
-           "'1 2', '6 2 1 2 1 2', '6 2 1 2' and '10 3 3 3'.\n"
+           "'1 2', '6 2 1 2 1 2', '6 2 1 2' and '10 3 3 3'. "
+           "view.draw.dashLeastLength: Shortest stretch, in strand widths, a "
+           "pattern may have; one with a shorter stretch is refused. Above "
+           "0; default is 0.5. view.draw.dashMaxCount: Most dashes one "
+           "strand is cut into; a strand needing more is drawn solid. At "
+           "least 1; default is 256.\n"
            "view.strand.minWidthPx: Least width on the screen of a strand "
            "between cells, in logical pixels, so the shortest strand still "
            "shows its dimension's colour and dash. Default is 5. "
@@ -431,7 +437,12 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "a label's box, in logical pixels. Default is 2.\n"
            "view.page.dim: Share of its own opacity the page beside a slice "
            "presentation keeps while the presentation is shown, 0 to 1; 1 "
-           "leaves the page alone. Default is 0.3. view.page.clearancePx: "
+           "leaves the page alone. Default is 0.3. view.page.dimUnified: The "
+           "same in the unified view, where the page is read and edited "
+           "beside the slice; 1 leaves it alone. Default is 1. "
+           "view.chrome.hintRows: Rows the key hints "
+           "may take at the foot of the pane, at least 1; what does not fit "
+           "is cut with an ellipsis. Default is 3. view.page.clearancePx: "
            "How far above the page's top edge the focus row stands, in "
            "logical pixels, so the page does not cut through the row. "
            "Default is 64.\n";
@@ -1337,6 +1348,11 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
                                 "each binding point shows",
                      .schemas = {{.expectedTypes = {"bool"},
                                   .defaultValues = {compass.visible}}}});
+    specs.push_back({.name    = std::string(settings::kViewCompassDodge),
+                     .notes   = "Move the compass to a free corner when what a "
+                                "slice draws would be under it",
+                     .schemas = {{.expectedTypes = {"bool"},
+                                  .defaultValues = {compass.dodge}}}});
     specs.insert(
         specs.end(),
         {
@@ -1384,10 +1400,21 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
                        "Thickness of a ghost's open outline, in logical "
                        "pixels",
                        draw.ghostStrokePx),
-            lengthSpec(settings::kViewDrawGhostSeamShare,
+            lengthSpec(settings::kViewDrawGhostCornerShare,
                        "Share of a ghost's shorter side left open at each "
                        "corner, above 0 and at most 0.5",
-                       draw.ghostSeamShare),
+                       draw.ghostCornerShare),
+            lengthSpec(settings::kViewDrawDashLeastLength,
+                       "Shortest drawn or open stretch of a dash pattern, in "
+                       "strand widths, above 0",
+                       draw.dashLeastLength),
+            SettingSpec{.name  = std::string(settings::kViewDrawDashMaxCount),
+                        .notes = "Most dashes one strand is cut into, at "
+                                 "least 1; a strand needing more is drawn "
+                                 "solid",
+                        .schemas = {{.expectedTypes = {"integer"},
+                                     .defaultValues = {static_cast<
+                                         std::int64_t>(draw.dashMaxCount)}}}},
             lengthSpec(settings::kViewDrawTickRulePx,
                        "Thickness of the rule in a dimension's colour under "
                        "a tick, in logical pixels",
@@ -1434,6 +1461,17 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
                        "presentation keeps while it is shown, 0 to 1; 1 "
                        "leaves the page alone",
                        draw.pageDim),
+            lengthSpec(settings::kViewPageDimUnified,
+                       "Share of its own opacity the page keeps in the "
+                       "unified view while a slice presentation is shown, 0 "
+                       "to 1",
+                       draw.pageDimUnified),
+            SettingSpec{.name  = std::string(settings::kViewChromeHintRows),
+                        .notes = "Rows the key hints may take at the foot of "
+                                 "the pane, at least 1",
+                        .schemas = {{.expectedTypes = {"integer"},
+                                     .defaultValues = {static_cast<
+                                         std::int64_t>(draw.hintRows)}}}},
             lengthSpec(settings::kViewPageClearancePx,
                        "How far above the page's top edge a slice "
                        "presentation's focus row stands, in logical pixels",
@@ -3869,6 +3907,7 @@ CompassConfig CompassConfig::fromStore(const Store &store) {
     }
   };
   cfg.visible = model.getBool(settings::kViewCompassVisible, cfg.visible);
+  cfg.dodge   = model.getBool(settings::kViewCompassDodge, cfg.dodge);
   positive(settings::kViewCompassGlyphPx, cfg.glyphPx);
   positive(settings::kViewCompassSwatchPx, cfg.swatchPx);
   positive(settings::kViewCompassMarginPx, cfg.marginPx);
@@ -3889,9 +3928,9 @@ std::string dashPatternText(const std::span<const float> pattern) {
 namespace {
 
 /// The lengths in @p text, or nothing when it is not an even number of
-/// positive finite lengths.
+/// finite lengths, each at least @p least (and above zero).
 [[nodiscard]] std::optional<std::vector<float>>
-dashPatternFrom(const std::string_view text) {
+dashPatternFrom(const std::string_view text, const float least) {
   std::vector<float> out;
   std::istringstream words{std::string{text}};
   std::string word;
@@ -3900,7 +3939,7 @@ dashPatternFrom(const std::string_view text) {
     const auto end           = word.data() + word.size();
     const auto [stop, error] = std::from_chars(word.data(), end, value);
     if (std::errc{} != error || stop != end || !std::isfinite(value) ||
-        value <= 0.0F) {
+        value <= 0.0F || value < least) {
       return std::nullopt;
     }
     out.push_back(value);
@@ -3939,8 +3978,10 @@ ViewDrawConfig ViewDrawConfig::fromStore(const Store &store) {
          false);
   ranged(settings::kViewDrawGhostStrokePx, cfg.ghostStrokePx, 0.0F, kMost,
          false);
-  ranged(settings::kViewDrawGhostSeamShare, cfg.ghostSeamShare, 0.0F, 0.5F,
+  ranged(settings::kViewDrawGhostCornerShare, cfg.ghostCornerShare, 0.0F, 0.5F,
          true);
+  ranged(settings::kViewDrawDashLeastLength, cfg.dashLeastLength, 0.0F, kMost,
+         false);
   ranged(settings::kViewDrawTickRulePx, cfg.tickRulePx, 0.0F, kMost, false);
   ranged(settings::kViewDrawCoarseBarShare, cfg.coarseBarShare, 0.0F, 1.0F,
          false);
@@ -3951,6 +3992,19 @@ ViewDrawConfig ViewDrawConfig::fromStore(const Store &store) {
   ranged(settings::kViewStrandLabelClearPx, cfg.strandLabelClearPx, 0.0F, kMost,
          true);
   ranged(settings::kViewPageDim, cfg.pageDim, 0.0F, 1.0F, true);
+  ranged(settings::kViewPageDimUnified, cfg.pageDimUnified, 0.0F, 1.0F, true);
+  const auto counted = [&model](const std::string_view key,
+                                std::uint32_t &into) {
+    const auto value = model.getInt64(key, std::int64_t{into});
+    if (value >= 1 && value <= std::numeric_limits<std::uint32_t>::max()) {
+      into = static_cast<std::uint32_t>(value);
+    } else if (value != std::int64_t{into}) {
+      GLEDITOR_LOG_WARN("system.ui", "{} = {} is out of range; using {}", key,
+                        value, into);
+    }
+  };
+  counted(settings::kViewDrawDashMaxCount, cfg.dashMaxCount);
+  counted(settings::kViewChromeHintRows, cfg.hintRows);
   ranged(settings::kViewPageClearancePx, cfg.pageClearancePx, 0.0F, kMost,
          true);
   const std::array<std::string_view, 5> keys{
@@ -3962,13 +4016,14 @@ ViewDrawConfig ViewDrawConfig::fromStore(const Store &store) {
     if (text.empty()) {
       continue;
     }
-    if (auto pattern = dashPatternFrom(text)) {
+    if (auto pattern = dashPatternFrom(text, cfg.dashLeastLength)) {
       cfg.dashes[i] = std::move(*pattern);
     } else {
       GLEDITOR_LOG_WARN("system.ui",
-                        "{} = \"{}\" is not a dash pattern; "
-                        "using {}",
-                        keys[i], text, dashPatternText(cfg.dashes[i]));
+                        "{} = \"{}\" is not a dash pattern whose "
+                        "stretches are each at least {}; using {}",
+                        keys[i], text, cfg.dashLeastLength,
+                        dashPatternText(cfg.dashes[i]));
     }
   }
   return cfg;

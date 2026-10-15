@@ -172,6 +172,10 @@ public:
   [[nodiscard]] float bodyLineHeight() const noexcept {
     return bodyFont_ ? bodyFont_->metrics().lineHeight : 0.0F;
   }
+  /// One line of the chrome strip and the compass, in canvas pixels.
+  [[nodiscard]] float chromeLineHeight() const noexcept {
+    return chromeFont_ ? chromeFont_->metrics().lineHeight : 0.0F;
+  }
   /// Changes with every typography change.
   [[nodiscard]] std::uint64_t typographyStamp() const noexcept {
     return typographyStamp_;
@@ -261,6 +265,10 @@ private:
   /// is laid out in, so that it is that many device pixels on the screen.
   [[nodiscard]] float deviceStroke(float px, const glm::vec3 &at) const;
   void drawGhost(Plane &plane, const PlacedItem &item);
+  /// The key hints as the rows that fit @p room pixels, at most
+  /// view.chrome.hintRows of them.
+  [[nodiscard]] std::vector<std::string>
+  hintRowsFitting(std::string_view hints, float room);
   void drawLabel(RenderState &state, Plane &plane, const PlacedItem &item,
                  std::string_view text, std::optional<std::uint32_t> rule,
                  float maxWidth);
@@ -337,11 +345,17 @@ private:
   gleditor::ui::UiMetrics chromeMetrics_;
   gleditor::ScreenInsets chromeBase_;
   float chromeClaim_{};
+  /// The width the hint rows were fitted to.
+  float chromeWidth_{};
 
   std::optional<std::uint64_t> compassStamp_;
   gleditor::ui::UiMetrics compassMetrics_;
   gleditor::ScreenInsets compassBase_;
   bool compassDrawn_{};
+  /// Which corner the compass stands in (top left, top right, bottom left,
+  /// bottom right), and the projection it was placed against.
+  std::size_t compassCorner_{};
+  std::uint64_t compassRevision_{};
 
   std::uint64_t rebuilds_{};
 };

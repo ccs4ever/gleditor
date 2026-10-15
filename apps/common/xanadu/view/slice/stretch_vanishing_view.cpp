@@ -17,7 +17,10 @@
 
 #include <glm/common.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/mat3x3.hpp>
+#include <glm/matrix.hpp>
 #include <glm/vec2.hpp>
+#include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
 
 #include <gleditor/cpp26.hpp>
@@ -334,6 +337,87 @@ Seen see(const PaneFrame &frame, const Rect &rect, const float z,
   return seen;
 }
 
+/// The part of the plane at depth @p z that the pane shows, as a box in local
+/// units: the pane's four corners carried back onto the plane. Nothing when
+/// the plane is edge-on or behind the camera, which is no box to clip to. A
+/// camera turned off the plane's normal makes the box the smallest one that
+/// holds what is shown, so what is cut by it is never something visible.
+std::optional<Rect> visibleOn(const PaneFrame &frame, const float z) noexcept {
+  const auto &m = frame.localToClip;
+  // (x, y, 1) on the plane at z -> (clip x, clip y, clip w).
+  const glm::dmat3 onto{
+      glm::dvec3{m[0][0], m[0][1], m[0][3]},
+      glm::dvec3{m[1][0], m[1][1], m[1][3]},
+      glm::dvec3{m[3][0] + (double{z} * m[2][0]),
+                 m[3][1] + (double{z} * m[2][1]),
+                 m[3][3] + (double{z} * m[2][3])}};
+  const double determinant = glm::determinant(onto);
+  if (!std::isfinite(determinant) || 0.0 == determinant) {
+    return std::nullopt;
+  }
+  const auto back = glm::inverse(onto);
+  glm::dvec2 least{std::numeric_limits<double>::max()};
+  glm::dvec2 most{std::numeric_limits<double>::lowest()};
+  for (const double sx : {-1.0, 1.0}) {
+    for (const double sy : {-1.0, 1.0}) {
+      const auto at = back * glm::dvec3{sx, sy, 1.0};
+      if (!std::isfinite(at.z) || 0.0 == at.z) {
+        return std::nullopt;
+      }
+      least = glm::min(least, glm::dvec2{at.x, at.y} / at.z);
+      most  = glm::max(most, glm::dvec2{at.x, at.y} / at.z);
+    }
+  }
+  if (!std::isfinite(least.x) || !std::isfinite(least.y) ||
+      !std::isfinite(most.x) || !std::isfinite(most.y)) {
+    return std::nullopt;
+  }
+  return Rect{.centre = glm::vec2{(least + most) / 2.0},
+              .half   = glm::vec2{(most - least) / 2.0}};
+}
+
+/// @p box cut to @p to, or nothing when none of it is inside.
+std::optional<Rect> within(const Rect &box, const Rect &to) noexcept {
+  glm::vec2 lo{};
+  glm::vec2 hi{};
+  for (int axis = 0; axis < 2; ++axis) {
+    lo[axis] = std::max(box.lo(axis), to.lo(axis));
+    hi[axis] = std::min(box.hi(axis), to.hi(axis));
+    if (hi[axis] <= lo[axis]) {
+      return std::nullopt;
+    }
+  }
+  return Rect{.centre = (lo + hi) / 2.0F, .half = (hi - lo) / 2.0F};
+}
+
+/// The part of the segment from @p a to @p b inside @p box, by Liang and
+/// Barsky: the parameters it enters and leaves at, or nothing.
+std::optional<std::pair<glm::vec2, glm::vec2>>
+segmentWithin(const glm::vec2 a, const glm::vec2 b, const Rect &box) noexcept {
+  float enter     = 0.0F;
+  float leave     = 1.0F;
+  const auto run  = b - a;
+  for (int axis = 0; axis < 2; ++axis) {
+    if (0.0F == run[axis]) {
+      if (a[axis] < box.lo(axis) || a[axis] > box.hi(axis)) {
+        return std::nullopt;
+      }
+      continue;
+    }
+    auto near = (box.lo(axis) - a[axis]) / run[axis];
+    auto far  = (box.hi(axis) - a[axis]) / run[axis];
+    if (near > far) {
+      std::swap(near, far);
+    }
+    enter = std::max(enter, near);
+    leave = std::min(leave, far);
+    if (enter >= leave) {
+      return std::nullopt;
+    }
+  }
+  return std::pair{a + (run * enter), a + (run * leave)};
+}
+
 /// The index of @p ref's slot in @p base: a dense number to mark it by.
 std::optional<std::size_t> denseIndex(const zigzag::Manifold &base,
                                       const zigzag::CellRef ref) noexcept {
@@ -355,6 +439,19 @@ float signOf(const zigzag::DimVector direction) noexcept {
 
 constexpr std::array kDirections{zigzag::DimVector::POS,
                                  zigzag::DimVector::NEG};
+
+/// @p to if it is on the @p sign side of @p from, else the next float that is.
+/// A gap smaller than a float's step at a large coordinate rounds a slide to
+/// where it started, and a loop that waits for the slide to clear a box would
+/// then never end; one step is always enough, since the overlap it escapes is
+/// at most a gap deep.
+[[nodiscard]] float advancedFrom(const float from, const float to,
+                                 const float sign) noexcept {
+  if (std::isfinite(to) && (sign * to) > (sign * from)) {
+    return to;
+  }
+  return std::nextafter(from, sign * std::numeric_limits<float>::infinity());
+}
 
 } // namespace
 
@@ -389,6 +486,7 @@ StretchConfig StretchConfig::fromSettings(const SystemStoreModel &settings) {
   cfg.overfill = read(names::kOverfill, cfg.overfill, 1.0F, kUnbounded, false);
   cfg.layerDepth =
       read(names::kLayerDepth, cfg.layerDepth, 0.0F, kUnbounded, true);
+  cfg.depthFade  = read(names::kDepthFade, cfg.depthFade, 0.0F, 1.0F, true);
   cfg.fadeBand   = read(names::kFadeBand, cfg.fadeBand, 0.0F, 1.0F, true);
   cfg.fadeFloor  = read(names::kFadeFloor, cfg.fadeFloor, 0.0F, 1.0F, false);
   cfg.ghostShare = read(names::kGhostShare, cfg.ghostShare, 0.0F, 1.0F, false);
@@ -399,7 +497,7 @@ StretchConfig StretchConfig::fromSettings(const SystemStoreModel &settings) {
   cfg.clipMargin =
       read(names::kClipMargin, cfg.clipMargin, 0.0F, kUnbounded, false);
   cfg.maxCellSpan =
-      read(names::kMaxCellSpan, cfg.maxCellSpan, 1.0F, kUnbounded, false);
+      read(names::kMaxCellSpan, cfg.maxCellSpan, 1.0F, kMaxCellSpanLimit, false);
   const auto crumbs = settings.getInt64(names::kBreadcrumbs, cfg.breadcrumbs);
   if (crumbs >= 0 && crumbs <= std::numeric_limits<std::uint32_t>::max()) {
     cfg.breadcrumbs = static_cast<std::uint32_t>(crumbs);
@@ -430,6 +528,10 @@ std::vector<SettingSpec> stretchSettingSpecs() {
            defaults.overfill),
       real(names::kLayerDepth, "Distance between depth planes, in px",
            defaults.layerDepth),
+      real(names::kDepthFade,
+           "Share of its opacity a cell keeps for each plane it stands from "
+           "the focus's, above 0 and at most 1",
+           defaults.depthFade),
       real(names::kFadeBand,
            "Outer fraction of the pane, above 0 and at most 1, over which "
            "cells fade",
@@ -451,7 +553,7 @@ std::vector<SettingSpec> stretchSettingSpecs() {
            defaults.clipMargin),
       real(names::kMaxCellSpan,
            "Largest a cell's width or height may be, as a multiple of the "
-           "pane's larger side, at least 1",
+           "pane's larger side, from 1 to 256",
            defaults.maxCellSpan),
       SettingSpec{.name    = std::string(names::kBreadcrumbs),
                   .notes   = "Cells walked that the breadcrumb strip lists",
@@ -569,8 +671,10 @@ struct StretchVanishingView::Workspace {
   /// panes is that (see StretchConfig::maxCellSpan).
   [[nodiscard]] ContentExtent measured(const SubjectId subject) const {
     auto extent      = in->measure(subject, config->cells.contentMaxWidthPx);
-    const float most = stretch().maxCellSpan *
-                       std::max({in->frame.widthPx, in->frame.heightPx, 1.0F});
+    const float most =
+        std::min(kMeasureCeilingPx,
+                 stretch().maxCellSpan * std::max({in->frame.widthPx,
+                                                   in->frame.heightPx, 1.0F}));
     const auto safe = [most](const float length) {
       return std::isfinite(length) ? std::clamp(length, 0.0F, most)
                                    : (length > 0.0F ? most : 0.0F);
@@ -670,7 +774,7 @@ struct StretchVanishingView::Workspace {
       if (!blocked) {
         return want;
       }
-      want.centre[v] = to;
+      want.centre[v] = advancedFrom(want.centre[v], to, side);
     }
   }
 
@@ -699,7 +803,8 @@ struct StretchVanishingView::Workspace {
           }
         }
       }
-      want.centre[u] = pastNearestBlocker(plane, want, u, sign);
+      want.centre[u] = advancedFrom(
+          want.centre[u], pastNearestBlocker(plane, want, u, sign), sign);
     }
   }
 
@@ -725,8 +830,17 @@ struct StretchVanishingView::Workspace {
     const auto next = plane + static_cast<std::int32_t>(sign);
     shield(next);
     want.centre = anchor.centre;
-    return place(cell, content, next, settle(next, want, 0, 1.0F, anchor, true),
-                 immediate, axis.point, direction);
+    // Behind, the cell steps to the left of the one it came from, so seen down
+    // z no text hides behind a nearer box (M2 gate 2, D2/D3); in front the
+    // shield does the same towards the right.
+    float outward = 1.0F;
+    if (next > plane) {
+      want.centre[0] = anchor.lo(0) - stretch().gap - want.half[0];
+      outward        = -1.0F;
+    }
+    return place(cell, content, next,
+                 settle(next, want, 0, outward, anchor, true), immediate,
+                 axis.point, direction);
   }
 
   /// Draw the link from @p from to @p to once: from the negward side, or
@@ -767,7 +881,8 @@ struct StretchVanishingView::Workspace {
     tick.centre[u] = box.centre[u] - (sign * (box.half[u] - tick.half[u]));
     tick.centre[v] = box.hi(v) + stretch().gap + tick.half[v];
     while (!grid.clear(cell.plane, tick, stretch().gap)) {
-      tick.centre[u] = pastNearestBlocker(cell.plane, tick, u, sign);
+      tick.centre[u] = advancedFrom(
+          tick.centre[u], pastNearestBlocker(cell.plane, tick, u, sign), sign);
     }
     ticks.push_back(
         {.placement = index, .box = grid.add(cell.plane, tick), .id = id});
@@ -842,13 +957,29 @@ struct StretchVanishingView::Workspace {
       }
       const auto seen = see(in->frame, box, item.centre.z, cfg.overfill);
       if (seen.inside) {
-        item.opacity = stretchOpacity(seen.margin, cfg);
+        item.opacity = stretchOpacity(seen.margin, cfg) *
+                       std::pow(cfg.depthFade,
+                                static_cast<float>(std::abs(cell.plane)));
         item.content = legibleContent(
             item.opacity, cell.content.lineHeight * seen.pixelsPerUnit, steps);
         out.push(item);
         emitted[i] = {.id = item.id, .opacity = item.opacity};
       } else if (!seen.outside && !withholdGhosts) {
-        const auto ghost = ghostOf(item, cfg.ghostOpacity());
+        auto ghost = ghostOf(item, cfg.ghostOpacity());
+        // A ghost stands for the part of the cell the pane shows: its
+        // outline stops at the pane's edge rather than running past it
+        // (M2 gate 2, D4).
+        if (const auto shown = visibleOn(in->frame, item.centre.z)) {
+          const auto cut = within(box, *shown);
+          if (!cut) {
+            emitted[i] = {};
+            continue;
+          }
+          ghost.centre.x = cut->centre.x;
+          ghost.centre.y = cut->centre.y;
+          ghost.width    = 2.0F * cut->half.x;
+          ghost.height   = 2.0F * cut->half.y;
+        }
         out.push(ghost);
         emitted[i] = {.id = ghost.id, .opacity = ghost.opacity};
       }
@@ -892,11 +1023,24 @@ struct StretchVanishingView::Workspace {
           placed[far].point == axis.point) {
         label = tickItems[far];
       }
+      auto start = flat ? rimTowards(a, b.centre) : a.centre;
+      auto end   = flat ? rimTowards(b, a.centre) : b.centre;
+      if (flat) {
+        // A strand stops where the pane does, as a ghost does.
+        if (const auto shown = visibleOn(in->frame, za)) {
+          const auto cut = segmentWithin(start, end, *shown);
+          if (!cut) {
+            continue;
+          }
+          start = cut->first;
+          end   = cut->second;
+        }
+      }
       out.push(PlacedEdge{
           .from      = *from.id,
           .to        = *to.id,
-          .a         = glm::vec3{flat ? rimTowards(a, b.centre) : a.centre, za},
-          .b         = glm::vec3{flat ? rimTowards(b, a.centre) : b.centre, zb},
+          .a         = glm::vec3{start, za},
+          .b         = glm::vec3{end, zb},
           .kind      = EdgeKind::Dimension,
           .relation  = axis.dim,
           .opacity   = std::min(from.opacity, to.opacity),

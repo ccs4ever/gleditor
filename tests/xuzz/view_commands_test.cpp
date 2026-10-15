@@ -308,7 +308,7 @@ TEST(ViewDrawConfigTest, ReadsItsSettingsAndKeepsDefaultsForNonsense) {
   auto head   = store.primaryCurrentVersion();
   namespace s = xanadu::settings;
   head        = xanadu::setSetting(store, head, s::kViewDrawCellBorderPx, 3.0);
-  head = xanadu::setSetting(store, head, s::kViewDrawGhostSeamShare, 0.9);
+  head = xanadu::setSetting(store, head, s::kViewDrawGhostCornerShare, 0.9);
   head = xanadu::setSetting(store, head, s::kViewPageDim, 0.5);
   head =
       xanadu::setSetting(store, head, s::kViewDrawDashDash, std::string{"4 2"});
@@ -320,10 +320,55 @@ TEST(ViewDrawConfigTest, ReadsItsSettingsAndKeepsDefaultsForNonsense) {
   EXPECT_FLOAT_EQ(read.cellBorderPx, 3.0F);
   EXPECT_FLOAT_EQ(read.pageDim, 0.5F);
   // Out of range: a seam is at most half a side.
-  EXPECT_FLOAT_EQ(read.ghostSeamShare, defaults.ghostSeamShare);
+  EXPECT_FLOAT_EQ(read.ghostCornerShare, defaults.ghostCornerShare);
   EXPECT_EQ(read.dashes[0], (std::vector<float>{4.0F, 2.0F}));
   // An odd count is not drawn then open.
   EXPECT_EQ(read.dashes[1], defaults.dashes[1]);
+}
+
+TEST(ViewDrawConfigTest, ADashPatternOfDustAndACountOfNothingAreRefused) {
+  xanadu::Store store;
+  xanadu::initializeSystemStore(store, xanadu::SystemDocKind::UI);
+  auto head   = store.primaryCurrentVersion();
+  namespace s = xanadu::settings;
+  // M2 gate 2, D8: a pattern of lengths too short to see is dust, and drawing
+  // it is a beam for each; it is refused by its floor, not by its sign.
+  head = xanadu::setSetting(store, head, s::kViewDrawDashDash,
+                            std::string{"1e-7 1e-7"});
+  head = xanadu::setSetting(store, head, s::kViewDrawDashDot,
+                            std::string{"0.4 3"});
+  head = xanadu::setSetting(store, head, s::kViewDrawDashDashDot,
+                            std::string{"0.5 0.5"});
+  head = xanadu::setSetting(store, head, s::kViewDrawDashMaxCount,
+                            std::int64_t{0});
+  head = xanadu::setSetting(store, head, s::kViewChromeHintRows,
+                            std::int64_t{-2});
+  store.repointCurrentVersion(head);
+  const auto read = xanadu::ViewDrawConfig::fromStore(store);
+  const xanadu::ViewDrawConfig defaults;
+  EXPECT_EQ(read.dashes[0], defaults.dashes[0]);
+  EXPECT_EQ(read.dashes[1], defaults.dashes[1]);
+  EXPECT_EQ(read.dashes[3], (std::vector<float>{0.5F, 0.5F}))
+      << "the floor itself is allowed";
+  EXPECT_EQ(read.dashMaxCount, defaults.dashMaxCount);
+  EXPECT_EQ(read.hintRows, defaults.hintRows);
+
+  // The floor is a setting too: lowered, a finer pattern is accepted.
+  head = xanadu::setSetting(store, head, s::kViewDrawDashLeastLength, 0.1);
+  head = xanadu::setSetting(store, head, s::kViewDrawDashDot,
+                            std::string{"0.4 3"});
+  head = xanadu::setSetting(store, head, s::kViewDrawDashMaxCount,
+                            std::int64_t{40});
+  head = xanadu::setSetting(store, head, s::kViewChromeHintRows,
+                            std::int64_t{2});
+  head = xanadu::setSetting(store, head, s::kViewPageDimUnified, 0.6);
+  store.repointCurrentVersion(head);
+  const auto lowered = xanadu::ViewDrawConfig::fromStore(store);
+  EXPECT_FLOAT_EQ(lowered.dashLeastLength, 0.1F);
+  EXPECT_EQ(lowered.dashes[1], (std::vector<float>{0.4F, 3.0F}));
+  EXPECT_EQ(lowered.dashMaxCount, 40U);
+  EXPECT_EQ(lowered.hintRows, 2U);
+  EXPECT_FLOAT_EQ(lowered.pageDimUnified, 0.6F);
 }
 
 TEST(ViewDrawConfigTest, EverySettingIsSeededInSystemUiWithItsDefault) {
@@ -331,12 +376,15 @@ TEST(ViewDrawConfigTest, EverySettingIsSeededInSystemUiWithItsDefault) {
   namespace s      = xanadu::settings;
   for (const auto name :
        {s::kViewDrawCellBorderPx, s::kViewDrawFocusBorderPx,
-        s::kViewDrawGhostStrokePx, s::kViewDrawGhostSeamShare,
+        s::kViewDrawGhostStrokePx, s::kViewDrawGhostCornerShare,
         s::kViewDrawTickRulePx, s::kViewDrawCoarseBarShare,
         s::kViewDrawDashDash, s::kViewDrawDashDot, s::kViewDrawDashDashDotDot,
         s::kViewDrawDashDashDot, s::kViewDrawDashLongShort,
         s::kViewStrandMinWidthPx, s::kViewStrandOpacityFloor,
-        s::kViewStrandLabelClearPx, s::kViewPageDim, s::kViewPageClearancePx}) {
+        s::kViewStrandLabelClearPx, s::kViewPageDim, s::kViewPageClearancePx,
+        s::kViewPageDimUnified, s::kViewChromeHintRows,
+        s::kViewDrawDashLeastLength, s::kViewDrawDashMaxCount,
+        s::kViewCompassDodge}) {
     EXPECT_TRUE(std::ranges::any_of(specs, [name](const auto &spec) {
       return spec.name == name;
     })) << name;

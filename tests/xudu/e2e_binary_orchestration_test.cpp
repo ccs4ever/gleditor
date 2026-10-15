@@ -3134,7 +3134,9 @@ void saveSliceMarksStore(const fs::path &scroll, const fs::path &path,
     link(above, down.dim, cell);
     above = cell;
   }
-  link(slice.homeCell(), deep.dim, make("Behind the plane"));
+  const auto behind = make("Behind the plane");
+  link(slice.homeCell(), deep.dim, behind);
+  link(behind, deep.dim, make("Further behind"));
   if (quote) {
     link(row.front(), down.dim, *quote);
   }

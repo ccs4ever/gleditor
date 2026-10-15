@@ -50,6 +50,7 @@ inline constexpr std::string_view kGap             = "stretch.gap";
 inline constexpr std::string_view kMinContact      = "stretch.minContact";
 inline constexpr std::string_view kOverfill        = "stretch.overfill";
 inline constexpr std::string_view kLayerDepth      = "stretch.layerDepth";
+inline constexpr std::string_view kDepthFade       = "stretch.depthFade";
 inline constexpr std::string_view kFadeBand        = "stretch.fadeBand";
 inline constexpr std::string_view kFadeFloor       = "stretch.fadeFloor";
 inline constexpr std::string_view kGhostShare      = "stretch.ghostShare";
@@ -59,6 +60,14 @@ inline constexpr std::string_view kClipMargin      = "stretch.clipMargin";
 inline constexpr std::string_view kBreadcrumbs     = "stretch.breadcrumbs";
 inline constexpr std::string_view kMaxCellSpan     = "stretch.maxCellSpan";
 } // namespace stretch_settings
+
+/// Most panes a cell's measure may span, whatever stretch.maxCellSpan says.
+/// Together with kMeasureCeilingPx it keeps every coordinate of a layout well
+/// inside a float's whole-number range (2^24), so a gap added to a position
+/// is a change the loops of the walk can see.
+inline constexpr float kMaxCellSpanLimit = 256.0F;
+/// Longest a measured side is taken to be, in logical pixels (2^22).
+inline constexpr float kMeasureCeilingPx = 4194304.0F;
 
 /**
  * @brief The stretch.* settings (§12.3; plan D1, D2). Lengths are logical
@@ -76,12 +85,16 @@ struct StretchConfig {
   float overfill{1.3F};
   /// Distance between depth planes.
   float layerDepth{120.0F};
+  /// Share of its opacity a cell keeps for each plane it stands from the
+  /// focus's, so a plane reads as further or nearer without a turned camera
+  /// (M2 gate 2, D3). Above 0, at most 1; 1 leaves depth to the perspective.
+  float depthFade{0.8F};
   /// Outer fraction of the pane over which opacity falls.
   float fadeBand{0.35F};
   /// Opacity at the pane's edge.
-  float fadeFloor{0.15F};
+  float fadeFloor{0.25F};
   /// A ghost's opacity as a share of fadeFloor (D1).
-  float ghostShare{0.6F};
+  float ghostShare{0.8F};
   /// Below this opacity a cell's content gives way to its shorter form (D2).
   float abbreviateBelow{0.75F};
   /// Below this opacity a cell's text gives way to bars (D2). At 0.5 the

@@ -485,8 +485,11 @@ TEST(StretchVanishingTest, NothingWithContentIsCutAndEveryCutCellIsOneGhost) {
     if (isGhost(item)) {
       EXPECT_TRUE(ghosts.insert(item.id.value).second);
       EXPECT_EQ(drawn(sink, item.id.value), nullptr);
-      EXPECT_FALSE(insideView(frame, item));
       EXPECT_EQ(item.content, ContentMode::None);
+      // It stands for the part the pane shows, so it stops at the pane's
+      // edge (M2 gate 2, D4) and never runs past it.
+      EXPECT_LE(item.centre.x + (item.width / 2.0F), 150.0F + kSlack);
+      EXPECT_GE(item.centre.x - (item.width / 2.0F), -150.0F - kSlack);
     }
   }
   // 24 wide and 28 apart: centres at 28k. The pane is 150 either side, so
@@ -497,7 +500,14 @@ TEST(StretchVanishingTest, NothingWithContentIsCutAndEveryCutCellIsOneGhost) {
   for (const int k : {-5, 5}) {
     EXPECT_EQ(drawn(sink, rank[10 + k]), nullptr) << k;
     ASSERT_NE(ghostOf(sink, rank[10 + k]), nullptr) << k;
-    EXPECT_FLOAT_EQ(ghostOf(sink, rank[10 + k])->centre.x, 28.0F * k);
+    // The cell spans 28k -+ 12; the pane ends at +-150, so what is shown of
+    // it runs from its near edge to the pane's.
+    const auto *ghost = ghostOf(sink, rank[10 + k]);
+    const float sign  = static_cast<float>(k) / std::abs(static_cast<float>(k));
+    EXPECT_NEAR(ghost->width, 150.0F - ((28.0F * std::abs(k)) - 12.0F), 1e-3F);
+    EXPECT_NEAR(ghost->centre.x,
+                sign * (((28.0F * std::abs(k)) - 12.0F + 150.0F) / 2.0F),
+                1e-3F);
   }
   for (const int k : {-6, 6}) {
     EXPECT_EQ(drawn(sink, rank[10 + k]), nullptr) << k;
@@ -664,6 +674,79 @@ TEST(StretchVanishingTest, AGhostIsDimmerThanTheDimmestRealCell) {
   EXPECT_FLOAT_EQ(brightestGhost, StretchConfig{}.ghostOpacity());
 }
 
+TEST(StretchVanishingTest, ADefaultGhostCanBeSeenAndStillOutshinesNothing) {
+  // M2 gate 2, D1: at 0.09 a ghost's outline was a few levels above black.
+  const StretchConfig config;
+  EXPECT_NEAR(config.ghostOpacity(), 0.2F, 1e-6F);
+  EXPECT_LT(config.ghostOpacity(), config.fadeFloor);
+}
+
+TEST(StretchVanishingTest, ADepthPlaneRecedesAndStandsClearOfTheFocus) {
+  Slice slice{"d.x", "d.y", "d.z"};
+  const auto focus  = slice.cell("focus cell");
+  const auto behind = slice.cell("behind the plane");
+  const auto beyond = slice.cell("further behind");
+  slice.link(focus, "d.z", behind).link(behind, "d.z", beyond);
+  const auto base = slice.manifold();
+  ViewManifold space{base};
+  configure(space);
+  ASSERT_TRUE(space.axes().bind(z, slice.dim("d.z")));
+  const Words words{slice};
+  StretchVanishingView view;
+  const auto sink = layOut(view, space, focus, deepPane(), words);
+  const StretchConfig config;
+
+  const auto *centre = drawn(sink, focus);
+  const auto *back   = drawn(sink, behind);
+  const auto *far    = drawn(sink, beyond);
+  ASSERT_NE(centre, nullptr);
+  ASSERT_NE(back, nullptr);
+  ASSERT_NE(far, nullptr);
+  // Seen down z, no plane behind hides its words behind a nearer box (M2
+  // gate 2, D2, D3): each steps to the left of the one it came from.
+  for (const auto *const plane : {back, far}) {
+    auto flat     = *plane;
+    flat.centre.z = 0.0F;
+    EXPECT_FALSE(overlapping(flat, *centre));
+  }
+  EXPECT_LT(back->centre.x + (back->width / 2.0F),
+            centre->centre.x - (centre->width / 2.0F));
+  EXPECT_LT(far->centre.x + (far->width / 2.0F),
+            back->centre.x - (back->width / 2.0F));
+  // And each plane keeps depthFade of the opacity of the one before.
+  EXPECT_FLOAT_EQ(centre->opacity, 1.0F);
+  EXPECT_NEAR(back->opacity, config.depthFade, 1e-4F);
+  EXPECT_NEAR(far->opacity, config.depthFade * config.depthFade, 1e-4F);
+}
+
+TEST(StretchVanishingTest, AStrandStopsWhereThePaneDoes) {
+  // A rank running off both edges: the strands between cells that are cut
+  // end at the pane's edge, not beyond it (M2 gate 2, D4).
+  Slice slice{"d.x"};
+  std::vector<CellRef> rank;
+  for (int i = 0; i < 21; ++i) {
+    rank.push_back(slice.cell("c"));
+    if (i > 0) {
+      slice.link(rank[i - 1], "d.x", rank[i]);
+    }
+  }
+  const auto base = slice.manifold();
+  ViewManifold space{base};
+  configure(space);
+  ASSERT_TRUE(space.axes().bind(x, slice.dim("d.x")));
+  const Words words{slice};
+  StretchVanishingView view;
+  const auto frame = flatPane(300.0F, 100.0F);
+  const auto sink  = layOut(view, space, rank[10], frame, words);
+  ASSERT_FALSE(sink.edges().empty());
+  for (const auto &edge : sink.edges()) {
+    for (const auto &end : {edge.a, edge.b}) {
+      EXPECT_LE(std::abs(end.x), 150.0F + kSlack);
+      EXPECT_LE(std::abs(end.y), 50.0F + kSlack);
+    }
+  }
+}
+
 TEST(StretchVanishingTest, FadedTextStepsDownAndTheFocusNever) {
   Grid grid(15, 11, [](int c, int r) { return std::format("{}:{}", c, r); });
   const auto base = grid.slice.manifold();
@@ -784,7 +867,8 @@ TEST(StretchVanishingTest, DepthPlacesBehindAndKeepsTheFrontOffTheFocus) {
   ASSERT_NE(back, nullptr);
   ASSERT_NE(fore, nullptr);
   EXPECT_FLOAT_EQ(back->centre.z, -config.layerDepth);
-  EXPECT_FLOAT_EQ(back->centre.x, 0.0F);
+  // On the focus's own line, stepped aside so nothing hides behind it.
+  EXPECT_LT(back->centre.x, 0.0F);
   EXPECT_FLOAT_EQ(back->centre.y, 0.0F);
   EXPECT_FLOAT_EQ(fore->centre.z, config.layerDepth);
   // Seen down z, the plane in front stands clear of the focus.
@@ -1218,6 +1302,80 @@ TEST(StretchVanishingGuardTest, ASizeThatIsNotANumberIsNothing) {
   EXPECT_GT(placedWith(10.0F, nan), 0U);
   EXPECT_GT(placedWith(-5.0F, -5.0F), 0U);
   EXPECT_GT(placedWith(1.0e30F, 1.0e30F), 0U);
+}
+
+namespace {
+
+/// A layout of three cells measured @p width by @p height in @p frame under
+/// @p config, as many as were placed.
+std::size_t placedUnder(const StretchConfig &config, const float width,
+                        const float height, const PaneFrame &frame) {
+  Slice slice{"d.x", "d.y", "d.z"};
+  const auto a = slice.cell("a");
+  const auto b = slice.cell("b");
+  const auto c = slice.cell("c");
+  const auto d = slice.cell("d");
+  slice.link(a, "d.x", b).link(a, "d.y", c).link(b, "d.y", d).link(c, "d.x", d);
+  const auto manifold = slice.manifold();
+  ViewManifold space(manifold);
+  configure(space);
+  EXPECT_TRUE(space.axes().bind(x, slice.dim("d.x")));
+  EXPECT_TRUE(space.axes().bind(y, slice.dim("d.y")));
+  const auto measure = [=](const SubjectId, const float) {
+    return ContentExtent{
+        .width = width, .height = height, .lineHeight = 16.0F, .lines = 1};
+  };
+  StretchVanishingView view;
+  view.configure(StretchVanishingConfig{.stretch = config});
+  const SliceCursor cursor{.origin = a};
+  EXPECT_TRUE(view.prepare(space, cursor, frame, measure));
+  LayoutSink sink;
+  view.layout(
+      SliceLayoutInput{
+          .space = space, .cursor = cursor, .frame = frame, .measure = measure},
+      sink);
+  return sink.items().size();
+}
+
+} // namespace
+
+TEST(StretchVanishingGuardTest, TheMeasureLimitHoldsAtTheExtremesOfItsSettings) {
+  // M2 gate 2, D8: stretch.maxCellSpan was accepted up to 1e5 panes, and a
+  // measure that large against a gap too small for a float to add to it never
+  // let the walk's slides end. The setting is bounded and the measure has an
+  // absolute ceiling, so each of these returns; the binary's own timeout is
+  // the watchdog.
+  StretchConfig config;
+  for (const float span : {1.0F, 16.0F, xanadu::view::kMaxCellSpanLimit}) {
+    for (const float gap : {0.0F, 1.0e-6F, 4.0F, 1.0e5F}) {
+      config.maxCellSpan = span;
+      config.gap         = gap;
+      for (const float size : {16.0F, 1.0e6F, 1.0e30F}) {
+        EXPECT_GT(placedUnder(config, size, size, flatPane()), 0U)
+            << span << " " << gap << " " << size;
+      }
+      EXPECT_GT(placedUnder(config, 1.0e30F, 20.0F, flatPane(1.0e5F, 1.0e5F)),
+                0U);
+    }
+  }
+}
+
+TEST(StretchVanishingGuardTest, MaxCellSpanOutOfItsRangeKeepsItsDefault) {
+  xanadu::Store store;
+  xanadu::initializeSystemStore(store, xanadu::SystemDocKind::Settings);
+  auto head = store.primaryCurrentVersion();
+  head      = xanadu::setSetting(store, head, "stretch.maxCellSpan", 1.0e5);
+  store.repointCurrentVersion(head);
+  EXPECT_EQ(
+      StretchConfig::fromSettings(xanadu::SystemStoreModel::fromStore(store))
+          .maxCellSpan,
+      StretchConfig{}.maxCellSpan);
+  head = xanadu::setSetting(store, head, "stretch.maxCellSpan", 256.0);
+  store.repointCurrentVersion(head);
+  EXPECT_EQ(
+      StretchConfig::fromSettings(xanadu::SystemStoreModel::fromStore(store))
+          .maxCellSpan,
+      256.0F);
 }
 
 TEST(StretchVanishingGuardTest, APaneThatIsNotASizeLaysOutNothing) {

@@ -29,7 +29,10 @@ public:
    *        thread; costs nothing while nothing is dimmed and nothing is
    *        asked.
    *
-   * A page opened while dimmed is dimmed too; one closed is forgotten.
+   * A page opened while dimmed is dimmed too; one closed is forgotten. A
+   * writer that sets a page's opacity while it is held (the onion-skin toggle,
+   * the side-by-side arrangement) is noticed: the dim is laid over the value
+   * it wrote, not lost to it.
    */
   void apply(gleditor::FrameContext &ctx, float share);
 
@@ -41,6 +44,9 @@ private:
     std::weak_ptr<Doc> doc;
     /// What the page settled at before it was dimmed.
     float before{1.0F};
+    /// What was last written for it: a resting opacity that differs is
+    /// another writer's, and the dim is laid over that.
+    float set{1.0F};
   };
   std::vector<Held> held_;
   float applied_{1.0F};

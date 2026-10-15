@@ -625,6 +625,55 @@ TEST(ViewCompassTest, TheSettingHidesItAndTheTreeFollows) {
   EXPECT_EQ(compassWords(*presentation).size(), 3U);
 }
 
+namespace {
+
+/// The height the chrome claims along the bottom for @p hints, which is what
+/// the rows it fits them in add up to.
+float chromeClaimFor(ViewSlicePresentation &presentation, Frame &frame,
+                     const std::string &hints) {
+  presentation.setKeyHints(hints, hints);
+  frame.state.beginPickScene();
+  gleditor::FrameContext ctx{frame.state, frame.camera, kWidth, kHeight,
+                             frame.timeline};
+  presentation.drawScene(ctx);
+  presentation.drawFrame(ctx);
+  return ctx.chrome.bottom;
+}
+
+} // namespace
+
+TEST(ViewChromeTest, KeyHintsWrapToRowsThatFitAndAreCappedBySetting) {
+  // M2 gate 2, D6: the hints ran off the edge of the pane with no ellipsis,
+  // so "Back to text" was cut in half. They take rows that fit, most used
+  // first, and view.chrome.hintRows rows at most.
+  Fixture fixture;
+  Frame frame;
+  const auto presentation = settled(fixture, frame);
+  const float line = std::ceil(presentation->presenter().chromeLineHeight());
+  ASSERT_GT(line, 0.0F);
+  const float one = chromeClaimFor(*presentation, frame, "Step: Arrows");
+
+  std::string many;
+  for (int i = 0; i < 24; ++i) {
+    many += (many.empty() ? "" : " | ") + std::string{"Command "} +
+            std::to_string(i) + ": Ctrl+Alt+" + std::to_string(i);
+  }
+  const float wrapped = chromeClaimFor(*presentation, frame, many);
+  const auto rows =
+      static_cast<int>(std::lround((wrapped - one) / line)) + 1;
+  EXPECT_GE(rows, 2) << "twenty-four commands do not fit one row";
+  EXPECT_LE(rows, static_cast<int>(xanadu::ViewDrawConfig{}.hintRows));
+
+  // One row when the setting says so, with the rest cut by the ellipsis.
+  auto &ui = *fixture.system.at(SystemDocKind::UI);
+  ui.repointCurrentVersion(
+      xanadu::setSetting(ui, ui.primaryCurrentVersion(),
+                         xanadu::settings::kViewChromeHintRows,
+                         std::int64_t{1}));
+  presentation->applySettings();
+  EXPECT_NEAR(chromeClaimFor(*presentation, frame, many), one, 1.0e-3F);
+}
+
 TEST(ViewCommandsTest, ATypedBindingChangesTheCompassAndTheLayout) {
   Fixture fixture;
   Frame frame;
@@ -1378,6 +1427,33 @@ TEST(ViewPresenterTest, ADashedStrandKeepsItsDashesAroundALabel) {
     const float hi = std::max(row.from[0], row.to[0]);
     EXPECT_FALSE(lo < 0.0F && hi > 0.0F) << "a dash crosses the label";
   }
+}
+
+TEST(ViewPresenterTest, APatternOfDustOrTooManyDashesIsDrawnSolid) {
+  // M2 gate 2, D8: a pattern of lengths too fine to see made a beam for each
+  // dash, millions of them, or never finished. A strand that would need more
+  // than view.draw.dashMaxCount dashes is one beam.
+  auto draw = xanadu::ViewDrawConfig{};
+  draw.dashes[0] = {1.0e-7F, 1.0e-7F};
+  StrandScene dust(false);
+  dust.presenter.setDrawConfig(draw);
+  dust.draw(DashStyle::Dash);
+  EXPECT_EQ(dust.presenter.strands().size(), 1U);
+
+  // A sound pattern is cut into dashes, up to the cap.
+  StrandScene dashed(false);
+  dashed.draw(DashStyle::Dash);
+  const auto cut = dashed.presenter.strands().size();
+  EXPECT_GT(cut, 1U);
+  EXPECT_LE(cut, xanadu::ViewDrawConfig{}.dashMaxCount);
+
+  // The cap is a setting: below what the strand needs it is drawn solid.
+  draw = xanadu::ViewDrawConfig{};
+  draw.dashMaxCount = static_cast<std::uint32_t>(cut) - 1U;
+  StrandScene capped(false);
+  capped.presenter.setDrawConfig(draw);
+  capped.draw(DashStyle::Dash);
+  EXPECT_EQ(capped.presenter.strands().size(), 1U);
 }
 
 TEST(ViewPresenterTest, AStrandIsNeverThinnerOrFainterThanItsFloors) {

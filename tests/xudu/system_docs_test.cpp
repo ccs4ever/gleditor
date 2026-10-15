@@ -669,7 +669,7 @@ TEST(SystemDocsTest, SchemaPagesListTheViewActionsAndDrawingSettings) {
   const auto ui = xanadu::defaultSystemDocSchema(SystemDocKind::UI);
   for (const auto name :
        {xanadu::settings::kViewDrawCellBorderPx,
-        xanadu::settings::kViewDrawGhostSeamShare,
+        xanadu::settings::kViewDrawGhostCornerShare,
         xanadu::settings::kViewDrawDashDash, xanadu::settings::kViewDrawDashDot,
         xanadu::settings::kViewDrawDashDashDotDot,
         xanadu::settings::kViewDrawDashDashDot,

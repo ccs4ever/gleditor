@@ -344,6 +344,7 @@ inline constexpr std::string_view kViewMotionHintEase = "view.motion.hintEase";
 // The compass (view-system.md §7.9): the corner display of what each binding
 // point shows. Lengths are logical pixels, converted with UiMetrics::px().
 inline constexpr std::string_view kViewCompassVisible = "view.compass.visible";
+inline constexpr std::string_view kViewCompassDodge   = "view.compass.dodge";
 inline constexpr std::string_view kViewCompassGlyphPx = "view.compass.glyphPx";
 inline constexpr std::string_view kViewCompassSwatchPx =
     "view.compass.swatchPx";
@@ -364,8 +365,12 @@ inline constexpr std::string_view kViewDrawFocusBorderPx =
     "view.draw.focusBorderPx";
 inline constexpr std::string_view kViewDrawGhostStrokePx =
     "view.draw.ghostStrokePx";
-inline constexpr std::string_view kViewDrawGhostSeamShare =
-    "view.draw.ghostSeamShare";
+inline constexpr std::string_view kViewDrawGhostCornerShare =
+    "view.draw.ghostCornerShare";
+inline constexpr std::string_view kViewDrawDashLeastLength =
+    "view.draw.dashLeastLength";
+inline constexpr std::string_view kViewDrawDashMaxCount =
+    "view.draw.dashMaxCount";
 inline constexpr std::string_view kViewDrawTickRulePx = "view.draw.tickRulePx";
 inline constexpr std::string_view kViewDrawCoarseBarShare =
     "view.draw.coarseBarShare";
@@ -384,6 +389,8 @@ inline constexpr std::string_view kViewStrandOpacityFloor =
 inline constexpr std::string_view kViewStrandLabelClearPx =
     "view.strand.labelClearPx";
 inline constexpr std::string_view kViewPageDim = "view.page.dim";
+inline constexpr std::string_view kViewPageDimUnified = "view.page.dimUnified";
+inline constexpr std::string_view kViewChromeHintRows = "view.chrome.hintRows";
 inline constexpr std::string_view kViewPageClearancePx =
     "view.page.clearancePx";
 // The overview panel. Colours are RGBA8, most significant byte red.
@@ -1527,6 +1534,10 @@ struct MotionConfig {
  */
 struct CompassConfig {
   bool visible{true};
+  /// Move to a free corner when what the slice draws would be under it, so
+  /// the legend never hides a cell's words (M2 gate 2, D2). Off keeps it at
+  /// the top left.
+  bool dodge{true};
   /// The cue's glyph, drawn on a square this long.
   float glyphPx{12.0F};
   /// The dimension's dash pattern, drawn along a line this long.
@@ -1557,9 +1568,10 @@ struct ViewDrawConfig {
   /// The focus's border: heavier than any edge.
   float focusBorderPx{2.5F};
   float ghostStrokePx{1.0F};
-  /// Share of a ghost's shorter side left open at each corner: the seam that
-  /// says "view-only", at most a half.
-  float ghostSeamShare{0.18F};
+  /// Radius of a ghost's rounded corners as a share of its shorter side: the
+  /// curve that says "view-only" where a stored cell is square, at most a
+  /// half.
+  float ghostCornerShare{0.3F};
   /// Under a tick, in its dimension's colour.
   float tickRulePx{2.0F};
   /// Share of a line's height a coarse bar fills, above 0 and at most 1.
@@ -1571,6 +1583,13 @@ struct ViewDrawConfig {
       std::vector<float>{6.0F, 2.0F, 1.0F, 2.0F, 1.0F, 2.0F},
       std::vector<float>{6.0F, 2.0F, 1.0F, 2.0F},
       std::vector<float>{10.0F, 3.0F, 3.0F, 3.0F}};
+  /// Shortest drawn or open stretch of a dash pattern, in strand widths: a
+  /// pattern with a shorter one is refused, since it is a line drawn as dust.
+  float dashLeastLength{0.5F};
+  /// Most dashes one strand is cut into; a strand that would need more is
+  /// drawn solid, so a fine pattern on a long strand costs a bounded number
+  /// of beams.
+  std::uint32_t dashMaxCount{256};
   /// A strand is never thinner than this on the screen, whatever the
   /// placement's scale: a link between cells one gap apart is the shortest
   /// line a view draws and must still show its dimension's hue and dash.
@@ -1583,6 +1602,13 @@ struct ViewDrawConfig {
   /// Share of its own opacity the xanadoc page the slice stands beside keeps
   /// while a slice presentation is shown; 1 leaves the page alone.
   float pageDim{0.3F};
+  /// The same, in the unified view, where the page and the slice share the
+  /// frame and the page is read and edited too: it is left alone unless the
+  /// reader asks for a dim, since a label has a chip of its own to stand on.
+  float pageDimUnified{1.0F};
+  /// Rows the key hints may take at the foot of the pane; what does not fit
+  /// is cut with an ellipsis.
+  std::uint32_t hintRows{3};
   /// How far above the page's top edge the focus row stands, in logical
   /// pixels, so the page never cuts through the row the reader is on.
   float pageClearancePx{64.0F};

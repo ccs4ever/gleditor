@@ -491,4 +491,31 @@ TEST(SampleXanadocsTest, Beams03MultiSpanStackedLinks) {
   EXPECT_EQ(singleSpanCount, 2U);
 }
 
+// M2 gate 2, D7: adding a cell to the unified sample was refused with "context
+// operation 5 is in the future relative to parent 4". That is the store being
+// right: it holds a text branch (a1..a3, operations 2 to 4) and a slice born
+// at operation 5 on a branch forked from operation 1, and latest() is the text
+// branch's tip, which is not a descendant of the slice. The refusal says so;
+// the slice's own tip takes the cell.
+TEST(SampleXanadocsTest, ACellCannotJoinASliceFromABranchForkedBeforeIt) {
+  const auto unifiedDir = kSampleBaseDir / "core_hypertext" / "unified_store";
+  Store unified(samplePermascroll());
+  unified.load(unifiedDir.string());
+  ASSERT_NE(unified.sliceBirth(), 0U);
+  const auto textTip = unified.latest();
+  ASSERT_LT(unified.segmentedOps().indexOf(textTip), unified.sliceBirth());
+  try {
+    static_cast<void>(unified.makeCell(textTip, "a cell"));
+    FAIL() << "a cell was filed on a branch that does not hold its slice";
+  } catch (const std::invalid_argument &refused) {
+    EXPECT_THAT(refused.what(), testing::HasSubstr("forked before the slice"));
+  }
+  // The slice's own tip, the last operation of the store, takes it.
+  const auto sliceTip = unified.segmentedOps().idOf(
+      static_cast<std::uint32_t>(unified.segmentedOps().size()));
+  const auto added    = unified.makeCell(sliceTip, "a cell");
+  EXPECT_EQ(unified.segmentedOps().indexOf(added),
+            unified.segmentedOps().size() + 1);
+}
+
 } // namespace
