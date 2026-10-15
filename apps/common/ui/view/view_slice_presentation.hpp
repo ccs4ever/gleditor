@@ -55,6 +55,7 @@
 #include "common/ui/view/view_animation.hpp"
 #include "common/ui/view/view_presenter.hpp"
 #include "common/xanadu/link_navigation.hpp"
+#include "common/xanadu/store_activity_log.hpp"
 #include "common/xanadu/system_docs.hpp"
 #include "common/xanadu/view/compass.hpp"
 #include "common/xanadu/view/dimension_colour.hpp"
@@ -84,6 +85,9 @@ public:
     /// Make @p version of a system xanadoc current and say so, as
     /// Session::repointSystemDoc() does.
     std::function<void(SystemDocKind, const MicroversionId &)> repoint;
+    /// Where the reader's resting place in each slice is kept: the activity
+    /// store, not a setting (view-system.md §7.5). Empty: not kept.
+    std::shared_ptr<SliceFocusLog> focus;
   };
 
   /// One placement of the slice view @p kind of @p registry, which must
@@ -133,6 +137,11 @@ public:
   /// Where completed moves are recorded and the breadcrumbs are read from.
   /// Not owned; null keeps them in a log of the presentation's own.
   ViewSlicePresentation *setActivityLog(ActivityLog *log);
+  /// Keep where the reader is now as the slice's resting place, unless that
+  /// is already kept. Called by the host when the reader leaves (a view
+  /// change, the program ending) so a move made just before is not lost; a
+  /// walk that comes to rest does it itself.
+  ViewSlicePresentation *flushFocus();
 
   // -- what it shows: for the host's tests and the frame inspector
   // ---------------
@@ -143,6 +152,11 @@ public:
   }
   /// The latest message, empty for none.
   [[nodiscard]] std::string notice() const;
+  /// The rows under the message and the walk as the strip last drew them:
+  /// the view and sub-view showing, then the key hints.
+  [[nodiscard]] std::string_view chromeRows() const noexcept {
+    return chromeRows_;
+  }
   /// What the placement says when it has no message: the view and the
   /// sub-view it is showing, "Stretch vanishing: Plain".
   [[nodiscard]] const std::string &status() const noexcept { return status_; }
@@ -265,7 +279,6 @@ private:
   /// showing anything, binds them as a slice does on opening and says so.
   void bindWhatIsLeftUnbound();
   void persistBindings();
-  void persistFocus();
   void announce(const ReplayReport &report);
   /// The name of the @p ordinal-th spatial binding point, in order: where the
   /// plane's steps, hops and swaps go, whatever the points are called.
@@ -317,6 +330,10 @@ private:
   /// The legacy visualizer's axes, by name, offered to a first fold.
   mutable std::vector<std::string> adopted_;
   bool focusDirty_{};
+  /// When the focus last moved, and the pause that makes it a resting place
+  /// (activity.settleMs): a walk is one record, not a record a step.
+  std::chrono::steady_clock::time_point focusMovedAt_;
+  std::uint32_t focusSettleMs_{WalkRankingConfig{}.settleMs};
   mutable std::optional<zigzag::CellRef> wantedFocus_;
   mutable zigzag::ViewAxisBinding legacyView_;
   SliceCursor cursor_{.origin = zigzag::noCell};
@@ -367,6 +384,11 @@ private:
   /// work (busy()).
   std::uint64_t drawnChrome_{}, drawnCompass_{};
   std::string hintsHere_, hintsElsewhere_;
+  /// The strip's rows under the message and the walk: the view and sub-view
+  /// showing, on a row of their own so a message never covers them, then the
+  /// hints. Composed when the chrome changes, not on every frame.
+  std::string chromeRows_;
+  std::uint64_t chromeRowsStamp_{~std::uint64_t{}};
   std::atomic<bool> keyboardHere_{true};
   std::atomic<std::uint64_t> keyboardMoves_{0};
 

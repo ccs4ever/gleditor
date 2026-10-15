@@ -175,16 +175,15 @@ inline constexpr std::string_view kSliceSubviewField       = ".subview";
 [[nodiscard]] std::string sliceSubviewKey(std::string_view sliceId,
                                           std::string_view viewKind);
 /// What a slice's placement keeps beside its presentation (view-system.md
-/// §7.5): the bindings, the groups, the ring order and the cell in focus. One
-/// setting each, keyed by the store's DocumentId.
+/// §7.5): the bindings, the groups and the ring order. One setting each, keyed
+/// by the store's DocumentId. Not the cell in focus: that changes with every
+/// step, so it is the reader's activity (SliceFocusLog; view-system.md §7.5).
 inline constexpr std::string_view kSliceAxesField      = ".axes";
 inline constexpr std::string_view kSliceGroupsField    = ".groups";
 inline constexpr std::string_view kSliceRingOrderField = ".ringOrder";
-inline constexpr std::string_view kSliceFocusField     = ".focus";
 [[nodiscard]] std::string sliceAxesKey(std::string_view sliceId);
 [[nodiscard]] std::string sliceGroupsKey(std::string_view sliceId);
 [[nodiscard]] std::string sliceRingOrderKey(std::string_view sliceId);
-[[nodiscard]] std::string sliceFocusKey(std::string_view sliceId);
 inline constexpr std::string_view kPhysicsKRepel   = "physics.kRepel";
 inline constexpr std::string_view kPhysicsKPlane   = "physics.kPlane";
 inline constexpr std::string_view kPhysicsKAlign   = "physics.kAlign";
@@ -1066,9 +1065,6 @@ slicePresentationSettingSpec(std::string_view sliceId);
 /// with a repeated type ("string*").
 [[nodiscard]] std::vector<SettingSpec>
 sliceBindingSettingSpecs(std::string_view sliceId);
-/// The cell a slice was last focused on: its operation index, or no value for
-/// none yet ("integer*").
-[[nodiscard]] SettingSpec sliceFocusSettingSpec(std::string_view sliceId);
 
 /// Keyboard scopes a key binding can be confined to (gleditor::Command::scope):
 /// the pane that has the keyboard.

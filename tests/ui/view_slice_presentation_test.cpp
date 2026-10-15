@@ -13,6 +13,7 @@
 #include <chrono>
 #include <cmath>
 #include <deque>
+#include <filesystem>
 #include <functional>
 #include <map>
 #include <memory>
@@ -38,7 +39,9 @@
 #include "common/ui/view/view_presenter.hpp"
 #include "common/ui/view/view_slice_presentation.hpp"
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/store_activity_log.hpp"
 #include "common/xanadu/system_docs.hpp"
+#include "common/xanadu/user_permascroll.hpp"
 #include "common/xanadu/view/builtin_views.hpp"
 #include "common/xanadu/view/slice/stretch_vanishing_view.hpp"
 #include "null_device.hpp"
@@ -69,9 +72,55 @@ public:
   }
 };
 
+/// The reader's activity store on disk, which can be closed and opened again
+/// as a program ending and starting does.
+struct KeptActivity {
+  std::filesystem::path base;
+  std::shared_ptr<xanadu::UserPermascroll> scroll;
+  std::unique_ptr<xanadu::Store> store;
+  std::shared_ptr<xanadu::SliceFocusLog> log;
+
+  KeptActivity()
+      : base(std::filesystem::temp_directory_path() /
+             ("ui-focus-" + std::to_string(std::chrono::steady_clock::now()
+                                               .time_since_epoch()
+                                               .count()))) {
+    xanadu::UserPermascroll::Config config;
+    config.storageDir = base / "permascroll";
+    scroll            = std::make_shared<xanadu::UserPermascroll>(config);
+    open();
+  }
+  KeptActivity(const KeptActivity &)            = delete;
+  KeptActivity &operator=(const KeptActivity &) = delete;
+  ~KeptActivity() {
+    log.reset();
+    store.reset();
+    scroll.reset();
+    std::filesystem::remove_all(base);
+  }
+
+  [[nodiscard]] std::filesystem::path directory() const {
+    return base / "activity";
+  }
+  void open() {
+    store = std::make_unique<xanadu::Store>(scroll);
+    if (std::filesystem::exists(directory())) {
+      store->load(directory().string());
+    }
+    log = std::make_shared<xanadu::SliceFocusLog>(store.get(), directory());
+  }
+  void close() {
+    log.reset();
+    store.reset();
+  }
+  [[nodiscard]] std::size_t operations() const { return store->opCount(); }
+};
+
 /// A row of cells along d.across and a column along d.down from the first,
 /// and the three system xanadocs the presentation reads.
 struct Fixture {
+  /// Where the reader's resting place is kept; none unless a test gives one.
+  std::shared_ptr<xanadu::SliceFocusLog> focus;
   xanadu::Store slice;
   std::vector<CellRef> row, column;
   std::map<SystemDocKind, std::unique_ptr<xanadu::Store>> system;
@@ -135,7 +184,8 @@ struct Fixture {
                 [this](const SystemDocKind kind,
                        const xanadu::MicroversionId &version) {
                   system.at(kind)->repointCurrentVersion(version);
-                }};
+                },
+            .focus = focus};
   }
 
   std::unique_ptr<ViewSlicePresentation> presentation() {
@@ -363,7 +413,7 @@ TEST(ViewSlicePresentationTest, TheAccessibilityTreeListsThePlacedCells) {
   const auto origin = std::ranges::find(tree.nodes, std::string("origin"),
                                         &gleditor::a11y::Node::label);
   ASSERT_NE(origin, tree.nodes.end());
-  EXPECT_THAT(origin->description, testing::HasSubstr("d.across posward"));
+  EXPECT_THAT(origin->description, testing::HasSubstr("d.across forward"));
   // Nothing drawn, nothing in the tree.
   EXPECT_FALSE(std::ranges::any_of(tree.nodes, [&](const auto &node) {
     return node.label == "down 2" &&
@@ -454,7 +504,7 @@ TEST(ViewSlicePresentationTest, NothingThatWayIsSaidNotSwallowed) {
   presentation->deviceReady(frame.device, {});
   frame.draw(*presentation);
   EXPECT_TRUE(presentation->dispatchAction("step-x-neg"));
-  EXPECT_EQ(presentation->notice(), "No cell further along d.across negward.");
+  EXPECT_EQ(presentation->notice(), "No cell further back along d.across.");
   const auto tree = treeOf(*presentation);
   const auto said = std::ranges::find(tree.nodes, presentation->notice(),
                                       &gleditor::a11y::Node::label);
@@ -517,10 +567,10 @@ TEST(SlicePresentationPaletteTest, ListsTheVisualizerAndEverySliceView) {
 
 TEST(ViewPresenterTest, MessagesFillTheirFields) {
   const std::array fields{xanadu::view::MessageField{"dimension", "d.x"},
-                          xanadu::view::MessageField{"direction", "posward"}};
+                          xanadu::view::MessageField{"direction", "forward"}};
   EXPECT_EQ(xanadu::view::spokenMessage(
                 xanadu::view::ViewMessage::NothingThatWay, fields),
-            "No cell further along d.x posward.");
+            "No cell further forward along d.x.");
   EXPECT_EQ(
       xanadu::view::spokenMessage(xanadu::view::ViewMessage::AxisUnknown, {}),
       "There is no axis {axis}.");
@@ -709,7 +759,7 @@ TEST(ViewCommandsTest, HopsToTheHeadAndTheTailOfTheRank) {
   EXPECT_EQ(presentation->focusCell(), fixture.row.front());
   // Already at the head: nothing further, said.
   EXPECT_TRUE(presentation->dispatchAction("hop-head"));
-  EXPECT_EQ(presentation->notice(), "No cell further along d.across negward.");
+  EXPECT_EQ(presentation->notice(), "No cell further back along d.across.");
 }
 
 TEST(ViewCommandsTest, TheSubviewIsSteppedAndKeptWithTheSlice) {
@@ -805,6 +855,109 @@ TEST(SlicePresentationPaletteTest, ListsEachViewsSubviewsBeneathIt) {
   EXPECT_EQ(choice.subview, "plain");
   EXPECT_EQ(xanadu::view::paletteChoiceOf("legacy").subview, "");
   EXPECT_EQ(xanadu::view::paletteValue(choice), kind + "#plain");
+}
+
+TEST(SlicePresentationPaletteTest, AViewsOwnRowSelectsItsDefaultSubview) {
+  Fixture fixture;
+  const auto kind = std::string(xanadu::view::StretchVanishingView::kKind);
+  gleditor::Form form("Sans 12");
+  std::optional<xanadu::view::PaletteChoice> chosen;
+  // The reader is on the second sub-view and picks the view's own row, two
+  // rows up from it.
+  xanadu::view::openSlicePresentationPalette(
+      form, fixture.registry, kind, "plain",
+      [&chosen](const xanadu::view::PaletteChoice &choice) {
+        chosen = choice;
+      });
+  ASSERT_TRUE(form.isOpen());
+  ASSERT_TRUE(form.keyPressed(gleditor::Key::Left, gleditor::KeyMods::None));
+  ASSERT_TRUE(form.keyPressed(gleditor::Key::Left, gleditor::KeyMods::None));
+  ASSERT_TRUE(form.keyPressed(gleditor::Key::Return, gleditor::KeyMods::None));
+  ASSERT_TRUE(chosen);
+  EXPECT_EQ(chosen->presentation, kind);
+  EXPECT_EQ(chosen->subview, "ghosts")
+      << "the old sub-view must not survive the choice";
+
+  // A cycle of views names no sub-view, and a view without sub-views and the
+  // visualizer have none to name.
+  EXPECT_EQ(
+      xanadu::view::withDefaultSubview(fixture.registry,
+                                       {.presentation = kind}),
+      (xanadu::view::PaletteChoice{.presentation = kind, .subview = "ghosts"}));
+  EXPECT_EQ(
+      xanadu::view::withDefaultSubview(
+          fixture.registry, {.presentation = kind, .subview = "plain"}),
+      (xanadu::view::PaletteChoice{.presentation = kind, .subview = "plain"}));
+  EXPECT_EQ(xanadu::view::withDefaultSubview(
+                fixture.registry,
+                {.presentation =
+                     std::string(xanadu::settings::kSlicePresentationLegacy)})
+                .subview,
+            "");
+}
+
+TEST(ViewStatusTest, AnotherPlacesChoiceOfSubviewRetiresTheStaleAnnouncement) {
+  Fixture fixture;
+  Frame frame;
+  const auto presentation = settled(fixture, frame);
+  ASSERT_TRUE(presentation->dispatchAction("std:view/subview_next"));
+  ASSERT_THAT(presentation->notice(), testing::HasSubstr("Plain (2 of 2)"));
+
+  // The palette writes the choice to the layout and the watcher applies it.
+  auto &layout = *fixture.system.at(SystemDocKind::Layout);
+  layout.repointCurrentVersion(xanadu::view::recordSlicePresentation(
+      layout, fixture.slice.documentId().str(),
+      {.presentation = std::string(xanadu::view::StretchVanishingView::kKind),
+       .subview      = "ghosts"}));
+  presentation->applySettings();
+  EXPECT_EQ(presentation->subviewId(), "ghosts");
+  EXPECT_EQ(presentation->notice(), "") << "Plain is no longer showing";
+  EXPECT_EQ(presentation->status(), "Stretch vanishing: Ghosts");
+}
+
+TEST(ViewStatusTest, ASwapRetiresTheMessageAboutTheAxesAsTheyWere) {
+  Fixture fixture;
+  Frame frame;
+  const auto presentation = settled(fixture, frame);
+  EXPECT_TRUE(presentation->dispatchAction("std:nav/step_x_neg"));
+  ASSERT_NE(presentation->notice(), "");
+  EXPECT_TRUE(presentation->dispatchAction("std:ui/swap_axes"));
+  EXPECT_EQ(presentation->notice(), "");
+}
+
+TEST(ViewStatusTest, AMessageDoesNotCoverTheViewAndSubviewOrTheKeys) {
+  Fixture fixture;
+  Frame frame;
+  const auto presentation = settled(fixture, frame);
+  presentation->setKeyHints("Left/Right: step", "Ctrl+Alt+V: back to text");
+  frame.draw(*presentation);
+  EXPECT_EQ(presentation->chromeRows(),
+            "Stretch vanishing: Ghosts\nLeft/Right: step");
+
+  EXPECT_TRUE(presentation->dispatchAction("std:nav/step_x_neg"));
+  ASSERT_NE(presentation->notice(), "");
+  frame.draw(*presentation);
+  EXPECT_THAT(presentation->chromeRows(),
+              testing::StartsWith("Stretch vanishing: Ghosts\n"))
+      << "the message is a row of its own above, not in place of this one";
+}
+
+TEST(ViewStatusTest, TheKeyHintsAreInTheAccessibilityTreeAsTheyAreDrawn) {
+  Fixture fixture;
+  Frame frame;
+  const auto presentation = settled(fixture, frame);
+  presentation->setKeyHints("Left/Right: step", "Ctrl+Alt+V: back to text");
+  const auto tree = treeOf(*presentation);
+  EXPECT_TRUE(std::ranges::any_of(tree.nodes, [](const auto &node) {
+    return gleditor::a11y::Role::Label == node.role &&
+           "Left/Right: step" == node.label;
+  }));
+  // Where the keyboard is not, the other line is the one drawn and read.
+  presentation->setHasKeyboard(false);
+  const auto away = treeOf(*presentation);
+  EXPECT_TRUE(std::ranges::any_of(away.nodes, [](const auto &node) {
+    return "Ctrl+Alt+V: back to text" == node.label;
+  }));
 }
 
 TEST(SlicePresentationPaletteTest, RecordsTheChoiceInTheLayoutPerSlice) {
@@ -1043,7 +1196,7 @@ TEST(ViewBindingsStayTest, ACellLinkedToItselfIsNotAMoveAndNotAVisit) {
 
   EXPECT_TRUE(presentation->dispatchAction("step-x-pos"));
   EXPECT_EQ(presentation->focusCell(), deep.loner);
-  EXPECT_EQ(presentation->notice(), "No cell further along d.deep posward.");
+  EXPECT_EQ(presentation->notice(), "No cell further forward along d.deep.");
   EXPECT_EQ(presentation->breadcrumbs(), walked);
 }
 
@@ -1068,6 +1221,8 @@ TEST(ViewBindingsStayTest, ASubviewBelongsToTheViewThatOffersIt) {
 
 TEST(ViewBindingsStayTest, BindingsAndTheFocusAreKeptWithTheSlice) {
   Fixture fixture;
+  KeptActivity activity;
+  fixture.focus = activity.log;
   Frame frame;
   {
     const auto presentation = settled(fixture, frame);
@@ -1077,7 +1232,12 @@ TEST(ViewBindingsStayTest, BindingsAndTheFocusAreKeptWithTheSlice) {
     EXPECT_TRUE(presentation->dispatchAction("step-y-pos"));
     ASSERT_EQ(presentation->focusCell(), fixture.column[0]);
     frame.draw(*presentation);
+    // Quitting straight after the move: no pause has made it a resting place.
+    presentation->flushFocus();
   }
+  activity.close();
+  activity.open();
+  fixture.focus = activity.log;
   Frame second;
   const auto again = reopened(fixture, second);
   EXPECT_EQ(
@@ -1086,6 +1246,134 @@ TEST(ViewBindingsStayTest, BindingsAndTheFocusAreKeptWithTheSlice) {
   EXPECT_TRUE(again->compass()[0].group);
   EXPECT_EQ(again->focusCell(), fixture.column[0]);
   EXPECT_EQ(again->notice(), "") << "nothing was lost, so nothing is said";
+}
+
+TEST(ViewFocusTest, AWalkOfManyStepsIsOneRecordKeptWhenTheReaderPauses) {
+  Fixture fixture(24);
+  KeptActivity activity;
+  fixture.focus  = activity.log;
+  auto &settings = *fixture.system.at(SystemDocKind::Settings);
+  settings.repointCurrentVersion(xanadu::setSetting(
+      settings, settings.primaryCurrentVersion(),
+      xanadu::settings::kActivitySettleMs, std::int64_t{400}));
+  Frame frame;
+  const auto presentation = settled(fixture, frame);
+  const auto before       = activity.operations();
+  for (int i = 0; i < 20; ++i) {
+    ASSERT_TRUE(presentation->dispatchAction("step-x-pos"));
+    frame.draw(*presentation);
+  }
+  ASSERT_EQ(presentation->focusCell(), fixture.row[20]);
+  EXPECT_EQ(activity.operations(), before)
+      << "twenty steps without a pause write nothing";
+  EXPECT_EQ(activity.log->records(), 0U);
+
+  std::this_thread::sleep_for(std::chrono::milliseconds{450});
+  frame.draw(*presentation);
+  EXPECT_EQ(activity.log->records(), 1U);
+  const auto after = activity.operations();
+  frame.draw(*presentation);
+  frame.draw(*presentation);
+  EXPECT_EQ(activity.operations(), after) << "resting is not a second walk";
+  EXPECT_EQ(activity.log->last(fixture.slice.documentId()), fixture.row[20]);
+
+  // What a walk costs does not depend on how long it was: the first record
+  // made the dimension too, so compare two later walks of 3 steps and 1.
+  const auto walk = [&](const int steps) {
+    const auto began = activity.operations();
+    for (int i = 0; i < steps; ++i) {
+      EXPECT_TRUE(presentation->dispatchAction("step-x-neg"));
+      frame.draw(*presentation);
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds{450});
+    frame.draw(*presentation);
+    return activity.operations() - began;
+  };
+  const auto three = walk(3);
+  const auto one   = walk(1);
+  EXPECT_GT(one, 0U);
+  EXPECT_EQ(three, one);
+  EXPECT_EQ(activity.log->records(), 3U);
+}
+
+TEST(ViewFocusTest, TheLayoutStoreDoesNotGrowWithTheReadersSteps) {
+  Fixture fixture(24);
+  KeptActivity activity;
+  fixture.focus = activity.log;
+  Frame frame;
+  const auto presentation = settled(fixture, frame);
+  const auto &layout      = *fixture.system.at(SystemDocKind::Layout);
+  const auto before       = layout.opCount();
+  for (int i = 0; i < 20; ++i) {
+    ASSERT_TRUE(presentation->dispatchAction("step-x-pos"));
+    frame.draw(*presentation);
+  }
+  presentation->flushFocus();
+  EXPECT_EQ(layout.opCount(), before)
+      << "where the reader is is activity, not a setting";
+}
+
+TEST(ViewFocusTest, AMoveJustBeforeLeavingIsKeptAndTheSliceReopensThere) {
+  Fixture fixture;
+  KeptActivity activity;
+  fixture.focus = activity.log;
+  Frame frame;
+  {
+    const auto presentation = settled(fixture, frame);
+    ASSERT_TRUE(presentation->dispatchAction("step-x-pos"));
+    ASSERT_EQ(presentation->focusCell(), fixture.row[1]);
+    frame.draw(*presentation);
+    EXPECT_EQ(activity.log->records(), 0U) << "not yet paused on";
+    presentation->setPresentationVisible(false);
+    EXPECT_EQ(activity.log->records(), 1U) << "hiding the view keeps it";
+  }
+  activity.close();
+  activity.open();
+  fixture.focus = activity.log;
+  Frame second;
+  const auto again = reopened(fixture, second);
+  EXPECT_EQ(again->focusCell(), fixture.row[1]);
+}
+
+TEST(SlicePresentationSwitchTest, AReopenedSliceShowsWhereTheReaderRested) {
+  Fixture fixture;
+  KeptActivity activity;
+  const auto kind = std::string(xanadu::view::StretchVanishingView::kKind);
+  const auto open = [&](const bool move) {
+    fixture.focus     = activity.log;
+    const auto legacy = std::make_shared<zigzag::ZigzagVisualizer>("");
+    std::shared_ptr<ViewSlicePresentation> view =
+        std::make_shared<ViewSlicePresentation>(
+            fixture.registry, xanadu::view::StretchVanishingView::kKind,
+            fixture.host());
+    auto presentations =
+        std::make_shared<xanadu::view::SlicePresentationSwitch>(legacy);
+    presentations->setFocusLog(activity.log);
+    EXPECT_TRUE(presentations->add(
+        kind, view,
+        [view](xanadu::view::SlicePresentation &,
+               const xanadu::view::SlicePresentation &leaving) {
+          view->adoptAxes(leaving.currentView());
+        }));
+    presentations->bindXuduStore(fixture.slice,
+                                 fixture.slice.primaryCurrentVersion());
+    // The legacy presentation is at home at startup, and the seam carries the
+    // focus across when the view is chosen.
+    EXPECT_TRUE(presentations->show(kind));
+    if (move) {
+      // The slice's home links along nothing a view can step along.
+      presentations->focusCell(fixture.row.front());
+      EXPECT_TRUE(presentations->dispatchAction("step-x-pos"));
+      EXPECT_TRUE(presentations->dispatchAction("step-x-pos"));
+      presentations->flushFocus();
+    }
+    return presentations->focusCell();
+  };
+  EXPECT_NE(open(false), fixture.row[2]) << "nothing kept yet";
+  EXPECT_EQ(open(true), fixture.row[2]);
+  activity.close();
+  activity.open();
+  EXPECT_EQ(open(false), fixture.row[2]) << "kept across closing and opening";
 }
 
 TEST(ViewBindingsStayTest, ANameThatNoLongerResolvesIsSaidWhenTheyAreRestored) {
@@ -1132,7 +1420,7 @@ TEST(ViewBindingsStayTest, EveryDeadEndOfAStepSaysSoInTheStatusLine) {
   EXPECT_TRUE(presentation->dispatchAction("std:nav/step_y_pos"));
   EXPECT_TRUE(presentation->dispatchAction("std:nav/step_y_pos"));
   EXPECT_EQ(presentation->focusCell(), fixture.column[1]);
-  EXPECT_EQ(presentation->notice(), "No cell further along d.down posward.");
+  EXPECT_EQ(presentation->notice(), "No cell further forward along d.down.");
   EXPECT_TRUE(presentation->dispatchAction("std:nav/step_z_pos"));
   EXPECT_EQ(presentation->notice(), "z shows nothing; bind a dimension to it "
                                     "first.");
@@ -1148,7 +1436,7 @@ TEST(ViewBindingsStayTest, EveryDeadEndOfAStepSaysSoInTheStatusLine) {
   }));
   EXPECT_TRUE(presentation->bindTyped("z d.across"));
   EXPECT_TRUE(presentation->dispatchAction("std:nav/step_z_neg"));
-  EXPECT_EQ(presentation->notice(), "No cell further along d.across negward.");
+  EXPECT_EQ(presentation->notice(), "No cell further back along d.across.");
 }
 
 TEST(ViewBindingsStayTest, ATypedPointIsFoundWhateverTheCase) {
@@ -1237,6 +1525,23 @@ std::string noteOf(gleditor::Form &form) {
 }
 
 } // namespace
+
+TEST(BindingDialogTest, TheExampleNamesWhatTheSliceHas) {
+  gleditor::Form form("Sans 12");
+  xanadu::view::openBindingCommand(
+      form,
+      {.points = {"a", "b"}, .dimensions = {"d.rows", "d.cols"}, .groups = {}},
+      [](const std::string &, xanadu::view::BindingResult) {});
+  ASSERT_TRUE(form.isOpen());
+  EXPECT_EQ(form.current().front().hint,
+            "a point, then what it shows: a d.rows");
+  EXPECT_EQ(xanadu::view::bindingExample(
+                {.points = {"x"}, .dimensions = {}, .groups = {"Both"}}),
+            "a point, then what it shows: x Both");
+  EXPECT_EQ(xanadu::view::bindingExample({.points = {"x"}}),
+            "a point, then what it shows")
+      << "no example is better than one that is wrong";
+}
 
 TEST(BindingDialogTest, ClosesOnABindingMadeAndComesBackOnARefusal) {
   gleditor::Form form("Sans 12");

@@ -898,6 +898,24 @@ int XuzzApp::run(const int argc, char **argv) {
   }
   const auto slicePresentations =
       std::make_shared<xanadu::view::SlicePresentationSwitch>(zigzagVisualizer);
+  // Where the reader rested in each slice is their activity, kept in
+  // system://activity and not in a setting (view-system.md §7.5). An activity
+  // store that cannot be read is left alone and the focus is kept for this
+  // session only, as the places are.
+  const auto focusLog = [&session]() -> std::shared_ptr<xanadu::SliceFocusLog> {
+    auto *const activity = session->activityForNavigation();
+    try {
+      return std::make_shared<xanadu::SliceFocusLog>(
+          activity, xanadu::activityDirectory());
+    } catch (const std::exception &err) {
+      GLEDITOR_LOG_WARN("xuzz.view",
+                        "where you rested in each slice cannot be read: {}",
+                        err.what());
+      return std::make_shared<xanadu::SliceFocusLog>(nullptr,
+                                                     std::filesystem::path{});
+    }
+  }();
+  slicePresentations->setFocusLog(focusLog);
   std::vector<std::shared_ptr<xanadu::view::ViewSlicePresentation>>
       viewPresentations;
   for (const auto &descriptor : viewRegistry.views()) {
@@ -918,7 +936,8 @@ int XuzzApp::run(const int argc, char **argv) {
                 [&session](const xanadu::SystemDocKind kind,
                            const xanadu::MicroversionId &version) {
                   session->repointSystemDoc(kind, version);
-                }});
+                },
+            .focus = focusLog});
     viewPresentations.push_back(presentation);
     std::ignore = slicePresentations->add(
         descriptor.kind, presentation,
@@ -3122,6 +3141,8 @@ int XuzzApp::run(const int argc, char **argv) {
 
   // 10. Persistence & Exit Cleanup
   {
+    // A move made just before quitting has not been paused on yet.
+    slicePresentations->flushFocus();
     auto place              = views.finalPlace();
     place.zigzagStore       = session->path(zigzagStoreIndex);
     place.zigzagVersion     = zigzagPresentation->sliceHead().str();

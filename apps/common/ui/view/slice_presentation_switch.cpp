@@ -9,6 +9,9 @@
 #include <stdexcept>
 #include <utility>
 
+#include <gleditor/logging.hpp>
+
+#include "common/xanadu/store.hpp"
 #include "common/xanadu/system_docs.hpp"
 
 namespace xanadu::view {
@@ -111,6 +114,7 @@ bool SlicePresentationSwitch::show(const std::string_view kind) {
   }
   auto &leaving = *entries_[shown_].presentation;
   auto &coming  = *found->presentation;
+  flushFocus();
   // The reader keeps their place: the same slice, the same cell, the same
   // axes, the same link marked.
   if (auto *const slice = leaving.store()) {
@@ -133,6 +137,25 @@ bool SlicePresentationSwitch::show(const std::string_view kind) {
     invalidation_(bridgeRevision());
   }
   return true;
+}
+
+SlicePresentationSwitch *
+SlicePresentationSwitch::setFocusLog(std::shared_ptr<SliceFocusLog> log) {
+  focusLog_ = std::move(log);
+  return this;
+}
+
+SlicePresentationSwitch *SlicePresentationSwitch::flushFocus() {
+  auto &now = shown();
+  if (const auto *const slice = now.store(); focusLog_ && nullptr != slice) {
+    if (const auto cell = now.focusCell(); zigzag::noCell != cell) {
+      if (const auto kept = focusLog_->keep(slice->documentId(), cell); !kept) {
+        GLEDITOR_LOG_WARN("xuzz.view", "the focus could not be kept: {}",
+                          kept.error());
+      }
+    }
+  }
+  return this;
 }
 
 std::string_view SlicePresentationSwitch::shownKind() const noexcept {
@@ -207,8 +230,19 @@ void SlicePresentationSwitch::bindXuduStore(Store &store,
                                             const MicroversionId &version) {
   // Every presentation follows the slice; one not shown folds it only when
   // it is shown.
+  const auto *const before = entries_.front().presentation->store();
   for (const auto &entry : entries_) {
     entry.presentation->bindXuduStore(store, version);
+  }
+  // A slice newly opened starts where the reader left it. The slice views
+  // read that themselves; the visualizer does not, and the seam would carry
+  // its home over a kept focus on the first switch.
+  if (focusLog_ && before != &store) {
+    auto &front = *entries_.front().presentation;
+    if (const auto kept = focusLog_->last(store.documentId());
+        kept && front.manifold().contains(*kept)) {
+      front.focusCell(*kept);
+    }
   }
 }
 

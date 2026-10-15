@@ -35,6 +35,7 @@ constexpr std::uint64_t kTrailNode   = 2;
 constexpr std::uint64_t kNoticeNode  = 3;
 constexpr std::uint64_t kCompassNode = 4;
 constexpr std::uint64_t kStatusNode  = 5;
+constexpr std::uint64_t kHintsNode   = 6;
 constexpr std::uint64_t kFirstNode   = 16;
 /// The breadcrumbs' items, by place in the strip, clear of placed things.
 constexpr std::uint64_t kFirstCrumbNode = std::uint64_t{1} << 40U;
@@ -201,6 +202,7 @@ ViewSlicePresentation *ViewSlicePresentation::applySettings() {
   if (auto *const settings = store(SystemDocKind::Settings)) {
     const auto model = SystemStoreModel::fromStore(*settings);
     stretch_         = StretchConfig::fromSettings(model);
+    focusSettleMs_   = WalkRankingConfig::fromStore(*settings).settleMs;
     view_->applySettings(model, cellsInPixels());
   }
   if (auto *const layout = store(SystemDocKind::Layout)) {
@@ -223,6 +225,12 @@ ViewSlicePresentation *ViewSlicePresentation::applySettings() {
           found && *found != subview_) {
         subview_ = *found;
         cause_   = MotionCause::SubViewSwitch;
+        // Chosen elsewhere (the palette): what was last said, "Plain (2 of
+        // 2)", is no longer so, and the status line now says what shows.
+        if (!notice_.empty()) {
+          notice_.clear();
+          ++chromeRevision_;
+        }
       }
     }
   }
@@ -349,13 +357,10 @@ void ViewSlicePresentation::buildSpace() {
   }
 
   auto origin = wantedFocus_.value_or(manifold_->home());
-  if (!carried && !wantedFocus_ && host_.systemStore) {
-    if (auto *const layout = host_.systemStore(SystemDocKind::Layout)) {
-      const auto kept = SystemStoreModel::fromStore(*layout).getInt64List(
-          settings::sliceFocusKey(store_->documentId().str()));
-      if (!kept.empty() && kept.front() >= 0) {
-        origin = static_cast<zigzag::CellRef>(kept.front());
-      }
+  if (!carried && !wantedFocus_ && host_.focus) {
+    // Where the reader last rested, from their activity (§7.5).
+    if (const auto kept = host_.focus->last(store_->documentId())) {
+      origin = *kept;
     }
   }
   if (!manifold_->contains(origin)) {
@@ -785,9 +790,11 @@ void ViewSlicePresentation::drawScene(gleditor::FrameContext &ctx) {
     ++stamp_;
   }
 
-  // Written once the walk comes to rest, so a held key is one write.
-  if (focusDirty_ && !animation_.animating()) {
-    persistFocus();
+  // Kept once the reader has paused for activity.settleMs, so a walk is one
+  // record however many steps it took.
+  if (focusDirty_ && !animation_.animating() &&
+      now - focusMovedAt_ >= std::chrono::milliseconds{focusSettleMs_}) {
+    flushFocus();
   }
 
   const auto documentId = store_ ? store_->documentId().str() : std::string{};
@@ -821,16 +828,24 @@ void ViewSlicePresentation::drawFrame(gleditor::FrameContext &ctx) {
   if (!visible_) {
     return;
   }
-  drawnChrome_  = chromeRevision_ + keyboardMoves_.load();
-  drawnCompass_ = compassStamp_;
+  const auto chromeStamp = chromeRevision_ + keyboardMoves_.load();
+  drawnChrome_           = chromeStamp;
+  drawnCompass_          = compassStamp_;
+  if (chromeRowsStamp_ != chromeStamp) {
+    chromeRows_       = status_;
+    const auto &hints = keyboardHere_.load() ? hintsHere_ : hintsElsewhere_;
+    if (!hints.empty()) {
+      chromeRows_ += (chromeRows_.empty() ? "" : "\n") + hints;
+    }
+    chromeRowsStamp_ = chromeStamp;
+  }
   presenter_.drawChrome(
       ctx, PresentedChrome{.breadcrumbs = breadcrumbs_,
-                           .notice      = notice_.empty() ? status_ : notice_,
-                           .hints       = keyboardHere_.load() ? hintsHere_
-                                                               : hintsElsewhere_,
+                           .notice      = notice_,
+                           .hints       = chromeRows_,
                            .paddingX    = cells_.hudHorizontalPaddingPx,
                            .paddingY    = cells_.hudVerticalPaddingPx,
-                           .stamp = chromeRevision_ + keyboardMoves_.load()});
+                           .stamp       = chromeStamp});
   ensureSpace();
   presenter_.drawCompass(ctx, PresentedCompass{.arms   = compass_,
                                                .config = compassConfig_,
@@ -929,9 +944,8 @@ void ViewSlicePresentation::step(const std::string &point,
     const auto name = shownName(*axis);
     const std::array fields{
         MessageField{"dimension", name.empty() ? point : name},
-        MessageField{"direction", zigzag::DimVector::POS == direction
-                                      ? "posward"
-                                      : "negward"}};
+        MessageField{"direction",
+                     zigzag::DimVector::POS == direction ? "forward" : "back"}};
     say(ViewMessage::NothingThatWay, fields);
     return;
   }
@@ -977,9 +991,8 @@ void ViewSlicePresentation::hop(const zigzag::DimVector direction) {
     const auto name = shownName(*axis);
     const std::array fields{
         MessageField{"dimension", name.empty() ? *point : name},
-        MessageField{"direction", zigzag::DimVector::POS == direction
-                                      ? "posward"
-                                      : "negward"}};
+        MessageField{"direction",
+                     zigzag::DimVector::POS == direction ? "forward" : "back"}};
     say(ViewMessage::NothingThatWay, fields);
     return;
   }
@@ -1013,6 +1026,12 @@ void ViewSlicePresentation::swapAxes() {
   if (const auto swapped = axes.swap(*x, *y); !swapped) {
     say(messageKey(swapped.error()), {});
     return;
+  }
+  // A swap is a change of what the last message was about; left up, it would
+  // still be read as true of the axes as they were.
+  if (!notice_.empty()) {
+    notice_.clear();
+    ++chromeRevision_;
   }
   rebound(MotionCause::Rebind);
   persistBindings();
@@ -1181,30 +1200,20 @@ void ViewSlicePresentation::persistBindings() {
   }
 }
 
-void ViewSlicePresentation::persistFocus() {
+ViewSlicePresentation *ViewSlicePresentation::flushFocus() {
+  if (!focusDirty_) {
+    return this;
+  }
   focusDirty_ = false;
-  if (nullptr == store_ || !host_.systemStore ||
-      zigzag::noCell == cursor_.origin) {
-    return;
+  if (nullptr == store_ || !host_.focus || zigzag::noCell == cursor_.origin) {
+    return this;
   }
-  auto *const layout = host_.systemStore(SystemDocKind::Layout);
-  if (nullptr == layout) {
-    return;
+  if (const auto kept = host_.focus->keep(store_->documentId(), cursor_.origin);
+      !kept) {
+    GLEDITOR_LOG_WARN(kCategory, "the focus could not be kept: {}",
+                      kept.error());
   }
-  const auto id    = store_->documentId().str();
-  const auto cell  = static_cast<std::int64_t>(cursor_.origin);
-  const auto model = SystemStoreModel::fromStore(*layout);
-  const auto kept  = model.getInt64List(settings::sliceFocusKey(id));
-  if (!kept.empty() && kept.front() == cell) {
-    return;
-  }
-  const auto before = layout->primaryCurrentVersion();
-  const auto spec   = sliceFocusSettingSpec(id);
-  auto head         = ensureSetting(*layout, before, spec);
-  head              = setSetting(*layout, head, spec.name, cell);
-  if (head != before && host_.repoint) {
-    host_.repoint(SystemDocKind::Layout, head);
-  }
+  return this;
 }
 
 void ViewSlicePresentation::refreshStatus() {
@@ -1237,7 +1246,8 @@ void ViewSlicePresentation::arrive(const MoveOutcome &outcome,
     // that shows nothing here stays so until the reader binds it (§7.3).
     space_->toss();
   }
-  focusDirty_ = true;
+  focusDirty_   = true;
+  focusMovedAt_ = std::chrono::steady_clock::now();
   if (recorded) {
     if (const auto cell = cellAt(*space_, cursor_)) {
       record(*cell);
@@ -1427,7 +1437,7 @@ void ViewSlicePresentation::describe(gleditor::a11y::Builder &into) {
         const auto &other = from ? edge.to : edge.from;
         relations += std::format(
             "; {} {}: {}", textOf(SubjectId::label(edge.relation)),
-            from ? "posward" : "negward",
+            from ? "forward" : "back",
             textOf(SubjectId::cell(static_cast<zigzag::CellRef>(other.value))));
       }
       node.description = std::move(relations);
@@ -1492,6 +1502,14 @@ void ViewSlicePresentation::describe(gleditor::a11y::Builder &into) {
     status.label = status_;
     children.push_back(into.id(kStatusNode));
   }
+  // The strip's keys line is read to a screen reader as it is drawn: the
+  // keys are the one thing on it that is not also somewhere else.
+  if (const auto &hints = keyboardHere_.load() ? hintsHere_ : hintsElsewhere_;
+      !hints.empty()) {
+    auto &keys = into.add(kHintsNode, Role::Label);
+    keys.label = hints;
+    children.push_back(into.id(kHintsNode));
+  }
   if (!notice_.empty()) {
     auto &notice = into.add(kNoticeNode, Role::Label);
     notice.label = notice_;
@@ -1546,6 +1564,9 @@ bool ViewSlicePresentation::performAction(const std::uint64_t nodeId,
 ViewSlicePresentation *
 ViewSlicePresentation::setPresentationVisible(const bool visible) {
   if (visible_ != visible) {
+    if (!visible) {
+      flushFocus();
+    }
     visible_ = visible;
     stale_   = true;
     changed();

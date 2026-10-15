@@ -1083,7 +1083,6 @@ TEST(SystemDocsTest, ASliceKeepsItsBindingsInListsOfAnyLength) {
   EXPECT_EQ(settings::sliceAxesKey("abc"), "slice.abc.axes");
   EXPECT_EQ(settings::sliceGroupsKey("abc"), "slice.abc.groups");
   EXPECT_EQ(settings::sliceRingOrderKey("abc"), "slice.abc.ringOrder");
-  EXPECT_EQ(settings::sliceFocusKey("abc"), "slice.abc.focus");
 
   Store store;
   store.setSystem(true);
@@ -1091,7 +1090,6 @@ TEST(SystemDocsTest, ASliceKeepsItsBindingsInListsOfAnyLength) {
   auto ver   = store.primaryCurrentVersion();
   auto specs = xanadu::sliceBindingSettingSpecs("abc");
   EXPECT_EQ(specs.size(), 3U);
-  specs.push_back(xanadu::sliceFocusSettingSpec("abc"));
   for (const auto &spec : specs) {
     EXPECT_FALSE(spec.notes.empty());
     ver = xanadu::ensureSetting(store, ver, spec);
@@ -1101,7 +1099,6 @@ TEST(SystemDocsTest, ASliceKeepsItsBindingsInListsOfAnyLength) {
   // Nothing kept yet is an empty list, not a missing key.
   const auto model = [&] { return xanadu::SystemStoreModel::fromStore(store); };
   EXPECT_TRUE(model().getStringList(settings::sliceAxesKey("abc")).empty());
-  EXPECT_TRUE(model().getInt64List(settings::sliceFocusKey("abc")).empty());
 
   // The same setting takes three values, then five, then none: the schema's
   // repeated type is "any number of these".
@@ -1118,12 +1115,6 @@ TEST(SystemDocsTest, ASliceKeepsItsBindingsInListsOfAnyLength) {
   EXPECT_EQ(model().getStringList(settings::sliceAxesKey("abc")).size(), 5U);
   write({});
   EXPECT_TRUE(model().getStringList(settings::sliceAxesKey("abc")).empty());
-
-  ver = xanadu::setSetting(store, ver, settings::sliceFocusKey("abc"),
-                           std::int64_t{42});
-  store.repointCurrentVersion(ver);
-  EXPECT_EQ(model().getInt64List(settings::sliceFocusKey("abc")),
-            (std::vector<std::int64_t>{42}));
 }
 
 TEST(SystemDocsTest, ASubviewIsKeptPerSliceAndPerView) {

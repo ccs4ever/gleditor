@@ -60,3 +60,49 @@ TEST(StoreActivityLogTest, BranchesAndSelectedVisitSurviveReopening) {
   scroll.reset();
   std::filesystem::remove_all(base);
 }
+
+TEST(SliceFocusLogTest, EachSlicesLatestRestingPlaceSurvivesReopening) {
+  const auto base =
+      std::filesystem::temp_directory_path() /
+      ("xuzz-focus-" +
+       std::to_string(
+           std::chrono::steady_clock::now().time_since_epoch().count()));
+  std::filesystem::remove_all(base);
+  xanadu::UserPermascroll::Config config;
+  config.storageDir    = base / "permascroll";
+  auto scroll          = std::make_shared<xanadu::UserPermascroll>(config);
+  const auto directory = base / "activity";
+  xanadu::DocumentId one;
+  xanadu::DocumentId other;
+  ASSERT_TRUE(xanadu::DocumentId::fromBytes(std::string(16, '\x01'), one));
+  ASSERT_TRUE(xanadu::DocumentId::fromBytes(std::string(16, '\x02'), other));
+  {
+    xanadu::Store store(scroll);
+    xanadu::SliceFocusLog log(&store, directory);
+    EXPECT_FALSE(log.last(one));
+    ASSERT_TRUE(log.keep(one, 7));
+    ASSERT_TRUE(log.keep(other, 9));
+    const auto operations = store.opCount();
+    ASSERT_TRUE(log.keep(one, 7)) << "a cell already kept writes nothing";
+    EXPECT_EQ(store.opCount(), operations);
+    ASSERT_TRUE(log.keep(one, 12));
+    EXPECT_EQ(log.last(one), 12U);
+  }
+  {
+    xanadu::Store reopened(scroll);
+    reopened.load(directory.string());
+    xanadu::SliceFocusLog log(&reopened, directory);
+    EXPECT_EQ(log.last(one), 12U) << "the newest record wins";
+    EXPECT_EQ(log.last(other), 9U);
+    EXPECT_EQ(log.records(), 3U);
+  }
+  scroll.reset();
+  std::filesystem::remove_all(base);
+}
+
+TEST(SliceFocusLogTest, WithNoStoreItKeepsForTheSessionOnly) {
+  xanadu::SliceFocusLog log(nullptr, {});
+  xanadu::DocumentId slice;
+  ASSERT_TRUE(log.keep(slice, 3));
+  EXPECT_EQ(log.last(slice), 3U);
+}

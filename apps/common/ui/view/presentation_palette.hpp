@@ -36,7 +36,9 @@ namespace xanadu::view {
 struct PaletteChoice {
   /// settings::kSlicePresentationLegacy or a view's kind.
   std::string presentation;
-  /// A sub-view's id; empty keeps the one the slice shows.
+  /// A sub-view's id; empty keeps the one the slice shows (a cycle of views
+  /// has no sub-view to choose). The palette's own row for a view names its
+  /// default, see withDefaultSubview().
   std::string subview;
 
   bool operator==(const PaletteChoice &) const = default;
@@ -45,6 +47,13 @@ struct PaletteChoice {
 /// The row value that names @p choice, and the choice a row value names.
 [[nodiscard]] std::string paletteValue(const PaletteChoice &choice);
 [[nodiscard]] PaletteChoice paletteChoiceOf(std::string_view value);
+
+/// @p choice with the default sub-view of its view named when it names none:
+/// choosing a view's own row is choosing the view as it opens, not as the
+/// last sub-view left it. A choice of a view with no sub-views, or of the
+/// visualizer, is as it was.
+[[nodiscard]] PaletteChoice withDefaultSubview(const ViewRegistry &registry,
+                                               PaletteChoice choice);
 
 /// The palette's one field: today's visualizer, then each slice view of
 /// @p registry in palette order with its sub-views beneath, with @p current
@@ -72,6 +81,10 @@ using BindingAttempt =
 /// one, then the points, the dimensions and the groups a reader can name.
 [[nodiscard]] std::string bindingNote(const BindingChoices &choices,
                                       std::string_view reason = {});
+
+/// The hint under the binding field: its form, with an example from the first
+/// point and the first dimension (or group) @p choices lists.
+[[nodiscard]] std::string bindingExample(const BindingChoices &choices);
 
 /// The binding command: one line, a point and what it shows ('x d.across'),
 /// with what can be named listed under it. @p attempt is called with the line
