@@ -1,0 +1,10 @@
+49a12edef0113d9b6f6b7a120c8f2f7cbf7dd1f6d865e8606dc7dfaac4a164d6  /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-eleventh/pagewalk/evidence/checkpoints/00-selected/source-0.ops.txt
+49a12edef0113d9b6f6b7a120c8f2f7cbf7dd1f6d865e8606dc7dfaac4a164d6  /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-eleventh/pagewalk/evidence/checkpoints/01-inspect-before-enter/source-0.ops.txt
+49a12edef0113d9b6f6b7a120c8f2f7cbf7dd1f6d865e8606dc7dfaac4a164d6  /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-eleventh/pagewalk/evidence/checkpoints/02-enter-b1/source-0.ops.txt
+49a12edef0113d9b6f6b7a120c8f2f7cbf7dd1f6d865e8606dc7dfaac4a164d6  /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-eleventh/pagewalk/evidence/checkpoints/04-origin/source-0.ops.txt
+49a12edef0113d9b6f6b7a120c8f2f7cbf7dd1f6d865e8606dc7dfaac4a164d6  /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-eleventh/pagewalk/evidence/checkpoints/05-closed-page1/source-0.ops.txt
+49a12edef0113d9b6f6b7a120c8f2f7cbf7dd1f6d865e8606dc7dfaac4a164d6  /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-eleventh/pagewalk/evidence/checkpoints/06-closed-page2/source-0.ops.txt
+49a12edef0113d9b6f6b7a120c8f2f7cbf7dd1f6d865e8606dc7dfaac4a164d6  /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-eleventh/pagewalk/evidence/checkpoints/07-closed-page3/source-0.ops.txt
+49a12edef0113d9b6f6b7a120c8f2f7cbf7dd1f6d865e8606dc7dfaac4a164d6  /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-eleventh/pagewalk/evidence/checkpoints/08-closed-page4/source-0.ops.txt
+49a12edef0113d9b6f6b7a120c8f2f7cbf7dd1f6d865e8606dc7dfaac4a164d6  /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-eleventh/pagewalk/evidence/checkpoints/09-closed-page5/source-0.ops.txt
+49a12edef0113d9b6f6b7a120c8f2f7cbf7dd1f6d865e8606dc7dfaac4a164d6  /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-eleventh/pagewalk/evidence/checkpoints/10-closed-page6/source-0.ops.txt

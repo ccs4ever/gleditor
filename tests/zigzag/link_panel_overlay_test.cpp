@@ -604,6 +604,70 @@ protected:
   }
 };
 
+TEST_F(LinkPanelOverlayTest,
+       ClosedOccurrenceKeepsExactIdentityUntilItsVersionIsReopened) {
+  metrics.screenWidth   = 1800;
+  metrics.screenHeight  = 1400;
+  const auto version    = session.views().front().version;
+  const auto authority  = session.store().documentId();
+  const auto wrong      = session.store().insert(version, 0, "Another state ");
+  const auto selected   = *navigation.selection();
+  const auto operations = session.store().opCount();
+  const auto visits     = navigation.walkEntries().size();
+  std::optional<xanadu::Extent> focused;
+  navigation.setFocusDocument([&](std::size_t view, xanadu::Extent range) {
+    EXPECT_EQ(view, 0U);
+    focused = range;
+  });
+  session.viewClosed(0);
+  overlay.toggleInvestigation();
+  const auto labels = [&] {
+    draw();
+    gleditor::a11y::Tree tree;
+    gleditor::a11y::Builder builder(tree, 27);
+    overlay.describe(builder);
+    std::string result;
+    for (const auto &node : tree.nodes) result += node.label + "\n";
+    return result;
+  };
+  const auto identity = "Left occurrence store: " + authority.str() +
+                        "\nState: " + version.str() + " · bytes 0–4";
+  const auto unavailable =
+      "Left exact source reference unavailable: " +
+      std::string(xanadu::name(xanadu::ContentReferenceError::WrongFrame));
+  const auto closed = labels();
+  EXPECT_NE(closed.find(identity), std::string::npos);
+  EXPECT_NE(closed.find(unavailable), std::string::npos);
+  EXPECT_FALSE(navigation.execute(nav::Enter{}));
+  EXPECT_FALSE(focused);
+  EXPECT_EQ(navigation.walkEntries().size(), visits);
+
+  session.viewOpened(wrong);
+  const auto other = labels();
+  EXPECT_NE(other.find(identity), std::string::npos);
+  EXPECT_NE(other.find(unavailable), std::string::npos);
+  EXPECT_FALSE(navigation.execute(nav::Enter{}));
+  EXPECT_FALSE(focused);
+  EXPECT_EQ(navigation.walkEntries().size(), visits);
+  session.viewClosed(0);
+
+  session.viewOpened(version);
+  const auto reopened = labels();
+  EXPECT_NE(reopened.find("Pinned state: " + version.str()), std::string::npos);
+  EXPECT_EQ(reopened.find(unavailable), std::string::npos);
+  ASSERT_TRUE(navigation.selection());
+  EXPECT_EQ(navigation.selection()->key, selected.key);
+  EXPECT_EQ(navigation.selection()->left, selected.left);
+  EXPECT_EQ(navigation.selection()->right, selected.right);
+  EXPECT_EQ(navigation.selection()->origin, selected.origin);
+  EXPECT_EQ(session.store().opCount(), operations);
+  EXPECT_EQ(navigation.walkEntries().size(), visits);
+  ASSERT_TRUE(navigation.execute(nav::Enter{}));
+  EXPECT_EQ(focused, (xanadu::Extent{0, 4}));
+  EXPECT_EQ(navigation.walkEntries().size(), visits + 1);
+  EXPECT_EQ(session.store().opCount(), operations);
+}
+
 TEST_F(LinkPanelOverlayTest, PreviewEdgesKeepLinkHueExactRangesAndActiveSide) {
   const auto key = navigation.keyOf(links[0]);
   ASSERT_TRUE(navigation.execute(

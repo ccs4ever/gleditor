@@ -1,0 +1,13 @@
+{
+  "product_base_commit": "325b38b1d1af4d399f25777952bd774b6289283a",
+  "red_build_exit": 0,
+  "red_test_exit": 1,
+  "test_name": "LinkPanelOverlayTest.ClosedOccurrenceKeepsExactIdentityUntilItsVersionIsReopened",
+  "red_test_source_sha256": "661716e2dc311971d7af464e942b3c0f4f5f8f83b0c2c43442bc95e9a2fd6d0d",
+  "red_source_note": "Original red test source retained exactly. Final test adds only a selection-presence assertion after reopening, for clearer failure reporting.",
+  "failures": [
+    "Missing closed target identity",
+    "Missing identity while another version is open",
+    "Duplicate widget ID exception on exact version reopening with unavailable status"
+  ]
+}

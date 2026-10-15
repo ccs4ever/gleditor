@@ -1,0 +1,132 @@
+diff --git a/apps/common/ui/link_panel_presentation.cpp b/apps/common/ui/link_panel_presentation.cpp
+index b7844c8b..013051f1 100644
+--- a/apps/common/ui/link_panel_presentation.cpp
++++ b/apps/common/ui/link_panel_presentation.cpp
+@@ -621,9 +621,12 @@ inspectorPresentation(std::span<const xanadu::PanelLine> lines,
+     if (!std::holds_alternative<xanadu::nav::Dismiss>(buttons[i].command) &&
+         !std::holds_alternative<xanadu::nav::CancelEntry>(buttons[i].command))
+       ordinary.push_back(i);
+-  auto layoutId = std::max(
+-      {toggleId, request.previousId, request.nextId, ui::WidgetId{70}});
++  auto layoutId =
++      std::max({toggleId, request.previousId, request.nextId, ui::WidgetId{2}});
+   for (const auto id : ids) layoutId = std::max(layoutId, id);
++  for (const auto &widget : pinned) layoutId = std::max(layoutId, widget.id);
++  for (const auto &block : blocks)
++    layoutId = std::max(layoutId, block.widget.id);
+   for (std::size_t start = 0; start < ordinary.size(); start += columns) {
+     if (layoutId == std::numeric_limits<ui::WidgetId>::max())
+       throw std::length_error("Link inspector layout identities exhausted");
+@@ -728,10 +731,14 @@ inspectorPresentation(std::span<const xanadu::PanelLine> lines,
+   // inspector's continuous configured surface without changing diagram widgets.
+   auto content         = std::move(result.model);
+   const auto preferred = content.preferred;
+-  result.model         = {.id        = 70,
+-                          .model     = ui::Panel{},
+-                          .children  = {std::move(content)},
+-                          .preferred = preferred};
++  // Status labels and control rows already own their identities. The
++  // background must join the same allocation rather than reserve a fixed ID.
++  if (layoutId == std::numeric_limits<ui::WidgetId>::max())
++    throw std::length_error("Link inspector layout identities exhausted");
++  result.model = {.id        = ++layoutId,
++                  .model     = ui::Panel{},
++                  .children  = {std::move(content)},
++                  .preferred = preferred};
+   if (!available)
+     result.reservedBottom = result.bounds.bottom + result.bounds.height;
+   return result;
+diff --git a/apps/common/ui/xanadoc/link_panel_overlay.cpp b/apps/common/ui/xanadoc/link_panel_overlay.cpp
+index afb44bf0..d8dd9443 100644
+--- a/apps/common/ui/xanadoc/link_panel_overlay.cpp
++++ b/apps/common/ui/xanadoc/link_panel_overlay.cpp
+@@ -295,6 +295,14 @@ void LinkPanelOverlay::appendInvestigation(std::vector<PanelLine> &lines) {
+     const auto exact =
+         context.reference(selected->key, member, *cursor.occurrence);
+     if (!exact) {
++      // A closed frame cannot supply a source reference, but the chosen
++      // destination's saved identity is still available for recovery.
++      if (*cursor.occurrence < member.occurrences.size()) {
++        const auto &site = member.occurrences[*cursor.occurrence].site;
++        place(std::string(label) + " occurrence", site);
++        if (const auto *cell = std::get_if<CellSite>(&site))
++          append(std::format("{} occurrence cell: {}", label, cell->cell));
++      }
+       append(std::format("{} exact source reference unavailable: {}", label,
+                          name(exact.error())));
+       continue;
+diff --git a/tests/zigzag/link_panel_overlay_test.cpp b/tests/zigzag/link_panel_overlay_test.cpp
+index 769cfcfd..9489084e 100644
+--- a/tests/zigzag/link_panel_overlay_test.cpp
++++ b/tests/zigzag/link_panel_overlay_test.cpp
+@@ -604,6 +604,70 @@ protected:
+   }
+ };
+ 
++TEST_F(LinkPanelOverlayTest,
++       ClosedOccurrenceKeepsExactIdentityUntilItsVersionIsReopened) {
++  metrics.screenWidth   = 1800;
++  metrics.screenHeight  = 1400;
++  const auto version    = session.views().front().version;
++  const auto authority  = session.store().documentId();
++  const auto wrong      = session.store().insert(version, 0, "Another state ");
++  const auto selected   = *navigation.selection();
++  const auto operations = session.store().opCount();
++  const auto visits     = navigation.walkEntries().size();
++  std::optional<xanadu::Extent> focused;
++  navigation.setFocusDocument([&](std::size_t view, xanadu::Extent range) {
++    EXPECT_EQ(view, 0U);
++    focused = range;
++  });
++  session.viewClosed(0);
++  overlay.toggleInvestigation();
++  const auto labels = [&] {
++    draw();
++    gleditor::a11y::Tree tree;
++    gleditor::a11y::Builder builder(tree, 27);
++    overlay.describe(builder);
++    std::string result;
++    for (const auto &node : tree.nodes) result += node.label + "\n";
++    return result;
++  };
++  const auto identity = "Left occurrence store: " + authority.str() +
++                        "\nState: " + version.str() + " · bytes 0–4";
++  const auto unavailable =
++      "Left exact source reference unavailable: " +
++      std::string(xanadu::name(xanadu::ContentReferenceError::WrongFrame));
++  const auto closed = labels();
++  EXPECT_NE(closed.find(identity), std::string::npos);
++  EXPECT_NE(closed.find(unavailable), std::string::npos);
++  EXPECT_FALSE(navigation.execute(nav::Enter{}));
++  EXPECT_FALSE(focused);
++  EXPECT_EQ(navigation.walkEntries().size(), visits);
++
++  session.viewOpened(wrong);
++  const auto other = labels();
++  EXPECT_NE(other.find(identity), std::string::npos);
++  EXPECT_NE(other.find(unavailable), std::string::npos);
++  EXPECT_FALSE(navigation.execute(nav::Enter{}));
++  EXPECT_FALSE(focused);
++  EXPECT_EQ(navigation.walkEntries().size(), visits);
++  session.viewClosed(0);
++
++  session.viewOpened(version);
++  const auto reopened = labels();
++  EXPECT_NE(reopened.find("Pinned state: " + version.str()), std::string::npos);
++  EXPECT_EQ(reopened.find(unavailable), std::string::npos);
++  ASSERT_TRUE(navigation.selection());
++  EXPECT_EQ(navigation.selection()->key, selected.key);
++  EXPECT_EQ(navigation.selection()->left, selected.left);
++  EXPECT_EQ(navigation.selection()->right, selected.right);
++  EXPECT_EQ(navigation.selection()->origin, selected.origin);
++  EXPECT_EQ(session.store().opCount(), operations);
++  EXPECT_EQ(navigation.walkEntries().size(), visits);
++  ASSERT_TRUE(navigation.execute(nav::Enter{}));
++  EXPECT_EQ(focused, (xanadu::Extent{0, 4}));
++  EXPECT_EQ(navigation.walkEntries().size(), visits + 1);
++  EXPECT_EQ(session.store().opCount(), operations);
++}
++
+ TEST_F(LinkPanelOverlayTest, PreviewEdgesKeepLinkHueExactRangesAndActiveSide) {
+   const auto key = navigation.keyOf(links[0]);
+   ASSERT_TRUE(navigation.execute(

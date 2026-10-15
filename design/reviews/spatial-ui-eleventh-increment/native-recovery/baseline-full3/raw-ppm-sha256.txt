@@ -1,0 +1,8 @@
+b26d196047f78535e6e90102773221fa32f77ce38d91cdef522eefd5b0905dcc  /tmp/spatial-eleventh-recovery/full3/raw/00-selected.ppm
+ce7016ab8681c928beb3d2beb515a504a3aec5fb4fc88fa8ad51f434d0dc1280  /tmp/spatial-eleventh-recovery/full3/raw/01-inspect-before-enter.ppm
+28bb947238188713f41a59616620f1fbf97cc75709fe6f896cab07f1a492d192  /tmp/spatial-eleventh-recovery/full3/raw/02-enter-b1.ppm
+93f7b0ea7c1cc03c54b004da720b2df112fcde8770fb5ac7dc15f558772b6954  /tmp/spatial-eleventh-recovery/full3/raw/04-origin.ppm
+e13a6d51c446a135f6dac6022db03c8d4f73bfd1869352538b058a5b2f6437ba  /tmp/spatial-eleventh-recovery/full3/raw/05-close-b1.ppm
+b8d123bbd0857c7dcac48d9819717ce4da193f65c6986d81662fe34defd7081a  /tmp/spatial-eleventh-recovery/full3/raw/07-map.ppm
+fb8554b953119af03c8d5805a6d6266ba6c654839810f301d1adbe364cf23b64  /tmp/spatial-eleventh-recovery/full3/raw/08-reopened-b1.ppm
+63251bd05f9b110e4ce7d2d3a4a9c4b238d06039cd696b1fe2663e8f98402e7d  /tmp/spatial-eleventh-recovery/full3/raw/10-enter-after-map.ppm

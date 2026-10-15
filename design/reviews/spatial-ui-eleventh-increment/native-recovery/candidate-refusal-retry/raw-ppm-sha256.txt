@@ -1,0 +1,9 @@
+94d9928ebf5dbaddb76c7e5fbdc2a261d87146d494ce8843680401c79c06a807  /tmp/spatial-eleventh-candidate/full6/raw/00-selected.ppm
+ab38b361b0c8f1f0cfe385d51aa0d5261715cdd85b5ee0b45b4bdb1e57f2ea1c  /tmp/spatial-eleventh-candidate/full6/raw/01-inspect-before-enter.ppm
+de093905f8ca3e0c7b05dad0fcdfe48a77ccd75525cc527f518c47918bbb2a20  /tmp/spatial-eleventh-candidate/full6/raw/02-enter-b1.ppm
+2a571b75b40f447572c500f7466b55b32f3081167aacfe3a147ef9e3bf9638da  /tmp/spatial-eleventh-candidate/full6/raw/04-origin.ppm
+0138895f9d4eb6f9d76a34b02508c637de2f70a890556a6c35ec4a0073918224  /tmp/spatial-eleventh-candidate/full6/raw/05-close-b1.ppm
+03577a464d78c62d446e84d9174b5b6268c833972d8060c6dfd6884c147b2bf7  /tmp/spatial-eleventh-candidate/full6/raw/06-unavailable-closed.ppm
+8fb3b0b3db19723d242f58b8d93d572429d23fe34a4e8094faba862a8976a66b  /tmp/spatial-eleventh-candidate/full6/raw/07-map.ppm
+29860f3e75436c000d4689462b98a7d5f934ea7147dc3664770e1f128925ad6c  /tmp/spatial-eleventh-candidate/full6/raw/08-reopened-b1.ppm
+6237a66efa4cd901fec7d0ddc8ba86591d4e3fb6cba8cdecb7627985c09992e8  /tmp/spatial-eleventh-candidate/full6/raw/09-retry-after-map.ppm

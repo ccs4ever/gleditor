@@ -295,6 +295,14 @@ void LinkPanelOverlay::appendInvestigation(std::vector<PanelLine> &lines) {
     const auto exact =
         context.reference(selected->key, member, *cursor.occurrence);
     if (!exact) {
+      // A closed frame cannot supply a source reference, but the chosen
+      // destination's saved identity is still available for recovery.
+      if (*cursor.occurrence < member.occurrences.size()) {
+        const auto &site = member.occurrences[*cursor.occurrence].site;
+        place(std::string(label) + " occurrence", site);
+        if (const auto *cell = std::get_if<CellSite>(&site))
+          append(std::format("{} occurrence cell: {}", label, cell->cell));
+      }
       append(std::format("{} exact source reference unavailable: {}", label,
                          name(exact.error())));
       continue;

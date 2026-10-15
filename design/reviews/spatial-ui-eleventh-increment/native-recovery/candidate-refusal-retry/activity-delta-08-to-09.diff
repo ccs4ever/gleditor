@@ -1,0 +1,10 @@
+--- /tmp/spatial-eleventh-candidate/full6/evidence/checkpoints/08-reopened-b1/activity.ops.txt	2026-10-15 14:00:36.936962562 -0400
++++ /tmp/spatial-eleventh-candidate/full6/evidence/checkpoints/09-retry-after-map/activity.ops.txt	2026-10-15 14:00:42.043132940 -0400
+@@ -16,3 +16,7 @@
+ op 16  produces=16 parent=15 branch=0 kind=structure flags=0x1 at=0 len=0 to=15 src=11 srcAt=11 srcLen=0 scroll=0 span=[0,0) link=9 value=0  [setLink posward dim=9 -> 15 cell@11 ctx=11]
+ op 17  produces=17 parent=16 branch=0 kind=structure flags=0x30 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[55840,55841) link=0 value=1  [make cell int64 ctx=1] text="1"
+ op 18  produces=18 parent=17 branch=0 kind=structure flags=0x1 at=0 len=0 to=17 src=15 srcAt=15 srcLen=0 scroll=0 span=[0,0) link=9 value=0  [setLink posward dim=9 -> 17 cell@15 ctx=15]
++op 19  produces=19 parent=18 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[55841,55998) link=0 value=0  [make cell ctx=1] text="visit2 1 doc dd9091a75803e93f7c5486c386db25f3 b1"...
++op 20  produces=20 parent=19 branch=0 kind=structure flags=0x1 at=0 len=0 to=19 src=13 srcAt=13 srcLen=0 scroll=0 span=[0,0) link=5 value=0  [setLink posward dim=5 -> 19 cell@13 ctx=13]
++op 21  produces=21 parent=20 branch=0 kind=structure flags=0x30 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[55998,55999) link=0 value=3  [make cell int64 ctx=1] text="3"
++op 22  produces=22 parent=21 branch=0 kind=structure flags=0x1 at=0 len=0 to=21 src=17 srcAt=17 srcLen=0 scroll=0 span=[0,0) link=9 value=0  [setLink posward dim=9 -> 21 cell@17 ctx=17]

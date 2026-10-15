@@ -1,0 +1,59 @@
+{
+  "canonical_build_exit": 0,
+  "fresh_ui_suite": {
+    "passed": 236,
+    "total": 236,
+    "exit": 0
+  },
+  "format_check_exit": 0,
+  "lint_exit": 0,
+  "diff_check_exit": 0,
+  "product_and_binary_hashes_verified": true,
+  "strict_core": {
+    "exit": 0,
+    "backends": [
+      "OpenGL",
+      "OpenGL ES",
+      "Vulkan"
+    ],
+    "gl_gles_differing_pixels": 0,
+    "vulkan_ordinary_percent": 0.5104,
+    "vulkan_overlay_percent": 0.5096,
+    "unchanged_vulkan_limit_percent": 1,
+    "actual_split_recording_exercised": false,
+    "broad_e2e_accepted": false
+  },
+  "native_main_visit_record_counts": [
+    1,
+    1,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    3
+  ],
+  "native_source_ops_sha256": "49a12edef0113d9b6f6b7a120c8f2f7cbf7dd1f6d865e8606dc7dfaac4a164d6",
+  "native_pagewalk": {
+    "pages": 6,
+    "complete_frames": true,
+    "visible_fallback_page": 3,
+    "source_and_visit_records_unchanged": true
+  },
+  "reused_after_hash_verification": {
+    "library": 799,
+    "xuzz": 99,
+    "owning_mip_cache": 53
+  },
+  "independent_source_and_ux_visual_review": "No blocking concern for bounded increment",
+  "open": [
+    "J25 exact occurrence identity across fresh resolution and same-profile restart",
+    "native pending-page interruption",
+    "exact cell/history endpoints",
+    "complete J24/J25 and 16+16 journeys",
+    "native AT-SPI",
+    "optimized performance"
+  ],
+  "manifest_note": "Nested snapshot manifests preserve their original absolute run paths; archive-level manifests use relative paths and were verified."
+}

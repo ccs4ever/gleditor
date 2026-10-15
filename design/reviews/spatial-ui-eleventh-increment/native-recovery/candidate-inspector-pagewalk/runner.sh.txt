@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -euo pipefail
+run=/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-eleventh/pagewalk
+bin=/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-eleventh/bin
+export SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1
+export XDG_DATA_HOME=$run/data XDG_CONFIG_HOME=$run/config XDG_CACHE_HOME=$run/cache
+export PATH=/tmp/spatial-xvfb/usr/bin:$PATH
+passage=$'Harbor left passage.\nMeadow second passage.\nRight one.\nRight two.\nRight three.\n'
+app=("$bin/xuzz" --backend opengl --resize 1440,1000 --profile
+  --chord Ctrl+N --type "$passage" --select 0,20 --chord Ctrl+T --chord Ctrl+2
+  --select 0,20 --chord 'Ctrl+Alt+['
+  --select 21,43 --chord 'Ctrl+Alt+['
+  --select 44,54 --chord 'Ctrl+Alt+]'
+  --select 55,65 --chord 'Ctrl+Alt+]'
+  --select 66,78 --chord 'Ctrl+Alt+]'
+  --chord 'Ctrl+Alt+L' --select 0,20 --chord 'Alt+Shift+N'
+  --chord 'Alt+Shift+J' --chord 'Alt+Shift+L' --chord 'Alt+Shift+L'
+  --chord 'Alt+Shift+X' --chord 'Alt+Shift+J' --chord 'Alt+Shift+J'
+  --chord 'Alt+Shift+X'
+  --dump-a11y --capture "$run/raw/00-selected.ppm" --wait-ms 5000
+  --click-label 'Inspect members' --dump-a11y --capture "$run/raw/01-inspect-before-enter.ppm" --wait-ms 5000
+  --chord 'Alt+Shift+Return' --dump-a11y --capture "$run/raw/02-enter-b1.ppm" --wait-ms 5000
+  --chord 'Alt+Shift+O' --dump-a11y --capture "$run/raw/04-origin.ppm" --wait-ms 5000
+  --click-label 'Close Untitled · b' --dump-a11y --capture "$run/raw/05-closed-page1.ppm" --wait-ms 5000
+  --click-label 'Next controls page' --dump-a11y --capture "$run/raw/06-closed-page2.ppm" --wait-ms 5000
+  --click-label 'Next controls page' --dump-a11y --capture "$run/raw/07-closed-page3.ppm" --wait-ms 5000
+  --click-label 'Next controls page' --dump-a11y --capture "$run/raw/08-closed-page4.ppm" --wait-ms 5000
+  --click-label 'Next controls page' --dump-a11y --capture "$run/raw/09-closed-page5.ppm" --wait-ms 5000
+  --click-label 'Next controls page' --dump-a11y --capture "$run/raw/10-closed-page6.ppm" --wait-ms 5000
+  --chord Ctrl+Q)
+printf '%q ' "${app[@]}" > "$run/evidence/app-argv.txt"
+printf '\n' >> "$run/evidence/app-argv.txt"
+sha256sum "$bin"/{xuzz,libgleditor.so.0,xudu-dump} > "$run/evidence/binary-hashes-before.txt"
+LD_LIBRARY_PATH="$bin${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" SPDLOG_LEVEL='xuzz.keymap=debug' \
+  timeout --signal=TERM --kill-after=5s 240s xvfb-run -a -s '-noreset -screen 0 1600x1200x24' \
+  "${app[@]}" > "$run/evidence/session.log" 2>&1 & app_pid=$!
+snapshot() {
+  local label=$1 root="$run/data/xudu/xanadocs" target="$run/evidence/checkpoints/$1"
+  mkdir -p "$target"
+  mapfile -t stores < <(find "$root" -mindepth 1 -maxdepth 1 -type d ! -name default 2>/dev/null | sort)
+  { printf 'count=%s\n' "${#stores[@]}"; for i in "${!stores[@]}"; do printf '%s=%s\n' "$i" "${stores[$i]}"; done; } > "$target/profile-stores.txt"
+  for i in "${!stores[@]}"; do "$bin/xudu-dump" --section=ops --permascroll="$run/data/xuzz/permascroll/default" "${stores[$i]}" > "$target/source-$i.ops.txt" 2>&1 || true; done
+  if [[ -e "$run/data/xudu/activity" ]]; then "$bin/xudu-dump" --section=ops --permascroll="$run/data/xuzz/permascroll/default" "$run/data/xudu/activity" > "$target/activity.ops.txt" 2>&1 || true; else printf 'activity store absent at checkpoint\n' > "$target/activity.ops.txt"; fi
+  rg -o 'visit2 [0-9]+' "$target/activity.ops.txt" > "$target/visit-text-count.txt" || true
+  sha256sum "$target"/*.txt > "$target/SHA256SUMS"
+}
+for step in 00-selected 01-inspect-before-enter 02-enter-b1 04-origin 05-closed-page1 06-closed-page2 07-closed-page3 08-closed-page4 09-closed-page5 10-closed-page6; do
+  frame="$run/raw/$step.ppm"; ready=false
+  for _ in $(seq 1 120); do
+    if [[ -s "$frame" ]] && [[ $(stat -c %s "$frame") -eq 4320017 ]]; then ready=true; break; fi
+    if ! kill -0 "$app_pid" 2>/dev/null; then break; fi
+    sleep 0.5
+  done
+  if [[ "$ready" == true ]]; then snapshot "$step"; else printf 'missing-or-incomplete\n' > "$run/evidence/$step.missing.txt"; fi
+done
+if wait "$app_pid"; then status=0; else status=$?; fi
+printf '%s\n' "$status" > "$run/evidence/exit-status.txt"
+sha256sum "$bin"/{xuzz,libgleditor.so.0,xudu-dump} > "$run/evidence/binary-hashes-after.txt"
+for f in "$run"/raw/*.ppm; do [[ -f $f ]] && sha256sum "$f"; done > "$run/evidence/raw-ppm-sha256.txt"

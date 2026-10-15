@@ -621,9 +621,12 @@ inspectorPresentation(std::span<const xanadu::PanelLine> lines,
     if (!std::holds_alternative<xanadu::nav::Dismiss>(buttons[i].command) &&
         !std::holds_alternative<xanadu::nav::CancelEntry>(buttons[i].command))
       ordinary.push_back(i);
-  auto layoutId = std::max(
-      {toggleId, request.previousId, request.nextId, ui::WidgetId{70}});
+  auto layoutId =
+      std::max({toggleId, request.previousId, request.nextId, ui::WidgetId{2}});
   for (const auto id : ids) layoutId = std::max(layoutId, id);
+  for (const auto &widget : pinned) layoutId = std::max(layoutId, widget.id);
+  for (const auto &block : blocks)
+    layoutId = std::max(layoutId, block.widget.id);
   for (std::size_t start = 0; start < ordinary.size(); start += columns) {
     if (layoutId == std::numeric_limits<ui::WidgetId>::max())
       throw std::length_error("Link inspector layout identities exhausted");
@@ -728,10 +731,14 @@ inspectorPresentation(std::span<const xanadu::PanelLine> lines,
   // inspector's continuous configured surface without changing diagram widgets.
   auto content         = std::move(result.model);
   const auto preferred = content.preferred;
-  result.model         = {.id        = 70,
-                          .model     = ui::Panel{},
-                          .children  = {std::move(content)},
-                          .preferred = preferred};
+  // Status labels and control rows already own their identities. The
+  // background must join the same allocation rather than reserve a fixed ID.
+  if (layoutId == std::numeric_limits<ui::WidgetId>::max())
+    throw std::length_error("Link inspector layout identities exhausted");
+  result.model = {.id        = ++layoutId,
+                  .model     = ui::Panel{},
+                  .children  = {std::move(content)},
+                  .preferred = preferred};
   if (!available)
     result.reservedBottom = result.bounds.bottom + result.bounds.height;
   return result;

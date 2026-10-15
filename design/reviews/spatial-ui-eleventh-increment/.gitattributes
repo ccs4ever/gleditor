@@ -1,0 +1,4 @@
+# Preserve original transcripts, argument vectors and unified diff context.
+*.log -text whitespace=cr-at-eol
+*.patch.txt whitespace=-blank-at-eol
+*argv.txt whitespace=-blank-at-eol

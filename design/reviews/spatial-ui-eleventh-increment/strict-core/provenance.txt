@@ -1,0 +1,20 @@
+Strict core comparison, exit 0. Command (repository worktree cwd):
+SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1 \
+XDG_DATA_HOME=$PWD/build/validation-eleventh/strict-core/data \
+XDG_CONFIG_HOME=$PWD/build/validation-eleventh/strict-core/config \
+XDG_CACHE_HOME=$PWD/build/validation-eleventh/strict-core/cache \
+OUT=$PWD/build/validation-eleventh/strict-core/raw XUDU_TEST_BIN=/nonexistent \
+PATH=/tmp/spatial-xvfb/usr/bin:$PATH \
+xvfb-run -a -s '-noreset -screen 0 1024x768x24' ./tools/compare-backends.sh
+
+XUDU_TEST_BIN explicitly excludes the optional broad E2E extension. The first invocation omitted
+that override, completed the core checks, then started broad E2E; root stopped only its process
+subtree (exit 143). Its log is retained as an aborted attempt, not a passing broad suite. A fresh
+profile/output directory was used for the successful explicit core-only rerun above. Criteria and
+script are unchanged. GL/GLES ordinary and overlay images match exactly. Vulkan ordinary differs
+by 0.5104%, overlay by 0.5096%, within the unchanged 1% criterion with channel tolerance 1.
+
+All three backends ran; no backend was classified unavailable. The small sample's one/four-thread
+frames match, but it has too few page draws to split actual recording. No split-recording,
+optimized-performance or broad backend E2E acceptance is claimed. PPM originals remain in the
+ignored build output directory; all are losslessly encoded here as PNGs, with original hashes.

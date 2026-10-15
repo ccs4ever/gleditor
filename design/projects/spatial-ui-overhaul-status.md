@@ -7,6 +7,26 @@ session.
 
 ## Current checkpoint
 
+Eleventh checkpoint (2026-10-15), based on `325b38b1`: the existing Inspector now shows a closed
+chosen occurrence's store, exact state and byte range before its unavailable-source-reference
+reason. Cell targets retain their cell ID. A status/background widget-ID collision found while
+reopening is repaired through checked container-ID allocation. The red/green overlay regression
+covers closed, wrong-version and exact-version reopening, preserving source operations and adding no
+visit on refusal. Canonical GNU Make and fresh UI 236/236 pass.
+
+The native OpenGL same-session route proves exact recovery after refused Enter: Inspector matches
+store/version/source/range before and after the map reopens `b1`, retains Left place 2/2 and Right
+member 2/3, and fresh Enter adds one visit. Nine snapshots preserve source bytes and show visits
+1→2→2→3. The previous unsuccessful map experiment restarted the app and freshly resolved ordinal
+cursors; it did not prove same-session recovery broken. Exact occurrence identity across restart
+remains open. See the [eleventh review](../reviews/spatial-ui-eleventh-increment/README.md).
+
+Fresh strict core comparison passes on GL/GLES/Vulkan with unchanged thresholds. GL/GLES ordinary
+and overlay match exactly; Vulkan differs by 0.5104% and 0.5096%. One/four-thread frames match,
+without actual split recording in the small sample. Broad E2E is excluded. Unchanged shared library
+and library/Xuzz binaries retain previous 799/799, owning 53/53 and 99/99 results; UI 236/236 is
+fresh. Full journeys, native AT-SPI and optimized performance remain open.
+
 Tenth checkpoint (2026-10-15), based on `237d6b1e`: a completed source return now cancels any older
 endpoint entry waiting for page geometry. Pouch Swing Back can return to an already-open source
 without changing the session epoch; previously the deferred entry could later steal focus and append
@@ -442,13 +462,18 @@ reviews pass.
 
 ## Exact next task
 
-Finish J24 recovery after a closed exact target is reopened through actual controls. Establish the
-saved occurrence's store authority and version alongside the reopened view before classifying the
-Hypertime-map observation; a visible `b1` label alone is insufficient. Capture before/after source
-and activity snapshots and prove a fresh explicit Enter adds exactly one completed visit. Exercise
-naturally pending page cancellation where native timing permits; retain the owning deferred-page
-regression as integration evidence, not native timing acceptance. Continue exact cell/history
-endpoints and J25 branching Back/Return and same-profile reopen.
+Continue J25 exact occurrence identity across fresh resolution and same-profile restart. Saved
+selection currently carries numeric member/occurrence cursors, while re-resolution indexes the
+currently open views; a changed view set can change what the ordinal denotes. Preserve exact chosen
+sites, refuse missing sites explicitly, and verify both cursors and origin after reopening. Follow
+R8 and the on-disk/activity rules before changing persistence. Then exercise branching Back/Return
+and each retained forward child through actual controls with source/activity snapshots. The eleventh
+review proves bounded same-session closed-target refusal/reopen/retry, not same-profile restore or
+the complete J24/J25 journeys.
+
+Exercise naturally pending page cancellation where native timing permits; retain the owning
+source-arrival regression as integration evidence, not native timing acceptance. Continue exact
+cell/history endpoints. Publication/pin-lifecycle audit still precedes D2 history enumeration.
 
 The tenth review records bounded unavailable/Cancel/retry evidence. The ninth numeric audit resolves
 the earlier Origin/Back missing-panel discrepancy; confirm future visual findings with decoded

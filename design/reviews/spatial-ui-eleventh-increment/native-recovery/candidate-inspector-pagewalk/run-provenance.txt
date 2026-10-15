@@ -1,0 +1,13 @@
+Source revision at run: 325b38b1d1af4d399f25777952bd774b6289283a (working tree had active edits; binary hashes below identify exact tested artifacts). Candidate app xuzz SHA-256: 6aade8d34a679960b3789f87cc808219dcb2d01aa2ab0602b68a14907a8d7522; libgleditor.so.0: ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9; regular xudu-dump copy (copied from build/store-dump, not the compatibility symlink): 7031847f950135234935ae67d06c3e59da6a945bd95a5202f14591064f00947c. Hashes match before and after each candidate run. Baseline app was 9a27360825b63e344879885e1039ad0183062e595dfe3472c3e0042e1828101e; same library and dumper hashes.
+
+All six native environment variables (set explicitly in each preserved runner):
+SDL_VIDEODRIVER=offscreen
+SDL_AUDIODRIVER=dummy
+LIBGL_ALWAYS_SOFTWARE=1
+XDG_DATA_HOME=/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-eleventh/pagewalk/data
+XDG_CONFIG_HOME=/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-eleventh/pagewalk/config
+XDG_CACHE_HOME=/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-eleventh/pagewalk/cache
+PATH prepended /tmp/spatial-xvfb/usr/bin; LD_LIBRARY_PATH prepended the frozen candidate bin directory; SPDLOG_LEVEL=xuzz.keymap=debug. Xuzz window/frame size 1440x1000.
+Xvfb command: timeout --signal=TERM --kill-after=5s 240s xvfb-run -a -s '-noreset -screen 0 1600x1200x24' <app argv>. xvfb-run auto-selected DISPLAY; numeric display was not recorded.
+
+Each preserved runner is byte-exact as executed but named `.sh.txt` for archival. It requests a full P6 PPM frame, then waits 5 seconds before the next UI action. An external collector polls every 0.5 seconds for up to 120 attempts and snapshots only after the PPM exists at exactly 4,320,017 bytes while the app PID is live. It then dumps each source store and the private activity store, extracts `visit2 <parent-id>` text from the complete activity dump, and hashes the snapshot files. All archived frame PNGs are lossless decoded-RGB matches for their 1440x1000 PPM sources; frame-verification.tsv lists dimensions, byte counts and hashes.

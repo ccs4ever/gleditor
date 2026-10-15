@@ -1,0 +1,32 @@
+{
+  "derivation": "Read the recorded span offsets from the final activity ops dump against this run\u2019s append-only permascroll; derived read-only after native exit.",
+  "permascroll_path": "/tmp/spatial-eleventh-candidate/full6/data/xuzz/permascroll/default/active.primedia",
+  "permascroll_sha256": "f56bb617d71a671628ecbd217a70580fe982ee28ac7a02b60eeec67be374e1fd",
+  "records": [
+    {
+      "op": 7,
+      "primedia_range": [
+        55427,
+        55484
+      ],
+      "payload": "visit2 0 doc 151f6cb7d4b764b692b1a170a74dcdf8 0 0 0 0 0 0"
+    },
+    {
+      "op": 13,
+      "primedia_range": [
+        55682,
+        55839
+      ],
+      "payload": "visit2 1 doc dd9091a75803e93f7c5486c386db25f3 b1 0 20 0 1 1 dd9091a75803e93f7c5486c386db25f3 22 0 0 1 1 0 1 1 doc dd9091a75803e93f7c5486c386db25f3 a34 0 20 0"
+    },
+    {
+      "op": 19,
+      "primedia_range": [
+        55841,
+        55998
+      ],
+      "payload": "visit2 1 doc dd9091a75803e93f7c5486c386db25f3 b1 0 20 0 1 1 dd9091a75803e93f7c5486c386db25f3 22 0 0 1 1 0 1 1 doc dd9091a75803e93f7c5486c386db25f3 a34 0 20 0"
+    }
+  ],
+  "note": "The integer following visit2 is parent visit ID. Visit IDs follow append order; identical payloads at different MakeCell operations remain distinct visits."
+}
