@@ -39,7 +39,7 @@ using testing::Return;
 namespace gleditor {
 namespace {
 
-std::vector<std::uint8_t> readFile(const std::string &path) {
+[[maybe_unused]] std::vector<std::uint8_t> readFile(const std::string &path) {
   std::ifstream file(path, std::ios::binary);
   if (!file.is_open()) {
     return {};
