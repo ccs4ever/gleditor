@@ -8,12 +8,12 @@ Last updated: 2026-10-15.
 
 ## Where it stands
 
-| Milestone                 | State                                           |
-| ------------------------- | ----------------------------------------------- |
-| M0, the tree in its shape | A1 and A2 done; closed                          |
-| M1, spikes                | done; closed                                    |
-| M2, the spine             | second gate: no-go until a second closing round |
-| M3 onward                 | not started                                     |
+| Milestone                 | State                                          |
+| ------------------------- | ---------------------------------------------- |
+| M0, the tree in its shape | A1 and A2 done; closed                         |
+| M1, spikes                | done; closed                                   |
+| M2, the spine             | third check: no-go until a third closing round |
+| M3 onward                 | not started                                    |
 
 ## Done
 
@@ -44,6 +44,8 @@ Last updated: 2026-10-15.
 | U5a, U7a                       | `c26bd5e`                                  | The compass (rows, not the rose; display only), the palette with sub-views, and the commands: steps, hop, swap, sub-view next and previous, cycle, and binding by typing (`std:view/bind`, Ctrl+Alt+B). A "plain" sub-view without ghosts. Typed bindings last only the session; no binding undo yet.                                                                                                                                                                                                                                                                                                                       |
 | M2 closing round, A            | `813d17e`, `c721e0b`, `66c3202`            | The gate's behaviour findings: arrival never rebinds (a typed group and undo survive a move); an unbound point stays unbound; the visualizer says it cannot bind; points by name from `layout.bindingPoints`, case-insensitive, unique; a hop around a ring stops beside its start; a self-link is not a move; sub-view kept per slice and view kind; bindings and focus kept per slice; the bind dialog lists names and survives a refusal; the status line names the view and sub-view.                                                                                                                                   |
 | M2 closing round, B            | `3084743`, `28c18ab`, `e5ca53a`, `73b68a9` | The capture race (four causes: a contributor finding work mid-frame, the camera and page still settling, undrawn chrome, and a 48-pixel blank page from `Doc::layoutFrom`); the page dimmed behind a slice and the focus row clear of it; strands clipped round labels and given a minimum width; ghosts and fades drawn at all (the canvas ignored a quad's alpha); key hints from the keymap for the active presentation; the presenter's per-frame allocation; layout guards on non-finite sizes; `view.draw.*`, `view.strand.*`, `view.page.*` settings; scenes for ghosts, wide neighbours, depth and quotation beams. |
+| M2 closing round 2, C          | `893a29f`                                  | The reader's focus kept per slice in `system://activity` (`SliceFocusLog`, one record per rest, flushed on hide, switch and exit; nothing written to `system://layout`, R8); a view's palette row selects its default sub-view; notices retired on swap and sub-view change; the status row never hidden by a notice; the key hints in the accessibility tree; the bind example from the slice's own names; "forward" and "back" in dead ends (§12.2).                                                                                                                                                                      |
+| M2 closing round 2, D          | `1f19db2`, `4218cdf`, `4a2ce2b`, `1a8b5d0` | Ghosts at 0.2 with rounded corners; depth as a fading cascade lifted clear of the thumbnail; strands and ghosts cut at the pane edge; labels on chips; the compass dodges; `PageDim` holds against other writers (the unified page is not dimmed by default, `view.page.dimUnified`); hints wrap, capped, with the status row outside the cap; dash floor and cap; `stretch.maxCellSpan` bounded; scenes in their own workspaces; a linked-pages scene. The `unified_store` refusal is not an engine defect: the text versions are not on the slice's line.                                                                 |
 
 What the A1 remainder changed:
 
@@ -82,36 +84,25 @@ changed.
 The project moves to a local machine; [`resume-view-project.md`](resume-view-project.md) is the
 prompt that resumes it.
 
-1. **M2's second closing round.** The second gate (2026-10-15) found no blocker and confirmed most
-   of the first round fixed, but not all; the owner's rule is few things fully done.
-   - Behaviour:
-     - Focus is not restored on reopen. `SlicePresentationSwitch::show()`
-       (`slice_presentation_switch.cpp:122`) pushes the visualizer's focus (home) over the kept one,
-       and `persistFocus()` appends about three operations to `system://layout` per rested step that
-       nothing reads, so the store grows without bound. Keep one value per slice, set in place;
-       restore it; flush on exit; test move, close, reopen. Decide whether a reader's focus belongs
-       in `system://layout` at all or in the activity store (R8).
-     - Choosing a view's own palette row after a sub-view leaves the sub-view
-       (`presentation_palette.cpp:175`); the announcement after it is stale.
-     - A swap leaves the previous notice up; a notice hides the view and sub-view line; the hints
-       bar is not in the accessibility tree; the bind dialog's example names a dimension the slice
-       may not have; "posward" and "negward" in messages.
-   - Drawing:
-     - Ghosts too faint at opacity 0.09 and square-cornered (§5.1.1, §5.5 #3).
-     - Labels overlapped: the focus box over the depth neighbour, the wide neighbour over its
-       neighbour, the compass over text, the focus box over a strand label.
-     - Depth invisible: the d.deep scene differs from the ghosts scene only in the status line.
-     - Strands and ghosts run past the viewport edge (a hairline and a tick at the right).
-     - The page is full white behind the slice in the default unified mode
-       (`view_coordinator.cpp:86`), and PageDim is undone by the onion-skin toggle and
-       `arrangeAlongside` (`views.cpp:2077`, `:2095`); `faded()` assumes a black ground.
-     - The hints bar clips "Back to text" with no ellipsis; an empty "Walked:" line.
-     - No capture shows a magenta xanalink ribbon beside dimension strands, and the gold beams sit
-       behind the inspector panel; adding a slice to `unified_store` is refused ("context operation
-       5 is in the future relative to parent 4"), which may be an engine defect.
-   - Guards: a hand-edited dash pattern of tiny lengths hangs the presenter (no lower bound or cap);
-     `stretch.maxCellSpan` up to 1e5 lets a huge measure hang layout.
-   - Then a short re-check: the red team on these items and the frame inspector on the frames.
+1. **M2's third closing round.** The re-check (2026-10-15) found no blocker; the red team confirmed
+   focus restore, R8 (movement writes only to `system://activity`) and every single setting's range
+   check, and the frame inspector confirmed ghosts, depth, hints and chips. Still to do:
+   - Red team: a combination of dash settings still hangs (a tiny `dashLeastLength` with a huge
+     `dashMaxCount`); the hint-row cap appends overflow back to front; ghosts and the compass dodge
+     allocate on every rebuild; a move then opening another slice before the rest window loses the
+     move; the pane extent is built from mirrored points when a corner is behind the camera; the
+     `unified_store` refusal message says "forked" of a separate root chain.
+   - Smaller: a notice survives hide and show; the a11y label and two tests read a string that is
+     never drawn; two settings' ranges disagree with their schema text; `PageDim` mistakes a
+     writer's value near its own for itself; a pane narrower than its padding does not ellipsise;
+     the focus log's keep costs 1 to 5 ms on the render thread and may share a store with another
+     writer.
+   - Frames: cells run under the tab bar; the overview thumbnail covers cells when the hints grow;
+     the link panel hides the slice in unified mode; the legend and thumbnail hide page text; a
+     stray outline and an empty focus box in the unified scene; the ribbon colour for a Comment link
+     to check against the spec; the linked-pages scene differs by 692 pixels between GL and GLES
+     where every other scene is identical.
+   - Then a short re-check, as before.
 1. Then M3 (packs), one milestone at a time.
 
 The spike branches were never meant to land; they are pushed for reference as `spike/v1-v3`,
@@ -155,6 +146,10 @@ At `73b68a9` (the end of M2's closing round, 2026-10-15, 4 cores, llvmpipe, no V
 `make -k test` exits 0 — `gleditor_test` 806, `xudu_test` 1319, `xuzz_test` 241, `ui_test` 257, both
 swarm runs (12, 4) — and `compare-backends.sh` exits 0, every image check and E2E scenario agreeing
 between OpenGL and GLES.
+
+At `1a8b5d0` (after M2's second closing round, 2026-10-15): `make -k test` exits 0 — `gleditor_test`
+806, `xudu_test` 1320, `xuzz_test` 249, `ui_test` 274, both swarm runs (12, 4) — and
+`compare-backends.sh` exits 0.
 
 ### Known reds, not this project's
 
@@ -226,6 +221,10 @@ What a fresh Ubuntu 24.04 container needs, beyond the submodules:
   for now, so it does not go red on this.
 
 ## Decisions taken
+
+- M2's third check (2026-10-15), after the second closing round: no-go until a third closing round;
+  the red team and frame inspector found no blocker. The unified-mode page stays undimmed by
+  default, labels on chips instead (the page is read and edited there); the reader can dim it.
 
 - M2's second gate (2026-10-15): no-go until a second, short closing round; red team, frame
   inspector and UX validator found no blocker and most of the first round fixed.
