@@ -1,0 +1,32 @@
+{
+  "normalization": "Run-generated source and target directory basenames replaced with role labels; remaining tree unchanged. RGB pixel tuples compared exactly.",
+  "backends": {
+    "gl": {
+      "frame_sha256": "f955bac5d4f918ad5651bd58ac4f9b80a19418c3bec7218dcd56c91cd29f04e9",
+      "different_pixels_from_gl": 0,
+      "panel_y340_550_different_pixels_from_gl": 0,
+      "normalized_tree_sha256": "37edb656523923e6c70469e39b91e122f4b7f8f7e06bef16d774177fb17b38c4",
+      "controls_visible": true,
+      "close_visible": true,
+      "default_focus": true
+    },
+    "gles": {
+      "frame_sha256": "2b0fe94f7a91b01cb1d459049e56a05876bc5cfd3430ef9e40fa165e25aece7e",
+      "different_pixels_from_gl": 0,
+      "panel_y340_550_different_pixels_from_gl": 0,
+      "normalized_tree_sha256": "37edb656523923e6c70469e39b91e122f4b7f8f7e06bef16d774177fb17b38c4",
+      "controls_visible": true,
+      "close_visible": true,
+      "default_focus": true
+    },
+    "vulkan": {
+      "frame_sha256": "954c926dce92b820eececc9dacedd1f9d8481d8f4e73c0f78b3c9358095c107d",
+      "different_pixels_from_gl": 10091,
+      "panel_y340_550_different_pixels_from_gl": 2447,
+      "normalized_tree_sha256": "37edb656523923e6c70469e39b91e122f4b7f8f7e06bef16d774177fb17b38c4",
+      "controls_visible": true,
+      "close_visible": true,
+      "default_focus": true
+    }
+  }
+}

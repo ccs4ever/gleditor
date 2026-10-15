@@ -9,8 +9,16 @@ artifacts were unchanged across the run: `build/gleditor` SHA-256
 Six sequential captures used X11 under `xvfb-run -a -s '-noreset -screen 0 1440x1000x24'`, with
 fresh XDG data/config/cache directories per invocation and software rendering. The four overlay
 invocations used the same sample and arguments:
-`--profile --strict-diagnostics --toast 'error:GL_INVALID_ENUM in glEnable(0xdead)' --toast 'warning:overlay parity check' --click 300,265 --select 20,34 --screenshot ... tests/samples/quick_brown_fox.txt`;
-two used OpenGL and two OpenGLES. Two more OpenGL captures used the same arguments without the toast
+
+```sh
+--profile --strict-diagnostics \
+  --toast 'error:GL_INVALID_ENUM in glEnable(0xdead)' \
+  --toast 'warning:overlay parity check' \
+  --click 300,265 --select 20,34 --screenshot ... \
+  tests/samples/quick_brown_fox.txt
+```
+
+Two used OpenGL and two OpenGLES. Two more OpenGL captures used the same arguments without the toast
 options. Exact arguments, logs, exit codes, and PNGs are stored per run.
 
 Every process exited 0. Repeated OpenGL overlay frames were byte-identical; repeated OpenGLES

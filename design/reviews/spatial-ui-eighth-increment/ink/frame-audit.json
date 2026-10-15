@@ -1,0 +1,16 @@
+{
+  "opengles": {
+    "raw_sha256": "58930affe484788a80299d63c6574155f1883a7c232e636e1f20de6bddbf63e3",
+    "png_sha256": "7d0e2b7f1498513fa2108e1cad8ebfade6eb769fb0e31f17a9f6a068b99d42ac",
+    "lossless_pixels_verified": true,
+    "ink_pixel_count": 241,
+    "unchanged_threshold": 100
+  },
+  "vulkan": {
+    "raw_sha256": "2410e32aa86ddc826ebed12e2d4dfef3a89d755e10aec17e7fa4e8d55cd51a02",
+    "png_sha256": "d9536b2961458e7e82284d5586b4c06fe180cdcb24d2e4779d137bbe0e663ab3",
+    "lossless_pixels_verified": true,
+    "ink_pixel_count": 216,
+    "unchanged_threshold": 100
+  }
+}

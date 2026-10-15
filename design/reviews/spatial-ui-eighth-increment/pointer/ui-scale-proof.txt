@@ -1,0 +1,12 @@
+Saved UI configuration and live-watcher proof. Cell 144 is the schema default; cell 146 is the active d.values scalar. New setValue preserves double kind and writes 1.5. See full ops dump for subject chains.
+
+op 85  produces=85 parent=84 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=5 srcAt=0 srcLen=0 scroll=0 span=[45460,45468) link=0 value=0  [make cell ctx=5] text="d.values"
+op 132  produces=132 parent=131 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=5 srcAt=0 srcLen=0 scroll=0 span=[46452,46464) link=0 value=0  [make cell ctx=5] text="ui.fontScale"
+op 144  produces=144 parent=143 branch=0 kind=structure flags=0x10 at=0 len=0 to=0 src=5 srcAt=0 srcLen=0 scroll=0 span=[46507,46508) link=0 value=4607182418800017408  [make cell double ctx=5] text="1"
+op 146  produces=146 parent=145 branch=0 kind=structure flags=0x10 at=0 len=0 to=0 src=5 srcAt=0 srcLen=0 scroll=0 span=[46508,46509) link=0 value=4607182418800017408  [make cell double ctx=5] text="1"
+op 147  produces=147 parent=146 branch=0 kind=structure flags=0x1 at=0 len=0 to=146 src=140 srcAt=140 srcLen=0 scroll=0 span=[0,0) link=85 value=0  [setLink posward dim=85 -> 146 cell@140 ctx=140]
+op 1596  produces=1575a1 parent=1575 branch=1 kind=structure flags=0x12 at=0 len=0 to=0 src=146 srcAt=146 srcLen=0 scroll=0 span=[55503,55506) link=0 value=4609434218613702656  [setValue double ctx=146] text="1.5"
+op 1597  produces=1596 parent=1595 branch=0 kind=structure flags=0x40 at=0 len=0 to=0 src=5 srcAt=0 srcLen=0 scroll=0 span=[0,0) link=0 value=1596  [make cell op_handle ctx=5]
+op 1598  produces=1597 parent=1597 branch=0 kind=structure flags=0x1 at=0 len=0 to=1597 src=1595 srcAt=1595 srcLen=0 scroll=0 span=[0,0) link=1591 value=0  [setLink posward dim=1591 -> 1597 cell@1595 ctx=1595]
+
+Session: xuzz: system doc updated (system://ui)

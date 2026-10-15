@@ -1,0 +1,14 @@
+{
+  "base": "3afcc8b8",
+  "byte_identical_to_HEAD": [
+    "evidence/reproduction/run-six.sh",
+    "evidence/journeys/gl/launch.sh",
+    "evidence/journeys/gl/run-native-journey.sh",
+    "evidence/journeys/gles/launch.sh",
+    "evidence/journeys/gles/run-gles-journey.sh",
+    "evidence/journeys/vk/launch.sh",
+    "evidence/journeys/vk/run-native-journey.sh",
+    "evidence/reproduction/report.md",
+    "SHA256SUMS"
+  ]
+}

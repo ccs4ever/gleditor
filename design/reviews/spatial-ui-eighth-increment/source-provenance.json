@@ -1,0 +1,10 @@
+{
+  "source_commit": "3afcc8b8",
+  "product_code_changed": false,
+  "xuzz_sha256": "ca0d8dba068a58e0c23780e2d3134f2a68450f75e50ea5647196b2f8d27f4d98",
+  "library_sha256": "ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9",
+  "raw_profile_root": "/tmp/spatial-local-validation.W4mSRr/gl/portable-run",
+  "historical_input_runner_sha256": "bdd7201a7aea71408c5923f43c4d4fa501c93fa46c1ca2fa9dd240f89a0fc95e",
+  "pointer_runner_sha256": "672ae83a92d7be266aa0c8a07bbc4a183cfc32f14c295de12523a7a0fb564dea",
+  "artifact_scope": "Initial pointer proof and historical Back audit before the system-setting fix"
+}

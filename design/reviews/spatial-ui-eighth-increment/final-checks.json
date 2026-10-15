@@ -1,0 +1,23 @@
+{
+  "format_check": {
+    "command": "make -j$(nproc) format-check CLANG_FORMAT=/tmp/spatial-format-19/bin/clang-format",
+    "exit": 0
+  },
+  "lint": {
+    "command": "make -j$(nproc) lint",
+    "exit": 0
+  },
+  "new_ui_suite": {
+    "count": 234,
+    "exit": 0
+  },
+  "reused_unchanged_binary_suites": {
+    "library": 799,
+    "xuzz": 99,
+    "owning": 53
+  },
+  "broad_e2e": "not accepted",
+  "optimized_performance": "not accepted",
+  "native_AT_SPI": "not accepted",
+  "complete_16_plus_16_journeys": "not accepted"
+}

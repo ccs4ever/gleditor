@@ -15,7 +15,8 @@ actual_library=$(sha256sum "$bin/libgleditor.so.0" | awk '{print $1}')
 }
 mkdir -p "$evidence" "$raw"
 
-passage=$(python3 - <<'PY'
+passage=$(
+  python3 - <<'PY'
 for index in range(1, 81):
     print(f"P{index:03d} The selected passage continues across this ordinary page line with its own exact words.", end="")
     if index != 80:
@@ -42,27 +43,31 @@ cache="$XDG_CACHE_HOME/seventh-vk-$mode-$width"
 mkdir -p "$data" "$config" "$cache"
 printf '%s' "$actual_source" >"$evidence/source-fixture.txt"
 if [[ "$mode" == forced ]]; then entry_name='Untitled · a'; else entry_name='Doc 2'; fi
-app=("$bin/xuzz" --backend vulkan --resize "$width,$height"
+viewport="$width,$height"
+source_range="0,$actual_source_bytes"
+target_range="0,${#target}"
+await_control="45000,$entry_name=selected"
+app=("$bin/xuzz" --backend vulkan --resize "$viewport"
   --chord Ctrl+Alt+Shift+F --key backspace --type 1.5 --key enter --chord Ctrl+N)
 if [[ "$mode" == forced ]]; then
   app+=(--type "$first" --chord Ctrl+Return --type "$second")
 else
   app+=(--type "$passage")
 fi
-app+=(--select "0,$actual_source_bytes"
+app+=(--select "$source_range"
   --dump-a11y --capture "$raw/00a-source-selection.ppm"
   --chord 'Ctrl+Alt+[' --chord Ctrl+N --type "$target"
-  --select "0,${#target}" --chord 'Ctrl+Alt+]' --chord Ctrl+Alt+L
+  --select "$target_range" --chord 'Ctrl+Alt+]' --chord Ctrl+Alt+L
   --chord Alt+Shift+N --wait-ms 5000 --dump-a11y --capture "$raw/00-link-preview.ppm" --wait-ms 20000
   --click-label Enter
-  --await-a11y "45000,$entry_name=selected"
+  --await-a11y "$await_control"
   --dump-a11y --capture "$raw/03-enter-selected.ppm" --wait-ms 5000
-  --mouse-move 400,300 --wheel 0,-1 --wait-ms 1500 --dump-a11y --capture "$raw/04-pan-1.ppm"
-  --wheel 0,-1 --wait-ms 1500 --dump-a11y --capture "$raw/05-pan-2.ppm"
-  --wheel 0,-1 --wait-ms 1500 --dump-a11y --capture "$raw/06-pan-3.ppm"
-  --wheel 0,-1 --wait-ms 1500 --dump-a11y --capture "$raw/07-pan-4.ppm"
-  --wheel 0,-1 --wait-ms 1500 --dump-a11y --capture "$raw/08-pan-5.ppm"
-  --wheel 0,-1 --wait-ms 1500 --dump-a11y --capture "$raw/09-pan-6.ppm"
+  --mouse-move "400,300" --wheel "0,-1" --wait-ms 1500 --dump-a11y --capture "$raw/04-pan-1.ppm"
+  --wheel "0,-1" --wait-ms 1500 --dump-a11y --capture "$raw/05-pan-2.ppm"
+  --wheel "0,-1" --wait-ms 1500 --dump-a11y --capture "$raw/06-pan-3.ppm"
+  --wheel "0,-1" --wait-ms 1500 --dump-a11y --capture "$raw/07-pan-4.ppm"
+  --wheel "0,-1" --wait-ms 1500 --dump-a11y --capture "$raw/08-pan-5.ppm"
+  --wheel "0,-1" --wait-ms 1500 --dump-a11y --capture "$raw/09-pan-6.ppm"
   --dump-a11y --capture "$raw/10-continuation-wheel.ppm"
   --chord Alt+Shift+B --wait-ms 3000 --dump-a11y --capture "$raw/11-back.ppm"
   --chord Alt+Shift+O --wait-ms 3000 --dump-a11y --capture "$raw/12-origin.ppm"
@@ -74,14 +79,16 @@ app+=(--select "0,$actual_source_bytes"
   [[ "$mode" == forced ]] && printf 'page_break=Ctrl+Return at byte 3719\n' || printf 'page_break=none\n'
   printf 'backend=vulkan\nviewport=%sx%s\nui_font_scale=1.5\nprofile_data=%s\nprofile_config=%s\nprofile_cache=%s\n' \
     "$width" "$height" "$data" "$config" "$cache"
-  printf 'argv='; printf '%q ' "${app[@]}" | sed 's/[[:space:]]\+$//'; printf '\n'
+  printf 'argv='
+  printf '%q ' "${app[@]}" | sed 's/[[:space:]]\+$//'
+  printf '\n'
 } >"$evidence/argv.txt"
 
 XDG_DATA_HOME="$data" XDG_CONFIG_HOME="$config" XDG_CACHE_HOME="$cache" \
   LD_LIBRARY_PATH="$bin${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
   SPDLOG_LEVEL='text.layout=debug,xudu.links=debug,xuzz.keymap=debug' \
   stdbuf -oL -eL timeout --signal=TERM --kill-after=5s 100s xvfb-run -a -s '-noreset -screen 0 1440x1000x24' \
-    "${app[@]}" >"$evidence/session.log" 2>&1 &
+  "${app[@]}" >"$evidence/session.log" 2>&1 &
 app_pid=$!
 
 snapshot_stores() {

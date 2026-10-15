@@ -7,21 +7,35 @@ session.
 
 ## Current checkpoint
 
-Local validation checkpoint (2026-10-14): new worktree at `fbd4169c`, submodules initialized,
-canonical optimized local build passes. The cache layer-growth test now stops at the layer
-transition instead of assuming 16 host-resolved large glyphs fit the aligned eight-layer atlas. Only
-this test changes; no product code or comparison/latency/ink criterion changes. Final local library
-passes 799/799, owning checks 53/53, UI 233/233 and Xuzz 99/99. Strict core GL/GLES and offscreen
-RADV Vulkan comparisons pass. The unchanged whole-page ink test passes on OpenGL.
+Eighth checkpoint (2026-10-14), based on `3afcc8b8`: native editing of a system-setting scalar now
+publishes and saves its committed head and notifies the existing watcher. The `readableTextPx` edit
+previously appended the correct double but left the consumed current head stale. The existing native
+Omnibar path reaches the active value without numeric cell IDs. The owning red/green regression
+covers live value, saved reload, historical sibling views and no-op/ rejected commits. The full UI
+suite passes 234/234. No new camera, view, setting or command is added.
 
-Three independent native runs retain source purity and visits 1→2→2. GL/GLES needed a confirmed
-Enter chord retry because the visible Enter click target was absent; Back panels differ across
-GL/Vulkan. Independent review retains these as open findings. Local repository gates stop on
-archived seventh-checkpoint shell formatting/lint; separate Markdown lint reports one existing
-MD013, while C++19, Markdown format, YAML, configuration harmony and text policy pass. No full
-journey, native AT-SPI or optimized-budget acceptance is claimed. Exact local evidence and next
-task:
-[local validation](../reviews/spatial-ui-seventh-increment/local-validation-2026-10-14/README.md).
+Native enlarged-document and combined Link evidence, source purity, exact visit checkpoints and
+remaining limitations are recorded in the
+[eighth review](../reviews/spatial-ui-eighth-increment/README.md). The earlier missing-Enter report
+was a harness error: the visible Controls action expands the collapsed dock. The claimed Vulkan
+Back-panel absence was a review error; archived frames and normalized accessible trees show the same
+semantic panel state. Exact GL/Vulkan pixel parity is not claimed. Historical reports remain intact,
+with these corrections explicitly superseding those findings.
+
+The seventh-checkpoint archive's shell/Markdown gates are repaired with exact originals and old/new
+hash ledgers preserved. Local full library 799/799, Xuzz 99/99 and owning 53/53 results are reused
+only after verifying unchanged binaries and shared library. This increment freshly builds the app
+and runs UI 234/234. The unchanged whole-page ink test now passes on local GL, GLES and Vulkan
+without lowering its 100-pixel threshold. Strict core comparisons from the prior checkpoint remain
+applicable to unchanged rendering. These bounded results do not accept broad E2E, native AT-SPI,
+optimized performance or the complete 16+16 journeys.
+
+Previous local validation checkpoint (2026-10-14): new worktree at `fbd4169c`, submodules
+initialized, canonical local build passes. The cache layer-growth test stops at the transition
+instead of assuming 16 host-resolved large glyphs fit the aligned eight-layer atlas. The build's
+default optimization does not establish a latency budget; earlier O0 measurements remain distinct.
+Original local evidence is retained in the
+[local report](../reviews/spatial-ui-seventh-increment/local-validation-2026-10-14/README.md).
 
 Seventh restart checkpoint (2026-10-14), validation partially complete: glyph atlas allocations now
 align to the deepest existing mip block so unrelated earlier glyph requests cannot change minified
@@ -392,24 +406,23 @@ reviews pass.
 
 ## Exact next task
 
-Resolve the local visible Enter and Back-panel findings and the archived seventh-checkpoint shell
-format/lint and Markdown findings. Preserve the historical scripts and their provenance when making
-reviewable harness changes. Local build, full library 799/799, UI 233/233, Xuzz 99/99, owning 53/53,
-strict core backend comparison and three native source/visit proofs are now recorded in the local
-validation report. Full J24/J25 restoration parity remains open. Retain the earlier O0 latency
-finding separately; no optimized performance acceptance follows from the local default build.
-
-The unchanged whole-page ink test now passes on local OpenGL; broader backend/font coverage remains
-unverified. Validate actual enlarged document text through existing layout tunables. The governed
-`ui.fontScale` form enlarges chrome only. Continue J24 repeated occurrences, pending/unavailable
-cancellation and stale replacement, cell/history endpoints, then J25 branching Back/Return and
-same-profile reopen. Preserve exact source/activity snapshots, native per-backend frames and Link
-identity. Full J1–J16 preservation and complete J17–J32 acceptance remain unverified.
+First isolate the Origin context discrepancy: default reading-size baseline/candidate frames lose
+the visible Link panel after restoring home, while the enlarged combined run retains it. This
+predates the system-setting fix and is not complete restoration acceptance. Then continue J24
+repeated occurrences, pending/unavailable cancellation and stale replacement, cell/history
+endpoints, then J25 branching Back/Return and same-profile reopen. Preserve exact source/activity
+snapshots, native per-backend frames and Link identity. The collapsed-dock Enter route, historical
+Back-panel review error, archive quality gates and live layout-setting commit have been resolved in
+the eighth checkpoint; consult its bounded native evidence before extending acceptance. Whole-page
+ink passes the unchanged local test on all three backends; broader font and backend E2E coverage
+remains unverified. Long lines at enlarged reading size can clip at 800 pixels; retain that stress
+evidence while expanding readable and responsive cases.
 
 Resolve legacy J3, J11 and J15 findings against the pinned baseline. The stale drag tests and UI
-font-scale control are repaired. Native AT-SPI, optimized performance, actual enlarged document text
-and complete 16+16 journey coverage remain open. Audit changed-region reflow costs and atlas
-allocation overhead in an optimized build; alignment can add up to seven trailing texels per axis.
+font-scale control are repaired. Full J1–J16 preservation, complete J17–J32, native AT-SPI and
+optimized performance remain open. Audit changed-region reflow costs and atlas allocation overhead
+in an optimized measurement run; alignment can add up to seven trailing texels per axis. Earlier O0
+latency findings are not replaced by default-build success.
 
 The next spatial service package is the publication/pin-lifecycle audit before D2 branch/frame
 enumeration. Do not substitute primedia search for historical occurrence coverage or add another

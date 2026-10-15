@@ -1,0 +1,194 @@
+window "Xuzz"
+  multiline text input "default" [caret 0]
+    text run
+  multiline text input "Untitled · a"
+    text run = "P001 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P002 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P003 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P004 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P005 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P006 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P007 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P008 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P009 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P010 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P011 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P012 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P013 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P014 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P015 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P016 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P017 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P018 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P019 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P020 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P021 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P022 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P023 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P024 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P025 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P026 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P027 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P028 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P029 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P030 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P031 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P032 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P033 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P034 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P035 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P036 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P037 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P038 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P039 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P040 The selected passage continues across this ordinary page line with its own exact words.P041 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P042 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P043 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P044 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P045 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P046 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P047 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P048 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P049 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P050 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P051 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P052 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P053 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P054 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P055 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P056 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P057 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P058 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P059 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P060 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P061 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P062 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P063 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P064 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P065 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P066 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P067 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P068 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P069 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P070 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P071 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P072 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P073 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P074 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P075 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P076 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P077 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P078 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P079 The selected passage continues across this ordinary page line with its own exact words.
+"
+    text run = "P080 The selected passage continues across this ordinary page line with its own exact words."
+  multiline text input "document"
+    text run = "Distant target passage!"
+  group "Xanadu ZigZag: Xudu/Zigzag unified store"
+    group "Active View Dimensions: X=d.1, Y=d.2, Z=d.3"
+  list "Open Documents"
+    list item "default" = "selected" [on]
+    button "Close default"
+    list item "Untitled · a" [off]
+    button "Close Untitled · a"
+    list item "Doc 3" [off]
+    button "Close Doc 3"
+    button "Store Object Manager"
+    button "New Document"
+  list "links between the open documents"
+    link "comment link, 1 left and 1 right members" = "selected"
+      list item "left member 1 of 1" = "chosen"
+        list item "occurrence 1 of 1, source-document · pages 1–2/2 · continues across page breaks" = "chosen"
+      list item "right member 1 of 1" = "chosen"
+        list item "occurrence 1 of 1, target-document · page 1/1" = "chosen"
+  group
+    label "comment · link 21 · local_author
+origin: target-document · page 1/1 · bytes 0–23"
+    label "▸ Left 1/1 · place 1/1 · bytes
+0–7438
+source-document · pages 1–2/2 · continues across page breaks"
+    label "Right 1/1 · place 1/1 · bytes
+0–23
+target-document · page 1/1"
+    group
+      button "×"
+      button "Controls"
+  button "Overview: move camera to scene centre"
+focus: default

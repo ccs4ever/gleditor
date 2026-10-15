@@ -1,0 +1,48 @@
+{
+  "app_exit": 0,
+  "snapshots": {
+    "before": {
+      "visits": 1,
+      "source_sha256": [
+        "bcdc5ecc225d8798dfaa46c94b4a95638d2483e45c8d9327e9ac1a6a62e9b6d9",
+        "08076a529ac679c66caad9746cba980f1d58dad651616d90e093ed64ed05625c"
+      ]
+    },
+    "controls": {
+      "visits": 1,
+      "source_sha256": [
+        "bcdc5ecc225d8798dfaa46c94b4a95638d2483e45c8d9327e9ac1a6a62e9b6d9",
+        "08076a529ac679c66caad9746cba980f1d58dad651616d90e093ed64ed05625c"
+      ]
+    },
+    "enter": {
+      "visits": 2,
+      "source_sha256": [
+        "bcdc5ecc225d8798dfaa46c94b4a95638d2483e45c8d9327e9ac1a6a62e9b6d9",
+        "08076a529ac679c66caad9746cba980f1d58dad651616d90e093ed64ed05625c"
+      ]
+    },
+    "after": {
+      "visits": 2,
+      "source_sha256": [
+        "bcdc5ecc225d8798dfaa46c94b4a95638d2483e45c8d9327e9ac1a6a62e9b6d9",
+        "08076a529ac679c66caad9746cba980f1d58dad651616d90e093ed64ed05625c"
+      ]
+    }
+  },
+  "lossless_frames_verified": [
+    "00-link-preview.ppm",
+    "00a-source-selection.ppm",
+    "02-controls-expanded.ppm",
+    "03-enter-selected.ppm",
+    "04-pan-1.ppm",
+    "05-pan-2.ppm",
+    "06-pan-3.ppm",
+    "07-pan-4.ppm",
+    "08-pan-5.ppm",
+    "09-pan-6.ppm",
+    "10-continuation-wheel.ppm",
+    "11-back.ppm",
+    "12-origin.ppm"
+  ]
+}

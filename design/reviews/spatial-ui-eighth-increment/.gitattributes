@@ -1,0 +1,4 @@
+# Preserve native transcript bytes used by evidence hashes.
+*.log -text whitespace=cr-at-eol
+# Unified diffs retain the leading context marker on blank lines.
+candidate-product.patch.txt whitespace=-blank-at-eol

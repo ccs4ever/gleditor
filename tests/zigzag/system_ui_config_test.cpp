@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 
+#include "common/ui/slice/unified_transclusion_engine.hpp"
 #include "common/ui/xanadoc/session.hpp"
 #include "common/xanadu/system_docs.hpp"
 
@@ -35,6 +36,61 @@ public:
 private:
   std::optional<std::string> previous;
 };
+
+TEST(SystemUiConfigTest,
+     NativeSliceCommitPublishesSettingsWithoutMovingHistory) {
+  TemporaryConfig config;
+  const auto scroll = std::make_shared<xanadu::UserPermascroll>();
+  xanadu::Session session{"", scroll};
+  const auto kind  = xanadu::SystemDocKind::Layout;
+  const auto index = session.systemStoreIndex(kind);
+  auto &store      = session.store(index);
+  const auto base  = store.primaryCurrentVersion();
+  session.viewOpened(base, index);
+  session.viewOpened(base, index);
+  const auto model   = xanadu::SystemStoreModel::fromStore(store);
+  const auto setting = model.find(xanadu::settings::kReadableTextPx);
+  ASSERT_TRUE(setting);
+  ASSERT_EQ(setting->value.valueCells.size(), 1U);
+  const auto cell = setting->value.valueCells.front();
+  zigzag::UnifiedTransclusionEngine slice(store, base);
+  std::size_t notifications{};
+  session.setSystemDocChangedCallback(
+      [&](const xanadu::SystemDocKind changed, const xanadu::Store &current) {
+        ++notifications;
+        EXPECT_EQ(changed, kind);
+        EXPECT_EQ(current.primaryCurrentVersion(), slice.head());
+        EXPECT_EQ(xanadu::LayoutConfig::fromStore(current).readableTextPx, 24);
+      });
+  slice.setAuthoredCommitHandler([&](const xanadu::MicroversionId &parent,
+                                     const xanadu::MicroversionId &head) {
+    EXPECT_TRUE(session.advanceViewAfterCommit(0, parent, head));
+  });
+
+  slice.updateCellText(cell, "24.0");
+  const auto head = slice.head();
+  EXPECT_EQ(notifications, 1U);
+  EXPECT_EQ(session.views()[0].version, head);
+  EXPECT_EQ(session.views()[1].version, base);
+  EXPECT_EQ(store.primaryCurrentVersion(), head);
+  EXPECT_EQ(xanadu::LayoutConfig::fromStore(store).readableTextPx, 24);
+  xanadu::Store reopened(scroll);
+  reopened.load(xanadu::systemDocDirectory(kind).string());
+  EXPECT_EQ(reopened.primaryCurrentVersion(), head);
+  EXPECT_EQ(xanadu::LayoutConfig::fromStore(reopened).readableTextPx, 24);
+
+  auto operations = store.opCount();
+  EXPECT_TRUE(session.advanceViewAfterCommit(0, head, head));
+  EXPECT_EQ(store.opCount(), operations);
+  EXPECT_EQ(notifications, 1U);
+  const auto sibling = store.setCellText(base, cell, "30.0");
+  operations         = store.opCount();
+  EXPECT_FALSE(session.advanceViewAfterCommit(0, base, sibling));
+  EXPECT_EQ(store.opCount(), operations);
+  EXPECT_EQ(store.primaryCurrentVersion(), head);
+  EXPECT_EQ(session.views()[1].version, base);
+  EXPECT_EQ(notifications, 1U);
+}
 
 TEST(SystemUiConfigTest,
      ExistingNativeStoreAddsTypographyWithoutChangingNotesOrValues) {

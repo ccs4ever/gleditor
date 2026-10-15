@@ -1,0 +1,21 @@
+{
+  "base_commit": "3afcc8b87d3567b4d4c03247c8de086a01622e8f",
+  "product_patch_sha256": "02be861e3837c595ed7cddeccb8885d8f9abb28103cc8aa49e5f7dda3ce22acf",
+  "source_files": {
+    "apps/common/ui/xanadoc/session.cpp": "6249ba7798c77f1efd497989b43de7c1001099aa0627491cf10b2dd747b60ce3",
+    "tests/zigzag/system_ui_config_test.cpp": "e761eb09648b15f9c14eba964dc1410ff699d1fc535c99e49824b63d114da187"
+  },
+  "binaries": {
+    "build/xuzz": "81cd8bde678910f98f81cb67369cff611dfbb1977a0b8d6f281f5f9fd38dace8",
+    "build/libgleditor.so.0": "ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9",
+    "build/zigzag_test": "f1b54c452324e07aa633fbb6ad0e08897dac23720cb73f561c80ab936bdb268c",
+    "build/gleditor_test": "44562f4e4ea437f8f3c575a8005d5847367860f9b4d4714d2d1b6516cf014f8a",
+    "build/xuzz_test": "9ae669a13aba5a1a4ff57507ee335b0c5ab7b4362b1c16f85357cbf54d5f2676"
+  },
+  "build": "canonical make -j$(nproc), default -O3 -g, SDL3",
+  "tests": {
+    "new_owning_red_exit": 1,
+    "full_ui_green_exit": 0,
+    "full_ui_green_count": 234
+  }
+}

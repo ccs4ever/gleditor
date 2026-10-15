@@ -10,12 +10,12 @@ profile="$base/seventh-journey-gles-xdg"
 evidence="$repo/design/reviews/spatial-ui-seventh-increment/evidence/journeys/gles"
 raw="$base/seventh-journey-gles-raw"
 mkdir -p "$profile/data" "$profile/config" "$profile/cache" "$raw" "$evidence"
-sha256sum "$repo/build/xuzz" "$repo/build/libgleditor.so.0" > "$evidence/binaries-before.sha256"
+sha256sum "$repo/build/xuzz" "$repo/build/libgleditor.so.0" >"$evidence/binaries-before.sha256"
 "$base/run.sh" env SDL_VIDEODRIVER=x11 \
   XDG_DATA_HOME="$profile/data" XDG_CONFIG_HOME="$profile/config" XDG_CACHE_HOME="$profile/cache" \
   bash "$evidence/run-gles-journey.sh" "$repo/build" "$evidence" "$raw" 800 600 forced \
-  > "$raw/launcher.log" 2>&1
+  >"$raw/launcher.log" 2>&1
 status=$?
-printf '%s\n' "$status" > "$evidence/launcher-exit.txt"
-sha256sum "$repo/build/xuzz" "$repo/build/libgleditor.so.0" > "$evidence/binaries-after.sha256"
+printf '%s\n' "$status" >"$evidence/launcher-exit.txt"
+sha256sum "$repo/build/xuzz" "$repo/build/libgleditor.so.0" >"$evidence/binaries-after.sha256"
 exit "$status"

@@ -1,0 +1,2 @@
+count=1
+0=/tmp/spatial-vulkan-text-enlarged-candidate-20261015/profile/data/xudu/xanadocs/default

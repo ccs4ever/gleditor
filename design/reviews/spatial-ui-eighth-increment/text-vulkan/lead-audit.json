@@ -1,0 +1,20 @@
+{
+  "source_ops_sha256": {
+    "before": "944eb775e6a7ac9536f3be55745efcbde0a3c2b81afe4c02600d7996e4be5bd9",
+    "pre-edit": "944eb775e6a7ac9536f3be55745efcbde0a3c2b81afe4c02600d7996e4be5bd9",
+    "after": "944eb775e6a7ac9536f3be55745efcbde0a3c2b81afe4c02600d7996e4be5bd9",
+    "after-exit": "944eb775e6a7ac9536f3be55745efcbde0a3c2b81afe4c02600d7996e4be5bd9",
+    "after-reopen": "944eb775e6a7ac9536f3be55745efcbde0a3c2b81afe4c02600d7996e4be5bd9"
+  },
+  "layout_ops_sha256": {
+    "before": "28df389dd1a5fa2c3568fe67363a347a62aa8d178406b98d9ae60c2023262b8d",
+    "pre-edit": "28df389dd1a5fa2c3568fe67363a347a62aa8d178406b98d9ae60c2023262b8d",
+    "after": "97f826a1e57031f755125d2c0a2df9d6c584246abfd6c15e3d56daeb05fe9be7",
+    "after-exit": "97f826a1e57031f755125d2c0a2df9d6c584246abfd6c15e3d56daeb05fe9be7",
+    "after-reopen": "97f826a1e57031f755125d2c0a2df9d6c584246abfd6c15e3d56daeb05fe9be7"
+  },
+  "layout_live_notifications": 1,
+  "first_exit": "0",
+  "reopen_exit": "0",
+  "pre_edit_marker": "yes"
+}

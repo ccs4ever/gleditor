@@ -1,0 +1,13 @@
+# Original hashes are from exact byte copies listed in originals.sha256.tsv.
+# Current hashes identify the repaired scripts and report.
+# The root SHA256SUMS is a current inventory and intentionally excludes itself; its
+# pre-repair bytes are preserved as root-SHA256SUMS.txt with the original hash ledger.
+File	Original SHA256	Current SHA256	Original byte copy
+evidence/reproduction/run-six.sh	9d4d7e4102cf69f722ada7e81eeda87a08bbf583b310328db5a2d28f227924c7	5c35d7b1e586fc45b58ffe6b1aece083b21118559103b90a75bc3cf5414b7851	archived-originals/evidence-reproduction-run-six.sh.txt
+evidence/journeys/gl/launch.sh	e99627d146aa85546d9b16e4d80ba04a2a1e34261405f715a8374acf620ed331	15464ff07dd66488addf9b3e55ce5a3171c604401eeefc9ef81248923f45bc86	archived-originals/journeys-gl-launch.sh.txt
+evidence/journeys/gl/run-native-journey.sh	bdd7201a7aea71408c5923f43c4d4fa501c93fa46c1ca2fa9dd240f89a0fc95e	6ab34b6709e229ac5256bca0afa70f0bc8f5a84597da86db758f372e87d945f1	archived-originals/journeys-gl-run-native-journey.sh.txt
+evidence/journeys/gles/launch.sh	ada5f91affe14056ee8e617aa3546a2e8778aa9e5980807183f1a9a2d979586c	39d599db4581d5bc63493da1bf912072f199de6891cf23db7f84437d57a2ff33	archived-originals/journeys-gles-launch.sh.txt
+evidence/journeys/gles/run-gles-journey.sh	4590216464c038d21a444651f4c62077110ebee33dd8796ca66700a297c2748c	dc06f26dfb3de52f86b7b3943a9330a3df7f50e3bcdbac37aa8078f1c1b3d0a4	archived-originals/journeys-gles-run-gles-journey.sh.txt
+evidence/journeys/vk/launch.sh	9aa6527385573dd13a5b50476dfbd673ab1fcf24ab924917c143d996911daa69	a1cc60b97a5187e5df65efc9b2fcd5a82ac9aa25dccc6f68c530b2dca3ec99a3	archived-originals/journeys-vk-launch.sh.txt
+evidence/journeys/vk/run-native-journey.sh	01cfbb55709ccfa45318cdbb78faf58aa927032aaae12e329450cdeab3e3f968	d0e899b779d5327b893c01e6fa9c6b58259d259774146b4f9d5b9b25ff038227	archived-originals/journeys-vk-run-native-journey.sh.txt
+evidence/reproduction/report.md	4f9d13b6c9cba2315675785a80acef028003b150fe6be5f173ddd4c7ab7dfb1c	a5b210376b3fe8b4390654319ce6e393caf88ec635de73b7e7f229120a76d490	archived-originals/evidence-reproduction-report.md.txt

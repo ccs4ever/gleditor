@@ -6,7 +6,6 @@ set -u
 # libgleditor.so.0, and xudu-dump. This runs inside spatial-native-session.
 # This runner is prepared for the frozen seventh candidate; it has not yet run.
 bin=$1 evidence=$2 raw=$3 width=$4 height=$5 mode=$6
-repo=/workspace/gleditor
 expected_xuzz=66089e427a2ab6876c31675cfe6e6c0818294c6ba156a9c264caa8ef3c5d7739
 expected_lib=419d2142fb3aa9f0181120fb084a05deae6a17935754eae61fe9cd662abf680d
 [[ "$(sha256sum "$bin/xuzz" | cut -d ' ' -f1)" == "$expected_xuzz" ]] || {
@@ -19,7 +18,8 @@ expected_lib=419d2142fb3aa9f0181120fb084a05deae6a17935754eae61fe9cd662abf680d
 }
 mkdir -p "$evidence" "$raw"
 
-passage=$(python3 - <<'PY'
+passage=$(
+  python3 - <<'PY'
 for index in range(1, 81):
     print(f"P{index:03d} The selected passage continues across this ordinary page line with its own exact words.", end="")
     if index != 80:
@@ -46,45 +46,52 @@ cache="$XDG_CACHE_HOME/seventh-$mode-$width"
 mkdir -p "$data" "$config" "$cache"
 printf '%s' "$actual_source" >"$evidence/source-fixture.txt"
 if [[ "$mode" == forced ]]; then entry_name='Untitled · a'; else entry_name='Doc 2'; fi
-app=("$bin/xuzz" --backend opengles --resize "$width,$height" --chord Ctrl+Alt+Shift+F --key backspace --type 1.5 --key enter --chord Ctrl+N)
+viewport="$width,$height"
+source_range="0,$actual_source_bytes"
+target_range="0,${#target}"
+await_control="45000,$entry_name=selected"
+app=("$bin/xuzz" --backend opengles --resize "$viewport" --chord Ctrl+Alt+Shift+F --key backspace --type 1.5 --key enter --chord Ctrl+N)
 if [[ "$mode" == forced ]]; then
   app+=(--type "$first" --chord Ctrl+Return --type "$second")
 else
   app+=(--type "$passage")
 fi
-app+=(--select "0,$actual_source_bytes"
+app+=(--select "$source_range"
   --dump-a11y --capture "$raw/00a-source-selection.ppm"
   --chord 'Ctrl+Alt+[' --chord Ctrl+N --type "$target"
-  --select "0,${#target}" --chord 'Ctrl+Alt+]' --chord Ctrl+Alt+L
+  --select "$target_range" --chord 'Ctrl+Alt+]' --chord Ctrl+Alt+L
   --chord Alt+Shift+N --wait-ms 5000 --dump-a11y --capture "$raw/00-link-preview.ppm" --wait-ms 20000
   --click-label Enter
-  --await-a11y "45000,$entry_name=selected"
+  --await-a11y "$await_control"
   --dump-a11y --capture "$raw/03-enter-selected.ppm" --wait-ms 5000
-  --mouse-move 400,300 --wheel 0,-1 --wait-ms 1500 --dump-a11y --capture "$raw/04-pan-1.ppm"
-  --wheel 0,-1 --wait-ms 1500 --dump-a11y --capture "$raw/05-pan-2.ppm"
-  --wheel 0,-1 --wait-ms 1500 --dump-a11y --capture "$raw/06-pan-3.ppm"
-  --wheel 0,-1 --wait-ms 1500 --dump-a11y --capture "$raw/07-pan-4.ppm"
-  --wheel 0,-1 --wait-ms 1500 --dump-a11y --capture "$raw/08-pan-5.ppm"
-  --wheel 0,-1 --wait-ms 1500 --dump-a11y --capture "$raw/09-pan-6.ppm"
+  --mouse-move "400,300" --wheel "0,-1" --wait-ms 1500 --dump-a11y --capture "$raw/04-pan-1.ppm"
+  --wheel "0,-1" --wait-ms 1500 --dump-a11y --capture "$raw/05-pan-2.ppm"
+  --wheel "0,-1" --wait-ms 1500 --dump-a11y --capture "$raw/06-pan-3.ppm"
+  --wheel "0,-1" --wait-ms 1500 --dump-a11y --capture "$raw/07-pan-4.ppm"
+  --wheel "0,-1" --wait-ms 1500 --dump-a11y --capture "$raw/08-pan-5.ppm"
+  --wheel "0,-1" --wait-ms 1500 --dump-a11y --capture "$raw/09-pan-6.ppm"
   --dump-a11y --capture "$raw/10-continuation-wheel.ppm"
   --chord Alt+Shift+B --wait-ms 3000 --dump-a11y --capture "$raw/11-back.ppm"
   --chord Alt+Shift+O --wait-ms 3000 --dump-a11y --capture "$raw/12-origin.ppm"
   --chord Ctrl+Q)
 {
-  printf 'binary_sha256='; sha256sum "$bin/xuzz" | cut -d ' ' -f1
+  printf 'binary_sha256='
+  sha256sum "$bin/xuzz" | cut -d ' ' -f1
   printf 'binary_dir=%s\nmode=%s\nsource_bytes=%s\nsource_lines=80\ntarget=%s\ntarget_bytes=%s\n' \
     "$bin" "$mode" "$actual_source_bytes" "$target" "${#target}"
   [[ "$mode" == forced ]] && printf 'page_break=Ctrl+Return at byte 3719\n' || printf 'page_break=none\n'
   printf 'backend=opengles\nviewport=%sx%s\nprofile_data=%s\nprofile_config=%s\nprofile_cache=%s\n' \
     "$width" "$height" "$data" "$config" "$cache"
-  printf 'argv='; printf '%q ' "${app[@]}" | sed 's/[[:space:]]\+$//'; printf '\n'
+  printf 'argv='
+  printf '%q ' "${app[@]}" | sed 's/[[:space:]]\+$//'
+  printf '\n'
 } >"$evidence/argv.txt"
 
 XDG_DATA_HOME="$data" XDG_CONFIG_HOME="$config" XDG_CACHE_HOME="$cache" \
   LD_LIBRARY_PATH="$bin${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
   SPDLOG_LEVEL='text.layout=debug,xudu.links=debug,xuzz.keymap=debug' \
   stdbuf -oL -eL timeout --signal=TERM --kill-after=5s 100s xvfb-run -a -s '-noreset -screen 0 1440x1000x24' \
-    "${app[@]}" >"$evidence/session.log" 2>&1 &
+  "${app[@]}" >"$evidence/session.log" 2>&1 &
 app_pid=$!
 
 snapshot_stores() {
@@ -134,4 +141,4 @@ printf '%s\n' "$status" >"$evidence/exit-status.txt"
 snapshot_stores after
 
 sha256sum "$evidence"/* "$raw"/*.ppm 2>/dev/null >"$evidence/SHA256SUMS" || true
-exit 0
+exit "$status"

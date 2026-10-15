@@ -12,18 +12,20 @@ run_one() {
   if [[ "$overlay" == yes ]]; then
     args+=(--toast 'error:GL_INVALID_ENUM in glEnable(0xdead)' --toast 'warning:overlay parity check')
   fi
-  args+=(--click 300,265 --select 20,34 --screenshot "$screenshot" tests/samples/quick_brown_fox.txt)
+  args+=(--click "300,265" --select "20,34" --screenshot "$screenshot" tests/samples/quick_brown_fox.txt)
   {
     printf 'run=%s\nbackend=%s\noverlay=%s\n' "$name" "$backend" "$overlay"
     printf 'XDG_DATA_HOME=%s/data\nXDG_CONFIG_HOME=%s/config\nXDG_CACHE_HOME=%s/cache\n' "$profile" "$profile" "$profile"
-    printf 'argv='; printf '%q ' build/gleditor "${args[@]}"; printf '\n'
-  } > "$raw/$name.argv"
+    printf 'argv='
+    printf '%q ' build/gleditor "${args[@]}"
+    printf '\n'
+  } >"$raw/$name.argv"
   XDG_DATA_HOME="$profile/data" XDG_CONFIG_HOME="$profile/config" XDG_CACHE_HOME="$profile/cache" \
     SDL_VIDEODRIVER=x11 LD_LIBRARY_PATH="$repo/build" \
     timeout --signal=TERM --kill-after=5s 90s xvfb-run -a -s '-noreset -screen 0 1440x1000x24' \
-      "$repo/build/gleditor" "${args[@]}" >"$logfile" 2>&1
+    "$repo/build/gleditor" "${args[@]}" >"$logfile" 2>&1
   local status=$?
-  printf '%s\n' "$status" > "$raw/$name.exit"
+  printf '%s\n' "$status" >"$raw/$name.exit"
   printf '%s status=%s screenshot=%s\n' "$name" "$status" "$([[ -f "$screenshot" ]] && echo yes || echo no)"
 }
 run_one opengl-overlay-1 opengl yes

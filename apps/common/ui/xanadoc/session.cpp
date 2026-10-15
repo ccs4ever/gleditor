@@ -172,6 +172,15 @@ bool Session::advanceViewAfterCommit(const std::uint32_t docIndex,
     return false;
   }
   refresh(docIndex, head);
+  const auto index = open[docIndex].storeIndex;
+  if (head != parent && store(index).isSystem()) {
+    if (const auto kind = systemDocKindForStoreIndex(index)) {
+      auto &current = store(index);
+      current.repointCurrentVersion(head);
+      save(index);
+      if (systemDocChangedCallback_) systemDocChangedCallback_(*kind, current);
+    }
+  }
   return true;
 }
 
