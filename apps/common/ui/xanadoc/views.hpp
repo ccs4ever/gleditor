@@ -287,6 +287,8 @@ private:
   xanadu::view::PageDim pageDim_;
   std::function<bool()> pendingCamera_;
   bool cameraSettling_{};
+  /// The camera is to be framed on a page that is not built yet.
+  bool framingWaiting_{};
   int cameraSettlingFrames_{};
   std::function<bool()> comparisonCameraReady_;
   std::optional<xanadu::ReadingPlace> finalPlace_;

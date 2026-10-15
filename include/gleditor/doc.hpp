@@ -473,6 +473,8 @@ private:
   /// Build a page shaping for text starting at @p offset, with the page
   /// geometry makePages() uses. Safe to call off the render thread.
   [[nodiscard]] PageShaping layoutFrom(std::uint32_t offset) const;
+  /// The one blank page of an empty document, sized as a page of text is.
+  [[nodiscard]] PageShaping blankPage() const;
 
   /// Record that page @p pageIndex has shaped itself again.
   static void keepLayoutOf(std::uint32_t pageIndex);

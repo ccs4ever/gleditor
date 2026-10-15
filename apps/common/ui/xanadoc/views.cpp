@@ -97,6 +97,7 @@ void Views::drawFrame(gleditor::FrameContext &ctx) {
   }
   pageDim_.apply(ctx, pagesDimmed_.load() ? pageDimShare_.load() : 1.0F);
   const auto cameraBefore = cameraPosition();
+  framingWaiting_         = false;
   if (ctx.state.documentsVisible) frameForReading(ctx);
   if (pendingCamera_ && pendingCamera_()) {
     pendingCamera_ = {};
@@ -105,15 +106,26 @@ void Views::drawFrame(gleditor::FrameContext &ctx) {
   // it moved is not at rest, and neither is one still waiting to place it. A
   // placement that never comes (no page to place by) must not hold a run for
   // ever: it counts as busy for as long as a capture would wait for it.
-  const bool placing =
-      cameraBefore != cameraPosition() || static_cast<bool>(pendingCamera_);
+  // A page still being built is drawn at the size it has so far: in the view
+  // that shows the slice alone the renderer does not wait for documents, but
+  // the page is drawn all the same, and a frame of it half built is not one
+  // to capture.
+  const bool building =
+      ctx.state.documentsVisible &&
+      std::ranges::any_of(ctx.state.docs, [](const auto &doc) {
+        return doc && !doc->isFullyLoaded();
+      });
+  const bool placing = cameraBefore != cameraPosition() ||
+                       static_cast<bool>(pendingCamera_) || framingWaiting_ ||
+                       building;
   cameraSettlingFrames_ = placing ? cameraSettlingFrames_ + 1 : 0;
   cameraSettling_ =
       placing && cameraSettlingFrames_ < gleditor::anim::captureSettleFrames;
 }
 
 void Views::frameForReading(const gleditor::FrameContext &ctx) {
-  auto target = frameTarget_.lock();
+  framingWaiting_ = false;
+  auto target     = frameTarget_.lock();
   if (!target && !readingFramed_ && !ctx.state.docs.empty()) {
     target = ctx.state.docs.front();
   }
@@ -124,6 +136,9 @@ void Views::frameForReading(const gleditor::FrameContext &ctx) {
   const auto frame     = doc.pageFrame(0);
   const auto firstLine = doc.anchorFor(0);
   if (!frame || !firstLine) {
+    // The page is still being built: the camera will be framed on it when it
+    // is, and until then nothing drawn is the frame the reader will see.
+    framingWaiting_ = true;
     return;
   }
   const float toWorld = glm::length(glm::vec3(frame->localToWorld[1]));

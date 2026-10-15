@@ -896,9 +896,25 @@ const char *reflowScopeName(const ReflowScope scope) {
   return "unknown";
 }
 
+PageShaping Doc::blankPage() const {
+  const bool fixedPage = gleditor::PageSizing::Fixed == pageGeometry.mode &&
+                         pageGeometry.widthPx > 0.0F;
+  PageShaping blank;
+  blank.page         = pageGeometry;
+  blank.textWidthPx  = static_cast<int>(fixedPage ? pageGeometry.textWidthPx()
+                                                  : Doc::textWidthPx);
+  blank.textHeightPx = static_cast<int>(fixedPage ? pageGeometry.textHeightPx()
+                                                  : Doc::textHeightPx);
+  return blank;
+}
+
 PageShaping Doc::layoutFrom(const std::uint32_t offset) const {
   if (offset >= text.size()) {
-    return PageShaping{};
+    // An empty document's one blank page is sized as a page of text is. A
+    // page built from nothing at all was 48 pixels square, and was what a
+    // build that re-derived the blank page (rather than finding the one
+    // makePages() recorded) put on the screen, until a later reflow.
+    return text.empty() ? blankPage() : PageShaping{};
   }
   auto font = gleditor::text::FontManager::instance().getFont(
       std::string{renderer->defaultFontName()});
@@ -1406,14 +1422,7 @@ void Doc::makePages() {
     // An empty document is one blank page, not none: a new xanadoc has to
     // show where typing will go, and has a page for the caret and a pick to
     // land on. Sized as a page of text would be.
-    const bool fixedPage = gleditor::PageSizing::Fixed == pageGeometry.mode &&
-                           pageGeometry.widthPx > 0.0F;
-    PageShaping blank;
-    blank.page         = pageGeometry;
-    blank.textWidthPx  = static_cast<int>(fixedPage ? pageGeometry.textWidthPx()
-                                                    : Doc::textWidthPx);
-    blank.textHeightPx = static_cast<int>(
-        fixedPage ? pageGeometry.textHeightPx() : Doc::textHeightPx);
+    PageShaping blank   = blankPage();
     const auto heightPx = pageBoxFor(blank).height;
     std::scoped_lock lock(shapingMutex);
     pendingShapings.emplace(
