@@ -611,14 +611,19 @@ TEST_F(ReaderPackageUiTest, UnsupportedActivityPayloadsRemainUntouched) {
     auto at         = stale.sliceGenesis({});
     const auto rank = stale.makeDimension(
         at, savedSelection ? "d.places" : "d.activity-visits");
-    at =
-        stale.makeCell(rank.version, savedSelection ? "place" : "visit1 0 doc");
+    at = stale.makeCell(
+        rank.version,
+        savedSelection
+            ? "place"
+            : "visit2 0 doc 00000000000000000000000000000000 0 0 0 0 0 0");
     const auto record = stale.cellRefOf(at);
     at = stale.setLink(at, stale.homeCell(), rank.dim, zigzag::DimVector::POS,
                        record);
     if (savedSelection) {
       const auto selection = stale.makeDimension(at, "d.selection");
-      at = stale.makeCell(selection.version, "selection1 unsupported");
+      at                   = stale.makeCell(
+          selection.version,
+          "selection2 00000000000000000000000000000000 1 0 -1 -1 -1 -1 0 0");
       at = stale.setLink(at, record, selection.dim, zigzag::DimVector::POS,
                          stale.cellRefOf(at));
     }
@@ -635,4 +640,47 @@ TEST_F(ReaderPackageUiTest, UnsupportedActivityPayloadsRemainUntouched) {
     EXPECT_EQ(fileBytes(directory / "ops.nodes"), nodes);
     EXPECT_EQ(fileBytes(directory / "store.tables"), tables);
   }
+}
+
+TEST_F(ReaderPackageUiTest, RestoredClosedPlaceNeverEntersAnotherOpenVersion) {
+  auto perma = std::make_shared<UserPermascroll>();
+  Session session((root / "workspace").string(), perma);
+  auto &store       = session.store();
+  const auto text   = store.insert({}, 0, "origin destination");
+  const auto pieces = store.rebuild(text);
+  const auto head   = store.addLink(text, Link{.left  = pieces.spansFor(0, 6),
+                                               .right = pieces.spansFor(7, 11)});
+  const auto wrong  = store.insert(head, 0, "shift ");
+  session.viewOpened(head);
+  LinkContext original(session);
+  const LinkKey key{store.documentId(), store.links().begin()->first};
+  ASSERT_TRUE(
+      original.execute(nav::SelectOccurrence{key, LinkSide::Right, 0, 0}));
+  const auto saved = selectionContext(*original.selection());
+  ASSERT_TRUE(saved.rightPin);
+  session.viewClosed(0);
+  session.viewOpened(wrong);
+  const auto operations = store.opCount();
+  LinkContext resumed(session);
+  std::optional<Extent> focus;
+  resumed.setFocusDocument([&](std::size_t view, Extent range) {
+    EXPECT_EQ(view, 0U);
+    focus = range;
+  });
+  resumed.restoreSelection(saved);
+  ASSERT_TRUE(resumed.selection());
+  EXPECT_EQ(selectionContext(*resumed.selection()).rightPin, saved.rightPin);
+  const auto visits      = resumed.walkEntries().size();
+  const auto activityOps = session.activityForNavigation()->opCount();
+  EXPECT_FALSE(resumed.execute(nav::Enter{}));
+  EXPECT_FALSE(focus);
+  EXPECT_FALSE(resumed.entryStatus().empty());
+  EXPECT_EQ(resumed.walkEntries().size(), visits);
+  EXPECT_EQ(session.activityForNavigation()->opCount(), activityOps);
+  session.viewClosed(0);
+  session.viewOpened(head);
+  ASSERT_TRUE(resumed.execute(nav::Enter{}));
+  EXPECT_EQ(focus, (Extent{7, 18}));
+  EXPECT_EQ(resumed.walkEntries().size(), visits + 1);
+  EXPECT_EQ(store.opCount(), operations);
 }

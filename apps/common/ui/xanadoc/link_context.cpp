@@ -454,6 +454,10 @@ void LinkContext::apply(xanadu::NavigationEffect effect) {
                          effect.resolve->key.id,
                          xanadu::name(supplied.error()));
       previewing.reset();
+      if (const auto selection = navigator.selection();
+          selection && selection->restoring)
+        entryUnavailable = "Unavailable: the saved Link could not be resolved. "
+                           "Its exact choices are retained.";
       if (effect.resolve->key.authority != session.store().documentId()) {
         if (unavailable)
           unavailable("The saved link package is disabled or unavailable. Its "
@@ -461,6 +465,11 @@ void LinkContext::apply(xanadu::NavigationEffect effect) {
         if (effect.focus) focus(*effect.focus);
       }
       return;
+    }
+    if (const auto selection = navigator.selection();
+        selection && selection->restoring) {
+      entryUnavailable = "Unavailable: a saved Link member changed. Choose a "
+                         "member explicitly to replace the saved target.";
     }
     if (!effect.preview) {
       effect.preview = supplied->preview;
@@ -506,6 +515,12 @@ LinkContext::viewIndexOf(const xanadu::DocumentSite &site) const {
     }
   }
   return std::nullopt;
+}
+
+bool LinkContext::cellInView(const CellSite &site) const {
+  return manifold && site.version == manifoldVersion &&
+         site.store == session.store(manifoldStoreIndex).documentId() &&
+         manifold->contains(site.cell);
 }
 
 std::expected<ContentReference, ContentReferenceError>
@@ -569,7 +584,8 @@ std::string LinkContext::describe(const xanadu::OccurrenceSite &site) const {
           }
           return std::string{"a closed version"};
         } else {
-          return "cell " + std::to_string(at.cell);
+          return "cell " + std::to_string(at.cell) +
+                 (cellInView(at) ? "" : " · not in this view");
         }
       },
       site);

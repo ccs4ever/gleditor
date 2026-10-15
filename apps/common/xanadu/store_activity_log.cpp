@@ -155,7 +155,43 @@ OccurrenceSite readSite(std::istream &in) {
   return CellSite{store, at, static_cast<zigzag::CellRef>(cell), {start, end}};
 }
 
+void checkPin(const SideCursor &cursor,
+              const std::optional<OccurrencePin> &pin) {
+  if (bool(cursor.occurrence) != bool(pin) ||
+      (cursor.occurrence && !cursor.member))
+    throw ActivityRecordUnreadable(
+        "activity: chosen occurrence needs exact pin");
+  if (pin && (pin->member.length == 0 ||
+              pin->member.start > std::numeric_limits<std::uint64_t>::max() -
+                                      pin->member.length))
+    throw ActivityRecordUnreadable("activity: invalid pinned member range");
+}
+
+void writePin(std::ostream &out, const std::optional<OccurrencePin> &pin) {
+  out << ' ' << bool(pin);
+  if (!pin) return;
+  out << ' ' << pin->member.scroll << ' ' << pin->member.start << ' '
+      << pin->member.length << ' '
+      << static_cast<unsigned int>(pin->occurrence.coverage) << ' ';
+  writeSite(out, pin->occurrence.site);
+}
+
+std::optional<OccurrencePin> readPin(std::istream &in) {
+  if (!readNumber(in, "occurrence pin flag", 1)) return std::nullopt;
+  const auto scroll =
+      readNumber(in, "pinned scroll", std::numeric_limits<ScrollId>::max());
+  const auto start    = readNumber(in, "pinned member start");
+  const auto length   = readNumber(in, "pinned member length");
+  const auto coverage = readNumber(in, "pinned coverage", 1);
+  return OccurrencePin{
+      .member     = {static_cast<ScrollId>(scroll), start, length},
+      .occurrence = {.site     = readSite(in),
+                     .coverage = static_cast<Coverage>(coverage)}};
+}
+
 void writeContext(std::ostream &out, const LinkVisitContext &link) {
+  checkPin(link.left, link.leftPin);
+  checkPin(link.right, link.rightPin);
   out << bytesOf(link.key.authority) << ' ' << link.key.id << ' '
       << static_cast<unsigned int>(link.active) << ' '
       << indexOf(link.left.member) << ' ' << indexOf(link.left.occurrence)
@@ -167,6 +203,8 @@ void writeContext(std::ostream &out, const LinkVisitContext &link) {
     out << ' ';
     writeSite(out, *link.originCheckpoint);
   }
+  writePin(out, link.leftPin);
+  writePin(out, link.rightPin);
 }
 
 LinkVisitContext readContext(std::istream &in) {
@@ -188,12 +226,16 @@ LinkVisitContext readContext(std::istream &in) {
       .right  = {cursorIndex(rm), cursorIndex(ro)},
       .origin = origin ? std::optional{VisitId{origin}} : std::nullopt};
   if (checkpoint) link.originCheckpoint = readSite(in);
+  link.leftPin  = readPin(in);
+  link.rightPin = readPin(in);
+  checkPin(link.left, link.leftPin);
+  checkPin(link.right, link.rightPin);
   return link;
 }
 
 std::string encode(const Visit &visit) {
   std::ostringstream out;
-  out << "visit2 " << (visit.parent ? visit.parent->value : 0) << ' ';
+  out << "visit3 " << (visit.parent ? visit.parent->value : 0) << ' ';
   writeSite(out, visit.target);
   out << ' ' << static_cast<unsigned int>(visit.arrival) << ' '
       << static_cast<bool>(visit.link);
@@ -207,8 +249,8 @@ std::string encode(const Visit &visit) {
 Visit decode(const std::string &data) {
   std::istringstream in(data);
   std::string signature, extra;
-  if (!(in >> signature) || signature != "visit2")
-    throw ActivityRecordUnreadable("activity: expected visit2");
+  if (!(in >> signature) || signature != "visit3")
+    throw ActivityRecordUnreadable("activity: expected visit3");
   const auto parent = readNumber(in, "parent visit");
   Visit visit{.target = readSite(in)};
   const auto arrival = readNumber(in, "arrival", 1);
@@ -217,7 +259,7 @@ Visit decode(const std::string &data) {
   visit.arrival = static_cast<Arrival>(arrival);
   if (linked) visit.link = readContext(in);
   if (in >> extra)
-    throw ActivityRecordUnreadable("activity: trailing visit2 data");
+    throw ActivityRecordUnreadable("activity: trailing visit3 data");
   return visit;
 }
 
@@ -225,7 +267,7 @@ Visit decode(const std::string &data) {
 
 std::string encodeLinkContext(const LinkVisitContext &link) {
   std::ostringstream out;
-  out << "selection2 ";
+  out << "selection3 ";
   writeContext(out, link);
   return out.str();
 }
@@ -233,11 +275,11 @@ std::string encodeLinkContext(const LinkVisitContext &link) {
 LinkVisitContext decodeLinkContext(const std::string_view text) {
   std::istringstream in{std::string{text}};
   std::string signature, extra;
-  if (!(in >> signature) || signature != "selection2")
-    throw ActivityRecordUnreadable("activity: expected selection2");
+  if (!(in >> signature) || signature != "selection3")
+    throw ActivityRecordUnreadable("activity: expected selection3");
   auto link = readContext(in);
   if (in >> extra)
-    throw ActivityRecordUnreadable("activity: trailing selection2 data");
+    throw ActivityRecordUnreadable("activity: trailing selection3 data");
   return link;
 }
 

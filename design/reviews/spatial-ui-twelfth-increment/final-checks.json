@@ -1,0 +1,77 @@
+{
+  "canonical_build_exit": 0,
+  "fresh_xuzz_suite": {
+    "passed": 106,
+    "total": 106,
+    "exit": 0
+  },
+  "fresh_ui_suite": {
+    "passed": 238,
+    "total": 238,
+    "exit": 0
+  },
+  "fresh_reading_place": {
+    "passed": 4,
+    "total": 4,
+    "exit": 0
+  },
+  "format_check_exit": 0,
+  "lint_exit": 0,
+  "diff_check_exit": 0,
+  "reused_after_hash_verification": {
+    "library": 799,
+    "owning_mip_cache": 53
+  },
+  "strict_core": {
+    "exit": 0,
+    "backends": [
+      "OpenGL",
+      "OpenGL ES",
+      "Vulkan"
+    ],
+    "gl_gles_differing_pixels": 0,
+    "vulkan_ordinary_percent": 0.5104,
+    "vulkan_overlay_percent": 0.5096,
+    "unchanged_vulkan_limit_percent": 1,
+    "actual_split_recording_exercised": false,
+    "broad_e2e_accepted": false
+  },
+  "native": {
+    "core_baseline_exits": [
+      0,
+      0
+    ],
+    "core_candidate_exits": [
+      0,
+      0
+    ],
+    "candidate_visit_record_counts": {
+      "before_restart": 2,
+      "after_restart": 2,
+      "after_refused_enter": 2,
+      "after_exact_reopen": 2,
+      "after_successful_enter": 3
+    },
+    "source_ops_sha256": "49a12edef0113d9b6f6b7a120c8f2f7cbf7dd1f6d865e8606dc7dfaac4a164d6",
+    "supplemental_inspector": {
+      "actual_pages": 2,
+      "exit": 1,
+      "complete_pagewalk_accepted": false
+    },
+    "native_final_binaries_byte_identical": false,
+    "allocated_runtime_sections_equal_except_build_id": true
+  },
+  "independent_reviews": "No blocking finding in bounded increment; limits recorded in separate reviews",
+  "previous_activity_payloads": "v2 refused and bytes preserved; no migration shim",
+  "open": [
+    "J25 branching Back/Return and every forward child after restart",
+    "exact cell/history endpoints",
+    "pending-page interruption",
+    "remote/locked/package lifecycle variants",
+    "complete J24/J25 and 16+16 journeys",
+    "native AT-SPI",
+    "optimized performance",
+    "malformed historical cell pin range highlight boundary"
+  ],
+  "manifest_note": "Nested snapshot manifests retain original run paths; archive SHA256SUMS uses relative paths."
+}

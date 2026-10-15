@@ -3460,13 +3460,7 @@ int XuzzApp::run(const int argc, char **argv) {
     place.zigzagFocus       = zigzagPresentation->focusCell();
     place.zigzagHasKeyboard = keyboardPane.inZigzag();
     if (const auto selected = linkContext.selection()) {
-      place.link = xanadu::LinkVisitContext{.key    = selected->key,
-                                            .active = selected->active,
-                                            .left   = selected->left,
-                                            .right  = selected->right,
-                                            .origin = selected->origin,
-                                            .originCheckpoint =
-                                                selected->originCheckpoint};
+      place.link = xanadu::selectionContext(*selected);
     }
     session->rememberPlace(place);
   }

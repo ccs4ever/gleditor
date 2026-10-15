@@ -1239,3 +1239,38 @@ TEST_F(LinkPanelOverlayTest,
   draw(claim);
   EXPECT_NE(captured("Controls").overlayWidgetId, std::nullopt);
 }
+
+TEST_F(LinkPanelOverlayTest,
+       HistoricalCellPinsNeverMarkTheCurrentOtherVersion) {
+  auto &store                = session.store();
+  const auto original        = session.views().front().version;
+  const auto content         = store.rebuild(original).spansFor(0, 4).front();
+  const auto made            = store.makeCell(original, content);
+  const auto cell            = store.cellRefOf(made);
+  const auto later           = store.insert(made, 0, "new ");
+  const auto oldManifold     = store.rebuildManifold(made);
+  const auto currentManifold = store.rebuildManifold(later);
+  navigation.setFocusCell([](zigzag::CellRef, xanadu::Extent) {});
+  navigation.setManifold(&currentManifold, 0, later);
+  auto saved    = xanadu::selectionContext(*navigation.selection());
+  saved.leftPin = xanadu::OccurrencePin{
+      content, {xanadu::CellSite{store.documentId(), made, cell, {0, 4}}}};
+  saved.left = {.member = 0, .occurrence = 0};
+  navigation.restoreSelection(saved);
+  std::vector<xanadu::CellHighlight> marked;
+  overlay.setCellHighlighter(
+      [&](auto cells, std::uint32_t) { marked = std::move(cells); });
+  draw();
+  EXPECT_EQ(std::ranges::count(marked, cell, &xanadu::CellHighlight::cell), 1);
+  EXPECT_FALSE(std::ranges::any_of(marked, [&](const auto &highlight) {
+    return highlight.cell == cell && highlight.chosen;
+  }));
+  const auto revision = navigation.revision();
+  navigation.setManifold(&oldManifold, 0, made);
+  EXPECT_GT(navigation.revision(), revision);
+  draw();
+  EXPECT_EQ(std::ranges::count(marked, cell, &xanadu::CellHighlight::cell), 1);
+  EXPECT_TRUE(std::ranges::any_of(marked, [&](const auto &highlight) {
+    return highlight.cell == cell && highlight.chosen;
+  }));
+}

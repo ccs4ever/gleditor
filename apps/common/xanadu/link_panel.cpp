@@ -108,7 +108,9 @@ linkPanelLines(const SelectedLink &selected,
   std::vector<PanelLine> lines;
   if (!selected.occurrences) {
     lines.push_back(
-        {.text = std::format("link {}{}resolving", selected.key.id, kSep),
+        {.text = std::format("link {}{}{}", selected.key.id, kSep,
+                             selected.restoring ? "saved Link unavailable"
+                                                : "resolving"),
          .tone = PanelLine::Tone::Muted});
     return lines;
   }

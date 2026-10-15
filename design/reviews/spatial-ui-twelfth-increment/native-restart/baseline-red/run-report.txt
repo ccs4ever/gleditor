@@ -1,0 +1,24 @@
+Baseline changed-view-set restart audit (J25 red path)
+
+This is one fresh-profile native headless OpenGL run using the frozen baseline candidate. In process 1, the UI authored the 2-left/3-right Link, selected Left member 1/2 at place 2/2 and Right member 2/3 at place 1/1, entered b1, returned to Origin (a34), and closed the visible `Untitled · b` target with the visible `Close Untitled · b` button (logged click at 694,140). Inspector still showed the selected Left endpoint pinned to b1, with exact source reference unavailable because the chosen document frame was closed. The profile then exited normally.
+
+Process 2 relaunched with the same `--profile` and same six environment roots. It resumed the saved last place; no `--open-store`, Ctrl+O, or extra target-opening step was used. Before Enter, the selected Left ordinal 2 now resolved to `cell 24`: the visible Link list labels Left occurrence 1 as the document and occurrence 2 as cell 24. Inspector identifies `Pinned state: a34 · cell 24`, while the prior pre-exit Inspector identified `State: b1 · bytes 0–20` and the unavailable-reference explanation. The Right selected member 2/3 similarly has document occurrence 1 and cell 27 occurrence 2. This is the exact ordinal rebind after the chosen target view is closed.
+
+Pressing Enter after restart succeeds at the changed target: Inspector reports current reading state a34, bytes 0–42, and pinned state a34 · cell 24; the UI reports current reader visit 3. Activity snapshots show two visit MAKE-cell records before close and after restart, then three after Enter. New operation 74 contains `visit2 1 cell <same-store-id> a34`; the token after `visit2` is the parent visit ID. Activity op count grows from 18 before close to 73 on resumed-profile restoration, then 77 after Enter. Source ops remain unchanged at SHA-256 49a12edef0113d9b6f6b7a120c8f2f7cbf7dd1f6d865e8606dc7dfaac4a164d6 at every checkpoint.
+
+Both processes exited 0. Complete UI text/a11y logs are `phase1.log` and `phase2.log`; exact command vectors are the paired `phase*-argv.txt`; checkpoint source/activity dumps are in `checkpoints/`; scripts are `../run-baseline-closed.sh` and `../run-baseline-closed-restart.sh`. Seven complete P6 PPM frames (1440x1000, 4,320,017 bytes) and their PNGs are in `raw/` and `png/`; PNG decoded RGB bytes were compared byte-for-byte with each PPM payload.
+
+Provenance:
+Worktree: /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul
+HEAD at validation start: c5f21617594bd6e25d43136d7a010e58375ba342 (shared tree had parent-owned edits)
+Frozen app SHA-256: 6aade8d34a679960b3789f87cc808219dcb2d01aa2ab0602b68a14907a8d7522
+Frozen libgleditor.so.0 SHA-256: ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9
+Frozen xudu-dump SHA-256: 7031847f950135234935ae67d06c3e59da6a945bd95a5202f14591064f00947c
+SDL_VIDEODRIVER=offscreen
+SDL_AUDIODRIVER=dummy
+LIBGL_ALWAYS_SOFTWARE=1
+XDG_DATA_HOME=/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-twelfth/baseline-closed/data
+XDG_CONFIG_HOME=/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-twelfth/baseline-closed/config
+XDG_CACHE_HOME=/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-twelfth/baseline-closed/cache
+LD_LIBRARY_PATH prepended the frozen bin directory; SPDLOG_LEVEL=xuzz.keymap=debug; PATH prepended /tmp/spatial-xvfb/usr/bin.
+Each phase used: timeout --signal=TERM --kill-after=5s 240s (or 180s for phase 2) xvfb-run -a -s '-noreset -screen 0 1600x1200x24' <app argv>. Xvfb selected DISPLAY=:99. Xuzz window size 1440x1000.

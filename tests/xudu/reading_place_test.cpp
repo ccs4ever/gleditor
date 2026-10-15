@@ -119,7 +119,10 @@ TEST_F(ReadingPlaceTest, pinnedLinkWithoutAnEndpointVisitSurvivesRestart) {
       .left             = {.member = 1, .occurrence = 3},
       .right            = {.member = 2},
       .origin           = xanadu::VisitId{7},
-      .originCheckpoint = xanadu::CellSite{store.documentId(), {}, 21, {4, 9}}};
+      .originCheckpoint = xanadu::CellSite{store.documentId(), {}, 21, {4, 9}},
+      .leftPin          = xanadu::OccurrencePin{
+                   {0, 100, 5},
+                   {xanadu::DocumentSite{store.documentId(), {}, {7, 12}}}}};
   std::ignore = xanadu::recordPlace(store, place);
   store.save((root / "activity").string());
   xanadu::Store reopened(perma);

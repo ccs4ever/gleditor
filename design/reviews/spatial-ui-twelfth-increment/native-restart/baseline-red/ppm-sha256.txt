@@ -1,0 +1,8 @@
+06c5c0511d2432eaa47cd93100ce541f3ee006b056dc190eb021458c852b0a57  00-selected.ppm  (raw PPM intentionally omitted; source was validated against PNG)
+2f4281dcdfd128dcc1feeeee413b461b31ab12f47a6d99f78b66309761da821c  01-inspected.ppm  (raw PPM intentionally omitted; source was validated against PNG)
+624a9baeab8f1ea4d5f5ee2c4655fdcc00bf2b39321858d0ad7910f74ed18947  02-enter-b1.ppm  (raw PPM intentionally omitted; source was validated against PNG)
+04922ca3f295bb72042ed94ac3bb3dc5d81d6075e252de15a38538cd647b0a3f  03-origin.ppm  (raw PPM intentionally omitted; source was validated against PNG)
+c665e8c5b8dc305792f579c1b1b59cb32ea89f8d7fc5004f58268626c416e8f3  04-closed-before-exit.ppm  (raw PPM intentionally omitted; source was validated against PNG)
+a035c7a061ba7b649ebb56c255ae48e319d4afa32a316c1fe42544e592260d4f  05-restart-resume.ppm  (raw PPM intentionally omitted; source was validated against PNG)
+ba88c9a792bbadd44ab0386e262b66dfd692b2909b1ce7603c856cde7ffe3075  06-restart-inspector.ppm  (raw PPM intentionally omitted; source was validated against PNG)
+de5cd634e562e105a694fda53c9d6524f8dc70e06112381630cf4518f2dffd46  07-restart-enter.ppm  (raw PPM intentionally omitted; source was validated against PNG)

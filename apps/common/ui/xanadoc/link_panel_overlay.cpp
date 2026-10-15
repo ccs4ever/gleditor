@@ -79,6 +79,7 @@ void LinkPanelOverlay::rebuildHighlights() {
         std::visit(
             [&]<typename Site>(const Site &site) {
               if constexpr (std::is_same_v<Site, xanadu::CellSite>) {
+                if (!context.cellInView(site)) return;
                 cells.push_back({.cell   = site.cell,
                                  .start  = site.range.start,
                                  .end    = site.range.end,
@@ -278,8 +279,17 @@ void LinkPanelOverlay::appendInvestigation(std::vector<PanelLine> &lines) {
                    context.currentVisit()->value)
              : "Current reader visit unavailable · inspection keeps reading "
                "place");
-  if (!selected->occurrences) return;
   for (const auto side : {LinkSide::Left, LinkSide::Right}) {
+    if (selected->restoring) {
+      const auto &saved = side == LinkSide::Left
+                              ? selected->restoring->leftPin
+                              : selected->restoring->rightPin;
+      if (saved)
+        place(side == LinkSide::Left ? "Saved Left occurrence"
+                                     : "Saved Right occurrence",
+              saved->occurrence.site);
+    }
+    if (!selected->occurrences) continue;
     const auto &cursor  = selected->cursor(side);
     const auto &members = selected->occurrences->members(side);
     if (!cursor.member || *cursor.member >= members.size()) continue;

@@ -1,0 +1,9 @@
+Native same-profile restart evidence
+
+`baseline-red/` is the frozen pre-fix changed-view-set control. Before closing the target, the selected Left endpoint is pinned to b1 in local store `91fe92fa3df5a160f35d731a1ffb3afd`, scroll 0 bytes 55511–55531, occurrence bytes 0–20. After restart, ordinal place 2/2 resolves to a34 cell 24; Enter records a visit to that cell. Visit MAKE cells increase from two to three; source ops SHA-256 stays `49a12edef0113d9b6f6b7a120c8f2f7cbf7dd1f6d865e8606dc7dfaac4a164d6`.
+
+`candidate-v3/` is the build2 candidate on a fresh v3 profile. After restart, the selected Left endpoint remains pinned to b1 in local store `33db7f71defbaeb61f4b64f00540d85d`, scroll 0 bytes 55511–55531, occurrence bytes 0–20. Enter while closed is refused, retaining two visits. The visible Hypertime Map control `T · Version b1` reopens that exact target; explicit Enter creates one visit to b1 (three total). Source ops SHA-256 remains the same `49a12edef0113d9b6f6b7a120c8f2f7cbf7dd1f6d865e8606dc7dfaac4a164d6`.
+
+Both core two-process phases exited 0/0. Full reports, provenance, command vectors, compressed UI logs, source/activity snapshots, decoded visit payloads, PPM hashes and PNG/RGB validation tables are in each run directory. The rendered closed-reference identity proof is `candidate-v3/frames/11-identity-closed-page1.png`.
+
+The supplemental page capture contains only its two actual pages. The candidate's extra Next click after page 2/2 was disabled; that supplemental command exited 1 and is not counted as a pagewalk pass. `candidate-v3/pagewalk-notes.txt` records the unfulfilled page 3–6 requests. The archive contains no binaries, profile directories, or raw PPM frames. `ppm-sha256.txt` records hashes for omitted PPMs; `frame-verification.tsv` confirms every archived PNG decodes to the exact original RGB bytes. Visit payload JSON decodes all v2/v3 visit records from the recorded primedia spans.

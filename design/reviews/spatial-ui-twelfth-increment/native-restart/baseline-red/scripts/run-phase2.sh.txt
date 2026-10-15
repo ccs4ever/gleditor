@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+run=/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-twelfth/baseline-closed
+bin=/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-twelfth/bin
+export SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1
+export XDG_DATA_HOME=$run/data XDG_CONFIG_HOME=$run/config XDG_CACHE_HOME=$run/cache
+export PATH=/tmp/spatial-xvfb/usr/bin:$PATH
+app=("$bin/xuzz" --backend opengl --resize 1440,1000 --profile
+  --dump-a11y --capture "$run/raw/05-restart-resume.ppm" --wait-ms 5000
+  --chord 'Ctrl+Alt+I' --dump-a11y --capture "$run/raw/06-restart-inspector.ppm" --wait-ms 5000
+  --chord 'Alt+Shift+Return' --dump-a11y --capture "$run/raw/07-restart-enter.ppm" --wait-ms 5000
+  --chord Ctrl+Q)
+printf '%q ' "${app[@]}" > "$run/evidence/phase2-argv.txt"; printf '\n' >> "$run/evidence/phase2-argv.txt"
+sha256sum "$bin"/{xuzz,libgleditor.so.0,xudu-dump} > "$run/evidence/binary-hashes-before-phase2.txt"
+LD_LIBRARY_PATH="$bin${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" SPDLOG_LEVEL='xuzz.keymap=debug' timeout --signal=TERM --kill-after=5s 180s xvfb-run -a -s '-noreset -screen 0 1600x1200x24' "${app[@]}" > "$run/evidence/phase2.log" 2>&1 & pid=$!
+snapshot() {
+ local step=$1 target="$run/evidence/checkpoints/$1" root="$run/data/xudu/xanadocs"
+ mkdir -p "$target"; mapfile -t stores < <(find "$root" -mindepth 1 -maxdepth 1 -type d ! -name default 2>/dev/null | sort)
+ { printf 'count=%s\n' "${#stores[@]}"; for i in "${!stores[@]}"; do printf '%s=%s\n' "$i" "${stores[$i]}"; "$bin/xudu-dump" --section=ops --permascroll="$run/data/xuzz/permascroll/default" "${stores[$i]}" > "$target/source-$i.ops.txt" 2>&1 || true; done; } > "$target/profile-stores.txt"
+ if [[ -e "$run/data/xudu/activity" ]]; then "$bin/xudu-dump" --section=ops --permascroll="$run/data/xuzz/permascroll/default" "$run/data/xudu/activity" > "$target/activity.ops.txt" 2>&1 || true; else printf absent > "$target/activity.ops.txt"; fi
+ sha256sum "$target"/*.txt > "$target/SHA256SUMS"
+}
+for step in 05-restart-resume 06-restart-inspector 07-restart-enter; do
+ f="$run/raw/$step.ppm"; ready=false
+ for _ in $(seq 1 120); do [[ -s "$f" && $(stat -c %s "$f") -eq 4320017 ]] && { ready=true; break; }; kill -0 "$pid" 2>/dev/null || break; sleep .5; done
+ if [[ $ready == true ]]; then snapshot "$step"; else printf missing-or-incomplete > "$run/evidence/$step.missing"; fi
+done
+status=0; wait "$pid" || status=$?; printf '%s\n' "$status" > "$run/evidence/phase2-exit.txt"
+sha256sum "$bin"/{xuzz,libgleditor.so.0,xudu-dump} > "$run/evidence/binary-hashes-after-phase2.txt"

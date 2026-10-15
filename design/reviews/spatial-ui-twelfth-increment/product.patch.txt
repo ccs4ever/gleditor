@@ -1,0 +1,1007 @@
+diff --git a/apps/common/ui/xanadoc/link_context.cpp b/apps/common/ui/xanadoc/link_context.cpp
+index 70259c9f..32c30a73 100644
+--- a/apps/common/ui/xanadoc/link_context.cpp
++++ b/apps/common/ui/xanadoc/link_context.cpp
+@@ -454,6 +454,10 @@ void LinkContext::apply(xanadu::NavigationEffect effect) {
+                          effect.resolve->key.id,
+                          xanadu::name(supplied.error()));
+       previewing.reset();
++      if (const auto selection = navigator.selection();
++          selection && selection->restoring)
++        entryUnavailable = "Unavailable: the saved Link could not be resolved. "
++                           "Its exact choices are retained.";
+       if (effect.resolve->key.authority != session.store().documentId()) {
+         if (unavailable)
+           unavailable("The saved link package is disabled or unavailable. Its "
+@@ -462,6 +466,11 @@ void LinkContext::apply(xanadu::NavigationEffect effect) {
+       }
+       return;
+     }
++    if (const auto selection = navigator.selection();
++        selection && selection->restoring) {
++      entryUnavailable = "Unavailable: a saved Link member changed. Choose a "
++                         "member explicitly to replace the saved target.";
++    }
+     if (!effect.preview) {
+       effect.preview = supplied->preview;
+     }
+@@ -508,6 +517,12 @@ LinkContext::viewIndexOf(const xanadu::DocumentSite &site) const {
+   return std::nullopt;
+ }
+ 
++bool LinkContext::cellInView(const CellSite &site) const {
++  return manifold && site.version == manifoldVersion &&
++         site.store == session.store(manifoldStoreIndex).documentId() &&
++         manifold->contains(site.cell);
++}
++
+ std::expected<ContentReference, ContentReferenceError>
+ LinkContext::reference(const LinkKey &key, const LinkMember &member,
+                        std::uint32_t occurrence) const {
+@@ -569,7 +584,8 @@ std::string LinkContext::describe(const xanadu::OccurrenceSite &site) const {
+           }
+           return std::string{"a closed version"};
+         } else {
+-          return "cell " + std::to_string(at.cell);
++          return "cell " + std::to_string(at.cell) +
++                 (cellInView(at) ? "" : " · not in this view");
+         }
+       },
+       site);
+diff --git a/apps/common/ui/xanadoc/link_context.hpp b/apps/common/ui/xanadoc/link_context.hpp
+index dceefee3..fdb04df1 100644
+--- a/apps/common/ui/xanadoc/link_context.hpp
++++ b/apps/common/ui/xanadoc/link_context.hpp
+@@ -113,6 +113,9 @@ public:
+   /// entered.
+   void setManifold(const zigzag::Manifold *bridge, std::size_t storeIndex,
+                    xanadu::MicroversionId version) noexcept {
++    if (manifold != bridge || manifoldStoreIndex != storeIndex ||
++        manifoldVersion != version)
++      ++changes;
+     manifold           = bridge;
+     manifoldStoreIndex = storeIndex;
+     manifoldVersion    = std::move(version);
+@@ -182,6 +185,8 @@ public:
+   /// The open view showing @p site's version, if one is.
+   [[nodiscard]] std::optional<std::size_t>
+   viewIndexOf(const xanadu::DocumentSite &site) const;
++  /// Whether the bound slice is the exact saved cell frame.
++  [[nodiscard]] bool cellInView(const CellSite &site) const;
+ 
+   /// @p site in words: "document 2, bytes 10 to 14" or "cell 7, bytes 0 to
+   /// 5". Shared by the panel and the accessibility tree so both say the same.
+diff --git a/apps/common/ui/xanadoc/link_panel_overlay.cpp b/apps/common/ui/xanadoc/link_panel_overlay.cpp
+index d8dd9443..46f49d48 100644
+--- a/apps/common/ui/xanadoc/link_panel_overlay.cpp
++++ b/apps/common/ui/xanadoc/link_panel_overlay.cpp
+@@ -79,6 +79,7 @@ void LinkPanelOverlay::rebuildHighlights() {
+         std::visit(
+             [&]<typename Site>(const Site &site) {
+               if constexpr (std::is_same_v<Site, xanadu::CellSite>) {
++                if (!context.cellInView(site)) return;
+                 cells.push_back({.cell   = site.cell,
+                                  .start  = site.range.start,
+                                  .end    = site.range.end,
+@@ -278,8 +279,17 @@ void LinkPanelOverlay::appendInvestigation(std::vector<PanelLine> &lines) {
+                    context.currentVisit()->value)
+              : "Current reader visit unavailable · inspection keeps reading "
+                "place");
+-  if (!selected->occurrences) return;
+   for (const auto side : {LinkSide::Left, LinkSide::Right}) {
++    if (selected->restoring) {
++      const auto &saved = side == LinkSide::Left
++                              ? selected->restoring->leftPin
++                              : selected->restoring->rightPin;
++      if (saved)
++        place(side == LinkSide::Left ? "Saved Left occurrence"
++                                     : "Saved Right occurrence",
++              saved->occurrence.site);
++    }
++    if (!selected->occurrences) continue;
+     const auto &cursor  = selected->cursor(side);
+     const auto &members = selected->occurrences->members(side);
+     if (!cursor.member || *cursor.member >= members.size()) continue;
+diff --git a/apps/common/xanadu/link_navigation.cpp b/apps/common/xanadu/link_navigation.cpp
+index 23e45dc9..25a070eb 100644
+--- a/apps/common/xanadu/link_navigation.cpp
++++ b/apps/common/xanadu/link_navigation.cpp
+@@ -95,6 +95,50 @@ void keepInRange(SelectedLink &link, const LinkSide side) {
+   }
+ }
+ 
++/// View-local ordinals are hints; the saved member and site determine identity.
++void restorePins(SelectedLink &link) {
++  if (!link.restoring) return;
++  for (const auto side : {LinkSide::Left, LinkSide::Right}) {
++    auto &cursor = link.cursor(side);
++    auto &pin    = side == LinkSide::Left ? link.restoring->leftPin
++                                          : link.restoring->rightPin;
++    if (!pin) {
++      cursor.occurrence.reset();
++      keepInRange(link, side);
++      continue;
++    }
++    auto &members = side == LinkSide::Left ? link.occurrences->left
++                                           : link.occurrences->right;
++    if (!cursor.member || *cursor.member >= members.size() ||
++        members[*cursor.member].span != pin->member) {
++      cursor = {};
++      continue;
++    }
++    auto &places = members[*cursor.member].occurrences;
++    const auto found =
++        std::ranges::find(places, pin->occurrence.site, &Occurrence::site);
++    if (found == places.end()) {
++      // Retain a known historical place just as a live selection does when
++      // its view closes. The host still checks exact availability on Enter.
++      cursor.occurrence = static_cast<std::uint32_t>(places.size());
++      places.push_back(pin->occurrence);
++    } else {
++      cursor.occurrence = static_cast<std::uint32_t>(found - places.begin());
++    }
++    pin.reset();
++  }
++  if (!link.restoring->leftPin && !link.restoring->rightPin)
++    link.restoring.reset();
++}
++
++void abandonSavedPin(SelectedLink &link, const LinkSide side) {
++  if (!link.restoring) return;
++  (side == LinkSide::Left ? link.restoring->leftPin : link.restoring->rightPin)
++      .reset();
++  if (!link.restoring->leftPin && !link.restoring->rightPin)
++    link.restoring.reset();
++}
++
+ /// Settle what the selecting gesture knew against the resolved endsets.
+ void settleHint(SelectedLink &link) {
+   const auto hint = std::exchange(link.hint, {});
+@@ -109,6 +153,7 @@ void settleHint(SelectedLink &link) {
+           *hint.occurrence < members[*hint.member].occurrences.size()) {
+         cursor.occurrence = hint.occurrence;
+       }
++      abandonSavedPin(link, *hint.side);
+       link.cursor(*hint.side) = cursor;
+     }
+     return;
+@@ -144,7 +189,8 @@ void settleHint(SelectedLink &link) {
+                        link.key.id);
+     return;
+   }
+-  const auto &hitAt       = landings.front();
++  const auto &hitAt = landings.front();
++  abandonSavedPin(link, hitAt.side);
+   link.active             = hitAt.side;
+   link.cursor(hitAt.side) = SideCursor{
+       .member     = hitAt.member,
+@@ -168,6 +214,38 @@ LinkNavigator::selection() const noexcept {
+   return gleditor::refOf(selected ? &*selected : nullptr);
+ }
+ 
++LinkVisitContext selectionContext(const SelectedLink &selection) {
++  LinkVisitContext result{.key              = selection.key,
++                          .active           = selection.active,
++                          .left             = selection.left,
++                          .right            = selection.right,
++                          .origin           = selection.origin,
++                          .originCheckpoint = selection.originCheckpoint};
++  for (const auto side : {LinkSide::Left, LinkSide::Right}) {
++    auto &pin    = side == LinkSide::Left ? result.leftPin : result.rightPin;
++    auto &cursor = side == LinkSide::Left ? result.left : result.right;
++    if (selection.restoring) {
++      const auto &saved = side == LinkSide::Left
++                              ? selection.restoring->leftPin
++                              : selection.restoring->rightPin;
++      if (saved) {
++        pin    = saved;
++        cursor = side == LinkSide::Left ? selection.restoring->left
++                                        : selection.restoring->right;
++        continue;
++      }
++    }
++    if (!selection.occurrences || !cursor.member || !cursor.occurrence)
++      continue;
++    const auto &members = membersOf(selection, side);
++    if (*cursor.member >= members.size()) continue;
++    const auto &member = members[*cursor.member];
++    if (*cursor.occurrence < member.occurrences.size())
++      pin = OccurrencePin{member.span, member.occurrences[*cursor.occurrence]};
++  }
++  return result;
++}
++
+ NavigationResult LinkNavigator::dispatch(const NavigationCommand &command) {
+   return std::visit(
+       [this]<typename Command>(const Command &c) -> NavigationResult {
+@@ -248,17 +326,21 @@ NavigationResult LinkNavigator::supply(
+     return std::unexpected(NavigationError::StaleGeneration);
+   }
+   if (!occurrences) {
+-    selected.reset();
++    if (!selected->restoring) selected.reset();
+     return std::unexpected(NavigationError::LinkNotFound);
+   }
+   if (occurrences->key != selected->key) {
+     return std::unexpected(NavigationError::StaleGeneration);
+   }
+   selected->occurrences = std::move(*occurrences);
+-  keepInRange(*selected, LinkSide::Left);
+-  keepInRange(*selected, LinkSide::Right);
+-  settleHint(*selected);
+-  selectSingletonMembers(*selected);
++  if (selected->restoring) {
++    restorePins(*selected);
++  } else {
++    keepInRange(*selected, LinkSide::Left);
++    keepInRange(*selected, LinkSide::Right);
++    settleHint(*selected);
++    selectSingletonMembers(*selected);
++  }
+   return NavigationEffect{.preview = previewOf(*selected, selected->active)};
+ }
+ 
+@@ -293,6 +375,7 @@ NavigationResult LinkNavigator::selectMember(const nav::SelectMember &command) {
+   if (command.member >= members.size()) {
+     return std::unexpected(NavigationError::MemberOutOfRange);
+   }
++  abandonSavedPin(*selected, command.side);
+   selected->active = command.side;
+   selected->cursor(command.side) =
+       chooseMember(members[command.member], command.member);
+@@ -311,6 +394,7 @@ NavigationResult LinkNavigator::stepMember(const int delta) {
+   }
+   const auto next = stepIndex(selection.cursor(selection.active).member, delta,
+                               static_cast<std::uint32_t>(members.size()));
++  abandonSavedPin(selection, selection.active);
+   selection.cursor(selection.active) = chooseMember(members[next], next);
+   return NavigationEffect{.preview = previewOf(selection, selection.active)};
+ }
+@@ -329,6 +413,7 @@ LinkNavigator::selectOccurrence(const nav::SelectOccurrence &command) {
+   if (command.occurrence >= members[command.member].occurrences.size()) {
+     return std::unexpected(NavigationError::OccurrenceOutOfRange);
+   }
++  abandonSavedPin(*selected, command.side);
+   selected->active = command.side;
+   selected->cursor(command.side) =
+       SideCursor{.member = command.member, .occurrence = command.occurrence};
+@@ -349,6 +434,7 @@ NavigationResult LinkNavigator::stepOccurrence(const int delta) {
+   if (member.occurrences.empty()) {
+     return std::unexpected(NavigationError::MemberNotInView);
+   }
++  abandonSavedPin(selection, selection.active);
+   cursor.occurrence =
+       stepIndex(cursor.occurrence, delta,
+                 static_cast<std::uint32_t>(member.occurrences.size()));
+@@ -383,17 +469,10 @@ NavigationResult LinkNavigator::enter() {
+     return std::unexpected(NavigationError::NoOccurrenceChosen);
+   }
+   const auto &target = member.occurrences[*cursor.occurrence].site;
+-  current            = activity.append(
+-      Visit{.parent  = current,
+-                       .target  = target,
+-                       .arrival = Arrival::EnteredEndpoint,
+-                       .link    = LinkVisitContext{.key    = selection.key,
+-                                                   .active = selection.active,
+-                                                   .left   = selection.left,
+-                                                   .right  = selection.right,
+-                                                   .origin = selection.origin,
+-                                                   .originCheckpoint =
+-                                         selection.originCheckpoint}});
++  current            = activity.append(Visit{.parent  = current,
++                                             .target  = target,
++                                             .arrival = Arrival::EnteredEndpoint,
++                                             .link    = selectionContext(selection)});
+   return NavigationEffect{.focus = target, .visit = current};
+ }
+ 
+@@ -429,8 +508,8 @@ NavigationResult LinkNavigator::restoreVisit(const Visit &visit) {
+     selected->right            = saved.right;
+     selected->origin           = saved.origin;
+     selected->originCheckpoint = saved.originCheckpoint;
+-    keepInRange(*selected, LinkSide::Left);
+-    keepInRange(*selected, LinkSide::Right);
++    selected->restoring        = saved;
++    restorePins(*selected);
+     effect.preview = previewOf(*selected, selected->active);
+     return effect;
+   }
+@@ -440,7 +519,8 @@ NavigationResult LinkNavigator::restoreVisit(const Visit &visit) {
+                           .left             = saved.left,
+                           .right            = saved.right,
+                           .origin           = saved.origin,
+-                          .originCheckpoint = saved.originCheckpoint};
++                          .originCheckpoint = saved.originCheckpoint,
++                          .restoring        = saved};
+   effect.resolve =
+       ResolveRequest{.key = saved.key, .generation = selected->generation};
+   return effect;
+@@ -454,7 +534,8 @@ LinkNavigator::restoreSelection(const LinkVisitContext &saved) {
+                           .left             = saved.left,
+                           .right            = saved.right,
+                           .origin           = saved.origin,
+-                          .originCheckpoint = saved.originCheckpoint};
++                          .originCheckpoint = saved.originCheckpoint,
++                          .restoring        = saved};
+   return NavigationEffect{
+       .resolve =
+           ResolveRequest{.key = saved.key, .generation = selected->generation}};
+diff --git a/apps/common/xanadu/link_navigation.hpp b/apps/common/xanadu/link_navigation.hpp
+index 02b6a101..55f35ce3 100644
+--- a/apps/common/xanadu/link_navigation.hpp
++++ b/apps/common/xanadu/link_navigation.hpp
+@@ -50,6 +50,14 @@ struct SideCursor {
+   bool operator==(const SideCursor &) const = default;
+ };
+ 
++/// A previously observed target of one immutable authored member.
++struct OccurrencePin {
++  PrimediaSpan member;
++  Occurrence occurrence;
++
++  bool operator==(const OccurrencePin &) const = default;
++};
++
+ /// The link state a visit saves, so Activity Back can put the panel back.
+ struct LinkVisitContext {
+   LinkKey key;
+@@ -60,6 +68,8 @@ struct LinkVisitContext {
+   std::optional<VisitId> origin;
+   /// Frozen reading place at selection, without making a completed visit.
+   std::optional<OccurrenceSite> originCheckpoint{};
++  std::optional<OccurrencePin> leftPin{};
++  std::optional<OccurrencePin> rightPin{};
+ 
+   bool operator==(const LinkVisitContext &) const = default;
+ };
+@@ -292,6 +302,8 @@ struct SelectedLink {
+   std::optional<OccurrenceSite> originCheckpoint{};
+   /// Settled against the occurrences when they arrive.
+   SelectionHint hint{};
++  /// Kept until each saved member is reconciled, including unavailable pins.
++  std::optional<LinkVisitContext> restoring{};
+ 
+   [[nodiscard]] const SideCursor &cursor(const LinkSide side) const noexcept {
+     return LinkSide::Left == side ? left : right;
+@@ -301,6 +313,9 @@ struct SelectedLink {
+   }
+ };
+ 
++/// Capture both chosen sites from the same snapshot used for entry.
++[[nodiscard]] LinkVisitContext selectionContext(const SelectedLink &selection);
++
+ using NavigationResult = std::expected<NavigationEffect, NavigationError>;
+ 
+ class LinkNavigator {
+@@ -320,7 +335,8 @@ public:
+    *
+    * Refused with StaleGeneration unless @p generation is the current
+    * selection's, so a slow resolution cannot land on a link the reader has
+-   * since left. Cursors already set are kept when still in range.
++   * since left. Restored choices reconcile exact member spans and sites;
++   * ordinary selection hints settle against this snapshot.
+    */
+   NavigationResult
+   supply(std::uint64_t generation,
+diff --git a/apps/common/xanadu/link_occurrences.hpp b/apps/common/xanadu/link_occurrences.hpp
+index b1bfb226..b385fc6a 100644
+--- a/apps/common/xanadu/link_occurrences.hpp
++++ b/apps/common/xanadu/link_occurrences.hpp
+@@ -134,7 +134,9 @@ struct Occurrence {
+  *
+  * `occurrences` covers only the documents and cells the query was given, so
+  * an empty list means "not in view", not "nowhere": the member keeps its place
+- * and identity either way.
++ * and identity either way. A selected snapshot can also retain a previously
++ * observed place after its view closes or across restart. The host checks
++ * current availability separately before entry or highlighting.
+  */
+ struct LinkMember {
+   LinkSide side{LinkSide::Left};
+diff --git a/apps/common/xanadu/link_panel.cpp b/apps/common/xanadu/link_panel.cpp
+index 331b045d..677b197d 100644
+--- a/apps/common/xanadu/link_panel.cpp
++++ b/apps/common/xanadu/link_panel.cpp
+@@ -108,7 +108,9 @@ linkPanelLines(const SelectedLink &selected,
+   std::vector<PanelLine> lines;
+   if (!selected.occurrences) {
+     lines.push_back(
+-        {.text = std::format("link {}{}resolving", selected.key.id, kSep),
++        {.text = std::format("link {}{}{}", selected.key.id, kSep,
++                             selected.restoring ? "saved Link unavailable"
++                                                : "resolving"),
+          .tone = PanelLine::Tone::Muted});
+     return lines;
+   }
+diff --git a/apps/common/xanadu/store_activity_log.cpp b/apps/common/xanadu/store_activity_log.cpp
+index 8be91df0..ed6065a7 100644
+--- a/apps/common/xanadu/store_activity_log.cpp
++++ b/apps/common/xanadu/store_activity_log.cpp
+@@ -155,7 +155,43 @@ OccurrenceSite readSite(std::istream &in) {
+   return CellSite{store, at, static_cast<zigzag::CellRef>(cell), {start, end}};
+ }
+ 
++void checkPin(const SideCursor &cursor,
++              const std::optional<OccurrencePin> &pin) {
++  if (bool(cursor.occurrence) != bool(pin) ||
++      (cursor.occurrence && !cursor.member))
++    throw ActivityRecordUnreadable(
++        "activity: chosen occurrence needs exact pin");
++  if (pin && (pin->member.length == 0 ||
++              pin->member.start > std::numeric_limits<std::uint64_t>::max() -
++                                      pin->member.length))
++    throw ActivityRecordUnreadable("activity: invalid pinned member range");
++}
++
++void writePin(std::ostream &out, const std::optional<OccurrencePin> &pin) {
++  out << ' ' << bool(pin);
++  if (!pin) return;
++  out << ' ' << pin->member.scroll << ' ' << pin->member.start << ' '
++      << pin->member.length << ' '
++      << static_cast<unsigned int>(pin->occurrence.coverage) << ' ';
++  writeSite(out, pin->occurrence.site);
++}
++
++std::optional<OccurrencePin> readPin(std::istream &in) {
++  if (!readNumber(in, "occurrence pin flag", 1)) return std::nullopt;
++  const auto scroll =
++      readNumber(in, "pinned scroll", std::numeric_limits<ScrollId>::max());
++  const auto start    = readNumber(in, "pinned member start");
++  const auto length   = readNumber(in, "pinned member length");
++  const auto coverage = readNumber(in, "pinned coverage", 1);
++  return OccurrencePin{
++      .member     = {static_cast<ScrollId>(scroll), start, length},
++      .occurrence = {.site     = readSite(in),
++                     .coverage = static_cast<Coverage>(coverage)}};
++}
++
+ void writeContext(std::ostream &out, const LinkVisitContext &link) {
++  checkPin(link.left, link.leftPin);
++  checkPin(link.right, link.rightPin);
+   out << bytesOf(link.key.authority) << ' ' << link.key.id << ' '
+       << static_cast<unsigned int>(link.active) << ' '
+       << indexOf(link.left.member) << ' ' << indexOf(link.left.occurrence)
+@@ -167,6 +203,8 @@ void writeContext(std::ostream &out, const LinkVisitContext &link) {
+     out << ' ';
+     writeSite(out, *link.originCheckpoint);
+   }
++  writePin(out, link.leftPin);
++  writePin(out, link.rightPin);
+ }
+ 
+ LinkVisitContext readContext(std::istream &in) {
+@@ -188,12 +226,16 @@ LinkVisitContext readContext(std::istream &in) {
+       .right  = {cursorIndex(rm), cursorIndex(ro)},
+       .origin = origin ? std::optional{VisitId{origin}} : std::nullopt};
+   if (checkpoint) link.originCheckpoint = readSite(in);
++  link.leftPin  = readPin(in);
++  link.rightPin = readPin(in);
++  checkPin(link.left, link.leftPin);
++  checkPin(link.right, link.rightPin);
+   return link;
+ }
+ 
+ std::string encode(const Visit &visit) {
+   std::ostringstream out;
+-  out << "visit2 " << (visit.parent ? visit.parent->value : 0) << ' ';
++  out << "visit3 " << (visit.parent ? visit.parent->value : 0) << ' ';
+   writeSite(out, visit.target);
+   out << ' ' << static_cast<unsigned int>(visit.arrival) << ' '
+       << static_cast<bool>(visit.link);
+@@ -207,8 +249,8 @@ std::string encode(const Visit &visit) {
+ Visit decode(const std::string &data) {
+   std::istringstream in(data);
+   std::string signature, extra;
+-  if (!(in >> signature) || signature != "visit2")
+-    throw ActivityRecordUnreadable("activity: expected visit2");
++  if (!(in >> signature) || signature != "visit3")
++    throw ActivityRecordUnreadable("activity: expected visit3");
+   const auto parent = readNumber(in, "parent visit");
+   Visit visit{.target = readSite(in)};
+   const auto arrival = readNumber(in, "arrival", 1);
+@@ -217,7 +259,7 @@ Visit decode(const std::string &data) {
+   visit.arrival = static_cast<Arrival>(arrival);
+   if (linked) visit.link = readContext(in);
+   if (in >> extra)
+-    throw ActivityRecordUnreadable("activity: trailing visit2 data");
++    throw ActivityRecordUnreadable("activity: trailing visit3 data");
+   return visit;
+ }
+ 
+@@ -225,7 +267,7 @@ Visit decode(const std::string &data) {
+ 
+ std::string encodeLinkContext(const LinkVisitContext &link) {
+   std::ostringstream out;
+-  out << "selection2 ";
++  out << "selection3 ";
+   writeContext(out, link);
+   return out.str();
+ }
+@@ -233,11 +275,11 @@ std::string encodeLinkContext(const LinkVisitContext &link) {
+ LinkVisitContext decodeLinkContext(const std::string_view text) {
+   std::istringstream in{std::string{text}};
+   std::string signature, extra;
+-  if (!(in >> signature) || signature != "selection2")
+-    throw ActivityRecordUnreadable("activity: expected selection2");
++  if (!(in >> signature) || signature != "selection3")
++    throw ActivityRecordUnreadable("activity: expected selection3");
+   auto link = readContext(in);
+   if (in >> extra)
+-    throw ActivityRecordUnreadable("activity: trailing selection2 data");
++    throw ActivityRecordUnreadable("activity: trailing selection3 data");
+   return link;
+ }
+ 
+diff --git a/apps/xuzz/xuzz_app.cpp b/apps/xuzz/xuzz_app.cpp
+index 6be25e7a..3857921d 100644
+--- a/apps/xuzz/xuzz_app.cpp
++++ b/apps/xuzz/xuzz_app.cpp
+@@ -3460,13 +3460,7 @@ int XuzzApp::run(const int argc, char **argv) {
+     place.zigzagFocus       = zigzagPresentation->focusCell();
+     place.zigzagHasKeyboard = keyboardPane.inZigzag();
+     if (const auto selected = linkContext.selection()) {
+-      place.link = xanadu::LinkVisitContext{.key    = selected->key,
+-                                            .active = selected->active,
+-                                            .left   = selected->left,
+-                                            .right  = selected->right,
+-                                            .origin = selected->origin,
+-                                            .originCheckpoint =
+-                                                selected->originCheckpoint};
++      place.link = xanadu::selectionContext(*selected);
+     }
+     session->rememberPlace(place);
+   }
+diff --git a/tests/xudu/reading_place_test.cpp b/tests/xudu/reading_place_test.cpp
+index aa28a1a0..61c1259f 100644
+--- a/tests/xudu/reading_place_test.cpp
++++ b/tests/xudu/reading_place_test.cpp
+@@ -119,7 +119,10 @@ TEST_F(ReadingPlaceTest, pinnedLinkWithoutAnEndpointVisitSurvivesRestart) {
+       .left             = {.member = 1, .occurrence = 3},
+       .right            = {.member = 2},
+       .origin           = xanadu::VisitId{7},
+-      .originCheckpoint = xanadu::CellSite{store.documentId(), {}, 21, {4, 9}}};
++      .originCheckpoint = xanadu::CellSite{store.documentId(), {}, 21, {4, 9}},
++      .leftPin          = xanadu::OccurrencePin{
++                   {0, 100, 5},
++                   {xanadu::DocumentSite{store.documentId(), {}, {7, 12}}}}};
+   std::ignore = xanadu::recordPlace(store, place);
+   store.save((root / "activity").string());
+   xanadu::Store reopened(perma);
+diff --git a/tests/xuzz/link_navigation_test.cpp b/tests/xuzz/link_navigation_test.cpp
+index 2ca495d1..d4c55aad 100644
+--- a/tests/xuzz/link_navigation_test.cpp
++++ b/tests/xuzz/link_navigation_test.cpp
+@@ -10,6 +10,7 @@
+ #include <vector>
+ 
+ #include "common/xanadu/link_navigation.hpp"
++#include "common/xanadu/store_activity_log.hpp"
+ #include "common/xanadu/system_docs.hpp"
+ #include "two_by_three_fixture.hpp"
+ 
+@@ -416,21 +417,25 @@ TEST(LinkNavigationTest, ActivityBackIntoAnotherLinkResolvesItAgain) {
+                                           .side       = LinkSide::Right,
+                                           .member     = kThree,
+                                           .occurrence = kThreeInPartCell}));
+-  ASSERT_TRUE(h.run(nav::Enter{}));
++  const auto entered = h.run(nav::Enter{});
++  ASSERT_TRUE(entered && entered->focus);
+   ASSERT_TRUE(h.run(nav::SelectOccurrence{.key        = h.overlapping(),
+                                           .side       = LinkSide::Left,
+                                           .member     = 0,
+                                           .occurrence = 0}));
+   ASSERT_TRUE(h.run(nav::Enter{}));
+ 
+-  // The cells have gone out of view since: the saved member is still there,
+-  // the saved occurrence is not.
++  // A closed cell frame remains the saved target, rather than losing the
++  // occurrence or reinterpreting its old ordinal in the document-only query.
+   h.cellsInView   = false;
+   const auto back = h.run(nav::ActivityBack{});
+ 
+   ASSERT_TRUE(back.has_value());
+   EXPECT_EQ(h.selected().key, h.link());
+-  EXPECT_EQ(h.selected().right, (SideCursor{.member = kThree}));
++  EXPECT_EQ(h.selected().right,
++            (SideCursor{.member = kThree, .occurrence = 3}));
++  EXPECT_EQ(xanadu::selectionContext(h.selected()).rightPin->occurrence.site,
++            entered->focus);
+ }
+ 
+ TEST(LinkNavigationTest, ReturnToOriginKeepsTheLinkAndAddsNoVisit) {
+@@ -688,11 +693,7 @@ TEST(LinkNavigationTest, ResumePinnedChoicesBeforeAnyEndpointVisit) {
+                                           .occurrence = kThreeInWholeCell}));
+   const auto chosen = h.navigator.selection();
+   ASSERT_TRUE(chosen);
+-  const xanadu::LinkVisitContext saved{.key    = chosen->key,
+-                                       .active = chosen->active,
+-                                       .left   = chosen->left,
+-                                       .right  = chosen->right,
+-                                       .origin = chosen->origin};
++  const auto saved   = xanadu::selectionContext(*chosen);
+   const auto before  = h.log.size();
+   const auto current = h.log.current();
+   xanadu::LinkNavigator reopened(h.log);
+@@ -752,3 +753,131 @@ TEST(LinkNavigationTest, SelectionCheckpointPreservesVisitsAndExactReturn) {
+   EXPECT_EQ(*afterRestore->focus, xanadu::OccurrenceSite{readingOffset});
+   EXPECT_EQ(h.log.size(), 2U);
+ }
++
++TEST(LinkNavigationTest, FreshResolutionRebasesBothExactPinsInsteadOfOrdinals) {
++  Harness h;
++  arrive(h);
++  ASSERT_TRUE(h.run(nav::SelectOccurrence{h.link(), LinkSide::Left, 0, 0}));
++  ASSERT_TRUE(
++      h.run(nav::SelectOccurrence{h.link(), LinkSide::Right, kThree, 1}));
++  const auto saved = xanadu::decodeLinkContext(
++      xanadu::encodeLinkContext(xanadu::selectionContext(h.selected())));
++  auto fresh = h.resolve(h.link()).value();
++  fresh.left[0].occurrences.insert(
++      fresh.left[0].occurrences.begin(),
++      {.site = DocumentSite{h.f.store->documentId(), h.f.base, {0, 5}}});
++  std::ranges::reverse(fresh.right[kThree].occurrences);
++  const auto before = h.log.size();
++  xanadu::LinkNavigator resumed(h.log);
++  const auto request = resumed.restoreSelection(saved);
++  ASSERT_TRUE(request && request->resolve);
++  ASSERT_TRUE(resumed.supply(request->resolve->generation, fresh));
++  const auto restored = xanadu::selectionContext(*resumed.selection());
++  EXPECT_EQ(restored.leftPin, saved.leftPin);
++  EXPECT_EQ(restored.rightPin, saved.rightPin);
++  EXPECT_EQ(restored.left.occurrence, 1U);
++  EXPECT_EQ(restored.right.occurrence, 3U);
++  EXPECT_EQ(restored.origin, saved.origin);
++  EXPECT_EQ(h.log.size(), before);
++  const auto entered = resumed.dispatch(nav::Enter{});
++  ASSERT_TRUE(entered);
++  EXPECT_EQ(entered->focus, saved.rightPin->occurrence.site);
++  EXPECT_EQ(h.log.size(), before + 1);
++}
++
++TEST(LinkNavigationTest,
++     OmittedPlaceRemainsKnownAndChangedMemberNeverSubstitutes) {
++  Harness h;
++  arrive(h);
++  ASSERT_TRUE(h.run(nav::SelectOccurrence{h.link(), LinkSide::Left, 0, 0}));
++  ASSERT_TRUE(
++      h.run(nav::SelectOccurrence{h.link(), LinkSide::Right, kThree, 1}));
++  const auto saved = xanadu::selectionContext(h.selected());
++  auto fresh       = h.resolve(h.link()).value();
++  fresh.right[kThree].occurrences.erase(
++      fresh.right[kThree].occurrences.begin() + 1);
++  xanadu::LinkNavigator resumed(h.log);
++  auto request = resumed.restoreSelection(saved);
++  ASSERT_TRUE(request && request->resolve);
++  ASSERT_TRUE(resumed.supply(request->resolve->generation, fresh));
++  EXPECT_EQ(xanadu::selectionContext(*resumed.selection()).rightPin,
++            saved.rightPin);
++  EXPECT_EQ(resumed.selection()->right.occurrence, 4U);
++  EXPECT_FALSE(resumed.selection()->restoring);
++  fresh.right[kThree].span.start++;
++  request = resumed.restoreSelection(saved);
++  ASSERT_TRUE(request && request->resolve);
++  ASSERT_TRUE(resumed.supply(request->resolve->generation, fresh));
++  EXPECT_FALSE(resumed.selection()->right.member);
++  EXPECT_FALSE(resumed.selection()->right.occurrence);
++  ASSERT_TRUE(resumed.selection()->restoring);
++  EXPECT_EQ(xanadu::selectionContext(*resumed.selection()).rightPin,
++            saved.rightPin);
++  EXPECT_EQ(xanadu::selectionContext(*resumed.selection()).leftPin,
++            saved.leftPin);
++  const auto before = h.log.size();
++  EXPECT_FALSE(resumed.dispatch(nav::Enter{}));
++  EXPECT_EQ(h.log.size(), before);
++  ASSERT_TRUE(
++      resumed.dispatch(nav::SelectMember{h.link(), LinkSide::Right, 0}));
++  EXPECT_FALSE(resumed.selection()->restoring);
++  EXPECT_NE(xanadu::selectionContext(*resumed.selection()).rightPin,
++            saved.rightPin);
++}
++
++TEST(LinkNavigationTest, ExistingVisitRestoreAlsoRebasesExactPins) {
++  Harness h;
++  arrive(h);
++  ASSERT_TRUE(
++      h.run(nav::SelectOccurrence{h.link(), LinkSide::Right, kThree, 1}));
++  const auto first = h.run(nav::Enter{});
++  ASSERT_TRUE(first && first->visit);
++  auto fresh = h.resolve(h.link()).value();
++  std::ranges::reverse(fresh.right[kThree].occurrences);
++  ASSERT_TRUE(h.navigator.supply(h.selected().generation, fresh));
++  const auto before = h.log.size();
++  ASSERT_TRUE(h.run(nav::EnterVisit{*first->visit}));
++  EXPECT_EQ(h.selected().right.occurrence, 3U);
++  EXPECT_EQ(xanadu::selectionContext(h.selected()).rightPin->occurrence.site,
++            first->focus);
++  EXPECT_EQ(h.log.size(), before);
++}
++
++TEST(LinkNavigationTest, AnOrdinalWithoutAnExactPinCannotRestoreAChosenPlace) {
++  Harness h;
++  arrive(h);
++  const xanadu::LinkVisitContext old{.key   = h.link(),
++                                     .right = {.member = 0, .occurrence = 0}};
++  xanadu::LinkNavigator resumed(h.log);
++  const auto request = resumed.restoreSelection(old);
++  ASSERT_TRUE(request && request->resolve);
++  ASSERT_TRUE(
++      resumed.supply(request->resolve->generation, h.resolve(h.link())));
++  EXPECT_EQ(resumed.selection()->right.member, 0U);
++  EXPECT_FALSE(resumed.selection()->right.occurrence);
++  EXPECT_FALSE(resumed.dispatch(nav::Enter{}));
++}
++
++TEST(LinkNavigationTest,
++     FailedRestoreResolutionRetainsPinsUntilExplicitDismissal) {
++  Harness h;
++  arrive(h);
++  ASSERT_TRUE(h.run(nav::SelectOccurrence{h.link(), LinkSide::Left, 0, 0}));
++  ASSERT_TRUE(
++      h.run(nav::SelectOccurrence{h.link(), LinkSide::Right, kThree, 1}));
++  const auto saved  = xanadu::selectionContext(h.selected());
++  const auto before = h.log.size();
++  xanadu::LinkNavigator resumed(h.log);
++  const auto request = resumed.restoreSelection(saved);
++  ASSERT_TRUE(request && request->resolve);
++  EXPECT_FALSE(
++      resumed.supply(request->resolve->generation,
++                     std::unexpected(xanadu::LinkQueryError::LinkNotFound)));
++  ASSERT_TRUE(resumed.selection());
++  EXPECT_EQ(xanadu::selectionContext(*resumed.selection()), saved);
++  EXPECT_FALSE(resumed.dispatch(nav::Enter{}));
++  EXPECT_EQ(h.log.size(), before);
++  ASSERT_TRUE(resumed.dispatch(nav::Dismiss{}));
++  EXPECT_FALSE(resumed.selection());
++  EXPECT_EQ(h.log.size(), before);
++}
+diff --git a/tests/xuzz/store_activity_log_test.cpp b/tests/xuzz/store_activity_log_test.cpp
+index bb6dccad..b29f0612 100644
+--- a/tests/xuzz/store_activity_log_test.cpp
++++ b/tests/xuzz/store_activity_log_test.cpp
+@@ -26,17 +26,24 @@ TEST(StoreActivityLogTest, BranchesAndSelectedVisitSurviveReopening) {
+     xanadu::Store store(scroll);
+     xanadu::StoreActivityLog log(&store, directory);
+     origin = log.append({.target = xanadu::DocumentSite{document, {}, {4, 4}}});
+-    first  = log.append({.parent  = origin,
+-                         .target  = xanadu::CellSite{document, {}, 7, {2, 5}},
+-                         .arrival = xanadu::Arrival::EnteredEndpoint,
+-                         .link    = xanadu::LinkVisitContext{
+-                                .key    = {document, 12},
+-                                .active = xanadu::LinkSide::Right,
+-                                .left   = {.member = 0, .occurrence = 0},
+-                                .right  = {.member = 1, .occurrence = 0},
+-                                .origin = origin,
+-                                .originCheckpoint =
+-                                xanadu::DocumentSite{document, {}, {19, 19}}}});
++    first  = log.append(
++        {.parent  = origin,
++          .target  = xanadu::CellSite{document, {}, 7, {2, 5}},
++          .arrival = xanadu::Arrival::EnteredEndpoint,
++          .link    = xanadu::LinkVisitContext{
++                 .key              = {document, 12},
++                 .active           = xanadu::LinkSide::Right,
++                 .left             = {.member = 0, .occurrence = 0},
++                 .right            = {.member = 1, .occurrence = 0},
++                 .origin           = origin,
++                 .originCheckpoint = xanadu::DocumentSite{document, {}, {19, 19}},
++                 .leftPin =
++                 xanadu::OccurrencePin{
++                         {0, 4, 3}, {xanadu::DocumentSite{document, {}, {4, 7}}}},
++                 .rightPin = xanadu::OccurrencePin{
++                     {0, 12, 4},
++                     {xanadu::CellSite{document, {}, 7, {2, 5}},
++                      xanadu::Coverage::Partial}}}});
+     log.select(origin);
+     second = log.append({.parent = origin,
+                          .target = xanadu::CellSite{document, {}, 21, {0, 3}}});
+@@ -51,6 +58,12 @@ TEST(StoreActivityLogTest, BranchesAndSelectedVisitSurviveReopening) {
+               (std::vector<xanadu::VisitId>{first, second}));
+     ASSERT_TRUE(log.find(first));
+     EXPECT_EQ(log.find(first)->link->right.member, 1U);
++    ASSERT_TRUE(log.find(first)->link->leftPin);
++    ASSERT_TRUE(log.find(first)->link->rightPin);
++    EXPECT_EQ(log.find(first)->link->rightPin->occurrence.coverage,
++              xanadu::Coverage::Partial);
++    EXPECT_EQ(log.find(first)->link->leftPin->member,
++              (xanadu::PrimediaSpan{0, 4, 3}));
+     EXPECT_EQ(log.find(first)->link->originCheckpoint,
+               (std::optional<xanadu::OccurrenceSite>{
+                   xanadu::DocumentSite{document, {}, {19, 19}}}));
+@@ -180,7 +193,7 @@ TEST_F(ActivityMetadataTest, PreviousVisitPayloadIsRefusedWithoutRewriting) {
+   const auto rank = store->rebuildManifold(store->latest())
+                         .dimensionNamed("d.activity-visits", *store);
+   ASSERT_TRUE(rank);
+-  auto at           = store->makeCell(store->latest(), "visit1 0 doc");
++  auto at           = store->makeCell(store->latest(), "visit2 0 doc");
+   std::ignore       = store->setLink(at, store->homeCell(), *rank,
+                                      zigzag::DimVector::POS, store->cellRefOf(at));
+   const auto before = store->opCount();
+@@ -195,7 +208,7 @@ TEST(ActivitySelectionRecordTest, OldAndTruncatedCheckpointsAreRefused) {
+           "selection1 00000000000000000000000000000000 1 0 -1 -1 -1 -1 1"),
+       xanadu::ActivityRecordUnreadable);
+   EXPECT_THROW(
+-      xanadu::decodeLinkContext("selection2 00000000000000000000000000000000 1 "
++      xanadu::decodeLinkContext("selection3 00000000000000000000000000000000 1 "
+                                 "0 -1 -1 -1 -1 1 1 doc"),
+       xanadu::ActivityRecordUnreadable);
+ }
+@@ -203,7 +216,7 @@ TEST(ActivitySelectionRecordTest, OldAndTruncatedCheckpointsAreRefused) {
+ TEST(ActivitySelectionRecordTest,
+      NegativeAndOverflowingCheckpointNumbersAreRefused) {
+   const std::string authority = "00000000000000000000000000000000";
+-  const auto selection        = "selection2 " + authority + " ";
++  const auto selection        = "selection3 " + authority + " ";
+   const auto context          = selection + "1 0 -1 -1 -1 -1 1 1 ";
+   const auto doc              = context + "doc " + authority + " 0 ";
+   const auto cell             = context + "cell " + authority + " 0 ";
+@@ -222,7 +235,7 @@ TEST(ActivitySelectionRecordTest,
+   // Every representable offset remains accepted; source availability is
+   // checked by the host rather than by the private activity codec.
+   const auto boundary =
+-      xanadu::decodeLinkContext(doc + "4294967295 4294967295 0");
++      xanadu::decodeLinkContext(doc + "4294967295 4294967295 0 0 0");
+   ASSERT_TRUE(boundary.originCheckpoint);
+   EXPECT_EQ(std::get<xanadu::DocumentSite>(*boundary.originCheckpoint).range,
+             (xanadu::Extent{4294967295U, 4294967295U}));
+@@ -233,8 +246,8 @@ TEST_F(ActivityMetadataTest, NegativeVisitParentAndAddressesAreRefused) {
+                         .dimensionNamed("d.activity-visits", *store);
+   ASSERT_TRUE(rank);
+   for (const auto *record :
+-       {"visit2 -1 doc 00000000000000000000000000000000 0 0 0 0 0 0",
+-        "visit2 0 doc 00000000000000000000000000000000 0 -1 -1 0 0 0"}) {
++       {"visit3 -1 doc 00000000000000000000000000000000 0 0 0 0 0 0",
++        "visit3 0 doc 00000000000000000000000000000000 0 -1 -1 0 0 0"}) {
+     auto at           = store->makeCell(store->latest(), record);
+     std::ignore       = store->setLink(at, store->homeCell(), *rank,
+                                        zigzag::DimVector::POS, store->cellRefOf(at));
+@@ -244,3 +257,33 @@ TEST_F(ActivityMetadataTest, NegativeVisitParentAndAddressesAreRefused) {
+     EXPECT_EQ(store->opCount(), before);
+   }
+ }
++
++TEST(ActivitySelectionRecordTest, PreviousVersionAndUnpinnedChoicesAreRefused) {
++  EXPECT_THROW(xanadu::decodeLinkContext("selection2 0"),
++               xanadu::ActivityRecordUnreadable);
++  const std::string prefix =
++      "selection3 00000000000000000000000000000000 1 0 0 0 -1 -1 0 0 ";
++  EXPECT_THROW(xanadu::decodeLinkContext(prefix + "0 0"),
++               xanadu::ActivityRecordUnreadable);
++  EXPECT_THROW(xanadu::decodeLinkContext(prefix + "1 0 0 1 2 doc"),
++               xanadu::ActivityRecordUnreadable);
++}
++
++TEST(ActivitySelectionRecordTest, PinRangesCoverageAndPresenceAreChecked) {
++  const std::string authority = "00000000000000000000000000000000";
++  const auto prefix = "selection3 " + authority + " 1 0 0 0 -1 -1 0 0 ";
++  const auto site   = " doc " + authority + " 0 0 1 0 0";
++  const auto valid  = xanadu::decodeLinkContext(prefix + "1 0 10 1 0" + site);
++  ASSERT_TRUE(valid.leftPin);
++  EXPECT_EQ(valid.leftPin->member, (xanadu::PrimediaSpan{0, 10, 1}));
++  for (const auto *pin :
++       {"2", "1 -1 10 1 0", "1 4294967296 10 1 0", "1 0 10 0 0",
++        "1 0 18446744073709551615 1 0", "1 0 10 1 2"}) {
++    SCOPED_TRACE(pin);
++    EXPECT_THROW(xanadu::decodeLinkContext(prefix + pin + site),
++                 xanadu::ActivityRecordUnreadable);
++  }
++  const auto unchosen = "selection3 " + authority + " 1 0 0 -1 -1 -1 0 0 ";
++  EXPECT_THROW(xanadu::decodeLinkContext(unchosen + "1 0 10 1 0" + site),
++               xanadu::ActivityRecordUnreadable);
++}
+diff --git a/tests/zigzag/link_panel_overlay_test.cpp b/tests/zigzag/link_panel_overlay_test.cpp
+index 9489084e..becefb34 100644
+--- a/tests/zigzag/link_panel_overlay_test.cpp
++++ b/tests/zigzag/link_panel_overlay_test.cpp
+@@ -1239,3 +1239,38 @@ TEST_F(LinkPanelOverlayTest,
+   draw(claim);
+   EXPECT_NE(captured("Controls").overlayWidgetId, std::nullopt);
+ }
++
++TEST_F(LinkPanelOverlayTest,
++       HistoricalCellPinsNeverMarkTheCurrentOtherVersion) {
++  auto &store                = session.store();
++  const auto original        = session.views().front().version;
++  const auto content         = store.rebuild(original).spansFor(0, 4).front();
++  const auto made            = store.makeCell(original, content);
++  const auto cell            = store.cellRefOf(made);
++  const auto later           = store.insert(made, 0, "new ");
++  const auto oldManifold     = store.rebuildManifold(made);
++  const auto currentManifold = store.rebuildManifold(later);
++  navigation.setFocusCell([](zigzag::CellRef, xanadu::Extent) {});
++  navigation.setManifold(&currentManifold, 0, later);
++  auto saved    = xanadu::selectionContext(*navigation.selection());
++  saved.leftPin = xanadu::OccurrencePin{
++      content, {xanadu::CellSite{store.documentId(), made, cell, {0, 4}}}};
++  saved.left = {.member = 0, .occurrence = 0};
++  navigation.restoreSelection(saved);
++  std::vector<xanadu::CellHighlight> marked;
++  overlay.setCellHighlighter(
++      [&](auto cells, std::uint32_t) { marked = std::move(cells); });
++  draw();
++  EXPECT_EQ(std::ranges::count(marked, cell, &xanadu::CellHighlight::cell), 1);
++  EXPECT_FALSE(std::ranges::any_of(marked, [&](const auto &highlight) {
++    return highlight.cell == cell && highlight.chosen;
++  }));
++  const auto revision = navigation.revision();
++  navigation.setManifold(&oldManifold, 0, made);
++  EXPECT_GT(navigation.revision(), revision);
++  draw();
++  EXPECT_EQ(std::ranges::count(marked, cell, &xanadu::CellHighlight::cell), 1);
++  EXPECT_TRUE(std::ranges::any_of(marked, [&](const auto &highlight) {
++    return highlight.cell == cell && highlight.chosen;
++  }));
++}
+diff --git a/tests/zigzag/reader_link_packages_ui_test.cpp b/tests/zigzag/reader_link_packages_ui_test.cpp
+index ece03170..9a68f7ab 100644
+--- a/tests/zigzag/reader_link_packages_ui_test.cpp
++++ b/tests/zigzag/reader_link_packages_ui_test.cpp
+@@ -611,14 +611,19 @@ TEST_F(ReaderPackageUiTest, UnsupportedActivityPayloadsRemainUntouched) {
+     auto at         = stale.sliceGenesis({});
+     const auto rank = stale.makeDimension(
+         at, savedSelection ? "d.places" : "d.activity-visits");
+-    at =
+-        stale.makeCell(rank.version, savedSelection ? "place" : "visit1 0 doc");
++    at = stale.makeCell(
++        rank.version,
++        savedSelection
++            ? "place"
++            : "visit2 0 doc 00000000000000000000000000000000 0 0 0 0 0 0");
+     const auto record = stale.cellRefOf(at);
+     at = stale.setLink(at, stale.homeCell(), rank.dim, zigzag::DimVector::POS,
+                        record);
+     if (savedSelection) {
+       const auto selection = stale.makeDimension(at, "d.selection");
+-      at = stale.makeCell(selection.version, "selection1 unsupported");
++      at                   = stale.makeCell(
++          selection.version,
++          "selection2 00000000000000000000000000000000 1 0 -1 -1 -1 -1 0 0");
+       at = stale.setLink(at, record, selection.dim, zigzag::DimVector::POS,
+                          stale.cellRefOf(at));
+     }
+@@ -636,3 +641,46 @@ TEST_F(ReaderPackageUiTest, UnsupportedActivityPayloadsRemainUntouched) {
+     EXPECT_EQ(fileBytes(directory / "store.tables"), tables);
+   }
+ }
++
++TEST_F(ReaderPackageUiTest, RestoredClosedPlaceNeverEntersAnotherOpenVersion) {
++  auto perma = std::make_shared<UserPermascroll>();
++  Session session((root / "workspace").string(), perma);
++  auto &store       = session.store();
++  const auto text   = store.insert({}, 0, "origin destination");
++  const auto pieces = store.rebuild(text);
++  const auto head   = store.addLink(text, Link{.left  = pieces.spansFor(0, 6),
++                                               .right = pieces.spansFor(7, 11)});
++  const auto wrong  = store.insert(head, 0, "shift ");
++  session.viewOpened(head);
++  LinkContext original(session);
++  const LinkKey key{store.documentId(), store.links().begin()->first};
++  ASSERT_TRUE(
++      original.execute(nav::SelectOccurrence{key, LinkSide::Right, 0, 0}));
++  const auto saved = selectionContext(*original.selection());
++  ASSERT_TRUE(saved.rightPin);
++  session.viewClosed(0);
++  session.viewOpened(wrong);
++  const auto operations = store.opCount();
++  LinkContext resumed(session);
++  std::optional<Extent> focus;
++  resumed.setFocusDocument([&](std::size_t view, Extent range) {
++    EXPECT_EQ(view, 0U);
++    focus = range;
++  });
++  resumed.restoreSelection(saved);
++  ASSERT_TRUE(resumed.selection());
++  EXPECT_EQ(selectionContext(*resumed.selection()).rightPin, saved.rightPin);
++  const auto visits      = resumed.walkEntries().size();
++  const auto activityOps = session.activityForNavigation()->opCount();
++  EXPECT_FALSE(resumed.execute(nav::Enter{}));
++  EXPECT_FALSE(focus);
++  EXPECT_FALSE(resumed.entryStatus().empty());
++  EXPECT_EQ(resumed.walkEntries().size(), visits);
++  EXPECT_EQ(session.activityForNavigation()->opCount(), activityOps);
++  session.viewClosed(0);
++  session.viewOpened(head);
++  ASSERT_TRUE(resumed.execute(nav::Enter{}));
++  EXPECT_EQ(focus, (Extent{7, 18}));
++  EXPECT_EQ(resumed.walkEntries().size(), visits + 1);
++  EXPECT_EQ(store.opCount(), operations);
++}

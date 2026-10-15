@@ -1,0 +1,134 @@
+[
+  {
+    "source": "build/validation-twelfth/strict/raw/coarse0.ppm",
+    "sha256": "a374502e048096226564d29f012136ae80fd87d53e6e8163a22e68bc54935f49",
+    "png": "coarse0.png",
+    "rgb_sha256": "64a8226cd7078884c9a689445d367e9ef237d58f7e0a3d86e02a8c474ce6ca19"
+  },
+  {
+    "source": "build/validation-twelfth/strict/raw/coarse999.ppm",
+    "sha256": "b11b8a2f3283c8cf03f5697bdbfc9c2307eedfd891851a888ee1c976d9a5077b",
+    "png": "coarse999.png",
+    "rgb_sha256": "d795d1e0e2bb82c2db0eba1583349ff901b837bcef4d756f150825e804fec8d4"
+  },
+  {
+    "source": "build/validation-twelfth/strict/raw/opengl.grown.ppm",
+    "sha256": "5a952c969ac636f2d25f38bec6409c52a6c57446fe9975e033fe56a22332d679",
+    "png": "opengl.grown.png",
+    "rgb_sha256": "c4133ff929acb597caa4384c28ff2fa4a3a7c13ea3892fdf7490b9235b23abca"
+  },
+  {
+    "source": "build/validation-twelfth/strict/raw/opengl.nocull.ppm",
+    "sha256": "5a952c969ac636f2d25f38bec6409c52a6c57446fe9975e033fe56a22332d679",
+    "png": "opengl.nocull.png",
+    "rgb_sha256": "c4133ff929acb597caa4384c28ff2fa4a3a7c13ea3892fdf7490b9235b23abca"
+  },
+  {
+    "source": "build/validation-twelfth/strict/raw/opengl.ppm",
+    "sha256": "5a952c969ac636f2d25f38bec6409c52a6c57446fe9975e033fe56a22332d679",
+    "png": "opengl.png",
+    "rgb_sha256": "c4133ff929acb597caa4384c28ff2fa4a3a7c13ea3892fdf7490b9235b23abca"
+  },
+  {
+    "source": "build/validation-twelfth/strict/raw/opengl.toast.ppm",
+    "sha256": "0dd7a82879179e0c8b1a5157b3b06e72b35782216cfcbbd5fcf707473e70d92a",
+    "png": "opengl.toast.png",
+    "rgb_sha256": "a4c4b82c365e8e4475f793175de8adae3f8e1c7f0a2b68d608a76145770f0db4"
+  },
+  {
+    "source": "build/validation-twelfth/strict/raw/opengl.zoom15.05.ppm",
+    "sha256": "d6d690b58d29b7f6f5ddcdf62bfba1e3f81d903efc1771bc7cc0bd6a296db72c",
+    "png": "opengl.zoom15.05.png",
+    "rgb_sha256": "5ee2a66e8ff667df098a75ea78dea5c77ae92e04717c0b3c01b70858faf05185"
+  },
+  {
+    "source": "build/validation-twelfth/strict/raw/opengl.zoom15.ppm",
+    "sha256": "a374502e048096226564d29f012136ae80fd87d53e6e8163a22e68bc54935f49",
+    "png": "opengl.zoom15.png",
+    "rgb_sha256": "64a8226cd7078884c9a689445d367e9ef237d58f7e0a3d86e02a8c474ce6ca19"
+  },
+  {
+    "source": "build/validation-twelfth/strict/raw/opengles.grown.ppm",
+    "sha256": "5a952c969ac636f2d25f38bec6409c52a6c57446fe9975e033fe56a22332d679",
+    "png": "opengles.grown.png",
+    "rgb_sha256": "c4133ff929acb597caa4384c28ff2fa4a3a7c13ea3892fdf7490b9235b23abca"
+  },
+  {
+    "source": "build/validation-twelfth/strict/raw/opengles.nocull.ppm",
+    "sha256": "5a952c969ac636f2d25f38bec6409c52a6c57446fe9975e033fe56a22332d679",
+    "png": "opengles.nocull.png",
+    "rgb_sha256": "c4133ff929acb597caa4384c28ff2fa4a3a7c13ea3892fdf7490b9235b23abca"
+  },
+  {
+    "source": "build/validation-twelfth/strict/raw/opengles.ppm",
+    "sha256": "5a952c969ac636f2d25f38bec6409c52a6c57446fe9975e033fe56a22332d679",
+    "png": "opengles.png",
+    "rgb_sha256": "c4133ff929acb597caa4384c28ff2fa4a3a7c13ea3892fdf7490b9235b23abca"
+  },
+  {
+    "source": "build/validation-twelfth/strict/raw/opengles.toast.ppm",
+    "sha256": "0dd7a82879179e0c8b1a5157b3b06e72b35782216cfcbbd5fcf707473e70d92a",
+    "png": "opengles.toast.png",
+    "rgb_sha256": "a4c4b82c365e8e4475f793175de8adae3f8e1c7f0a2b68d608a76145770f0db4"
+  },
+  {
+    "source": "build/validation-twelfth/strict/raw/opengles.zoom15.05.ppm",
+    "sha256": "d6d690b58d29b7f6f5ddcdf62bfba1e3f81d903efc1771bc7cc0bd6a296db72c",
+    "png": "opengles.zoom15.05.png",
+    "rgb_sha256": "5ee2a66e8ff667df098a75ea78dea5c77ae92e04717c0b3c01b70858faf05185"
+  },
+  {
+    "source": "build/validation-twelfth/strict/raw/opengles.zoom15.ppm",
+    "sha256": "a374502e048096226564d29f012136ae80fd87d53e6e8163a22e68bc54935f49",
+    "png": "opengles.zoom15.png",
+    "rgb_sha256": "64a8226cd7078884c9a689445d367e9ef237d58f7e0a3d86e02a8c474ce6ca19"
+  },
+  {
+    "source": "build/validation-twelfth/strict/raw/vk.threads1.ppm",
+    "sha256": "428209106f948026adb55f1108c1ab78f70c43dcc1a12b823b1012b679531300",
+    "png": "vk.threads1.png",
+    "rgb_sha256": "7526dba5b94003c25885523fdc6ba0cca4733c0e22a439dd9ffeb4631120728b"
+  },
+  {
+    "source": "build/validation-twelfth/strict/raw/vk.threads4.ppm",
+    "sha256": "428209106f948026adb55f1108c1ab78f70c43dcc1a12b823b1012b679531300",
+    "png": "vk.threads4.png",
+    "rgb_sha256": "7526dba5b94003c25885523fdc6ba0cca4733c0e22a439dd9ffeb4631120728b"
+  },
+  {
+    "source": "build/validation-twelfth/strict/raw/vulkan.grown.ppm",
+    "sha256": "428209106f948026adb55f1108c1ab78f70c43dcc1a12b823b1012b679531300",
+    "png": "vulkan.grown.png",
+    "rgb_sha256": "7526dba5b94003c25885523fdc6ba0cca4733c0e22a439dd9ffeb4631120728b"
+  },
+  {
+    "source": "build/validation-twelfth/strict/raw/vulkan.nocull.ppm",
+    "sha256": "428209106f948026adb55f1108c1ab78f70c43dcc1a12b823b1012b679531300",
+    "png": "vulkan.nocull.png",
+    "rgb_sha256": "7526dba5b94003c25885523fdc6ba0cca4733c0e22a439dd9ffeb4631120728b"
+  },
+  {
+    "source": "build/validation-twelfth/strict/raw/vulkan.ppm",
+    "sha256": "428209106f948026adb55f1108c1ab78f70c43dcc1a12b823b1012b679531300",
+    "png": "vulkan.png",
+    "rgb_sha256": "7526dba5b94003c25885523fdc6ba0cca4733c0e22a439dd9ffeb4631120728b"
+  },
+  {
+    "source": "build/validation-twelfth/strict/raw/vulkan.toast.ppm",
+    "sha256": "0be1a0a7e0927b5f4110d4d575ac80d1368de0931ad56994582bc2854c79942b",
+    "png": "vulkan.toast.png",
+    "rgb_sha256": "88c8682ac4768128b70955e3e5704a55c608a8fa0d70cc4e508fcc5af57eb6e9"
+  },
+  {
+    "source": "build/validation-twelfth/strict/raw/vulkan.zoom15.05.ppm",
+    "sha256": "78219f78b1de6a448cb1cc470971182a521ed47eee17ffd39b47c8782057bb3b",
+    "png": "vulkan.zoom15.05.png",
+    "rgb_sha256": "6fd7252a686e316b996630cdf3d2914b9081a81f5957b3b288fd45731abbc4a1"
+  },
+  {
+    "source": "build/validation-twelfth/strict/raw/vulkan.zoom15.ppm",
+    "sha256": "7988112676139f70dd687bee7dab37e585af951dacb37fc754d1b94604e9155b",
+    "png": "vulkan.zoom15.png",
+    "rgb_sha256": "d6a3beca3d5637a2c2a1f84ab8fc519a04e3a89e927499a16ce64d88008fb542"
+  }
+]

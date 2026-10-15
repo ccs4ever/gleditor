@@ -1,0 +1,13 @@
+Strict core comparison, exit 0; worktree cwd. Headless run settings:
+SDL_VIDEODRIVER=offscreen
+SDL_AUDIODRIVER=dummy
+LIBGL_ALWAYS_SOFTWARE=1
+XDG_DATA_HOME=$PWD/build/validation-twelfth/strict/data
+XDG_CONFIG_HOME=$PWD/build/validation-twelfth/strict/config
+XDG_CACHE_HOME=$PWD/build/validation-twelfth/strict/cache
+OUT=$PWD/build/validation-twelfth/strict/raw
+XUDU_TEST_BIN=/nonexistent
+PATH prepended /tmp/spatial-xvfb/usr/bin
+xvfb-run -a -s '-noreset -screen 0 1024x768x24' ./tools/compare-backends.sh
+
+All compiled backends ran. Criteria unchanged; broad E2E explicitly excluded. Configured threads 1/4 agree, but sample has too few page draws to split recording. All 22 original PPM frames retained as lossless PNGs; frames.json records original and RGB hashes. Raw originals remain under ignored build output.

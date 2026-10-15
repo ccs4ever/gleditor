@@ -7,6 +7,28 @@ session.
 
 ## Current checkpoint
 
+Twelfth checkpoint (2026-10-15), based on `c5f21617`: both chosen sides now persist exact
+member-span and occurrence pins. Restore rebases view-local ordinals by exact identity and retains
+known closed places without substituting a current document or cell. A native baseline reproduction
+closed `b1` before restart and then entered cell 24 at `a34` through the reused ordinal. The fresh
+candidate retains `b1`, refuses Enter while closed, and enters bytes 0–20 only after exact map
+reopening. Source dumps remain unchanged; completed visits stay 2 through restart/refusal/reopen and
+become 3 only after explicit successful Enter.
+
+Private activity payloads are now `visit3` and `selection3`. Previous payloads are unsupported and
+preserved untouched rather than migrated or overwritten. The node/store formats and fixtures are
+unchanged. Changed members and failed resolution retain diagnostic pins; explicit new choices can
+replace them. Historical cell highlights require the exact bound store/version and cell, with
+binding revisions invalidating cached marks. See the
+[twelfth review](../reviews/spatial-ui-twelfth-increment/README.md).
+
+Canonical GNU Make succeeds; fresh Xuzz 106/106, UI 238/238 and owning ReadingPlace 4/4 pass. Fresh
+strict core comparisons pass on GL/GLES/Vulkan at unchanged criteria; GL/GLES match exactly and
+Vulkan ordinary/overlay differ by 0.5104%/0.5096%. The sample does not split actual recording, and
+broad E2E is excluded. Unchanged library/shared-library binaries retain previous 799/799 and owning
+53/53 results. Native evidence is GL at 1440×1000; full journeys, AT-SPI and optimized performance
+remain open.
+
 Eleventh checkpoint (2026-10-15), based on `325b38b1`: the existing Inspector now shows a closed
 chosen occurrence's store, exact state and byte range before its unavailable-source-reference
 reason. Cell targets retain their cell ID. A status/background widget-ID collision found while
@@ -462,18 +484,17 @@ reviews pass.
 
 ## Exact next task
 
-Continue J25 exact occurrence identity across fresh resolution and same-profile restart. Saved
-selection currently carries numeric member/occurrence cursors, while re-resolution indexes the
-currently open views; a changed view set can change what the ordinal denotes. Preserve exact chosen
-sites, refuse missing sites explicitly, and verify both cursors and origin after reopening. Follow
-R8 and the on-disk/activity rules before changing persistence. Then exercise branching Back/Return
-and each retained forward child through actual controls with source/activity snapshots. The eleventh
-review proves bounded same-session closed-target refusal/reopen/retry, not same-profile restore or
-the complete J24/J25 journeys.
+Continue J25 branching Back/Return and each retained forward child through actual controls, with
+source/activity snapshots before and after same-profile restart. Exact member/occurrence pins now
+survive changed view membership; verify both sides and origin while restoring unavailable targets,
+then reopen the exact versions and retry without adding restore visits. Check missing-link/member
+presentation and explicit replacement against the persisted pin contracts. Old v2 activity is
+preserved unsupported; do not regenerate it or introduce a compatibility shim.
 
-Exercise naturally pending page cancellation where native timing permits; retain the owning
-source-arrival regression as integration evidence, not native timing acceptance. Continue exact
-cell/history endpoints. Publication/pin-lifecycle audit still precedes D2 history enumeration.
+The twelfth review establishes bounded closed-target restart/refusal/reopen/retry, not complete
+J24/J25 acceptance. Exercise naturally pending page cancellation where native timing permits; retain
+the owning source-arrival regression as integration evidence. Continue exact cell/history endpoints.
+Publication/pin-lifecycle audit still precedes D2 history enumeration.
 
 The tenth review records bounded unavailable/Cancel/retry evidence. The ninth numeric audit resolves
 the earlier Origin/Back missing-panel discrepancy; confirm future visual findings with decoded

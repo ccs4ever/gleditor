@@ -113,6 +113,9 @@ public:
   /// entered.
   void setManifold(const zigzag::Manifold *bridge, std::size_t storeIndex,
                    xanadu::MicroversionId version) noexcept {
+    if (manifold != bridge || manifoldStoreIndex != storeIndex ||
+        manifoldVersion != version)
+      ++changes;
     manifold           = bridge;
     manifoldStoreIndex = storeIndex;
     manifoldVersion    = std::move(version);
@@ -182,6 +185,8 @@ public:
   /// The open view showing @p site's version, if one is.
   [[nodiscard]] std::optional<std::size_t>
   viewIndexOf(const xanadu::DocumentSite &site) const;
+  /// Whether the bound slice is the exact saved cell frame.
+  [[nodiscard]] bool cellInView(const CellSite &site) const;
 
   /// @p site in words: "document 2, bytes 10 to 14" or "cell 7, bytes 0 to
   /// 5". Shared by the panel and the accessibility tree so both say the same.

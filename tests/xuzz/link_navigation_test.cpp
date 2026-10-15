@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "common/xanadu/link_navigation.hpp"
+#include "common/xanadu/store_activity_log.hpp"
 #include "common/xanadu/system_docs.hpp"
 #include "two_by_three_fixture.hpp"
 
@@ -416,21 +417,25 @@ TEST(LinkNavigationTest, ActivityBackIntoAnotherLinkResolvesItAgain) {
                                           .side       = LinkSide::Right,
                                           .member     = kThree,
                                           .occurrence = kThreeInPartCell}));
-  ASSERT_TRUE(h.run(nav::Enter{}));
+  const auto entered = h.run(nav::Enter{});
+  ASSERT_TRUE(entered && entered->focus);
   ASSERT_TRUE(h.run(nav::SelectOccurrence{.key        = h.overlapping(),
                                           .side       = LinkSide::Left,
                                           .member     = 0,
                                           .occurrence = 0}));
   ASSERT_TRUE(h.run(nav::Enter{}));
 
-  // The cells have gone out of view since: the saved member is still there,
-  // the saved occurrence is not.
+  // A closed cell frame remains the saved target, rather than losing the
+  // occurrence or reinterpreting its old ordinal in the document-only query.
   h.cellsInView   = false;
   const auto back = h.run(nav::ActivityBack{});
 
   ASSERT_TRUE(back.has_value());
   EXPECT_EQ(h.selected().key, h.link());
-  EXPECT_EQ(h.selected().right, (SideCursor{.member = kThree}));
+  EXPECT_EQ(h.selected().right,
+            (SideCursor{.member = kThree, .occurrence = 3}));
+  EXPECT_EQ(xanadu::selectionContext(h.selected()).rightPin->occurrence.site,
+            entered->focus);
 }
 
 TEST(LinkNavigationTest, ReturnToOriginKeepsTheLinkAndAddsNoVisit) {
@@ -688,11 +693,7 @@ TEST(LinkNavigationTest, ResumePinnedChoicesBeforeAnyEndpointVisit) {
                                           .occurrence = kThreeInWholeCell}));
   const auto chosen = h.navigator.selection();
   ASSERT_TRUE(chosen);
-  const xanadu::LinkVisitContext saved{.key    = chosen->key,
-                                       .active = chosen->active,
-                                       .left   = chosen->left,
-                                       .right  = chosen->right,
-                                       .origin = chosen->origin};
+  const auto saved   = xanadu::selectionContext(*chosen);
   const auto before  = h.log.size();
   const auto current = h.log.current();
   xanadu::LinkNavigator reopened(h.log);
@@ -751,4 +752,132 @@ TEST(LinkNavigationTest, SelectionCheckpointPreservesVisitsAndExactReturn) {
   ASSERT_TRUE(afterRestore && afterRestore->focus);
   EXPECT_EQ(*afterRestore->focus, xanadu::OccurrenceSite{readingOffset});
   EXPECT_EQ(h.log.size(), 2U);
+}
+
+TEST(LinkNavigationTest, FreshResolutionRebasesBothExactPinsInsteadOfOrdinals) {
+  Harness h;
+  arrive(h);
+  ASSERT_TRUE(h.run(nav::SelectOccurrence{h.link(), LinkSide::Left, 0, 0}));
+  ASSERT_TRUE(
+      h.run(nav::SelectOccurrence{h.link(), LinkSide::Right, kThree, 1}));
+  const auto saved = xanadu::decodeLinkContext(
+      xanadu::encodeLinkContext(xanadu::selectionContext(h.selected())));
+  auto fresh = h.resolve(h.link()).value();
+  fresh.left[0].occurrences.insert(
+      fresh.left[0].occurrences.begin(),
+      {.site = DocumentSite{h.f.store->documentId(), h.f.base, {0, 5}}});
+  std::ranges::reverse(fresh.right[kThree].occurrences);
+  const auto before = h.log.size();
+  xanadu::LinkNavigator resumed(h.log);
+  const auto request = resumed.restoreSelection(saved);
+  ASSERT_TRUE(request && request->resolve);
+  ASSERT_TRUE(resumed.supply(request->resolve->generation, fresh));
+  const auto restored = xanadu::selectionContext(*resumed.selection());
+  EXPECT_EQ(restored.leftPin, saved.leftPin);
+  EXPECT_EQ(restored.rightPin, saved.rightPin);
+  EXPECT_EQ(restored.left.occurrence, 1U);
+  EXPECT_EQ(restored.right.occurrence, 3U);
+  EXPECT_EQ(restored.origin, saved.origin);
+  EXPECT_EQ(h.log.size(), before);
+  const auto entered = resumed.dispatch(nav::Enter{});
+  ASSERT_TRUE(entered);
+  EXPECT_EQ(entered->focus, saved.rightPin->occurrence.site);
+  EXPECT_EQ(h.log.size(), before + 1);
+}
+
+TEST(LinkNavigationTest,
+     OmittedPlaceRemainsKnownAndChangedMemberNeverSubstitutes) {
+  Harness h;
+  arrive(h);
+  ASSERT_TRUE(h.run(nav::SelectOccurrence{h.link(), LinkSide::Left, 0, 0}));
+  ASSERT_TRUE(
+      h.run(nav::SelectOccurrence{h.link(), LinkSide::Right, kThree, 1}));
+  const auto saved = xanadu::selectionContext(h.selected());
+  auto fresh       = h.resolve(h.link()).value();
+  fresh.right[kThree].occurrences.erase(
+      fresh.right[kThree].occurrences.begin() + 1);
+  xanadu::LinkNavigator resumed(h.log);
+  auto request = resumed.restoreSelection(saved);
+  ASSERT_TRUE(request && request->resolve);
+  ASSERT_TRUE(resumed.supply(request->resolve->generation, fresh));
+  EXPECT_EQ(xanadu::selectionContext(*resumed.selection()).rightPin,
+            saved.rightPin);
+  EXPECT_EQ(resumed.selection()->right.occurrence, 4U);
+  EXPECT_FALSE(resumed.selection()->restoring);
+  fresh.right[kThree].span.start++;
+  request = resumed.restoreSelection(saved);
+  ASSERT_TRUE(request && request->resolve);
+  ASSERT_TRUE(resumed.supply(request->resolve->generation, fresh));
+  EXPECT_FALSE(resumed.selection()->right.member);
+  EXPECT_FALSE(resumed.selection()->right.occurrence);
+  ASSERT_TRUE(resumed.selection()->restoring);
+  EXPECT_EQ(xanadu::selectionContext(*resumed.selection()).rightPin,
+            saved.rightPin);
+  EXPECT_EQ(xanadu::selectionContext(*resumed.selection()).leftPin,
+            saved.leftPin);
+  const auto before = h.log.size();
+  EXPECT_FALSE(resumed.dispatch(nav::Enter{}));
+  EXPECT_EQ(h.log.size(), before);
+  ASSERT_TRUE(
+      resumed.dispatch(nav::SelectMember{h.link(), LinkSide::Right, 0}));
+  EXPECT_FALSE(resumed.selection()->restoring);
+  EXPECT_NE(xanadu::selectionContext(*resumed.selection()).rightPin,
+            saved.rightPin);
+}
+
+TEST(LinkNavigationTest, ExistingVisitRestoreAlsoRebasesExactPins) {
+  Harness h;
+  arrive(h);
+  ASSERT_TRUE(
+      h.run(nav::SelectOccurrence{h.link(), LinkSide::Right, kThree, 1}));
+  const auto first = h.run(nav::Enter{});
+  ASSERT_TRUE(first && first->visit);
+  auto fresh = h.resolve(h.link()).value();
+  std::ranges::reverse(fresh.right[kThree].occurrences);
+  ASSERT_TRUE(h.navigator.supply(h.selected().generation, fresh));
+  const auto before = h.log.size();
+  ASSERT_TRUE(h.run(nav::EnterVisit{*first->visit}));
+  EXPECT_EQ(h.selected().right.occurrence, 3U);
+  EXPECT_EQ(xanadu::selectionContext(h.selected()).rightPin->occurrence.site,
+            first->focus);
+  EXPECT_EQ(h.log.size(), before);
+}
+
+TEST(LinkNavigationTest, AnOrdinalWithoutAnExactPinCannotRestoreAChosenPlace) {
+  Harness h;
+  arrive(h);
+  const xanadu::LinkVisitContext old{.key   = h.link(),
+                                     .right = {.member = 0, .occurrence = 0}};
+  xanadu::LinkNavigator resumed(h.log);
+  const auto request = resumed.restoreSelection(old);
+  ASSERT_TRUE(request && request->resolve);
+  ASSERT_TRUE(
+      resumed.supply(request->resolve->generation, h.resolve(h.link())));
+  EXPECT_EQ(resumed.selection()->right.member, 0U);
+  EXPECT_FALSE(resumed.selection()->right.occurrence);
+  EXPECT_FALSE(resumed.dispatch(nav::Enter{}));
+}
+
+TEST(LinkNavigationTest,
+     FailedRestoreResolutionRetainsPinsUntilExplicitDismissal) {
+  Harness h;
+  arrive(h);
+  ASSERT_TRUE(h.run(nav::SelectOccurrence{h.link(), LinkSide::Left, 0, 0}));
+  ASSERT_TRUE(
+      h.run(nav::SelectOccurrence{h.link(), LinkSide::Right, kThree, 1}));
+  const auto saved  = xanadu::selectionContext(h.selected());
+  const auto before = h.log.size();
+  xanadu::LinkNavigator resumed(h.log);
+  const auto request = resumed.restoreSelection(saved);
+  ASSERT_TRUE(request && request->resolve);
+  EXPECT_FALSE(
+      resumed.supply(request->resolve->generation,
+                     std::unexpected(xanadu::LinkQueryError::LinkNotFound)));
+  ASSERT_TRUE(resumed.selection());
+  EXPECT_EQ(xanadu::selectionContext(*resumed.selection()), saved);
+  EXPECT_FALSE(resumed.dispatch(nav::Enter{}));
+  EXPECT_EQ(h.log.size(), before);
+  ASSERT_TRUE(resumed.dispatch(nav::Dismiss{}));
+  EXPECT_FALSE(resumed.selection());
+  EXPECT_EQ(h.log.size(), before);
 }

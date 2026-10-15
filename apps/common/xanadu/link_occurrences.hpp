@@ -134,7 +134,9 @@ struct Occurrence {
  *
  * `occurrences` covers only the documents and cells the query was given, so
  * an empty list means "not in view", not "nowhere": the member keeps its place
- * and identity either way.
+ * and identity either way. A selected snapshot can also retain a previously
+ * observed place after its view closes or across restart. The host checks
+ * current availability separately before entry or highlighting.
  */
 struct LinkMember {
   LinkSide side{LinkSide::Left};

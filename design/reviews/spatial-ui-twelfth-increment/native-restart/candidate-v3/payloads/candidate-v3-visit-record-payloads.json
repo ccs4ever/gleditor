@@ -1,0 +1,45 @@
+{
+  "derivation": "Read-only decode of each visit MAKE-cell primedia span from the final activity ops dump against this run profile permascroll; no profile data is included in the archive.",
+  "permascroll_sha256": "6984e5237660ca4a377ec00bd307a94f0145c83a7e1358c93f7767076975dee9",
+  "visit_format": "visit3",
+  "record_count": 3,
+  "records": [
+    {
+      "op": 7,
+      "cell": 7,
+      "op_parent": 6,
+      "scroll": 0,
+      "primedia_range": [
+        55427,
+        55484
+      ],
+      "payload": "visit3 0 doc 293d6fbbf1f3a982e240308a84aacd54 0 0 0 0 0 0",
+      "payload_sha256": "123f841033ed63680be4685bc28b3e0506cdda7d60f9f7e39a87361dcd4fdfb8"
+    },
+    {
+      "op": 13,
+      "cell": 13,
+      "op_parent": 12,
+      "scroll": 0,
+      "primedia_range": [
+        55682,
+        55965
+      ],
+      "payload": "visit3 1 doc 33db7f71defbaeb61f4b64f00540d85d b1 0 20 0 1 1 33db7f71defbaeb61f4b64f00540d85d 22 0 0 1 1 0 1 1 doc 33db7f71defbaeb61f4b64f00540d85d a34 0 20 0 1 0 55511 20 0 doc 33db7f71defbaeb61f4b64f00540d85d b1 0 20 0 1 0 55566 10 0 doc 33db7f71defbaeb61f4b64f00540d85d a34 55 65 0",
+      "payload_sha256": "58e73c916d757725b8507243d38dc4aec5534c437edd8c5f653cc35f8600d278"
+    },
+    {
+      "op": 74,
+      "cell": 74,
+      "op_parent": 73,
+      "scroll": 0,
+      "primedia_range": [
+        56766,
+        57049
+      ],
+      "payload": "visit3 1 doc 33db7f71defbaeb61f4b64f00540d85d b1 0 20 0 1 1 33db7f71defbaeb61f4b64f00540d85d 22 0 0 2 1 0 1 1 doc 33db7f71defbaeb61f4b64f00540d85d a34 0 20 0 1 0 55511 20 0 doc 33db7f71defbaeb61f4b64f00540d85d b1 0 20 0 1 0 55566 10 0 doc 33db7f71defbaeb61f4b64f00540d85d a34 55 65 0",
+      "payload_sha256": "541a62fac6e696620c3a3bd9c17e90cb527e1118711d08ff5f92b2788f39bc51"
+    }
+  ],
+  "note": "The integer immediately after the visit format token is the parent visit ID. Distinct MAKE-cell operations are distinct visit records even when text payloads match."
+}

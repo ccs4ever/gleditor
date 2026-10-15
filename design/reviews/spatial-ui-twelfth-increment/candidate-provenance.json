@@ -1,0 +1,43 @@
+{
+  "base_commit": "c5f21617594bd6e25d43136d7a010e58375ba342",
+  "patch_sha256": "798c0a8942362be20dce15459e7f2cc145cedfa54da6bc384abdb6e8790d773c",
+  "source_sha256": {
+    "apps/common/ui/xanadoc/link_context.cpp": "6526c51d918610fb8664de56a883b48fc48751ed0308da0e1c710b9fbafc2134",
+    "apps/common/ui/xanadoc/link_context.hpp": "cd3ea1df970c4db9937c81a679bb29a4860a84d9efdb548198786b1f45b8df29",
+    "apps/common/ui/xanadoc/link_panel_overlay.cpp": "822e0b0ea47d08a5dfc7a9cc2a9813b00091d2239e3096c1351d85cb10efe17b",
+    "apps/common/xanadu/link_navigation.cpp": "e2160eec279aaf81363e07274a324623da11e60a26d4a060758d3840ade0dd4a",
+    "apps/common/xanadu/link_navigation.hpp": "15474baed091a720143a157c72e2f9fb80f3c343f1e52faa82cf5dd6952697cb",
+    "apps/common/xanadu/link_occurrences.hpp": "d119634e682c41462b79af230249bc64d6a37185c4f4f795e5bcf2bbbaf2bc79",
+    "apps/common/xanadu/link_panel.cpp": "26acb3b9ffec601a0fe056f31300cef41e93a12a68fd2e4787a273e09f482d1e",
+    "apps/common/xanadu/store_activity_log.cpp": "539689ce305259dc2d392ad7be667ae1e567eee9b11bc563ddc6284d852038a2",
+    "apps/xuzz/xuzz_app.cpp": "6107b3f6ed77f85281e7ce77993e9c8e2288831069eec29276fb9b4f692c7dff",
+    "tests/xudu/reading_place_test.cpp": "cbf7def6d5a07aab50bd0b05a31c8b7bd64a78feb1aba230efd66534ab1c7c0c",
+    "tests/xuzz/link_navigation_test.cpp": "79279743cb74d7eed6b04d3983be7a33d58bff7fe24635fb2b33bdffab8f0e8b",
+    "tests/xuzz/store_activity_log_test.cpp": "fb7d77f64c690958a23d90f2204d8e31b57e823a5ae4c7ffa541694a5ea73d1a",
+    "tests/zigzag/link_panel_overlay_test.cpp": "9f3ff22706315b1d12bc56b9469f90bebc13ff7c02075aad622a31a9b2aa375c",
+    "tests/zigzag/reader_link_packages_ui_test.cpp": "719d656093bd482c7663b0b944803d3a1c65269ad847b25ecb66b7952365f871"
+  },
+  "binaries": {
+    "build/xuzz": "b5dc499224f2a81548049ace2151ff341404e2f482e72014bc7923137571e5f3",
+    "build/libgleditor.so.0": "ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9",
+    "build/gleditor_test": "44562f4e4ea437f8f3c575a8005d5847367860f9b4d4714d2d1b6516cf014f8a",
+    "build/xuzz_test": "99ac3d9e6c35a540bb84eca57b0d41f4fdb69f8365900fffe64dc40bdff36f71",
+    "build/zigzag_test": "cdc53dfd35f4aac16959895d5180a65489a583235fa9a6389b5a6d20e0b6bc41",
+    "build/xudu_test": "aec7c8e1f7abff55a68fe9b60a063698184bb6d4d37efe599e87b3742b516de2",
+    "build/gleditor": "e5ce72f0283e7ebab0ce5700e1a6f58e2ee14b2abb6af982d009cac8379f1748"
+  },
+  "fresh_checks": {
+    "canonical_build_exit": 0,
+    "xuzz": 106,
+    "ui": 238,
+    "reading_place": 4,
+    "strict_core_exit": 0
+  },
+  "reused_after_hash_verification": {
+    "library": 799,
+    "owning_mip_cache": 53
+  },
+  "native_executable": "e1b532badbed96231b3eaad1d858fc73847d12e88b88d7afe112a9160c40dd07",
+  "native_final_runtime_section_equivalence": "native-final-elf-equivalence.json",
+  "optimized_performance_accepted": false
+}

@@ -26,17 +26,24 @@ TEST(StoreActivityLogTest, BranchesAndSelectedVisitSurviveReopening) {
     xanadu::Store store(scroll);
     xanadu::StoreActivityLog log(&store, directory);
     origin = log.append({.target = xanadu::DocumentSite{document, {}, {4, 4}}});
-    first  = log.append({.parent  = origin,
-                         .target  = xanadu::CellSite{document, {}, 7, {2, 5}},
-                         .arrival = xanadu::Arrival::EnteredEndpoint,
-                         .link    = xanadu::LinkVisitContext{
-                                .key    = {document, 12},
-                                .active = xanadu::LinkSide::Right,
-                                .left   = {.member = 0, .occurrence = 0},
-                                .right  = {.member = 1, .occurrence = 0},
-                                .origin = origin,
-                                .originCheckpoint =
-                                xanadu::DocumentSite{document, {}, {19, 19}}}});
+    first  = log.append(
+        {.parent  = origin,
+          .target  = xanadu::CellSite{document, {}, 7, {2, 5}},
+          .arrival = xanadu::Arrival::EnteredEndpoint,
+          .link    = xanadu::LinkVisitContext{
+                 .key              = {document, 12},
+                 .active           = xanadu::LinkSide::Right,
+                 .left             = {.member = 0, .occurrence = 0},
+                 .right            = {.member = 1, .occurrence = 0},
+                 .origin           = origin,
+                 .originCheckpoint = xanadu::DocumentSite{document, {}, {19, 19}},
+                 .leftPin =
+                 xanadu::OccurrencePin{
+                         {0, 4, 3}, {xanadu::DocumentSite{document, {}, {4, 7}}}},
+                 .rightPin = xanadu::OccurrencePin{
+                     {0, 12, 4},
+                     {xanadu::CellSite{document, {}, 7, {2, 5}},
+                      xanadu::Coverage::Partial}}}});
     log.select(origin);
     second = log.append({.parent = origin,
                          .target = xanadu::CellSite{document, {}, 21, {0, 3}}});
@@ -51,6 +58,12 @@ TEST(StoreActivityLogTest, BranchesAndSelectedVisitSurviveReopening) {
               (std::vector<xanadu::VisitId>{first, second}));
     ASSERT_TRUE(log.find(first));
     EXPECT_EQ(log.find(first)->link->right.member, 1U);
+    ASSERT_TRUE(log.find(first)->link->leftPin);
+    ASSERT_TRUE(log.find(first)->link->rightPin);
+    EXPECT_EQ(log.find(first)->link->rightPin->occurrence.coverage,
+              xanadu::Coverage::Partial);
+    EXPECT_EQ(log.find(first)->link->leftPin->member,
+              (xanadu::PrimediaSpan{0, 4, 3}));
     EXPECT_EQ(log.find(first)->link->originCheckpoint,
               (std::optional<xanadu::OccurrenceSite>{
                   xanadu::DocumentSite{document, {}, {19, 19}}}));
@@ -180,7 +193,7 @@ TEST_F(ActivityMetadataTest, PreviousVisitPayloadIsRefusedWithoutRewriting) {
   const auto rank = store->rebuildManifold(store->latest())
                         .dimensionNamed("d.activity-visits", *store);
   ASSERT_TRUE(rank);
-  auto at           = store->makeCell(store->latest(), "visit1 0 doc");
+  auto at           = store->makeCell(store->latest(), "visit2 0 doc");
   std::ignore       = store->setLink(at, store->homeCell(), *rank,
                                      zigzag::DimVector::POS, store->cellRefOf(at));
   const auto before = store->opCount();
@@ -195,7 +208,7 @@ TEST(ActivitySelectionRecordTest, OldAndTruncatedCheckpointsAreRefused) {
           "selection1 00000000000000000000000000000000 1 0 -1 -1 -1 -1 1"),
       xanadu::ActivityRecordUnreadable);
   EXPECT_THROW(
-      xanadu::decodeLinkContext("selection2 00000000000000000000000000000000 1 "
+      xanadu::decodeLinkContext("selection3 00000000000000000000000000000000 1 "
                                 "0 -1 -1 -1 -1 1 1 doc"),
       xanadu::ActivityRecordUnreadable);
 }
@@ -203,7 +216,7 @@ TEST(ActivitySelectionRecordTest, OldAndTruncatedCheckpointsAreRefused) {
 TEST(ActivitySelectionRecordTest,
      NegativeAndOverflowingCheckpointNumbersAreRefused) {
   const std::string authority = "00000000000000000000000000000000";
-  const auto selection        = "selection2 " + authority + " ";
+  const auto selection        = "selection3 " + authority + " ";
   const auto context          = selection + "1 0 -1 -1 -1 -1 1 1 ";
   const auto doc              = context + "doc " + authority + " 0 ";
   const auto cell             = context + "cell " + authority + " 0 ";
@@ -222,7 +235,7 @@ TEST(ActivitySelectionRecordTest,
   // Every representable offset remains accepted; source availability is
   // checked by the host rather than by the private activity codec.
   const auto boundary =
-      xanadu::decodeLinkContext(doc + "4294967295 4294967295 0");
+      xanadu::decodeLinkContext(doc + "4294967295 4294967295 0 0 0");
   ASSERT_TRUE(boundary.originCheckpoint);
   EXPECT_EQ(std::get<xanadu::DocumentSite>(*boundary.originCheckpoint).range,
             (xanadu::Extent{4294967295U, 4294967295U}));
@@ -233,8 +246,8 @@ TEST_F(ActivityMetadataTest, NegativeVisitParentAndAddressesAreRefused) {
                         .dimensionNamed("d.activity-visits", *store);
   ASSERT_TRUE(rank);
   for (const auto *record :
-       {"visit2 -1 doc 00000000000000000000000000000000 0 0 0 0 0 0",
-        "visit2 0 doc 00000000000000000000000000000000 0 -1 -1 0 0 0"}) {
+       {"visit3 -1 doc 00000000000000000000000000000000 0 0 0 0 0 0",
+        "visit3 0 doc 00000000000000000000000000000000 0 -1 -1 0 0 0"}) {
     auto at           = store->makeCell(store->latest(), record);
     std::ignore       = store->setLink(at, store->homeCell(), *rank,
                                        zigzag::DimVector::POS, store->cellRefOf(at));
@@ -243,4 +256,34 @@ TEST_F(ActivityMetadataTest, NegativeVisitParentAndAddressesAreRefused) {
                  xanadu::ActivityRecordUnreadable);
     EXPECT_EQ(store->opCount(), before);
   }
+}
+
+TEST(ActivitySelectionRecordTest, PreviousVersionAndUnpinnedChoicesAreRefused) {
+  EXPECT_THROW(xanadu::decodeLinkContext("selection2 0"),
+               xanadu::ActivityRecordUnreadable);
+  const std::string prefix =
+      "selection3 00000000000000000000000000000000 1 0 0 0 -1 -1 0 0 ";
+  EXPECT_THROW(xanadu::decodeLinkContext(prefix + "0 0"),
+               xanadu::ActivityRecordUnreadable);
+  EXPECT_THROW(xanadu::decodeLinkContext(prefix + "1 0 0 1 2 doc"),
+               xanadu::ActivityRecordUnreadable);
+}
+
+TEST(ActivitySelectionRecordTest, PinRangesCoverageAndPresenceAreChecked) {
+  const std::string authority = "00000000000000000000000000000000";
+  const auto prefix = "selection3 " + authority + " 1 0 0 0 -1 -1 0 0 ";
+  const auto site   = " doc " + authority + " 0 0 1 0 0";
+  const auto valid  = xanadu::decodeLinkContext(prefix + "1 0 10 1 0" + site);
+  ASSERT_TRUE(valid.leftPin);
+  EXPECT_EQ(valid.leftPin->member, (xanadu::PrimediaSpan{0, 10, 1}));
+  for (const auto *pin :
+       {"2", "1 -1 10 1 0", "1 4294967296 10 1 0", "1 0 10 0 0",
+        "1 0 18446744073709551615 1 0", "1 0 10 1 2"}) {
+    SCOPED_TRACE(pin);
+    EXPECT_THROW(xanadu::decodeLinkContext(prefix + pin + site),
+                 xanadu::ActivityRecordUnreadable);
+  }
+  const auto unchosen = "selection3 " + authority + " 1 0 0 -1 -1 -1 0 0 ";
+  EXPECT_THROW(xanadu::decodeLinkContext(unchosen + "1 0 10 1 0" + site),
+               xanadu::ActivityRecordUnreadable);
 }

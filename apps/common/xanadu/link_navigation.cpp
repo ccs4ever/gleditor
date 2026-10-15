@@ -95,6 +95,50 @@ void keepInRange(SelectedLink &link, const LinkSide side) {
   }
 }
 
+/// View-local ordinals are hints; the saved member and site determine identity.
+void restorePins(SelectedLink &link) {
+  if (!link.restoring) return;
+  for (const auto side : {LinkSide::Left, LinkSide::Right}) {
+    auto &cursor = link.cursor(side);
+    auto &pin    = side == LinkSide::Left ? link.restoring->leftPin
+                                          : link.restoring->rightPin;
+    if (!pin) {
+      cursor.occurrence.reset();
+      keepInRange(link, side);
+      continue;
+    }
+    auto &members = side == LinkSide::Left ? link.occurrences->left
+                                           : link.occurrences->right;
+    if (!cursor.member || *cursor.member >= members.size() ||
+        members[*cursor.member].span != pin->member) {
+      cursor = {};
+      continue;
+    }
+    auto &places = members[*cursor.member].occurrences;
+    const auto found =
+        std::ranges::find(places, pin->occurrence.site, &Occurrence::site);
+    if (found == places.end()) {
+      // Retain a known historical place just as a live selection does when
+      // its view closes. The host still checks exact availability on Enter.
+      cursor.occurrence = static_cast<std::uint32_t>(places.size());
+      places.push_back(pin->occurrence);
+    } else {
+      cursor.occurrence = static_cast<std::uint32_t>(found - places.begin());
+    }
+    pin.reset();
+  }
+  if (!link.restoring->leftPin && !link.restoring->rightPin)
+    link.restoring.reset();
+}
+
+void abandonSavedPin(SelectedLink &link, const LinkSide side) {
+  if (!link.restoring) return;
+  (side == LinkSide::Left ? link.restoring->leftPin : link.restoring->rightPin)
+      .reset();
+  if (!link.restoring->leftPin && !link.restoring->rightPin)
+    link.restoring.reset();
+}
+
 /// Settle what the selecting gesture knew against the resolved endsets.
 void settleHint(SelectedLink &link) {
   const auto hint = std::exchange(link.hint, {});
@@ -109,6 +153,7 @@ void settleHint(SelectedLink &link) {
           *hint.occurrence < members[*hint.member].occurrences.size()) {
         cursor.occurrence = hint.occurrence;
       }
+      abandonSavedPin(link, *hint.side);
       link.cursor(*hint.side) = cursor;
     }
     return;
@@ -144,7 +189,8 @@ void settleHint(SelectedLink &link) {
                        link.key.id);
     return;
   }
-  const auto &hitAt       = landings.front();
+  const auto &hitAt = landings.front();
+  abandonSavedPin(link, hitAt.side);
   link.active             = hitAt.side;
   link.cursor(hitAt.side) = SideCursor{
       .member     = hitAt.member,
@@ -166,6 +212,38 @@ void selectSingletonMembers(SelectedLink &link) {
 gleditor::cpp26::optional<const SelectedLink &>
 LinkNavigator::selection() const noexcept {
   return gleditor::refOf(selected ? &*selected : nullptr);
+}
+
+LinkVisitContext selectionContext(const SelectedLink &selection) {
+  LinkVisitContext result{.key              = selection.key,
+                          .active           = selection.active,
+                          .left             = selection.left,
+                          .right            = selection.right,
+                          .origin           = selection.origin,
+                          .originCheckpoint = selection.originCheckpoint};
+  for (const auto side : {LinkSide::Left, LinkSide::Right}) {
+    auto &pin    = side == LinkSide::Left ? result.leftPin : result.rightPin;
+    auto &cursor = side == LinkSide::Left ? result.left : result.right;
+    if (selection.restoring) {
+      const auto &saved = side == LinkSide::Left
+                              ? selection.restoring->leftPin
+                              : selection.restoring->rightPin;
+      if (saved) {
+        pin    = saved;
+        cursor = side == LinkSide::Left ? selection.restoring->left
+                                        : selection.restoring->right;
+        continue;
+      }
+    }
+    if (!selection.occurrences || !cursor.member || !cursor.occurrence)
+      continue;
+    const auto &members = membersOf(selection, side);
+    if (*cursor.member >= members.size()) continue;
+    const auto &member = members[*cursor.member];
+    if (*cursor.occurrence < member.occurrences.size())
+      pin = OccurrencePin{member.span, member.occurrences[*cursor.occurrence]};
+  }
+  return result;
 }
 
 NavigationResult LinkNavigator::dispatch(const NavigationCommand &command) {
@@ -248,17 +326,21 @@ NavigationResult LinkNavigator::supply(
     return std::unexpected(NavigationError::StaleGeneration);
   }
   if (!occurrences) {
-    selected.reset();
+    if (!selected->restoring) selected.reset();
     return std::unexpected(NavigationError::LinkNotFound);
   }
   if (occurrences->key != selected->key) {
     return std::unexpected(NavigationError::StaleGeneration);
   }
   selected->occurrences = std::move(*occurrences);
-  keepInRange(*selected, LinkSide::Left);
-  keepInRange(*selected, LinkSide::Right);
-  settleHint(*selected);
-  selectSingletonMembers(*selected);
+  if (selected->restoring) {
+    restorePins(*selected);
+  } else {
+    keepInRange(*selected, LinkSide::Left);
+    keepInRange(*selected, LinkSide::Right);
+    settleHint(*selected);
+    selectSingletonMembers(*selected);
+  }
   return NavigationEffect{.preview = previewOf(*selected, selected->active)};
 }
 
@@ -293,6 +375,7 @@ NavigationResult LinkNavigator::selectMember(const nav::SelectMember &command) {
   if (command.member >= members.size()) {
     return std::unexpected(NavigationError::MemberOutOfRange);
   }
+  abandonSavedPin(*selected, command.side);
   selected->active = command.side;
   selected->cursor(command.side) =
       chooseMember(members[command.member], command.member);
@@ -311,6 +394,7 @@ NavigationResult LinkNavigator::stepMember(const int delta) {
   }
   const auto next = stepIndex(selection.cursor(selection.active).member, delta,
                               static_cast<std::uint32_t>(members.size()));
+  abandonSavedPin(selection, selection.active);
   selection.cursor(selection.active) = chooseMember(members[next], next);
   return NavigationEffect{.preview = previewOf(selection, selection.active)};
 }
@@ -329,6 +413,7 @@ LinkNavigator::selectOccurrence(const nav::SelectOccurrence &command) {
   if (command.occurrence >= members[command.member].occurrences.size()) {
     return std::unexpected(NavigationError::OccurrenceOutOfRange);
   }
+  abandonSavedPin(*selected, command.side);
   selected->active = command.side;
   selected->cursor(command.side) =
       SideCursor{.member = command.member, .occurrence = command.occurrence};
@@ -349,6 +434,7 @@ NavigationResult LinkNavigator::stepOccurrence(const int delta) {
   if (member.occurrences.empty()) {
     return std::unexpected(NavigationError::MemberNotInView);
   }
+  abandonSavedPin(selection, selection.active);
   cursor.occurrence =
       stepIndex(cursor.occurrence, delta,
                 static_cast<std::uint32_t>(member.occurrences.size()));
@@ -383,17 +469,10 @@ NavigationResult LinkNavigator::enter() {
     return std::unexpected(NavigationError::NoOccurrenceChosen);
   }
   const auto &target = member.occurrences[*cursor.occurrence].site;
-  current            = activity.append(
-      Visit{.parent  = current,
-                       .target  = target,
-                       .arrival = Arrival::EnteredEndpoint,
-                       .link    = LinkVisitContext{.key    = selection.key,
-                                                   .active = selection.active,
-                                                   .left   = selection.left,
-                                                   .right  = selection.right,
-                                                   .origin = selection.origin,
-                                                   .originCheckpoint =
-                                         selection.originCheckpoint}});
+  current            = activity.append(Visit{.parent  = current,
+                                             .target  = target,
+                                             .arrival = Arrival::EnteredEndpoint,
+                                             .link    = selectionContext(selection)});
   return NavigationEffect{.focus = target, .visit = current};
 }
 
@@ -429,8 +508,8 @@ NavigationResult LinkNavigator::restoreVisit(const Visit &visit) {
     selected->right            = saved.right;
     selected->origin           = saved.origin;
     selected->originCheckpoint = saved.originCheckpoint;
-    keepInRange(*selected, LinkSide::Left);
-    keepInRange(*selected, LinkSide::Right);
+    selected->restoring        = saved;
+    restorePins(*selected);
     effect.preview = previewOf(*selected, selected->active);
     return effect;
   }
@@ -440,7 +519,8 @@ NavigationResult LinkNavigator::restoreVisit(const Visit &visit) {
                           .left             = saved.left,
                           .right            = saved.right,
                           .origin           = saved.origin,
-                          .originCheckpoint = saved.originCheckpoint};
+                          .originCheckpoint = saved.originCheckpoint,
+                          .restoring        = saved};
   effect.resolve =
       ResolveRequest{.key = saved.key, .generation = selected->generation};
   return effect;
@@ -454,7 +534,8 @@ LinkNavigator::restoreSelection(const LinkVisitContext &saved) {
                           .left             = saved.left,
                           .right            = saved.right,
                           .origin           = saved.origin,
-                          .originCheckpoint = saved.originCheckpoint};
+                          .originCheckpoint = saved.originCheckpoint,
+                          .restoring        = saved};
   return NavigationEffect{
       .resolve =
           ResolveRequest{.key = saved.key, .generation = selected->generation}};

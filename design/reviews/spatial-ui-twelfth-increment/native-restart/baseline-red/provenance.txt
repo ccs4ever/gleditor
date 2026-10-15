@@ -1,0 +1,16 @@
+Run: baseline-red
+Repository HEAD: c5f21617594bd6e25d43136d7a010e58375ba342
+Frozen xuzz SHA-256: 6aade8d34a679960b3789f87cc808219dcb2d01aa2ab0602b68a14907a8d7522
+Frozen libgleditor.so.0 SHA-256: ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9
+Frozen xudu-dump SHA-256: 7031847f950135234935ae67d06c3e59da6a945bd95a5202f14591064f00947c
+SDL_VIDEODRIVER=offscreen
+SDL_AUDIODRIVER=dummy
+LIBGL_ALWAYS_SOFTWARE=1
+XDG_DATA_HOME=/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-twelfth/baseline-closed/data
+XDG_CONFIG_HOME=/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-twelfth/baseline-closed/config
+XDG_CACHE_HOME=/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-twelfth/baseline-closed/cache
+LD_LIBRARY_PATH prepended /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-twelfth/bin; SPDLOG_LEVEL=xuzz.keymap=debug; PATH prepended /tmp/spatial-xvfb/usr/bin.
+phase1 Xvfb command: timeout --signal=TERM --kill-after=5s 240s xvfb-run -a -s '-noreset -screen 0 1600x1200x24' <phase1 argv>.
+phase2 Xvfb command: timeout --signal=TERM --kill-after=5s 180s xvfb-run -a -s '-noreset -screen 0 1600x1200x24' <phase2 argv>.
+Xvfb selected DISPLAY=:99 as observed. Window 1440x1000.
+Snapshot collector waited for full 4,320,017-byte P6 frames during each five-second app pause, then dumped source and activity stores while app was live.

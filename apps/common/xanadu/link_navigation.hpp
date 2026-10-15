@@ -50,6 +50,14 @@ struct SideCursor {
   bool operator==(const SideCursor &) const = default;
 };
 
+/// A previously observed target of one immutable authored member.
+struct OccurrencePin {
+  PrimediaSpan member;
+  Occurrence occurrence;
+
+  bool operator==(const OccurrencePin &) const = default;
+};
+
 /// The link state a visit saves, so Activity Back can put the panel back.
 struct LinkVisitContext {
   LinkKey key;
@@ -60,6 +68,8 @@ struct LinkVisitContext {
   std::optional<VisitId> origin;
   /// Frozen reading place at selection, without making a completed visit.
   std::optional<OccurrenceSite> originCheckpoint{};
+  std::optional<OccurrencePin> leftPin{};
+  std::optional<OccurrencePin> rightPin{};
 
   bool operator==(const LinkVisitContext &) const = default;
 };
@@ -292,6 +302,8 @@ struct SelectedLink {
   std::optional<OccurrenceSite> originCheckpoint{};
   /// Settled against the occurrences when they arrive.
   SelectionHint hint{};
+  /// Kept until each saved member is reconciled, including unavailable pins.
+  std::optional<LinkVisitContext> restoring{};
 
   [[nodiscard]] const SideCursor &cursor(const LinkSide side) const noexcept {
     return LinkSide::Left == side ? left : right;
@@ -300,6 +312,9 @@ struct SelectedLink {
     return LinkSide::Left == side ? left : right;
   }
 };
+
+/// Capture both chosen sites from the same snapshot used for entry.
+[[nodiscard]] LinkVisitContext selectionContext(const SelectedLink &selection);
 
 using NavigationResult = std::expected<NavigationEffect, NavigationError>;
 
@@ -320,7 +335,8 @@ public:
    *
    * Refused with StaleGeneration unless @p generation is the current
    * selection's, so a slow resolution cannot land on a link the reader has
-   * since left. Cursors already set are kept when still in range.
+   * since left. Restored choices reconcile exact member spans and sites;
+   * ordinary selection hints settle against this snapshot.
    */
   NavigationResult
   supply(std::uint64_t generation,

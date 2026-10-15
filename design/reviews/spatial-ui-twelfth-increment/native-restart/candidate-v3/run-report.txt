@@ -1,0 +1,24 @@
+Build2 candidate fresh-profile closed-target restart/retry validation
+
+The profile was fresh and authored by the candidate build, so its private activity store uses the new `d.activity-visits` / `visit3` shape. This run used two separate Xuzz processes and the same six isolated roots. Phase 1 authored the two-left/three-right Link; selected Left member 1/2 at place 2/2 and Right member 2/3 at place 1/1; entered b1; returned to Origin (a34); opened the visible `Close Untitled · b` control; and closed that target before exiting.
+
+After restart with only `--profile`, before Enter the selected Left endpoint stayed the exact b1 target: the link list showed selected occurrence 3/3 labeled `a closed version`, while occurrences 1 and 2 were the current document and cell 24. Inspector retained `State: b1 · bytes 0–20` and `Left exact source reference unavailable: Occurrence does not match the chosen document or cell frame`. The candidate did not rebind the selected target to cell 24. A post-restart Enter attempt showed `Unavailable: open the exact saved document or cell version. Cancel to keep reading.` and left the activity op count and visit-cell count unchanged (73 ops, two `visit3` MAKE cells).
+
+Ctrl+H opened the visible Hypertime Map; the actual visible `T · Version b1` control was clicked, then the visible `Close hypertime` control closed the map. Inspector resolved the left source back to the exact local store `33db7f71defbaeb61f4b64f00540d85d`, pinned b1, scroll 0 bytes 55511–55531, occurrence bytes 0–20. The unavailable-entry message remained pending until explicit retry. The next Enter succeeded at b1, current reading bytes 0–20, and current reader visit 3. Activity grew from 73 to 77 operations with exactly one new visit MAKE cell; the text payload's `visit3 1 doc ... b1` points to b1. No visit was added by the closed-target refusal, map open, or b1 reopen. The right endpoint remains unavailable after reopening b1 because its a34 target view is closed; the selected Right member/cursor remains 2/3, place 1/2.
+
+The source ops dump hash is unchanged at every checkpoint: 49a12edef0113d9b6f6b7a120c8f2f7cbf7dd1f6d865e8606dc7dfaac4a164d6. The two core processes exited 0. Full UI text/a11y logs are `phase1.log` and `phase2.log`; exact argv files, source/activity snapshots, per-checkpoint hashes, and binary hashes are in this directory. The core run produced eleven complete P6 PPM frames (1440x1000, 4,320,017 bytes each) and lossless PNGs. Every decoded RGB payload was verified byte-for-byte against its PPM source. A supplemental same-profile Inspector pagewalk closed b1 again and captured rendered page 1/2 at `png/11-identity-closed-page1.png` (PPM in `raw/`), visibly showing the exact local store, b1 state/range, and unavailable-reference explanation. Page 2/2 was also captured. The pagewalk did not press Enter and added no visit; source ops stayed unchanged and the three visit records remained. The pagewalk attempted one more `Next controls page` after page 2/2, when that control was disabled; the CLI reported zero visible actionable controls and that supplemental process exited 1. This does not affect the completed core run.
+
+Provenance:
+Worktree: /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul
+HEAD at validation: c5f21617594bd6e25d43136d7a010e58375ba342 (shared working tree had parent-owned edits)
+Frozen candidate xuzz SHA-256: e1b532badbed96231b3eaad1d858fc73847d12e88b88d7afe112a9160c40dd07
+Frozen libgleditor.so.0 SHA-256: ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9
+Frozen xudu-dump SHA-256: 7031847f950135234935ae67d06c3e59da6a945bd95a5202f14591064f00947c
+SDL_VIDEODRIVER=offscreen
+SDL_AUDIODRIVER=dummy
+LIBGL_ALWAYS_SOFTWARE=1
+XDG_DATA_HOME=/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-twelfth/candidate-closed/data
+XDG_CONFIG_HOME=/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-twelfth/candidate-closed/config
+XDG_CACHE_HOME=/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-twelfth/candidate-closed/cache
+LD_LIBRARY_PATH prepended the frozen candidate bin directory; SPDLOG_LEVEL=xuzz.keymap=debug; PATH prepended /tmp/spatial-xvfb/usr/bin.
+Each phase used `timeout --signal=TERM --kill-after=5s 240s xvfb-run -a -s '-noreset -screen 0 1600x1200x24' <app argv>`; Xvfb selected DISPLAY=:99; xuzz window size 1440x1000.
