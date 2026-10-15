@@ -1,0 +1,2 @@
+a3117b5b8490a8ae6652553b97c25726759603914382b561c06c01086ee28f08  /tmp/spatial-tenth-cancel.20261015/candidate/raw/08-reopened-b1.ppm
+231aa6d0e588637c0ec9260372590385ebc9802c18e7c1ed7dc70435d824aa89  /tmp/spatial-tenth-cancel.20261015/candidate/raw/09-retry-entered-b1.ppm

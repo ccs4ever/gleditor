@@ -1,0 +1,24 @@
+{
+  "base_commit": "237d6b1e91e68d96f3a4e6593b3b09571fdc05ed",
+  "patch_sha256": "062155f1ed6ce1e551489ca3b9f67918ca3ee1009c73a657367b63fabf4c795d",
+  "source_sha256": {
+    "apps/common/ui/xanadoc/link_context.cpp": "4f04987efe997205fa6c364010ca442f48a08b0806421b7dc8474d106194867f",
+    "tests/zigzag/reader_link_packages_ui_test.cpp": "841f738f660f0bf34e19acacc38a83af547aca7b460fea834d331f0d9975c658"
+  },
+  "binaries": {
+    "build/xuzz": "9a27360825b63e344879885e1039ad0183062e595dfe3472c3e0042e1828101e",
+    "build/libgleditor.so.0": "ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9",
+    "build/zigzag_test": "9f8fecbf0f866a37e7156f5956be1cd9b466c88d92671e7957d8b029add1c1ae",
+    "build/gleditor_test": "44562f4e4ea437f8f3c575a8005d5847367860f9b4d4714d2d1b6516cf014f8a",
+    "build/xuzz_test": "9ae669a13aba5a1a4ff57507ee335b0c5ab7b4362b1c16f85357cbf54d5f2676"
+  },
+  "canonical_build_exit": 0,
+  "full_ui_tests": 235,
+  "full_ui_exit": 0,
+  "reused_unchanged_binaries": {
+    "library_tests": 799,
+    "xuzz_tests": 99,
+    "owning_mip_cache": 53
+  },
+  "optimized_performance_accepted": false
+}

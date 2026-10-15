@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+set -euo pipefail
+run=/tmp/spatial-tenth-cancel.20261015/candidate/checkpoint
+bin=/tmp/spatial-tenth-cancel.20261015/candidate/bin
+export SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1
+export PATH=/tmp/spatial-xvfb/usr/bin:$PATH
+export XDG_DATA_HOME=$run/data XDG_CONFIG_HOME=$run/config XDG_CACHE_HOME=$run/cache
+passage=$'Harbor left passage.\nMeadow second passage.\nRight one.\nRight two.\nRight three.\n'
+app=("$bin/xuzz" --backend opengl --resize 1440,1000 --profile
+  --chord Ctrl+N --type "$passage" --select 0,20 --chord Ctrl+T --chord Ctrl+2
+  --select 0,20 --chord 'Ctrl+Alt+['
+  --select 21,43 --chord 'Ctrl+Alt+['
+  --select 44,54 --chord 'Ctrl+Alt+]'
+  --select 55,65 --chord 'Ctrl+Alt+]'
+  --select 66,78 --chord 'Ctrl+Alt+]'
+  --chord 'Ctrl+Alt+L' --select 0,20 --chord 'Alt+Shift+N'
+  --chord 'Alt+Shift+J' --chord 'Alt+Shift+L' --chord 'Alt+Shift+L'
+  --chord 'Alt+Shift+X' --chord 'Alt+Shift+J' --chord 'Alt+Shift+J'
+  --chord 'Alt+Shift+X' --dump-a11y --capture "$run/raw/00-selected.ppm" --wait-ms 5000
+  --chord 'Alt+Shift+Return' --dump-a11y --capture "$run/raw/01-enter-b1.ppm" --wait-ms 5000
+  --chord 'Alt+Shift+O' --dump-a11y --capture "$run/raw/02-origin.ppm" --wait-ms 5000
+  --click-label 'Close Untitled · b' --dump-a11y --capture "$run/raw/03-close-b1.ppm" --wait-ms 5000
+  --chord 'Alt+Shift+Return' --dump-a11y --capture "$run/raw/04-unavailable.ppm" --wait-ms 5000
+  --chord 'Alt+Shift+Escape' --dump-a11y --capture "$run/raw/05-cancel.ppm" --wait-ms 5000
+  --chord 'Alt+Shift+Return' --dump-a11y --capture "$run/raw/06-retry.ppm" --wait-ms 5000
+  --chord Ctrl+Q)
+printf '%q ' "${app[@]}" > "$run/evidence/argv.txt"
+printf '\n' >> "$run/evidence/argv.txt"
+sha256sum "$bin/xuzz" "$bin/libgleditor.so.0" "$bin/xudu-dump" > "$run/evidence/binary-hashes-before.txt"
+LD_LIBRARY_PATH="$bin${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" SPDLOG_LEVEL='xuzz.keymap=debug' \
+  timeout --signal=TERM --kill-after=5s 180s xvfb-run -a -s '-noreset -screen 0 1600x1200x24' \
+  "${app[@]}" > "$run/evidence/session.log" 2>&1 &
+app_pid=$!
+
+snapshot() {
+  local label=$1 root="$run/data/xudu/xanadocs" target="$run/evidence/checkpoints/$1"
+  mkdir -p "$target"
+  mapfile -t stores < <(find "$root" -mindepth 1 -maxdepth 1 -type d ! -name default 2>/dev/null | sort)
+  {
+    printf 'count=%s\n' "${#stores[@]}"
+    for i in "${!stores[@]}"; do printf '%s=%s\n' "$i" "${stores[$i]}"; done
+  } > "$target/profile-stores.txt"
+  for i in "${!stores[@]}"; do
+    "$bin/xudu-dump" --section=ops --permascroll="$run/data/xuzz/permascroll/default" "${stores[$i]}" \
+      > "$target/source-$i.ops.txt" 2>&1 || true
+  done
+  if [[ -e "$run/data/xudu/activity" ]]; then
+    "$bin/xudu-dump" --section=ops --permascroll="$run/data/xuzz/permascroll/default" "$run/data/xudu/activity" \
+      > "$target/activity.ops.txt" 2>&1 || true
+  else
+    printf 'activity store absent at checkpoint\n' > "$target/activity.ops.txt"
+  fi
+  rg -o 'visit2 [0-9]+' "$target/activity.ops.txt" > "$target/visit-text-count.txt" || true
+  sha256sum "$target"/*.txt > "$target/SHA256SUMS"
+}
+for step in 00-selected 01-enter-b1 02-origin 03-close-b1 04-unavailable 05-cancel 06-retry; do
+  frame="$run/raw/$step.ppm"
+  ready=false
+  for _ in $(seq 1 120); do
+    if [[ -s "$frame" ]] && [[ $(stat -c %s "$frame") -eq 4320017 ]]; then ready=true; break; fi
+    if ! kill -0 "$app_pid" 2>/dev/null; then break; fi
+    sleep 0.5
+  done
+  if [[ "$ready" == true ]]; then snapshot "$step"; else printf 'missing-or-incomplete\n' > "$run/evidence/$step.missing.txt"; fi
+done
+if wait "$app_pid"; then status=0; else status=$?; fi
+printf '%s\n' "$status" > "$run/evidence/exit-status.txt"
+sha256sum "$bin/xuzz" "$bin/libgleditor.so.0" "$bin/xudu-dump" > "$run/evidence/binary-hashes-after.txt"
+for f in "$run"/raw/*.ppm; do [[ -f $f ]] && sha256sum "$f"; done > "$run/evidence/raw-ppm-sha256.txt"

@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+run=/tmp/spatial-tenth-cancel.20261015/candidate
+bin=$run/bin
+store="$run/data/xudu/xanadocs/untitled-20261015-131855"
+export SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1
+export PATH=/tmp/spatial-xvfb/usr/bin:$PATH
+export XDG_DATA_HOME=$run/data XDG_CONFIG_HOME=$run/config XDG_CACHE_HOME=$run/cache
+app=("$bin/xuzz" --backend opengl --resize 1440,1000 --profile
+  --chord Ctrl+O --key tab --type "$store" --key enter --wait-ms 9000
+  --chord Ctrl+H --wait-ms 9000 --dump-a11y --capture "$run/raw/07-hypertime-map.ppm"
+  --chord Ctrl+Q)
+printf '%q ' "${app[@]}" > "$run/evidence/map-argv.txt"
+printf '\n' >> "$run/evidence/map-argv.txt"
+LD_LIBRARY_PATH="$bin${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" SPDLOG_LEVEL='xuzz.keymap=debug' \
+  timeout --signal=TERM --kill-after=5s 90s xvfb-run -a -s '-noreset -screen 0 1600x1200x24' \
+  "${app[@]}" > "$run/evidence/map-session.log" 2>&1
+sha256sum "$run/raw/07-hypertime-map.ppm" > "$run/evidence/map-ppm-sha256.txt"

@@ -227,6 +227,10 @@ xanadu::ReadingPosition LinkContext::reading() const {
 }
 
 void LinkContext::recordSourceArrival(const OccurrenceSite &site) {
+  // A source return can bypass execute() without changing the open views.
+  // Its arrival supersedes any endpoint still waiting for page geometry.
+  pendingEntry.reset();
+  entryUnavailable.clear();
   navigator.recordArrival(site);
   ++changes;
 }

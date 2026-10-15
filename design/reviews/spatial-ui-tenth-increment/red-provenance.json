@@ -1,0 +1,8 @@
+{
+  "product_base_commit": "237d6b1e",
+  "red_build_exit": 0,
+  "red_test_exit": 1,
+  "test_name": "ReaderPackageUiTest.NewSourceArrivalCancelsDeferredEntryWithoutLosingTheLink",
+  "red_source_note": "Red test source reconstructed from the final source by removing the later post-Cancel selection-presence assertion. That assertion improves failure reporting; the behavioral checks and failing stale-entry path are unchanged.",
+  "red_test_source_sha256": "cd5e612e7cf3787cf88237e414fb2fadf6687f31b61ec66f555b66a09b215b8b"
+}

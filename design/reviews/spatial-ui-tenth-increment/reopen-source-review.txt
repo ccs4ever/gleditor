@@ -1,0 +1,18 @@
+Independent read-only source review (Luna pending_source)
+
+LinkContext::describe(DocumentSite) calls viewIndexOf(site) on each description.
+LinkPanelOverlay rebuilds when either context revision or session generation changes.
+viewIndexOf requires both the version and the store documentId to match.
+Views::showOnly clears the view list and opens the selected version and storeIndex;
+showMapVersion passes map.storeIndex() and the selected graph id through this path.
+The captured activity arrival identifies document 4b419b77911f8bcdbae47f86462f05ba,
+version b1, matching the native source store and its b1 operation.
+
+This establishes the successful visit destination, not the currently pinned endpoint's
+DocumentSite. The map-reopened panel includes ranges 0-20 and 55-65; b1 has only
+20 bytes. Those ranges alone do not establish which exact selected occurrence is
+being requested. The persisted selection record carries Link 22 and an a34 origin
+checkpoint but does not identify the chosen occurrence's exact version. No frozen
+label-cache defect is established. Next compare the chosen occurrence's exact
+DocumentSite store/version with the reopened OpenView through actual Inspector
+or existing internal accessibility, preserving the native source/visit checkpoints.

@@ -1,0 +1,7 @@
+295bc4e5a671c70669c6b91f33534554502a4ff843e08c5e4da442e0fbadefdf  /tmp/spatial-tenth-cancel.20261015/candidate/checkpoint/raw/00-selected.ppm
+1ba45fc89482ac50ee72b00d925a315fdfa980d71cdff8f1d9f21d606f18c67b  /tmp/spatial-tenth-cancel.20261015/candidate/checkpoint/raw/01-enter-b1.ppm
+e51e9377a4c70415d8b61c9d047ee412f4c69593e06b4e78720119780cb5f9bd  /tmp/spatial-tenth-cancel.20261015/candidate/checkpoint/raw/02-origin.ppm
+01741d2404c64c0a85dbd8a8149f9ac8c83d776e2e1d39487be806f444b619f6  /tmp/spatial-tenth-cancel.20261015/candidate/checkpoint/raw/03-close-b1.ppm
+e85b38343a4be91957d0773d1de40ef8aa0fc66d2a07b2be094579873baf7dc9  /tmp/spatial-tenth-cancel.20261015/candidate/checkpoint/raw/04-unavailable.ppm
+01741d2404c64c0a85dbd8a8149f9ac8c83d776e2e1d39487be806f444b619f6  /tmp/spatial-tenth-cancel.20261015/candidate/checkpoint/raw/05-cancel.ppm
+e85b38343a4be91957d0773d1de40ef8aa0fc66d2a07b2be094579873baf7dc9  /tmp/spatial-tenth-cancel.20261015/candidate/checkpoint/raw/06-retry.ppm

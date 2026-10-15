@@ -1,0 +1,25 @@
+Reproduction provenance for native-cancel UI checkpoints
+
+Original runner and exact commands are preserved here: run-with-checkpoints.sh.txt, open-map.sh.txt, reopen-exact-retry.sh.txt. argv.txt, map-argv.txt, and reopen-exact-argv.txt preserve the app argument vectors.
+
+The checkpointed cancellation run exported these six environment variables before invoking Xuzz:
+SDL_VIDEODRIVER=offscreen
+SDL_AUDIODRIVER=dummy
+LIBGL_ALWAYS_SOFTWARE=1
+XDG_DATA_HOME=/tmp/spatial-tenth-cancel.20261015/candidate/checkpoint/data
+XDG_CONFIG_HOME=/tmp/spatial-tenth-cancel.20261015/candidate/checkpoint/config
+XDG_CACHE_HOME=/tmp/spatial-tenth-cancel.20261015/candidate/checkpoint/cache
+It prepended PATH=/tmp/spatial-xvfb/usr/bin:$PATH and set LD_LIBRARY_PATH to the frozen bin directory (`/tmp/spatial-tenth-cancel.20261015/candidate/bin`, followed by any previous value). SPDLOG_LEVEL=xuzz.keymap=debug.
+
+Exact display wrapper command from the runner:
+timeout --signal=TERM --kill-after=5s 180s xvfb-run -a -s '-noreset -screen 0 1600x1200x24' <xuzz argv>
+The X server was Xvfb via xvfb-run; `-noreset` was passed, screen 0 was 1600x1200x24, and `-a` auto-selected an available display. The numeric DISPLAY chosen by xvfb-run was not recorded in the original log, so it cannot be asserted from this archive. The Xuzz window was resized to 1440x1000 and each PPM frame is 1440x1000.
+
+Snapshot gating and collection procedure are preserved verbatim in run-with-checkpoints.sh.txt. For each ordered checkpoint label, the runner polls every 0.5 seconds, for up to 120 polls, until the corresponding PPM exists and its byte size is exactly 4,320,017 (the complete 1440x1000 P6 frame); it checks that the app PID remains alive while waiting. Only after this frame gate does it invoke `snapshot LABEL`. The snapshot function enumerates per-profile xanadoc store directories (excluding `default`), writes profile-stores.txt, runs the frozen xudu-dump `--section=ops --permascroll=...` once per source store and once for the activity store, derives visit-text-count.txt by matching `visit2 [0-9]+`, then hashes those snapshot text files. The app independently pauses for five seconds after each capture; the external collector does not control that pause. The runner records snapshots when a complete frame is observed, rather than waiting on buffered stdout. No per-dump timestamps were retained. The first and second snapshots distinguish the successful Enter delta; later snapshots all retain the same two completed visits and source bytes.
+
+The app's complete stdout/stderr is in session.log.gz. This contains the a11y state dump and `wrote screenshot` line for each checkpoint. `exit-status.txt` is the final app status; binary-hashes.txt records the frozen app, library, and dumper hashes (the runner also wrote before/after hashes, which matched).
+
+The unresolved recovery experiment is separate. Its exact app arguments are in map-argv.txt and reopen-exact-argv.txt; wrappers and a11y logs are in open-map.sh.txt, reopen-exact-retry.sh.txt, map-session.log.gz, reopen-exact-session.log.gz. Lossless PNG captures are frames/07-hypertime-map.png, 08-reopened-b1.png, and 09-retry-entered-b1.png; their PPM source checksums are retained in map-ppm-sha256.txt and reopen-exact-ppm-sha256.txt. The map exposed and accepted the visible “T · Version b1” node; after closing the map, the selected endpoint still read “a closed version” and Enter stayed unavailable. No Inspector dump established the exact endpoint store/version authority, so this experiment is unresolved rather than a recovery pass.
+The nested snapshots/*/SHA256SUMS files were emitted by the original runner with its absolute temporary checkpoint paths in the manifest entries; their corresponding files and hashes are preserved. The archive-level SHA256SUMS uses relative paths and excludes itself.
+
+The original shell runners are archival .sh.txt files, preserved byte-for-byte rather than installed as new repository tools. They are not formatter/linter input; their hashes bind the actual commands used.

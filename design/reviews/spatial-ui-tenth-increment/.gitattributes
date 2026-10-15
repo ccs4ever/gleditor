@@ -1,0 +1,4 @@
+# Retain original transcripts and the context markers of unified diffs.
+*.log -text whitespace=cr-at-eol
+*.patch.txt whitespace=-blank-at-eol
+*argv.txt whitespace=-blank-at-eol

@@ -1,0 +1,127 @@
+diff --git a/apps/common/ui/xanadoc/link_context.cpp b/apps/common/ui/xanadoc/link_context.cpp
+index 8f3f7394..70259c9f 100644
+--- a/apps/common/ui/xanadoc/link_context.cpp
++++ b/apps/common/ui/xanadoc/link_context.cpp
+@@ -227,6 +227,10 @@ xanadu::ReadingPosition LinkContext::reading() const {
+ }
+ 
+ void LinkContext::recordSourceArrival(const OccurrenceSite &site) {
++  // A source return can bypass execute() without changing the open views.
++  // Its arrival supersedes any endpoint still waiting for page geometry.
++  pendingEntry.reset();
++  entryUnavailable.clear();
+   navigator.recordArrival(site);
+   ++changes;
+ }
+diff --git a/tests/zigzag/reader_link_packages_ui_test.cpp b/tests/zigzag/reader_link_packages_ui_test.cpp
+index 4fd3331e..ece03170 100644
+--- a/tests/zigzag/reader_link_packages_ui_test.cpp
++++ b/tests/zigzag/reader_link_packages_ui_test.cpp
+@@ -8,6 +8,7 @@
+ #include <fstream>
+ #include <gleditor/beams.hpp>
+ #include <gleditor/render_state.hpp>
++#include <gleditor/renderer.hpp>
+ #include <gleditor/text_source.hpp>
+ #include <glm/gtc/matrix_transform.hpp>
+ #include <gtest/gtest.h>
+@@ -305,6 +306,99 @@ TEST_F(ReaderPackageUiTest,
+   EXPECT_EQ(store.opCount(), operations);
+ }
+ 
++TEST_F(ReaderPackageUiTest,
++       NewSourceArrivalCancelsDeferredEntryWithoutLosingTheLink) {
++  auto perma = std::make_shared<UserPermascroll>();
++  Session session((root / "workspace").string(), perma);
++  auto &store       = session.store();
++  const auto text   = store.insert({}, 0, "origin destination");
++  const auto pieces = store.rebuild(text);
++  Link link{.left = pieces.spansFor(0, 6), .right = pieces.spansFor(7, 11)};
++  const auto head = store.addLink(text, link);
++  session.viewOpened(head);
++  const LinkKey key{.authority = store.documentId(),
++                    .id        = store.links().begin()->first};
++  WorldRecordingDevice device;
++  RenderState state{&device};
++  auto app      = std::make_shared<AppState>();
++  auto renderer = Renderer::create(app, render::Backend::OpenGL);
++  auto doc      = Doc::create(
++      renderer, &device, glm::mat4{1},
++      gleditor::MemoryTextSource("origin destination", "deferred-entry"));
++  state.docs.push_back(doc);
++  LinkContext navigation(session);
++  LinkContext::CaretPosition caret{.view = 0, .offset = 0};
++  navigation.setCaretQuery([&] { return std::optional{caret}; });
++  std::optional<Extent> focused;
++  navigation.setDocumentEntryHandler(
++      [&](std::size_t view, Extent range, RenderState &) {
++        EXPECT_EQ(view, 0U);
++        focused = range;
++      });
++  navigation.advanceFrame(state);
++  ASSERT_TRUE(navigation.execute(nav::SelectLink{.key = key}));
++  ASSERT_TRUE(navigation.execute(nav::SelectOccurrence{
++      .key = key, .side = LinkSide::Right, .member = 0, .occurrence = 0}));
++  const auto selected    = *navigation.selection();
++  const auto operations  = store.opCount();
++  const auto visits      = navigation.walkEntries().size();
++  const auto activityOps = session.activityForNavigation()->opCount();
++  ASSERT_FALSE(doc->anchorFor(7));
++  ASSERT_TRUE(navigation.execute(nav::Enter{}));
++  ASSERT_TRUE(navigation.entryPending());
++  EXPECT_FALSE(focused);
++  EXPECT_EQ(navigation.walkEntries().size(), visits);
++  EXPECT_EQ(session.activityForNavigation()->opCount(), activityOps);
++
++  ASSERT_TRUE(navigation.execute(nav::CancelEntry{}));
++  EXPECT_FALSE(navigation.entryPending());
++  ASSERT_TRUE(navigation.selection());
++  EXPECT_EQ(navigation.selection()->left, selected.left);
++  EXPECT_EQ(navigation.selection()->right, selected.right);
++  EXPECT_EQ(navigation.walkEntries().size(), visits);
++  EXPECT_EQ(session.activityForNavigation()->opCount(), activityOps);
++  ASSERT_TRUE(navigation.execute(nav::Enter{}));
++  ASSERT_TRUE(navigation.entryPending());
++
++  // Swing Back to an already open quotation source changes reading focus
++  // without changing the session's view epoch.
++  const auto views = session.generation();
++  caret.selection  = Extent{0, 6};
++  navigation.recordSourceArrival(DocumentSite{
++      .store = store.documentId(), .version = head, .range = {0, 6}});
++  EXPECT_EQ(session.generation(), views);
++  EXPECT_FALSE(navigation.entryPending());
++  const auto arrived    = navigation.currentVisit();
++  const auto arrivals   = navigation.walkEntries().size();
++  const auto arrivedOps = session.activityForNavigation()->opCount();
++  EXPECT_EQ(arrivals, visits + 1);
++
++  doc->makePages();
++  std::ignore = doc->buildPendingPages(state);
++  ASSERT_TRUE(doc->anchorFor(7));
++  ASSERT_TRUE(doc->anchorFor(17));
++  navigation.advanceFrame(state);
++  navigation.advanceFrame(state);
++  EXPECT_FALSE(focused);
++  EXPECT_EQ(navigation.currentVisit(), arrived);
++  EXPECT_EQ(navigation.walkEntries().size(), arrivals);
++  EXPECT_EQ(session.activityForNavigation()->opCount(), arrivedOps);
++  ASSERT_TRUE(navigation.selection());
++  EXPECT_EQ(navigation.selection()->key, selected.key);
++  EXPECT_EQ(navigation.selection()->left, selected.left);
++  EXPECT_EQ(navigation.selection()->right, selected.right);
++  EXPECT_EQ(navigation.selection()->active, selected.active);
++  EXPECT_EQ(navigation.selection()->origin, selected.origin);
++  EXPECT_EQ(navigation.selection()->originCheckpoint,
++            selected.originCheckpoint);
++  EXPECT_EQ(store.opCount(), operations);
++
++  ASSERT_TRUE(navigation.execute(nav::Enter{}));
++  EXPECT_EQ(focused, (Extent{7, 18}));
++  EXPECT_EQ(navigation.walkEntries().size(), arrivals + 1);
++  EXPECT_EQ(store.opCount(), operations);
++}
++
+ TEST_F(ReaderPackageUiTest,
+        SavedCellEntryRestoresHistoricalVersionAndExactContentRange) {
+   auto perma = std::make_shared<UserPermascroll>();

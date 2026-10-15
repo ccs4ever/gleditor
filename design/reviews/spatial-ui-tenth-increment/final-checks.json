@@ -1,0 +1,36 @@
+{
+  "canonical_build_exit": 0,
+  "fresh_ui_suite": {
+    "passed": 235,
+    "total": 235,
+    "exit": 0
+  },
+  "format_check_exit": 0,
+  "lint_exit": 0,
+  "diff_check_exit": 0,
+  "binary_and_product_patch_hashes_verified": true,
+  "native_backend": "OpenGL, headless SDL offscreen with Xvfb wrapper",
+  "native_completed_visits": [
+    1,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2
+  ],
+  "native_source_sha256": "49a12edef0113d9b6f6b7a120c8f2f7cbf7dd1f6d865e8606dc7dfaac4a164d6",
+  "native_cancel_action": "Alt+Shift+Escape (visible Cancel control retained in a11y/frame)",
+  "reused_only_after_binary_hash_verification": {
+    "library": 799,
+    "xuzz": 99,
+    "mip_cache": 53
+  },
+  "open": [
+    "exact selected endpoint recovery identity",
+    "native naturally pending interruption",
+    "complete J24/J25 and 16+16 journeys",
+    "native AT-SPI",
+    "optimized performance"
+  ]
+}

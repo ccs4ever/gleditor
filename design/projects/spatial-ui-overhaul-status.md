@@ -7,6 +7,24 @@ session.
 
 ## Current checkpoint
 
+Tenth checkpoint (2026-10-15), based on `237d6b1e`: a completed source return now cancels any older
+endpoint entry waiting for page geometry. Pouch Swing Back can return to an already-open source
+without changing the session epoch; previously the deferred entry could later steal focus and append
+an unwanted visit. The owning regression fails before the fix and passes afterward, using an actual
+unbuilt `Doc`, explicit Cancel, source arrival, real page building and fresh Enter. The pinned Link,
+both cursors and origin remain intact. Canonical GNU Make builds and the fresh UI suite pass
+235/235. Unchanged library/shared-library and Xuzz binaries retain the previous 799/799, 53/53
+owning cache/mip and 99/99 results; those are reused, not new suite runs.
+
+A native GL run authors the repeated quotation and two-left/three-right Link through existing
+controls. It enters the selected exact occurrence, returns, closes the target, refuses entry,
+cancels and retries. Measured checkpoints preserve source bytes and visits 1→2→2; decoded frames
+confirm status changes with both cursors retained. This proves the bounded unavailable/Cancel route,
+not interruption of a naturally pending page build. Hypertime-map reopening has not yet restored the
+selected occurrence; exact store/version authority must be established before classifying that
+observation. Full J24/J25, native AT-SPI, remote/stale-response handling and optimized performance
+remain open. See the [tenth review](../reviews/spatial-ui-tenth-increment/README.md).
+
 Ninth checkpoint (2026-10-15), based on `25b1ccde`: quantitative pixel inspection disproves the
 eighth review's missing-panel and blank-Back findings. The full 800×235 panel band is byte-identical
 across all six archived baseline/candidate/enlarged GL Back/Origin captures. Independent
@@ -424,18 +442,20 @@ reviews pass.
 
 ## Exact next task
 
-Continue J24 pending/unavailable cancellation and stale replacement, exact cell/history endpoints,
-and J25 branching Back/Return and same-profile reopen. Preserve exact source/activity snapshots,
-native per-backend frames and Link identity. The ninth numeric audit resolves the reported
-Origin/Back missing-panel discrepancy for the captured states; do not repeat the misleading image
-preview interpretation or infer a product fix from it. Use decoded pixels and region hashes to
-confirm visual findings, alongside actual frame inspection and accessibility state.
+Finish J24 recovery after a closed exact target is reopened through actual controls. Establish the
+saved occurrence's store authority and version alongside the reopened view before classifying the
+Hypertime-map observation; a visible `b1` label alone is insufficient. Capture before/after source
+and activity snapshots and prove a fresh explicit Enter adds exactly one completed visit. Exercise
+naturally pending page cancellation where native timing permits; retain the owning deferred-page
+regression as integration evidence, not native timing acceptance. Continue exact cell/history
+endpoints and J25 branching Back/Return and same-profile reopen.
 
-The bounded repeated-occurrence route is recorded in the ninth review; consult its actual cursors,
-source/visit checkpoints and exclusions before extending acceptance. Full J24/J25 and 16+16 journey
-acceptance remain open. Whole-page ink passes the unchanged local test on all three backends;
-broader font and backend E2E coverage remains unverified. Long lines at enlarged reading size can
-clip at 800 pixels, and the mini-map can occlude text; retain those stress limitations.
+The tenth review records bounded unavailable/Cancel/retry evidence. The ninth numeric audit resolves
+the earlier Origin/Back missing-panel discrepancy; confirm future visual findings with decoded
+pixels and region hashes alongside accessibility and frame inspection. Full J24/J25 and 16+16
+journey acceptance remain open. Whole-page ink passes the unchanged local test on all three
+backends; broader font and backend E2E coverage remains unverified. Long lines at enlarged reading
+size can clip at 800 pixels, and the mini-map can occlude text; retain those stress limitations.
 
 Resolve legacy J3, J11 and J15 findings against the pinned baseline. The stale drag tests and UI
 font-scale control are repaired. Full J1–J16 preservation, complete J17–J32, native AT-SPI and
