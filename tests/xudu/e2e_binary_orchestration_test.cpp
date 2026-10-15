@@ -3081,8 +3081,10 @@ TEST(E2EBinaryOrchestrationTest, aSliceViewShowsItsCompassAndIsBoundByTyping) {
 /// off the plane; and, in the same store, a page of text with a link between
 /// two of its passages and a cell that quotes one of them, so a ribbon and a
 /// quotation beam can share a frame with the strands.
+enum class MarksScene { Ghosts, Depth, Page, LinkedPages };
+
 void saveSliceMarksStore(const fs::path &scroll, const fs::path &path,
-                         const bool withPage) {
+                         const MarksScene scene) {
   Store slice(permascrollAt(scroll));
   auto head         = slice.sliceGenesis({});
   const auto across = slice.makeDimension(head, "d.across");
@@ -3104,6 +3106,41 @@ void saveSliceMarksStore(const fs::path &scroll, const fs::path &path,
       "addresses, wherever they are shown. A link joins what a reader "
       "joins, and neither end is moved by it.";
   std::optional<zigzag::CellRef> quote;
+  const bool withPage = MarksScene::Page == scene;
+  if (MarksScene::LinkedPages == scene) {
+    // Two documents joined by a xanalink, and a slice in the same store: the
+    // pages are roots of their own, as the unified sample's are, and the link
+    // is filed on the slice's branch because it names permascroll addresses.
+    // Passages low enough on the page that no tab strip or focus row hides
+    // them, with filler above, so the ribbon has a page to leave from.
+    const auto filler = [](const std::string &tag, const int count) {
+      std::string lines;
+      for (int i = 1; i <= count; ++i) {
+        lines += tag + " line " + std::to_string(i) + "\n";
+      }
+      return lines;
+    };
+    const std::string passageA = "Transclusion is";
+    const std::string passageB = "A link joins what a reader joins";
+    // Indented to the right half of its page, clear of the overview panel.
+    const std::string first = filler("Alpha", 40) + std::string(70, ' ') +
+                              passageA + "\n" + filler("Alpha", 6);
+    const std::string second =
+        filler("Beta", 40) + passageB + "\n" + filler("Beta", 6);
+    const auto docA   = slice.insert({}, 0, first);
+    const auto docB   = slice.insert({}, 0, second);
+    const auto startA = static_cast<std::uint32_t>(first.find(passageA));
+    const auto startB = static_cast<std::uint32_t>(second.find(passageB));
+    xanadu::Link ribbon;
+    ribbon.type  = xanadu::LinkType::Comment;
+    ribbon.owner = "e2e";
+    ribbon.left.push_back(slice.rebuild(docA).spansFor(startA, 14).front());
+    ribbon.right.push_back(slice.rebuild(docB).spansFor(startB, 18).front());
+    head = slice.addLink(head, ribbon);
+    head =
+        slice.makeCell(head, slice.rebuild(docA).spansFor(startA, 14).front());
+    quote = slice.cellRefOf(head);
+  }
   if (withPage) {
     head              = slice.insert(head, 0, text);
     const auto spanAt = [&](const std::uint32_t start,
@@ -3142,9 +3179,13 @@ void saveSliceMarksStore(const fs::path &scroll, const fs::path &path,
     link(above, down.dim, cell);
     above = cell;
   }
-  const auto behind = make("Behind the plane");
-  link(slice.homeCell(), deep.dim, behind);
-  link(behind, deep.dim, make("Further behind"));
+  if (MarksScene::Ghosts != scene) {
+    const auto behind  = make("Behind the plane");
+    const auto further = make("Further behind");
+    link(slice.homeCell(), deep.dim, behind);
+    link(behind, deep.dim, further);
+    link(further, deep.dim, make("Furthest behind"));
+  }
   if (quote) {
     link(row.front(), down.dim, *quote);
   }
@@ -3168,15 +3209,16 @@ TEST(E2EBinaryOrchestrationTest, aSliceViewDrawsGhostsWideNeighboursAndDepth) {
   const auto ppm = [&](const std::string &name) {
     return screenshotDir / ("slice_marks_" + name + ".ppm");
   };
-  // One workspace for the slice alone, one for the slice beside a page with a
-  // link and a quotation.
-  const auto run = [&](const std::string &workspace, const bool withPage,
+  // Each scene has a workspace of its own, with its own XDG directories: a
+  // binding or a chosen presentation kept by one run is what the next of the
+  // same workspace opens with, so scenes that share one are not independent.
+  const auto run = [&](const std::string &workspace, const MarksScene scene,
                        const std::string &view, const std::string &steps) {
     const auto root = workspaceRoot() / workspace;
     if (!fs::exists(root / "store")) {
       fs::remove_all(root);
       fs::create_directories(root);
-      saveSliceMarksStore(root / "permascroll", root / "store", withPage);
+      saveSliceMarksStore(root / "permascroll", root / "store", scene);
     }
     return executeProcess(
         "XDG_CONFIG_HOME=" + (root / "config").string() +
@@ -3185,37 +3227,55 @@ TEST(E2EBinaryOrchestrationTest, aSliceViewDrawsGhostsWideNeighboursAndDepth) {
         " --backend " + activeBackend() + " --profile --view " + view + steps +
         " " + (root / "store").string());
   };
-  fs::remove_all(workspaceRoot() / "integration_workspace_slice_marks");
-  fs::remove_all(workspaceRoot() / "integration_workspace_slice_marks_page");
   const std::string choose = " --chord Ctrl+Alt+V --key right --key enter"
                              " --do std:nav/zigzag_step_x_pos"
                              " --do std:nav/zigzag_step_x_neg";
-  const std::string plain  = "integration_workspace_slice_marks";
+  const std::string ghosts = "integration_workspace_slice_marks_ghosts";
+  const std::string depth  = "integration_workspace_slice_marks_depth";
   const std::string paged  = "integration_workspace_slice_marks_page";
+  const std::string linked = "integration_workspace_slice_marks_linked";
+  for (const auto &name : {ghosts, depth, paged, linked}) {
+    fs::remove_all(workspaceRoot() / name);
+  }
 
-  const auto chosen = run(plain, false, "zigzag", choose);
+  const auto chosen = run(ghosts, MarksScene::Ghosts, "zigzag", choose);
   ASSERT_EQ(chosen.exitCode, 0) << chosen.output;
   EXPECT_THAT(
       chosen.output,
       testing::HasSubstr("slice presentation -> slice.stretch-vanishing"));
-  const auto cut =
-      run(plain, false, "zigzag", " --capture " + ppm("ghosts").string());
+  const auto cut = run(ghosts, MarksScene::Ghosts, "zigzag",
+                       " --capture " + ppm("ghosts").string());
   ASSERT_EQ(cut.exitCode, 0) << cut.output;
+
+  // Three planes behind the focus, in a workspace that has never bound them.
+  const auto deepChosen = run(depth, MarksScene::Depth, "zigzag", choose);
+  ASSERT_EQ(deepChosen.exitCode, 0) << deepChosen.output;
   const auto deepBound =
-      run(plain, false, "zigzag",
+      run(depth, MarksScene::Depth, "zigzag",
           " --chord Ctrl+Alt+B --type \"z d.deep\" --key enter --capture " +
               ppm("depth").string());
   ASSERT_EQ(deepBound.exitCode, 0) << deepBound.output;
 
-  const auto pageChosen = run(paged, true, "unified", choose);
+  const auto pageChosen = run(paged, MarksScene::Page, "unified", choose);
   ASSERT_EQ(pageChosen.exitCode, 0) << pageChosen.output;
   const auto unified =
-      run(paged, true, "unified",
+      run(paged, MarksScene::Page, "unified",
           " --do std:xuzz/focus_toggle --do std:nav/zigzag_step_x_pos"
           " --capture " +
               ppm("unified").string());
   ASSERT_EQ(unified.exitCode, 0) << unified.output;
-  for (const auto *const name : {"ghosts", "depth", "unified"}) {
+
+  // Two documents joined by a xanalink, and the slice, in one store.
+  const std::string pages = " --version-id a1 --alongside b1 --whole-pages";
+  const auto linkedChosen =
+      run(linked, MarksScene::LinkedPages, "unified", pages + choose);
+  ASSERT_EQ(linkedChosen.exitCode, 0) << linkedChosen.output;
+  const auto linkedShown =
+      run(linked, MarksScene::LinkedPages, "unified",
+          pages + " --do std:xuzz/focus_toggle --capture " +
+              ppm("linked").string());
+  ASSERT_EQ(linkedShown.exitCode, 0) << linkedShown.output;
+  for (const auto *const name : {"ghosts", "depth", "unified", "linked"}) {
     ASSERT_TRUE(fs::exists(ppm(name))) << name;
     exportToPng(ppm(name),
                 screenshotDir / ("slice_marks_" + std::string(name) + ".png"));

@@ -139,6 +139,26 @@ struct PresentedCompass {
   std::uint64_t stamp{};
 };
 
+/// The rectangles of a ghost's outline inside @p box: four sides and the
+/// stairs of four rounded corners of @p radius, each @p stroke thick, so the
+/// corners of the box itself are left empty (plan §5.5 #3).
+[[nodiscard]] std::vector<gleditor::ui::Rect>
+ghostOutlineRects(gleditor::ui::Rect box, float radius, float stroke);
+
+/// The top left of a @p panel standing in corner @p corner of @p area (0 top
+/// left, 1 top right, 2 bottom left, 3 bottom right), bottom-up pixels.
+[[nodiscard]] glm::vec2 compassCornerOrigin(std::size_t corner,
+                                            gleditor::ui::Rect area,
+                                            gleditor::ui::Size panel);
+
+/// The corner the compass stands in: @p current while nothing in @p obstacles
+/// is under it there, else the corner with the least of them under it, the
+/// earlier of equals.
+[[nodiscard]] std::size_t
+chooseCompassCorner(std::span<const gleditor::ui::Rect> obstacles,
+                    gleditor::ui::Rect area, gleditor::ui::Size panel,
+                    std::size_t current);
+
 class SlicePresenter {
 public:
   /// @p fontOverride is the font description the host gives every

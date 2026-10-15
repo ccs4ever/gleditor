@@ -485,7 +485,9 @@ StretchConfig StretchConfig::fromSettings(const SystemStoreModel &settings) {
   cfg.overfill = read(names::kOverfill, cfg.overfill, 1.0F, kUnbounded, false);
   cfg.layerDepth =
       read(names::kLayerDepth, cfg.layerDepth, 0.0F, kUnbounded, true);
-  cfg.depthFade  = read(names::kDepthFade, cfg.depthFade, 0.0F, 1.0F, true);
+  cfg.depthFade = read(names::kDepthFade, cfg.depthFade, 0.0F, 1.0F, true);
+  cfg.depthLift =
+      read(names::kDepthLift, cfg.depthLift, 0.0F, kUnbounded, false);
   cfg.fadeBand   = read(names::kFadeBand, cfg.fadeBand, 0.0F, 1.0F, true);
   cfg.fadeFloor  = read(names::kFadeFloor, cfg.fadeFloor, 0.0F, 1.0F, false);
   cfg.ghostShare = read(names::kGhostShare, cfg.ghostShare, 0.0F, 1.0F, false);
@@ -531,6 +533,9 @@ std::vector<SettingSpec> stretchSettingSpecs() {
            "Share of its opacity a cell keeps for each plane it stands from "
            "the focus's, above 0 and at most 1",
            defaults.depthFade),
+      real(names::kDepthLift,
+           "How far above the cell it came from a cell behind stands, in px",
+           defaults.depthLift),
       real(names::kFadeBand,
            "Outer fraction of the pane, above 0 and at most 1, over which "
            "cells fade",
@@ -835,6 +840,7 @@ struct StretchVanishingView::Workspace {
     float outward = 1.0F;
     if (next > plane) {
       want.centre[0] = anchor.lo(0) - stretch().gap - want.half[0];
+      want.centre[1] = anchor.centre[1] + stretch().depthLift;
       outward        = -1.0F;
     }
     return place(cell, content, next,
@@ -1022,8 +1028,8 @@ struct StretchVanishingView::Workspace {
           placed[far].point == axis.point) {
         label = tickItems[far];
       }
-      auto start = flat ? rimTowards(a, b.centre) : a.centre;
-      auto end   = flat ? rimTowards(b, a.centre) : b.centre;
+      auto start = rimTowards(a, b.centre);
+      auto end   = rimTowards(b, a.centre);
       if (flat) {
         // A strand stops where the pane does, as a ghost does.
         if (const auto shown = visibleOn(in->frame, za)) {

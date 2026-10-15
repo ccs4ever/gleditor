@@ -370,6 +370,7 @@ inline constexpr std::string_view kViewDrawDashLeastLength =
     "view.draw.dashLeastLength";
 inline constexpr std::string_view kViewDrawDashMaxCount =
     "view.draw.dashMaxCount";
+inline constexpr std::string_view kViewDrawSliceLift  = "view.draw.sliceLift";
 inline constexpr std::string_view kViewDrawTickRulePx = "view.draw.tickRulePx";
 inline constexpr std::string_view kViewDrawCoarseBarShare =
     "view.draw.coarseBarShare";
@@ -1563,7 +1564,7 @@ struct ViewDrawConfig {
   float cellBorderPx{1.0F};
   /// The focus's border: heavier than any edge.
   float focusBorderPx{2.5F};
-  float ghostStrokePx{1.0F};
+  float ghostStrokePx{2.0F};
   /// Radius of a ghost's rounded corners as a share of its shorter side: the
   /// curve that says "view-only" where a stored cell is square, at most a
   /// half.
@@ -1598,6 +1599,9 @@ struct ViewDrawConfig {
   /// Share of its own opacity the xanadoc page the slice stands beside keeps
   /// while a slice presentation is shown; 1 leaves the page alone.
   float pageDim{0.3F};
+  /// How far in front of the page's plane a slice presentation stands, in
+  /// world units, so the beams between pages pass behind its cells.
+  float sliceLift{0.25F};
   /// The same, in the unified view, where the page and the slice share the
   /// frame and the page is read and edited too: it is left alone unless the
   /// reader asks for a dim, since a label has a chip of its own to stand on.

@@ -578,9 +578,9 @@ namespace {
 /// tall: the canvas draws only upright quads, so a curve is the steps of one.
 /// @p centre is the arc's centre; @p sx and @p sy say which quarter, by the
 /// sign of the way it runs from there.
-void addQuarterArc(gleditor::Canvas &canvas, const glm::vec2 centre,
-                   const float radius, const float sx, const float sy,
-                   const float stroke, const std::uint32_t colour) {
+void quarterArc(std::vector<gleditor::ui::Rect> &out, const glm::vec2 centre,
+                const float radius, const float sx, const float sy,
+                const float stroke) {
   constexpr int kMostRows = 32;
   const int rows          = std::clamp(
       static_cast<int>(std::lround(radius / std::max(stroke, 1e-6F))), 2,
@@ -594,20 +594,87 @@ void addQuarterArc(gleditor::Canvas &canvas, const glm::vec2 centre,
     const float far  = std::sqrt(std::max(0.0F, (radius * radius) - (t0 * t0)));
     const float near = std::sqrt(std::max(0.0F, (radius * radius) - (t1 * t1)));
     const float reach = std::min(near, far - stroke);
-    const float width = far - reach;
-    canvas.addRect(sx > 0.0F ? centre.x + reach : centre.x - far,
-                   sy > 0.0F ? centre.y + t0 : centre.y - t1, width, rise,
-                   colour);
+    out.push_back({.left   = sx > 0.0F ? centre.x + reach : centre.x - far,
+                   .bottom = sy > 0.0F ? centre.y + t0 : centre.y - t1,
+                   .width  = far - reach,
+                   .height = rise});
   }
 }
 
 } // namespace
 
+std::vector<gleditor::ui::Rect> ghostOutlineRects(const gleditor::ui::Rect box,
+                                                  const float radius,
+                                                  const float stroke) {
+  std::vector<gleditor::ui::Rect> out;
+  const float left   = box.left;
+  const float bottom = box.bottom;
+  const float right  = left + box.width;
+  const float top    = bottom + box.height;
+  const float run    = std::max(0.0F, box.width - (2.0F * radius));
+  const float rise   = std::max(0.0F, box.height - (2.0F * radius));
+  // Each side runs a stroke into the arcs at both ends: two quads that only
+  // touch can leave a pixel between them when the plane is scaled.
+  const float lap = radius > 0.0F ? stroke : 0.0F;
+  out.push_back({left + radius - lap, bottom, run + (2.0F * lap), stroke});
+  out.push_back(
+      {left + radius - lap, top - stroke, run + (2.0F * lap), stroke});
+  out.push_back({left, bottom + radius - lap, stroke, rise + (2.0F * lap)});
+  out.push_back(
+      {right - stroke, bottom + radius - lap, stroke, rise + (2.0F * lap)});
+  if (radius > 0.0F) {
+    quarterArc(out, {left + radius, bottom + radius}, radius, -1.0F, -1.0F,
+               stroke);
+    quarterArc(out, {right - radius, bottom + radius}, radius, 1.0F, -1.0F,
+               stroke);
+    quarterArc(out, {left + radius, top - radius}, radius, -1.0F, 1.0F, stroke);
+    quarterArc(out, {right - radius, top - radius}, radius, 1.0F, 1.0F, stroke);
+  }
+  return out;
+}
+
+glm::vec2 compassCornerOrigin(const std::size_t corner,
+                              const gleditor::ui::Rect area,
+                              const gleditor::ui::Size panel) {
+  const float left =
+      0 == corner % 2 ? area.left : area.left + area.width - panel.width;
+  const float top =
+      corner < 2 ? area.bottom + area.height : area.bottom + panel.height;
+  return {left, top};
+}
+
+std::size_t
+chooseCompassCorner(const std::span<const gleditor::ui::Rect> obstacles,
+                    const gleditor::ui::Rect area,
+                    const gleditor::ui::Size panel, const std::size_t current) {
+  const auto covered = [&](const std::size_t corner) {
+    const auto at = compassCornerOrigin(corner, area, panel);
+    float total   = 0.0F;
+    for (const auto &box : obstacles) {
+      const float across = std::min(box.left + box.width, at.x + panel.width) -
+                           std::max(box.left, at.x);
+      const float down = std::min(box.bottom + box.height, at.y) -
+                         std::max(box.bottom, at.y - panel.height);
+      if (across > 0.0F && down > 0.0F) {
+        total += across * down;
+      }
+    }
+    return total;
+  };
+  std::size_t best = current < 4 ? current : 0;
+  float least      = covered(best);
+  for (std::size_t i = 0; i < 4 && least > 0.0F; ++i) {
+    if (const auto area = covered(i); area < least) {
+      least = area;
+      best  = i;
+    }
+  }
+  return best;
+}
+
 void SlicePresenter::drawGhost(Plane &plane, const PlacedItem &item) {
   const float left   = item.centre.x - (item.width / 2.0F);
   const float bottom = item.centre.y - (item.height / 2.0F);
-  const float right  = left + item.width;
-  const float top    = bottom + item.height;
   const float radius =
       std::min(item.width, item.height) * draw_.ghostCornerShare;
   GLEDITOR_LOG_TRACE(kCategory,
@@ -615,23 +682,12 @@ void SlicePresenter::drawGhost(Plane &plane, const PlacedItem &item) {
                      item.id.value, item.centre.x, item.centre.y, item.width,
                      item.height, item.opacity, radius);
   const float stroke = deviceStroke(draw_.ghostStrokePx, item.centre);
-  const auto colour  = themed(theme_.colours.muted, item.opacity);
+  const auto colour  = themed(theme_.colours.text, item.opacity);
   // Rounded where a stored cell is square (plan §5.1 principle 1, §5.5 #3).
-  const float run  = std::max(0.0F, item.width - (2.0F * radius));
-  const float rise = std::max(0.0F, item.height - (2.0F * radius));
-  plane.body->addRect(left + radius, bottom, run, stroke, colour);
-  plane.body->addRect(left + radius, top - stroke, run, stroke, colour);
-  plane.body->addRect(left, bottom + radius, stroke, rise, colour);
-  plane.body->addRect(right - stroke, bottom + radius, stroke, rise, colour);
-  if (radius > 0.0F) {
-    addQuarterArc(*plane.body, {left + radius, bottom + radius}, radius, -1.0F,
-                  -1.0F, stroke, colour);
-    addQuarterArc(*plane.body, {right - radius, bottom + radius}, radius, 1.0F,
-                  -1.0F, stroke, colour);
-    addQuarterArc(*plane.body, {left + radius, top - radius}, radius, -1.0F,
-                  1.0F, stroke, colour);
-    addQuarterArc(*plane.body, {right - radius, top - radius}, radius, 1.0F,
-                  1.0F, stroke, colour);
+  for (const auto &each : ghostOutlineRects(
+           {left, bottom, item.width, item.height}, radius, stroke)) {
+    plane.body->addRect(each.left, each.bottom, each.width, each.height,
+                        colour);
   }
 }
 
@@ -1059,42 +1115,22 @@ void SlicePresenter::drawCompass(gleditor::FrameContext &ctx,
       // hidden. It stays where it is until something is under it, then goes
       // to the corner with the least under it, top left first (M2 gate 2,
       // D2). The corners are the pane's, inside what others have claimed.
-      const std::array<glm::vec2, 4> corners{
-          glm::vec2{clear.left + margin, height - clear.top - margin},
-          glm::vec2{width - clear.right - margin - panelW,
-                    height - clear.top - margin},
-          glm::vec2{clear.left + margin, clear.bottom + margin + panelH},
-          glm::vec2{width - clear.right - margin - panelW,
-                    clear.bottom + margin + panelH}};
-      const auto covered = [&](const glm::vec2 &corner) {
-        float area = 0.0F;
-        for (std::size_t i = 0; i < projected_.size() && i < drawn_.size();
-             ++i) {
-          if (!projected_[i] || drawnGhost_[i] ||
-              ContentMode::None == drawnContent_[i]) {
-            continue;
-          }
-          const auto &box = projected_[i]->bounds;
-          const float across =
-              std::min(box.left + box.width, corner.x + panelW) -
-              std::max(box.left, corner.x);
-          const float down = std::min(box.bottom + box.height, corner.y) -
-                             std::max(box.bottom, corner.y - panelH);
-          if (across > 0.0F && down > 0.0F) {
-            area += across * down;
-          }
-        }
-        return area;
-      };
-      float least = covered(corners[compassCorner_]);
-      for (std::size_t i = 0; i < corners.size() && least > 0.0F; ++i) {
-        if (const auto area = covered(corners[i]); area < least) {
-          least          = area;
-          compassCorner_ = i;
+      std::vector<ui::Rect> under;
+      for (std::size_t i = 0; i < projected_.size() && i < drawn_.size(); ++i) {
+        if (projected_[i] && !drawnGhost_[i] &&
+            ContentMode::None != drawnContent_[i]) {
+          under.push_back(projected_[i]->bounds);
         }
       }
-      left = corners[compassCorner_].x;
-      top  = corners[compassCorner_].y;
+      const ui::Rect area{clear.left + margin, clear.bottom + margin,
+                          width - clear.left - clear.right - (2.0F * margin),
+                          height - clear.top - clear.bottom - (2.0F * margin)};
+      compassCorner_ =
+          chooseCompassCorner(under, area, {panelW, panelH}, compassCorner_);
+      const auto origin =
+          compassCornerOrigin(compassCorner_, area, {panelW, panelH});
+      left = origin.x;
+      top  = origin.y;
     }
     const float bottom = top - panelH;
 

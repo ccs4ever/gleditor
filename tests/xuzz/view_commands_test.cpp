@@ -394,7 +394,8 @@ TEST(ViewDrawConfigTest, EverySettingIsSeededInSystemUiWithItsDefault) {
                           s::kViewChromeHintRows,
                           s::kViewDrawDashLeastLength,
                           s::kViewDrawDashMaxCount,
-                          s::kViewCompassDodge}) {
+                          s::kViewCompassDodge,
+                          s::kViewDrawSliceLift}) {
     EXPECT_TRUE(std::ranges::any_of(specs, [name](const auto &spec) {
       return spec.name == name;
     })) << name;

@@ -407,10 +407,13 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "view.draw.ghostStrokePx and view.draw.tickRulePx: Thickness in "
            "logical pixels of a cell's border, the focus cell's border, a "
            "ghost's open outline and the rule under a tick. Positive; "
-           "defaults are 1, 2.5, 1 and 2.\n"
+           "defaults are 1, 2.5, 2 and 2.\n"
            "view.draw.ghostCornerShare: Radius of a ghost's rounded corners "
            "as a share of its shorter side, above 0 and at most 0.5. Default "
            "is 0.3. "
+           "view.draw.sliceLift: How far in front of the page's plane a slice "
+           "presentation stands, in world units, so the beams between pages "
+           "pass behind its cells. Default is 0.25. "
            "view.draw.coarseBarShare: Share of a text line's height a coarse "
            "bar fills, above 0 and at most 1. Default is 0.45.\n"
            "view.draw.dash.dash, view.draw.dash.dot, "
@@ -1412,6 +1415,11 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
                 .schemas = {{.expectedTypes = {"integer"},
                              .defaultValues = {static_cast<std::int64_t>(
                                  draw.dashMaxCount)}}}},
+            lengthSpec(settings::kViewDrawSliceLift,
+                       "How far in front of the page's plane a slice "
+                       "presentation stands, in world units, so the beams "
+                       "between pages pass behind its cells",
+                       draw.sliceLift),
             lengthSpec(settings::kViewDrawTickRulePx,
                        "Thickness of the rule in a dimension's colour under "
                        "a tick, in logical pixels",
@@ -3973,6 +3981,7 @@ ViewDrawConfig ViewDrawConfig::fromStore(const Store &store) {
          true);
   ranged(settings::kViewDrawDashLeastLength, cfg.dashLeastLength, 0.0F, kMost,
          false);
+  ranged(settings::kViewDrawSliceLift, cfg.sliceLift, 0.0F, kMost, false);
   ranged(settings::kViewDrawTickRulePx, cfg.tickRulePx, 0.0F, kMost, false);
   ranged(settings::kViewDrawCoarseBarShare, cfg.coarseBarShare, 0.0F, 1.0F,
          false);

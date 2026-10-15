@@ -1759,6 +1759,71 @@ TEST(ViewPresenterTest, APatternOfDustOrTooManyDashesIsDrawnSolid) {
   EXPECT_EQ(capped.presenter.strands().size(), 1U);
 }
 
+TEST(ViewPresenterTest, AGhostsCornersAreRoundedAndAStoredCellsAreNot) {
+  // M2 gate 2, D1 (plan §5.5 #3): view-only things are rounded. The outline
+  // of a 100 by 40 ghost with a corner radius of 12 leaves each corner of its
+  // box empty and covers the middle of each side; with no radius it is the
+  // four sides of a square box and so covers the corner.
+  const gleditor::ui::Rect box{0.0F, 0.0F, 100.0F, 40.0F};
+  const auto covers = [](const std::vector<gleditor::ui::Rect> &rects,
+                         const float x, const float y) {
+    return std::ranges::any_of(rects, [=](const gleditor::ui::Rect &r) {
+      return x >= r.left && x < r.left + r.width && y >= r.bottom &&
+             y < r.bottom + r.height;
+    });
+  };
+  const auto round  = xanadu::view::ghostOutlineRects(box, 12.0F, 2.0F);
+  const auto square = xanadu::view::ghostOutlineRects(box, 0.0F, 2.0F);
+  for (const auto [x, y] : {std::pair{0.5F, 0.5F}, std::pair{99.5F, 0.5F},
+                            std::pair{0.5F, 39.5F}, std::pair{99.5F, 39.5F}}) {
+    EXPECT_FALSE(covers(round, x, y)) << x << "," << y;
+    EXPECT_TRUE(covers(square, x, y)) << x << "," << y;
+  }
+  for (const auto [x, y] : {std::pair{50.0F, 0.5F}, std::pair{50.0F, 39.5F},
+                            std::pair{0.5F, 20.0F}, std::pair{99.5F, 20.0F}}) {
+    EXPECT_TRUE(covers(round, x, y)) << x << "," << y;
+  }
+  // The curve is joined to the sides: the outline reaches 12 in along each
+  // side, and nothing of it lies outside the box or inside its middle.
+  EXPECT_TRUE(covers(round, 12.5F, 0.5F));
+  EXPECT_TRUE(covers(round, 0.5F, 12.5F));
+  EXPECT_FALSE(covers(round, 50.0F, 20.0F));
+  for (const auto &r : round) {
+    EXPECT_GE(r.left, -1.0e-3F);
+    EXPECT_GE(r.bottom, -1.0e-3F);
+    EXPECT_LE(r.left + r.width, 100.0F + 1.0e-3F);
+    EXPECT_LE(r.bottom + r.height, 40.0F + 1.0e-3F);
+  }
+}
+
+TEST(ViewCompassTest,
+     StaysPutUntilSomethingIsUnderItThenFindsTheEmptiestCorner) {
+  // M2 gate 2, D2: the legend hid a cell's words. A 100 by 60 panel in a
+  // 800 by 600 area.
+  const gleditor::ui::Rect area{0.0F, 0.0F, 800.0F, 600.0F};
+  const gleditor::ui::Size panel{100.0F, 60.0F};
+  const auto topLeft = xanadu::view::compassCornerOrigin(0, area, panel);
+  EXPECT_EQ(topLeft, glm::vec2(0.0F, 600.0F));
+  EXPECT_EQ(xanadu::view::compassCornerOrigin(3, area, panel),
+            glm::vec2(700.0F, 60.0F));
+
+  std::vector<gleditor::ui::Rect> under;
+  EXPECT_EQ(xanadu::view::chooseCompassCorner(under, area, panel, 0), 0U);
+  EXPECT_EQ(xanadu::view::chooseCompassCorner(under, area, panel, 2), 2U)
+      << "a free corner is kept";
+  // A cell under the top left: it moves to the next free corner, the top
+  // right, and stays there while the cell stays.
+  under.push_back({40.0F, 560.0F, 120.0F, 30.0F});
+  EXPECT_EQ(xanadu::view::chooseCompassCorner(under, area, panel, 0), 1U);
+  EXPECT_EQ(xanadu::view::chooseCompassCorner(under, area, panel, 1), 1U);
+  // Every corner covered: the one with least under it.
+  under.push_back({700.0F, 540.0F, 100.0F, 60.0F});
+  under.push_back({0.0F, 0.0F, 100.0F, 60.0F});
+  under.push_back({700.0F, 0.0F, 100.0F, 20.0F});
+  under.push_back({0.0F, 540.0F, 100.0F, 60.0F});
+  EXPECT_EQ(xanadu::view::chooseCompassCorner(under, area, panel, 0), 3U);
+}
+
 TEST(ViewPresenterTest, AStrandIsNeverThinnerOrFainterThanItsFloors) {
   StrandScene scene(false);
   // A hairline edge between cells that fade: the layout's own opacity.

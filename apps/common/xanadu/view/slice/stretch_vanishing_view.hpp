@@ -51,6 +51,7 @@ inline constexpr std::string_view kMinContact      = "stretch.minContact";
 inline constexpr std::string_view kOverfill        = "stretch.overfill";
 inline constexpr std::string_view kLayerDepth      = "stretch.layerDepth";
 inline constexpr std::string_view kDepthFade       = "stretch.depthFade";
+inline constexpr std::string_view kDepthLift       = "stretch.depthLift";
 inline constexpr std::string_view kFadeBand        = "stretch.fadeBand";
 inline constexpr std::string_view kFadeFloor       = "stretch.fadeFloor";
 inline constexpr std::string_view kGhostShare      = "stretch.ghostShare";
@@ -89,6 +90,9 @@ struct StretchConfig {
   /// focus's, so a plane reads as further or nearer without a turned camera
   /// (M2 gate 2, D3). Above 0, at most 1; 1 leaves depth to the perspective.
   float depthFade{0.8F};
+  /// How far above the cell it came from a cell behind stands, so the planes
+  /// behind read as a cascade going up and away and not as a row.
+  float depthLift{12.0F};
   /// Outer fraction of the pane over which opacity falls.
   float fadeBand{0.35F};
   /// Opacity at the pane's edge.

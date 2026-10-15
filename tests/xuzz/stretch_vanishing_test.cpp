@@ -713,6 +713,9 @@ TEST(StretchVanishingTest, ADepthPlaneRecedesAndStandsClearOfTheFocus) {
             centre->centre.x - (centre->width / 2.0F));
   EXPECT_LT(far->centre.x + (far->width / 2.0F),
             back->centre.x - (back->width / 2.0F));
+  // Each plane stands depthLift above the one before: a cascade, not a row.
+  EXPECT_NEAR(back->centre.y - centre->centre.y, config.depthLift, 1e-3F);
+  EXPECT_NEAR(far->centre.y - back->centre.y, config.depthLift, 1e-3F);
   // And each plane keeps depthFade of the opacity of the one before.
   EXPECT_FLOAT_EQ(centre->opacity, 1.0F);
   EXPECT_NEAR(back->opacity, config.depthFade, 1e-4F);
@@ -868,9 +871,9 @@ TEST(StretchVanishingTest, DepthPlacesBehindAndKeepsTheFrontOffTheFocus) {
   ASSERT_NE(back, nullptr);
   ASSERT_NE(fore, nullptr);
   EXPECT_FLOAT_EQ(back->centre.z, -config.layerDepth);
-  // On the focus's own line, stepped aside so nothing hides behind it.
+  // Stepped aside and up so nothing hides behind the focus.
   EXPECT_LT(back->centre.x, 0.0F);
-  EXPECT_FLOAT_EQ(back->centre.y, 0.0F);
+  EXPECT_FLOAT_EQ(back->centre.y, config.depthLift);
   EXPECT_FLOAT_EQ(fore->centre.z, config.layerDepth);
   // Seen down z, the plane in front stands clear of the focus.
   auto flat     = *fore;

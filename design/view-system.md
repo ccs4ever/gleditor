@@ -1975,10 +1975,10 @@ plane behind or in front, `stretch.layerDepth` apart, starting at `p`'s own x an
 the same rule within that plane, which has its own grid. For depth the slide is along y and the
 outward move along +x. Planes in front of the focus are drawn only where they do not cover it: the
 focus's box stands in each of their grids as an obstacle, so a cell in front is slid clear of it
-rather than drawn over it and clipped. A cell behind steps to the left of the one it came from, on
-that cell's own line, so that seen down z no cell's words are hidden behind a nearer box (M2 gate 2,
-D2, D3); and each plane away from the focus keeps `stretch.depthFade` of the opacity of the one
-before, so a plane reads as further or nearer without a turned camera.
+rather than drawn over it and clipped. A cell behind steps to the left of the one it came from and
+`stretch.depthLift` above it, so that seen down z no cell's words are hidden behind a nearer box (M2
+gate 2, D2, D3); and each plane away from the focus keeps `stretch.depthFade` of the opacity of the
+one before, so a plane reads as further or nearer without a turned camera.
 
 #### 9.1.5 Fade and clip
 
@@ -3149,6 +3149,7 @@ given to the measurer), `rankClearancePx`, `minReadableTextPx` and `connectionBe
 | `stretch.overfill`                                                 | 1.3          | viewport multiple the walk fills                                           |
 | `stretch.layerDepth`                                               | 120          | distance between depth planes                                              |
 | `stretch.depthFade`                                                | 0.8          | share of its opacity a cell keeps for each plane from the focus's          |
+| `stretch.depthLift`                                                | 12           | how far above its source a cell behind stands, so planes cascade           |
 | `stretch.fadeBand`, `fadeFloor`                                    | 0.35, 0.25   | outer fraction that fades; the opacity it fades to                         |
 | `stretch.clipMargin`                                               | 6            | margin before a hidden cell is shown again                                 |
 | `stretch.ghostShare`                                               | 0.8          | a ghost's opacity as a share of `fadeFloor` (plan D1)                      |
@@ -3157,7 +3158,7 @@ given to the measurer), `rankClearancePx`, `minReadableTextPx` and `connectionBe
 | `stretch.breadcrumbs`                                              | 6            | cells in the breadcrumb strip                                              |
 | `stretch.maxCellSpan`                                              | 16           | most a cell's measured size may be, in panes, from 1 to 256 (D8)           |
 | `view.draw.cellBorderPx`, `focusBorderPx`                          | 1, 2.5       | a cell's border; the focus's, heavier than any edge                        |
-| `view.draw.ghostStrokePx`, `ghostCornerShare`                      | 1, 0.3       | a ghost's outline; the radius of its rounded corners, as a share of a side |
+| `view.draw.ghostStrokePx`, `ghostCornerShare`                      | 2, 0.3       | a ghost's outline; the radius of its rounded corners, as a share of a side |
 | `view.draw.tickRulePx`, `coarseBarShare`                           | 2, 0.45      | the rule under a tick; the share of a line a coarse bar fills              |
 | `view.draw.dash.dash`, `dot`, `dashDotDot`, `dashDot`, `longShort` | "6 3" ...    | each dash style's pattern, in strand widths, drawn then open               |
 | `view.draw.dashLeastLength`, `dashMaxCount`                        | 0.5, 256     | shortest stretch of a pattern, in widths; most dashes a strand is cut into |
@@ -3166,6 +3167,7 @@ given to the measurer), `rankClearancePx`, `minReadableTextPx` and `connectionBe
 | `view.page.dim`                                                    | 0.3          | share of its opacity the page keeps while a slice is shown on its own      |
 | `view.page.dimUnified`                                             | 1            | the same in the unified view, where the page is read; 1 leaves it alone    |
 | `view.page.clearancePx`                                            | 64           | how far above the page's top edge a slice shown on its own stands          |
+| `view.draw.sliceLift`                                              | 0.25         | how far in front of the page's plane a slice stands, so beams pass behind  |
 | `view.chrome.hintRows`                                             | 3            | rows the key hints may take at the foot of the pane                        |
 | `view.compass.dodge`                                               | true         | the compass moves to a free corner when the scene would be under it        |
 | `ring.radius`, `ring.radiusStep`                                   | 220, 90      | ring 0's least radius; growth per ring                                     |

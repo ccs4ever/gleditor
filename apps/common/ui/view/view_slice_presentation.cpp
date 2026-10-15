@@ -768,7 +768,14 @@ void ViewSlicePresentation::drawScene(gleditor::FrameContext &ctx) {
       scale != readableScale_) {
     readableScale_ = scale;
   }
-  toWorld_ = unscaled * glm::scale(glm::mat4{1.0F}, glm::vec3{readableScale_});
+  // In front of the pages and the beams between them by a little, so a ribbon
+  // that crosses a cell goes behind its box and not through its words (M2
+  // gate 2, D2, D7).
+  toWorld_ =
+      unscaled *
+      glm::translate(glm::mat4{1.0F},
+                     glm::vec3{0.0F, 0.0F, presenter_.drawConfig().sliceLift}) *
+      glm::scale(glm::mat4{1.0F}, glm::vec3{readableScale_});
   const PaneFrame frame{
       .widthPx     = static_cast<float>(ctx.screenWidth),
       .heightPx    = static_cast<float>(ctx.screenHeight),
