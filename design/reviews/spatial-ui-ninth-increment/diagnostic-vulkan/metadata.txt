@@ -1,0 +1,11 @@
+Diagnostic Vulkan run — instrumentation only, no candidate fix
+
+Purpose: compare the Origin panel pixels across native OpenGL and Vulkan runs after the image preview led to a false appearance of disappearance. This run is diagnostic evidence only; it does not propose or validate a product change.
+
+The run used an isolated copy of xuzz and libgleditor.so.0 from diagnostic build 2. Binary hashes are in binary-hashes.txt. The app hash is c8b61c1dcbc65d729114d882de0924a846a5e077800959fbb118b4f9b4eea1d9 and the shared library hash is 2049ce0d5a2d8f52a3ee14e08ae24dadab33801588f54b30ca2e4d5f7a495b5c. The runner completed with status 0.
+
+Backend: Vulkan, AMD Radeon RX Vega (RADV VEGA10), SDL offscreen video driver, 800x600, forced-page fixture. Each XDG directory was fresh and isolated under /tmp/spatial-panel-vulkan/xdg. xvfb-run was unavailable, so the temporary runner used SDL_VIDEODRIVER=offscreen. The exact adapted runner is script.txt; argv.txt records its invocation. Full session output is gzip-compressed in session.log.gz. Source and activity store snapshots are in dumps/.
+
+At 3 seconds after Alt+Shift+O and again 12 seconds later, the Link panel band x=0..799, y=316..550 was byte-identical. Each crop contains 112,850 pixels of panel surface RGB (30,41,59); the exact crop hashes and source image hashes are in pixel-audit.txt. The OpenGL immediate and delayed captures in diagnostic-panel have the same dark panel pixel count and are also identical to each other. This does not show a backend-specific rendering failure or an actual panel disappearance.
+
+source-instrumentation.patch.txt and source-scope.json preserve the diagnostic build's instrumentation provenance. No product code was modified for this run.

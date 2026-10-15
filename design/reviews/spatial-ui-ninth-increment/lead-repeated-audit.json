@@ -1,0 +1,65 @@
+{
+  "snapshots": {
+    "01-pre-preview": {
+      "completed_visit_cells": 1,
+      "activity_operation_count": 12,
+      "source_sha256": {
+        "source-0.ops.txt": "49a12edef0113d9b6f6b7a120c8f2f7cbf7dd1f6d865e8606dc7dfaac4a164d6"
+      }
+    },
+    "02-left-occurrence-second-step": {
+      "completed_visit_cells": 1,
+      "activity_operation_count": 12,
+      "source_sha256": {
+        "source-0.ops.txt": "49a12edef0113d9b6f6b7a120c8f2f7cbf7dd1f6d865e8606dc7dfaac4a164d6"
+      }
+    },
+    "04-right-member-second-step": {
+      "completed_visit_cells": 1,
+      "activity_operation_count": 12,
+      "source_sha256": {
+        "source-0.ops.txt": "49a12edef0113d9b6f6b7a120c8f2f7cbf7dd1f6d865e8606dc7dfaac4a164d6"
+      }
+    },
+    "05-left-restored": {
+      "completed_visit_cells": 1,
+      "activity_operation_count": 12,
+      "source_sha256": {
+        "source-0.ops.txt": "49a12edef0113d9b6f6b7a120c8f2f7cbf7dd1f6d865e8606dc7dfaac4a164d6"
+      }
+    },
+    "06-enter": {
+      "completed_visit_cells": 2,
+      "activity_operation_count": 16,
+      "source_sha256": {
+        "source-0.ops.txt": "49a12edef0113d9b6f6b7a120c8f2f7cbf7dd1f6d865e8606dc7dfaac4a164d6"
+      }
+    },
+    "07-origin": {
+      "completed_visit_cells": 2,
+      "activity_operation_count": 18,
+      "source_sha256": {
+        "source-0.ops.txt": "49a12edef0113d9b6f6b7a120c8f2f7cbf7dd1f6d865e8606dc7dfaac4a164d6"
+      }
+    },
+    "08-inspect": {
+      "completed_visit_cells": 2,
+      "activity_operation_count": 18,
+      "source_sha256": {
+        "source-0.ops.txt": "49a12edef0113d9b6f6b7a120c8f2f7cbf7dd1f6d865e8606dc7dfaac4a164d6"
+      }
+    },
+    "09-fold": {
+      "completed_visit_cells": 2,
+      "activity_operation_count": 18,
+      "source_sha256": {
+        "source-0.ops.txt": "49a12edef0113d9b6f6b7a120c8f2f7cbf7dd1f6d865e8606dc7dfaac4a164d6"
+      }
+    }
+  },
+  "quotation_version": "b1",
+  "entered_version": "b1",
+  "selected_left": "member1/2 occurrence2/2 range[0,20)",
+  "selected_right": "member2/3 occurrence1/1 range[55,65)",
+  "scope": "native GL 1440x1000, one UI-authored quotation and one 2x3 Link; not full J24/J25"
+}

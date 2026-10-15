@@ -1,0 +1,68 @@
+{
+  "pointer/png/11-back.png": {
+    "file_sha256": "b3775b1fcba9c0fbba7ffa3a87753c89e6979ac1607e6282fe80e4f4c7c76304",
+    "rgb_sha256": "b0977eb7ec649c94f763b657714b6ad9e424249367013f3a81a919f02e887d14",
+    "panel_crop_rgb_sha256": "7e81dc163aa69b2a1930d5c0eba34713752d39250de708177c3dee0de55c9a51",
+    "panel_crop_rect": [
+      0,
+      316,
+      800,
+      551
+    ]
+  },
+  "pointer/png/12-origin.png": {
+    "file_sha256": "878314d0c7e097ebe5df6303402a6d8acbcabad78db646527a1a5ce3e74534f1",
+    "rgb_sha256": "52e83d25aafb28a5eb1790caac2e42160f301d9b542293ef8a28a6ee6321117d",
+    "panel_crop_rgb_sha256": "7e81dc163aa69b2a1930d5c0eba34713752d39250de708177c3dee0de55c9a51",
+    "panel_crop_rect": [
+      0,
+      316,
+      800,
+      551
+    ]
+  },
+  "candidate-pointer/png/11-back.png": {
+    "file_sha256": "b3775b1fcba9c0fbba7ffa3a87753c89e6979ac1607e6282fe80e4f4c7c76304",
+    "rgb_sha256": "b0977eb7ec649c94f763b657714b6ad9e424249367013f3a81a919f02e887d14",
+    "panel_crop_rgb_sha256": "7e81dc163aa69b2a1930d5c0eba34713752d39250de708177c3dee0de55c9a51",
+    "panel_crop_rect": [
+      0,
+      316,
+      800,
+      551
+    ]
+  },
+  "candidate-pointer/png/12-origin.png": {
+    "file_sha256": "878314d0c7e097ebe5df6303402a6d8acbcabad78db646527a1a5ce3e74534f1",
+    "rgb_sha256": "52e83d25aafb28a5eb1790caac2e42160f301d9b542293ef8a28a6ee6321117d",
+    "panel_crop_rgb_sha256": "7e81dc163aa69b2a1930d5c0eba34713752d39250de708177c3dee0de55c9a51",
+    "panel_crop_rect": [
+      0,
+      316,
+      800,
+      551
+    ]
+  },
+  "text-gl-link/evidence/png/11-back.png": {
+    "file_sha256": "ad581e87c61cf93ecff02a2a29824698a904b1cb35e3f11d4866da43947f81b7",
+    "rgb_sha256": "0f00df2c47492d76bc315c21a3f38173ac701281afdb61ad8973c2f7bdbb36df",
+    "panel_crop_rgb_sha256": "7e81dc163aa69b2a1930d5c0eba34713752d39250de708177c3dee0de55c9a51",
+    "panel_crop_rect": [
+      0,
+      316,
+      800,
+      551
+    ]
+  },
+  "text-gl-link/evidence/png/12-origin.png": {
+    "file_sha256": "b731d2ec65d689d49059f7378b7c0baa5ee696b3b57cab30c26d740a84709a72",
+    "rgb_sha256": "80634cffa1a6778269746ef7d59f5a99e8236db305e25b7458a1de8a059fb90b",
+    "panel_crop_rgb_sha256": "7e81dc163aa69b2a1930d5c0eba34713752d39250de708177c3dee0de55c9a51",
+    "panel_crop_rect": [
+      0,
+      316,
+      800,
+      551
+    ]
+  }
+}

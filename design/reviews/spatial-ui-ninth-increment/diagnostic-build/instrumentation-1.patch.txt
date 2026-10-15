@@ -1,0 +1,29 @@
+diff --git a/apps/common/ui/xanadoc/link_panel_overlay.cpp b/apps/common/ui/xanadoc/link_panel_overlay.cpp
+index afb44bf0..d171b28e 100644
+--- a/apps/common/ui/xanadoc/link_panel_overlay.cpp
++++ b/apps/common/ui/xanadoc/link_panel_overlay.cpp
+@@ -461,6 +461,13 @@ void LinkPanelOverlay::rebuildPanel(gleditor::FrameContext &ctx) {
+     controlsCollapsed = false;
+   }
+   if (next->pages) controlsPage = next->pages->request.page;
++  GLEDITOR_LOG_DEBUG(
++      "ui.link_panel",
++      "link {} bounds=({},{},{},{}) dock={} reserved={} chrome={} settled={}",
++      selected->key.id, next->bounds.left, next->bounds.bottom,
++      next->bounds.width, next->bounds.height, dockLink.has_value(),
++      next->reservedBottom.value_or(0), ctx.chrome.bottom,
++      ctx.settledChrome.bottom);
+   panel.setModel(next->model);
+   panel.setBounds(next->bounds);
+   panel.setVisible(true);
+@@ -694,6 +701,10 @@ void LinkPanelOverlay::drawFrame(gleditor::FrameContext &ctx) {
+   }
+   if (shown->reservedBottom)
+     ctx.chrome.bottom = std::max(ctx.chrome.bottom, *shown->reservedBottom);
++  GLEDITOR_LOG_TRACE("ui.link_panel", "link {} draw={} reserved={} settled={}",
++                     context.selection()->key.id, !waiting,
++                     shown->reservedBottom.value_or(0),
++                     ctx.settledChrome.bottom);
+   if (waiting) return;
+   auto shownMetrics = builtMetrics;
+   if (shown->reservedBottom) shownMetrics.marginShare = 0;

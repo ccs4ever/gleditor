@@ -1,0 +1,20 @@
+Frozen native reproduction — origin
+Date: 2026-10-15
+
+Candidate binary: xuzz SHA-256 81cd8bde678910f98f81cb67369cff611dfbb1977a0b8d6f281f5f9fd38dace8
+Shared library: libgleditor.so.0 SHA-256 ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9
+Backend/viewport: OpenGL, 800x600; software GL; Xvfb with -noreset
+SDL_VIDEODRIVER=offscreen; SDL_AUDIODRIVER=dummy; LIBGL_ALWAYS_SOFTWARE=1
+Each branch used its own XDG_DATA_HOME, XDG_CONFIG_HOME, and XDG_CACHE_HOME under the run profile.
+
+UI sequence: open own document, author a comment link, select it with Alt+Shift+N, click Controls, click Enter, pan six wheel steps, then invoke the branch action. The runner and complete session log retain the exact sequence and captured accessibility trees.
+Navigation action: Alt+Shift+O (Return to Origin)
+The two bindings were separately logged as activity_back=Alt+Shift+B and link_origin=Alt+Shift+O.
+
+Post-action state: selected comment link 21; both one-member endsets and Origin/Back controls remain in accessibility output. Focus is document. The final PNG does not show the docked context panel; the link tether and endpoint highlight remain visible. Frame captured 3 seconds after the action.
+
+Activity: two visit records after Enter and after the action; no third visit was appended by Back/Origin. The activity dump has 16 operations at Enter and 81 at process exit (view checkpoints are included in the latter).
+Visited source store purity: before, after Enter, and at exit, the source operation dump SHA-256 is bcdc5ecc225d8798dfaa46c94b4a95638d2483e45c8d9327e9ac1a6a62e9b6d9.
+Exit status: 0; candidate binary and library hashes match before/after guards.
+
+Files: png/ contains lossless PNG conversions of the captured PPM frames; session.log contains the full accessibility and diagnostic transcript; activity-*.txt and source-*.txt are xudu-dump outputs; runner.sh.txt is the exact isolated runner used.

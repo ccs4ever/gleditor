@@ -1,0 +1,11 @@
+6434bcd544b24e129d5adab60f7c56cafac4b0248405b5ea91d53611150a5d73  /tmp/spatial-ninth-repeated-corrected.Q7db5V/raw/00-authored.ppm
+50475cf56e28018134ac42939e16bd633e83fad62b007ae2c3862900a00a9928  /tmp/spatial-ninth-repeated-corrected.Q7db5V/raw/00b-quotation.ppm
+6051bfb75a20aaa8ac9a24d34b611ceea20b16369d59f51aa43b1eacf01fd74e  /tmp/spatial-ninth-repeated-corrected.Q7db5V/raw/01-pre-preview.ppm
+c3accf0461b12db3fd4c28d4633520181bbf8d400172d590c2dd7bb982e9790e  /tmp/spatial-ninth-repeated-corrected.Q7db5V/raw/02-left-member-occurrence.ppm
+6c9961b6a55b39e74f5af0aea03ca40d325038d58216973eea45a453b5b99c2b  /tmp/spatial-ninth-repeated-corrected.Q7db5V/raw/03-right-active.ppm
+cf557921f95a15a284e6a7a06dea7c3bf0761d091f4c235e6dbf5ba124622b50  /tmp/spatial-ninth-repeated-corrected.Q7db5V/raw/04-right-member-next.ppm
+c94e83c6aebb50c8d6ca861000592c6ccbb60a922d689dc28650e7108d832280  /tmp/spatial-ninth-repeated-corrected.Q7db5V/raw/05-left-restored.ppm
+95a550da44f8e163dbbd18de1db59ecfa4a11a886669f310a06389a5039b019f  /tmp/spatial-ninth-repeated-corrected.Q7db5V/raw/06-enter.ppm
+9fc11f1723bdc544268a2b7e2af79bd26479e889875b751e90ad8fc4e990d6d7  /tmp/spatial-ninth-repeated-corrected.Q7db5V/raw/07-origin.ppm
+73e97b7fa15b9375d07e96fd63045275e76e5cc96b6a234d958e05b5010f6377  /tmp/spatial-ninth-repeated-corrected.Q7db5V/raw/08-inspect.ppm
+9fc11f1723bdc544268a2b7e2af79bd26479e889875b751e90ad8fc4e990d6d7  /tmp/spatial-ninth-repeated-corrected.Q7db5V/raw/09-fold.ppm

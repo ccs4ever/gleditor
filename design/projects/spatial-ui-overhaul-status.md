@@ -7,6 +7,24 @@ session.
 
 ## Current checkpoint
 
+Ninth checkpoint (2026-10-15), based on `25b1ccde`: quantitative pixel inspection disproves the
+eighth review's missing-panel and blank-Back findings. The full 800×235 panel band is byte-identical
+across all six archived baseline/candidate/enlarged GL Back/Origin captures. Independent
+recomputation agrees. Isolated native Back and Origin branches preserve the Link, both endsets,
+source operations and two completed visits. Immediate/delayed diagnostic GL and Vulkan captures also
+retain the complete panel. The earlier image-preview interpretation was wrong; these frames justify
+no product fix. Historical reports remain intact, superseded by the
+[ninth audit](../reviews/spatial-ui-ninth-increment/README.md).
+
+All temporary debug/trace instrumentation was removed and the canonical GNU Make rebuild passes. The
+shared library and library/UI/Xuzz test binaries match the previous passing checkpoint exactly; no
+new full-suite or performance pass is claimed. The rebuilt app embeds the current commit's generated
+version string; its exact hash and version config are retained with the audit. The native
+repeated-occurrence route selects Left place 2/2 and Right member 2/3 independently, enters the
+exact quotation version, preserves source operations and records visits 1→2→2. This 1440×1000 GL
+route is bounded evidence, not complete J24/J25 acceptance. Details and remaining limits are
+recorded separately in that review.
+
 Eighth checkpoint (2026-10-14), based on `3afcc8b8`: native editing of a system-setting scalar now
 publishes and saves its committed head and notifies the existing watcher. The `readableTextPx` edit
 previously appended the correct double but left the consumed current head stale. The existing native
@@ -406,17 +424,18 @@ reviews pass.
 
 ## Exact next task
 
-First isolate the Origin context discrepancy: default reading-size baseline/candidate frames lose
-the visible Link panel after restoring home, while the enlarged combined run retains it. This
-predates the system-setting fix and is not complete restoration acceptance. Then continue J24
-repeated occurrences, pending/unavailable cancellation and stale replacement, cell/history
-endpoints, then J25 branching Back/Return and same-profile reopen. Preserve exact source/activity
-snapshots, native per-backend frames and Link identity. The collapsed-dock Enter route, historical
-Back-panel review error, archive quality gates and live layout-setting commit have been resolved in
-the eighth checkpoint; consult its bounded native evidence before extending acceptance. Whole-page
-ink passes the unchanged local test on all three backends; broader font and backend E2E coverage
-remains unverified. Long lines at enlarged reading size can clip at 800 pixels; retain that stress
-evidence while expanding readable and responsive cases.
+Continue J24 pending/unavailable cancellation and stale replacement, exact cell/history endpoints,
+and J25 branching Back/Return and same-profile reopen. Preserve exact source/activity snapshots,
+native per-backend frames and Link identity. The ninth numeric audit resolves the reported
+Origin/Back missing-panel discrepancy for the captured states; do not repeat the misleading image
+preview interpretation or infer a product fix from it. Use decoded pixels and region hashes to
+confirm visual findings, alongside actual frame inspection and accessibility state.
+
+The bounded repeated-occurrence route is recorded in the ninth review; consult its actual cursors,
+source/visit checkpoints and exclusions before extending acceptance. Full J24/J25 and 16+16 journey
+acceptance remain open. Whole-page ink passes the unchanged local test on all three backends;
+broader font and backend E2E coverage remains unverified. Long lines at enlarged reading size can
+clip at 800 pixels, and the mini-map can occlude text; retain those stress limitations.
 
 Resolve legacy J3, J11 and J15 findings against the pinned baseline. The stale drag tests and UI
 font-scale control are repaired. Full J1–J16 preservation, complete J17–J32, native AT-SPI and

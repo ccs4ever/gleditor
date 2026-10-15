@@ -1,0 +1,14 @@
+{
+  "source_commit": "25b1ccde3697a83442092f7ba3e372174adc4c1b",
+  "product_changes": false,
+  "canonical_build_exit": 0,
+  "generated_version": "0.0.1.917.g25b1ccde",
+  "binaries": {
+    "build/xuzz": "130dc66a243fbfad19f57fed33fbde78bc1c0e85c6fd34503ee6cbd46216b90f",
+    "build/libgleditor.so.0": "ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9",
+    "build/gleditor_test": "44562f4e4ea437f8f3c575a8005d5847367860f9b4d4714d2d1b6516cf014f8a",
+    "build/zigzag_test": "f1b54c452324e07aa633fbb6ad0e08897dac23720cb73f561c80ab936bdb268c",
+    "build/xuzz_test": "9ae669a13aba5a1a4ff57507ee335b0c5ab7b4362b1c16f85357cbf54d5f2676"
+  },
+  "tests": "Prior library799, UI234, Xuzz99, owning53 reused only for byte-identical test binaries and shared library; no fresh suite pass claimed"
+}

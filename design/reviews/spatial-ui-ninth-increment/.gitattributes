@@ -1,0 +1,5 @@
+# Preserve captured native transcript and diagnostic patch bytes.
+*.log -text whitespace=cr-at-eol
+*.patch.txt whitespace=-blank-at-eol
+# Preserve the trailing argument separator in captured printf argv transcripts.
+argv.txt whitespace=-blank-at-eol

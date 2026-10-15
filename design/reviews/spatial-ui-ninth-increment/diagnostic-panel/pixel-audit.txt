@@ -1,0 +1,7 @@
+Numeric panel-band pixel audit
+ROI: x=0..799, y=316..550 (800x235), 8-bit RGB pixel bytes.
+eighth-pointer: AE=0; Back/first RGB-pixel SHA-256=7e81dc163aa69b2a1930d5c0eba34713752d39250de708177c3dee0de55c9a51; Origin/second RGB-pixel SHA-256=7e81dc163aa69b2a1930d5c0eba34713752d39250de708177c3dee0de55c9a51
+eighth-text-gl: AE=0; Back/first RGB-pixel SHA-256=7e81dc163aa69b2a1930d5c0eba34713752d39250de708177c3dee0de55c9a51; Origin/second RGB-pixel SHA-256=7e81dc163aa69b2a1930d5c0eba34713752d39250de708177c3dee0de55c9a51
+ninth-red-native: AE=0; Back/first RGB-pixel SHA-256=7e81dc163aa69b2a1930d5c0eba34713752d39250de708177c3dee0de55c9a51; Origin/second RGB-pixel SHA-256=7e81dc163aa69b2a1930d5c0eba34713752d39250de708177c3dee0de55c9a51
+diagnostic1-immediate-delayed: AE=0; Back/first RGB-pixel SHA-256=7e81dc163aa69b2a1930d5c0eba34713752d39250de708177c3dee0de55c9a51; Origin/second RGB-pixel SHA-256=7e81dc163aa69b2a1930d5c0eba34713752d39250de708177c3dee0de55c9a51
+Ninth-red Back panel fill: 112850: (30,41,59) #1E293B srgb(30,41,59)

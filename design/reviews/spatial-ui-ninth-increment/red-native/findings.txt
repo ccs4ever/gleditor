@@ -1,0 +1,16 @@
+Origin/Back visual audit correction
+
+The initial screen-reader review and my visual inspection labeled the Origin frame as missing its
+link panel. That report was mistaken: the preview-based interpretations were inconsistent, whereas decoded
+image data agrees. Numeric pixel checks show the docked-panel band is identical for Back and Origin in
+the eighth-increment pointer run, the eighth-increment enlarged GL run, and the ninth-increment red
+runs. The Origin frame therefore does not show a rendered panel inconsistency in these captures.
+
+For all three Back/Origin pairs, the ROI y=316..551 (800x235) has absolute pixel error AE=0. Each
+pair's 8-bit RGB pixel-buffer SHA-256 is identical within the pair. The dominant panel fill is RGB (30,41,59),
+with 112,850 pixels in the 800x235 region. `diagnostic-panel/panel-band-back-vs-origin.png`
+shows the enlarged ninth-red pair. `diagnostic-panel/pixel-audit.txt` records hashes and metrics.
+
+The original mistaken interpretation is preserved in `findings-original.txt` for provenance; do
+not treat it as a product bug. Source dumps remain unchanged before and after navigation, and each
+branch retained two visit records.

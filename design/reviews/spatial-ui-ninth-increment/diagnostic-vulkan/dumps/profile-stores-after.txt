@@ -1,0 +1,3 @@
+count=2
+0=/tmp/spatial-panel-vulkan/xdg/data/seventh-gl-forced-800/xudu/xanadocs/untitled-20261015-113142
+1=/tmp/spatial-panel-vulkan/xdg/data/seventh-gl-forced-800/xudu/xanadocs/untitled-20261015-113142-2

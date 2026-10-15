@@ -1,0 +1,8 @@
+11-origin.ppm: ppm_sha256=5921af5bf8ffe911a01619699e74b18cdc18efc6bcd3a9716d71ccfd016e0b0b
+  band=(0,316)-(800,551), rgb_bytes_sha256=fd0e6c93ed37d355ecf79bb5b81f721722fb1fac31abeb4f9c4811e0cf77052a
+  panel_surface_rgb_30_41_59_count=112850; unique_rgb=1189; other_pixels=75150
+  png=11-origin.png; png_sha256=8844aa76198dd1362a39506d4d3f825947407f9156a04aea23199a3c977c64d7
+12-origin-delayed.ppm: ppm_sha256=5921af5bf8ffe911a01619699e74b18cdc18efc6bcd3a9716d71ccfd016e0b0b
+  band=(0,316)-(800,551), rgb_bytes_sha256=fd0e6c93ed37d355ecf79bb5b81f721722fb1fac31abeb4f9c4811e0cf77052a
+  panel_surface_rgb_30_41_59_count=112850; unique_rgb=1189; other_pixels=75150
+  png=12-origin-delayed.png; png_sha256=8844aa76198dd1362a39506d4d3f825947407f9156a04aea23199a3c977c64d7

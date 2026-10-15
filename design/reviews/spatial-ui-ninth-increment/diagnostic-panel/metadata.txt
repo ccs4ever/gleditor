@@ -1,0 +1,12 @@
+Diagnostic run 1 — frozen candidate binary
+
+Candidate xuzz SHA-256: c8b61c1dcbc65d729114d882de0924a846a5e077800959fbb118b4f9b4eea1d9
+libgleditor.so.0 SHA-256: ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9
+Backend: OpenGL under Xvfb, 800x600, software GL; each XDG directory was isolated under /tmp/spatial-ninth-diagnostic.GAUJ9i/profile.
+UI sequence: authored/select comment link 21, clicked Controls, clicked Enter, panned six wheel steps, pressed Alt+Shift+O. The exact runner is runner.sh.txt.
+
+At both final captures, accessibility contains selected link 21, one left and one right member, Origin and Back buttons, and focus=document. Frame 11 was captured 3 seconds after Origin; frame 12 was captured 5 seconds later. Their original PPM byte streams are identical (raw-final-ppm-sha256.txt), and their panel-band pixel comparison is AE=0. Both show the same panel pixels. The earlier visual claim of disappearance was an image-display tool error and is superseded by pixel-audit.txt.
+
+Trace around both screenshots reports `link 21 draw=true reserved=284 settled=284`; rebuild diagnostics report `bounds=(0,49,800,235) dock=true reserved=284 chrome=49 settled=284`. The extra 5-second wait does not change the pixels.
+
+Source operation dumps before navigation, after Enter, and at exit have identical SHA-256 bcdc5ecc225d8798dfaa46c94b4a95638d2483e45c8d9327e9ac1a6a62e9b6d9. Activity contains two visit records after Enter and after Origin. The full session log is gzip-compressed in session.log.gz. The original runner-generated SHA256SUMS is preserved as evidence-SHA256SUMS-original.txt.

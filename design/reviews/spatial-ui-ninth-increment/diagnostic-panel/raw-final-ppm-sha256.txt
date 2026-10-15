@@ -1,0 +1,2 @@
+5af5444d38385cca737b2eca0a0667c8d6bdfa5f243d4a45e250a604dca6d2ff  /tmp/spatial-ninth-diagnostic.GAUJ9i/raw/11-origin.ppm
+5af5444d38385cca737b2eca0a0667c8d6bdfa5f243d4a45e250a604dca6d2ff  /tmp/spatial-ninth-diagnostic.GAUJ9i/raw/12-origin-settled.ppm

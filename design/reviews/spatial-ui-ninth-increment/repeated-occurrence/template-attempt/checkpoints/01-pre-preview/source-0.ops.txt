@@ -1,0 +1,35 @@
+op 1  produces=1 parent=0 branch=0 kind=structure flags=0x80 at=0 len=0 to=0 src=0 srcAt=0 srcLen=0 scroll=0 span=[55503,55511) link=0 value=0  [make xanadoc] text="document"
+op 2  produces=a1 parent=0 branch=1 kind=insert flags=0x0 at=0 len=0 to=0 src=0 srcAt=0 srcLen=0 scroll=0 span=[55511,55590) link=0 value=0 text="Harbor left passage.\nMeadow second passage.\nRi"...
+op 3  produces=a2 parent=2 branch=0 kind=structure flags=0x8 at=0 len=0 to=0 src=0 srcAt=0 srcLen=0 scroll=0 span=[55590,55594) link=0 value=0  [make slice] text="main"
+op 4  produces=a3 parent=3 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=3 srcAt=0 srcLen=0 scroll=0 span=[55594,55598) link=0 value=0  [make cell ctx=3] text="home"
+op 5  produces=a4 parent=4 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=3 srcAt=0 srcLen=0 scroll=0 span=[55598,55604) link=0 value=0  [make cell ctx=3] text="d.dims"
+op 6  produces=a5 parent=5 branch=0 kind=structure flags=0x1 at=0 len=0 to=5 src=4 srcAt=3 srcLen=0 scroll=0 span=[0,0) link=5 value=0  [setLink posward dim=5 -> 5 cell@4 ctx=3]
+op 7  produces=a6 parent=6 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=3 srcAt=0 srcLen=0 scroll=0 span=[55604,55611) link=0 value=0  [make cell ctx=3] text="d.links"
+op 8  produces=a7 parent=7 branch=0 kind=structure flags=0x1 at=0 len=0 to=7 src=5 srcAt=3 srcLen=0 scroll=0 span=[0,0) link=5 value=0  [setLink posward dim=5 -> 7 cell@5 ctx=3]
+op 9  produces=a8 parent=8 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=3 srcAt=0 srcLen=0 scroll=0 span=[55611,55617) link=0 value=0  [make cell ctx=3] text="d.from"
+op 10  produces=a9 parent=9 branch=0 kind=structure flags=0x1 at=0 len=0 to=9 src=7 srcAt=3 srcLen=0 scroll=0 span=[0,0) link=5 value=0  [setLink posward dim=5 -> 9 cell@7 ctx=3]
+op 11  produces=a10 parent=10 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=3 srcAt=0 srcLen=0 scroll=0 span=[55617,55621) link=0 value=0  [make cell ctx=3] text="d.to"
+op 12  produces=a11 parent=11 branch=0 kind=structure flags=0x1 at=0 len=0 to=11 src=9 srcAt=3 srcLen=0 scroll=0 span=[0,0) link=5 value=0  [setLink posward dim=5 -> 11 cell@9 ctx=3]
+op 13  produces=a12 parent=12 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=3 srcAt=0 srcLen=0 scroll=0 span=[55621,55631) link=0 value=0  [make cell ctx=3] text="d.linktype"
+op 14  produces=a13 parent=13 branch=0 kind=structure flags=0x1 at=0 len=0 to=13 src=11 srcAt=3 srcLen=0 scroll=0 span=[0,0) link=5 value=0  [setLink posward dim=5 -> 13 cell@11 ctx=3]
+op 15  produces=a14 parent=14 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=3 srcAt=0 srcLen=0 scroll=0 span=[55631,55641) link=0 value=0  [make cell ctx=3] text="d.linktier"
+op 16  produces=a15 parent=15 branch=0 kind=structure flags=0x1 at=0 len=0 to=15 src=13 srcAt=3 srcLen=0 scroll=0 span=[0,0) link=5 value=0  [setLink posward dim=5 -> 15 cell@13 ctx=3]
+op 17  produces=a16 parent=16 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=3 srcAt=0 srcLen=0 scroll=0 span=[55641,55648) link=0 value=0  [make cell ctx=3] text="d.owner"
+op 18  produces=a17 parent=17 branch=0 kind=structure flags=0x1 at=0 len=0 to=17 src=15 srcAt=3 srcLen=0 scroll=0 span=[0,0) link=5 value=0  [setLink posward dim=5 -> 17 cell@15 ctx=3]
+op 19  produces=a18 parent=18 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=3 srcAt=0 srcLen=0 scroll=0 span=[55648,55657) link=0 value=0  [make cell ctx=3] text="d.curator"
+op 20  produces=a19 parent=19 branch=0 kind=structure flags=0x1 at=0 len=0 to=19 src=17 srcAt=3 srcLen=0 scroll=0 span=[0,0) link=5 value=0  [setLink posward dim=5 -> 19 cell@17 ctx=3]
+op 21  produces=a20 parent=20 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=3 srcAt=0 srcLen=0 scroll=0 span=[0,0) link=0 value=0  [make cell ctx=3]
+op 22  produces=a21 parent=21 branch=0 kind=structure flags=0x1 at=0 len=0 to=21 src=6 srcAt=6 srcLen=0 scroll=0 span=[0,0) link=7 value=0  [setLink posward dim=7 -> 21 cell@6 ctx=6]
+op 23  produces=a22 parent=22 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=3 srcAt=0 srcLen=0 scroll=0 span=[55511,55531) link=0 value=0  [make cell ctx=3] text="Harbor left passage."
+op 24  produces=a23 parent=23 branch=0 kind=structure flags=0x3 at=20 len=0 to=0 src=23 srcAt=23 srcLen=0 scroll=0 span=[55532,55554) link=0 value=0  [splice ctx=23] text="Meadow second passage."
+op 25  produces=a24 parent=24 branch=0 kind=structure flags=0x1 at=0 len=0 to=23 src=21 srcAt=21 srcLen=0 scroll=0 span=[0,0) link=9 value=0  [setLink posward dim=9 -> 23 cell@21 ctx=21]
+op 26  produces=a25 parent=25 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=3 srcAt=0 srcLen=0 scroll=0 span=[55555,55565) link=0 value=0  [make cell ctx=3] text="Right one."
+op 27  produces=a26 parent=26 branch=0 kind=structure flags=0x3 at=10 len=0 to=0 src=26 srcAt=26 srcLen=0 scroll=0 span=[55566,55576) link=0 value=0  [splice ctx=26] text="Right two."
+op 28  produces=a27 parent=27 branch=0 kind=structure flags=0x3 at=20 len=0 to=0 src=27 srcAt=27 srcLen=0 scroll=0 span=[55577,55589) link=0 value=0  [splice ctx=27] text="Right three."
+op 29  produces=a28 parent=28 branch=0 kind=structure flags=0x1 at=0 len=0 to=26 src=25 srcAt=25 srcLen=0 scroll=0 span=[0,0) link=11 value=0  [setLink posward dim=11 -> 26 cell@25 ctx=25]
+op 30  produces=a29 parent=29 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=3 srcAt=0 srcLen=0 scroll=0 span=[55657,55664) link=0 value=0  [make cell ctx=3] text="comment"
+op 31  produces=a30 parent=30 branch=0 kind=structure flags=0x1 at=0 len=0 to=30 src=29 srcAt=29 srcLen=0 scroll=0 span=[0,0) link=13 value=0  [setLink posward dim=13 -> 30 cell@29 ctx=29]
+op 32  produces=a31 parent=31 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=3 srcAt=0 srcLen=0 scroll=0 span=[55664,55670) link=0 value=0  [make cell ctx=3] text="author"
+op 33  produces=a32 parent=32 branch=0 kind=structure flags=0x1 at=0 len=0 to=32 src=31 srcAt=31 srcLen=0 scroll=0 span=[0,0) link=15 value=0  [setLink posward dim=15 -> 32 cell@31 ctx=31]
+op 34  produces=a33 parent=33 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=3 srcAt=0 srcLen=0 scroll=0 span=[55670,55682) link=0 value=0  [make cell ctx=3] text="local_author"
+op 35  produces=a34 parent=34 branch=0 kind=structure flags=0x1 at=0 len=0 to=34 src=33 srcAt=33 srcLen=0 scroll=0 span=[0,0) link=17 value=0  [setLink posward dim=17 -> 34 cell@33 ctx=33]

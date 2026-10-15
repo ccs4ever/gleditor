@@ -1,0 +1,11 @@
+a7319d100cf8f994eed8237a5e27a2d0d548dfbcb51f4cdbf583ff5ff0b28537  /tmp/spatial-ninth-repeated-explicit.UW0nW5/raw/00-authored.ppm
+50475cf56e28018134ac42939e16bd633e83fad62b007ae2c3862900a00a9928  /tmp/spatial-ninth-repeated-explicit.UW0nW5/raw/00b-quotation.ppm
+638cf73851c5afac44ec966af49a179fc1bd523bf1ff0edf049790cc24677ce8  /tmp/spatial-ninth-repeated-explicit.UW0nW5/raw/01-pre-preview.ppm
+9ada0942c21dc27be538455c0facc17b1ef0c29c04fa1b10135d43ab64012db1  /tmp/spatial-ninth-repeated-explicit.UW0nW5/raw/02-left-occurrence-second-step.ppm
+03035432f72868078bc72129386485bbc24cc5cc8102bae2f98de7e980f43330  /tmp/spatial-ninth-repeated-explicit.UW0nW5/raw/03-right-active.ppm
+c7afec559546d7423f5554636ac8d4b8838eda502ea0405c76dc8518213fad9a  /tmp/spatial-ninth-repeated-explicit.UW0nW5/raw/04-right-member-second-step.ppm
+9f14f01c98b9f88040a137e64b27ea9d3b969008f697bb3e8534857d926ef085  /tmp/spatial-ninth-repeated-explicit.UW0nW5/raw/05-left-restored.ppm
+5cb90898b7c3f847ff35f01d9988f62686bf03c559591b29021176962f12b1ad  /tmp/spatial-ninth-repeated-explicit.UW0nW5/raw/06-enter.ppm
+9d5ce3a91aa07ecb27d320190e22855afe74fc5f8da4eb5ef5e9360e94c28655  /tmp/spatial-ninth-repeated-explicit.UW0nW5/raw/07-origin.ppm
+e499e0985fe176fabd3ccb4645f02b9761af000c1f79c64c0450d561097e0f3c  /tmp/spatial-ninth-repeated-explicit.UW0nW5/raw/08-inspect.ppm
+9d5ce3a91aa07ecb27d320190e22855afe74fc5f8da4eb5ef5e9360e94c28655  /tmp/spatial-ninth-repeated-explicit.UW0nW5/raw/09-fold.ppm

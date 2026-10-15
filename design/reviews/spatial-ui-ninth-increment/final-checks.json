@@ -1,0 +1,35 @@
+{
+  "product_source_changed": false,
+  "restored_canonical_make_exit": 0,
+  "format_check": {
+    "exit": 0,
+    "command": "make -j$(nproc) format-check CLANG_FORMAT=/tmp/spatial-format-19/bin/clang-format"
+  },
+  "lint": {
+    "exit": 0,
+    "command": "make -j$(nproc) lint"
+  },
+  "byte_identical_reused_results": {
+    "library": 799,
+    "UI": 234,
+    "Xuzz": 99,
+    "owning_cache_mip": 53
+  },
+  "fresh_native_repeated_occurrence": {
+    "backend": "OpenGL",
+    "viewport": [
+      1440,
+      1000
+    ],
+    "completed_visits": [
+      1,
+      2,
+      2
+    ],
+    "source_operations_unchanged": true,
+    "entered_version": "b1"
+  },
+  "complete_J24_J25": false,
+  "native_AT_SPI": false,
+  "optimized_performance_accepted": false
+}

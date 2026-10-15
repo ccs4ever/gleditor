@@ -1,0 +1,12 @@
+# Origin/Back native reproduction
+
+Two isolated OpenGL/Xvfb runs used the same frozen candidate binary, separate six-variable headless profiles, and the pointer journey through the real Controls and Enter buttons. Each run then branched directly to one navigation action. The keymap debug log records distinct bindings for Activity Back (Alt+Shift+B) and Return to Origin (Alt+Shift+O).
+
+| Branch | Post-action focus | Selected link and endsets in a11y | Docked panel in frame | Source dump changed | Visit records |
+| --- | --- | --- | --- | --- | --- |
+| Back | default | Link 21 selected; Left 1/1, Right 1/1; Origin and Back controls | Visible | No | 2 after Enter, 2 after action |
+| Origin | document | Link 21 selected; Left 1/1, Right 1/1; Origin and Back controls | Absent; tether and endpoint highlight remain | No | 2 after Enter, 2 after action |
+
+The Origin inconsistency is a rendered-frame discrepancy: the accessibility state retains the selected link and controls while the docked panel is absent. This package does not establish whether the absence persists beyond the 3-second capture; the longer delayed rerun was stopped before completion at the parent agent’s request.
+
+Each branch directory contains the exact runner, session transcript, final state dumps, source operation dumps, binary guards, argv, and PNG captures for Controls, Enter, the pre-navigation frame, and the action result.

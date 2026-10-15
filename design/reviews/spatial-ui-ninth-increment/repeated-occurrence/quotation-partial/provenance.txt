@@ -1,0 +1,4 @@
+binary_sha256=130dc66a243fbfad19f57fed33fbde78bc1c0e85c6fd34503ee6cbd46216b90f
+library_sha256=ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9
+backend=opengl
+viewport=1440x1000

@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+set -euo pipefail
+bin=$1
+evidence=$2
+raw=$3
+data=$XDG_DATA_HOME
+mkdir -p "$evidence" "$raw"
+passage=$'Harbor left passage.\nMeadow second passage.\nRight one.\nRight two.\nRight three.\n'
+printf '%s' "$passage" > "$evidence/source-fixture.txt"
+printf 'source_bytes=%s\n' "$(printf '%s' "$passage" | wc -c | tr -d ' ')" > "$evidence/fixture-metadata.txt"
+
+app=("$bin/xuzz" --backend opengl --resize 1440,1000 --profile
+  --chord Ctrl+N --type "$passage"
+  --dump-a11y --capture "$raw/00-authored.ppm" --wait-ms 9000
+  --select 0,20 --chord Ctrl+T --dump-a11y --capture "$raw/00b-quotation.ppm" --wait-ms 9000
+  --chord Ctrl+2
+  --select 0,20 --chord Ctrl+Alt+\[
+  --select 21,43 --chord Ctrl+Alt+\[
+  --select 44,54 --chord Ctrl+Alt+\]
+  --select 55,65 --chord Ctrl+Alt+\]
+  --select 66,78 --chord Ctrl+Alt+\]
+  --chord Ctrl+Alt+L
+  --select 0,20 --chord Alt+Shift+N
+  --dump-a11y --capture "$raw/01-pre-preview.ppm" --wait-ms 9000
+  --chord Alt+Shift+J
+  --chord Alt+Shift+L
+  --chord Alt+Shift+L
+  --dump-a11y --capture "$raw/02-left-occurrence-second-step.ppm" --wait-ms 9000
+  --chord Alt+Shift+X
+  --dump-a11y --capture "$raw/03-right-active.ppm" --wait-ms 9000
+  --chord Alt+Shift+J
+  --chord Alt+Shift+J
+  --dump-a11y --capture "$raw/04-right-member-second-step.ppm" --wait-ms 9000
+  --chord Alt+Shift+X
+  --dump-a11y --capture "$raw/05-left-restored.ppm" --wait-ms 9000
+  --chord Alt+Shift+Return
+  --dump-a11y --capture "$raw/06-enter.ppm" --wait-ms 9000
+  --chord Alt+Shift+O
+  --dump-a11y --capture "$raw/07-origin.ppm" --wait-ms 9000
+  --click-label 'Inspect members'
+  --dump-a11y --capture "$raw/08-inspect.ppm" --wait-ms 9000
+  --click-label 'Fold investigation'
+  --dump-a11y --capture "$raw/09-fold.ppm" --wait-ms 9000
+  --chord Ctrl+Q)
+printf 'binary_sha256=%s\nlibrary_sha256=%s\nbackend=opengl\nviewport=1440x1000\n' \
+  "$(sha256sum "$bin/xuzz" | cut -d ' ' -f1)" \
+  "$(sha256sum "$bin/libgleditor.so.0" | cut -d ' ' -f1)" > "$evidence/provenance.txt"
+printf 'argv=' > "$evidence/argv.txt"
+printf '%q ' "${app[@]}" >> "$evidence/argv.txt"
+printf '\n' >> "$evidence/argv.txt"
+
+XDG_DATA_HOME="$data" XDG_CONFIG_HOME="$XDG_CONFIG_HOME" XDG_CACHE_HOME="$XDG_CACHE_HOME" \
+  LD_LIBRARY_PATH="$bin${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+  SPDLOG_LEVEL='xuzz.keymap=debug' stdbuf -oL -eL \
+  timeout --signal=TERM --kill-after=5s 240s xvfb-run -a \
+  -s '-noreset -screen 0 1600x1200x24' "${app[@]}" \
+  > "$evidence/session.log" 2>&1 &
+app_pid=$!
+
+snapshot() {
+  local label=$1 root="$data/xudu/xanadocs" target="$evidence/snapshots/$1"
+  mkdir -p "$target"
+  mapfile -t stores < <(find "$root" -mindepth 1 -maxdepth 1 -type d ! -name default 2>/dev/null | sort)
+  {
+    printf 'count=%s\n' "${#stores[@]}"
+    for i in "${!stores[@]}"; do printf '%s=%s\n' "$i" "${stores[$i]}"; done
+  } > "$target/profile-stores.txt"
+  for i in "${!stores[@]}"; do
+    "$bin/xudu-dump" --section=ops --permascroll="$data/xuzz/permascroll/default" "${stores[$i]}" \
+      > "$target/source-$i.ops.txt" 2>&1 || true
+  done
+  if [[ -e "$data/xudu/activity" ]]; then
+    "$bin/xudu-dump" --section=ops --permascroll="$data/xuzz/permascroll/default" "$data/xudu/activity" \
+      > "$target/activity.ops.txt" 2>&1 || true
+  else
+    printf 'activity store absent at checkpoint\n' > "$target/activity.ops.txt"
+  fi
+  sha256sum "$target"/*.txt > "$target/SHA256SUMS"
+}
+
+for checkpoint in 00-authored 00b-quotation 01-pre-preview 02-left-occurrence-second-step 03-right-active 04-right-member-second-step 05-left-restored 06-enter 07-origin 08-inspect 09-fold; do
+  frame="$raw/$checkpoint.ppm"
+  for _ in $(seq 1 90); do
+    [[ -s "$frame" ]] && break
+    if ! kill -0 "$app_pid" 2>/dev/null; then break; fi
+    sleep 1
+  done
+  if [[ -s "$frame" ]]; then snapshot "$checkpoint"; else printf 'missing\n' > "$evidence/snapshots-$checkpoint-missing.txt"; fi
+done
+wait "$app_pid"
+status=$?
+printf '%s\n' "$status" > "$evidence/exit-status.txt"
+for file in "$raw"/*.ppm; do [[ -f "$file" ]] && sha256sum "$file"; done > "$evidence/raw-ppm-sha256.txt"
+sha256sum "$bin/xuzz" "$bin/libgleditor.so.0" > "$evidence/binary-hashes-after.txt"

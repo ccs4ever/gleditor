@@ -1,0 +1,10 @@
+{
+  "base_commit": "25b1ccde3697a83442092f7ba3e372174adc4c1b",
+  "changes": "debug and trace instrumentation only, all reverted after numerical audit disproved missing-panel interpretation",
+  "patch_sha256": "36cb4686241983af4ab8196fb71376a300aab856e12a8a505c2b20c8f86e93da",
+  "diagnostic_build_1_exit": 0,
+  "diagnostic_build_2_exit": 0,
+  "diagnostic_build_1_patch": "instrumentation-1.patch.txt",
+  "diagnostic_build_1_patch_sha256": "2884cbbc515b3eef261a451c10d36e5794f5d681dd9c1488a61608945add143d",
+  "diagnostic_build_2_patch": "instrumentation.patch.txt"
+}

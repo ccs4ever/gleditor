@@ -1,0 +1,40 @@
+  list "Open Documents"
+    list item "default" [off]
+    button "Close default"
+    list item "Untitled · a" [off]
+    button "Close Untitled · a"
+    list item "Doc 3" = "selected" [on]
+    button "Close Doc 3"
+    button "Store Object Manager"
+    button "New Document"
+  list "links between the open documents"
+    link "comment link, 1 left and 1 right members" = "selected"
+      list item "left member 1 of 1" = "chosen"
+        list item "occurrence 1 of 1, untitled-20261015-112635 · pages 1–2/2 · continues across page breaks" = "chosen"
+      list item "right member 1 of 1" = "chosen"
+        list item "occurrence 1 of 1, untitled-20261015-112635-2 · page 1/1" = "chosen"
+  group
+    label "comment · link 21 · local_author
+reading: right member 1
+origin: untitled-20261015-112635-2 · page 1/1 · bytes 0–23"
+    label "▸ Left 1/1 · place 1/1 · bytes
+0–7438
+untitled-20261015-112635 · pages 1–2/2 · continues across page breaks"
+    label "Right 1/1 · place 1/1 · bytes
+0–23
+untitled-20261015-112635-2 · page 1/1"
+    group
+      button "Previous link"
+      button "Next link"
+      button "‹ member"
+      button "member ›"
+      button "‹ place"
+      button "place ›"
+      button "Cross"
+      button "Enter"
+      button "Origin"
+      button "Back"
+      button "×"
+      button "Read"
+  button "Overview: move camera to scene centre"
+focus: document
