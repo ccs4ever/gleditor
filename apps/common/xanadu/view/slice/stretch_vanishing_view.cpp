@@ -345,12 +345,11 @@ Seen see(const PaneFrame &frame, const Rect &rect, const float z,
 std::optional<Rect> visibleOn(const PaneFrame &frame, const float z) noexcept {
   const auto &m = frame.localToClip;
   // (x, y, 1) on the plane at z -> (clip x, clip y, clip w).
-  const glm::dmat3 onto{
-      glm::dvec3{m[0][0], m[0][1], m[0][3]},
-      glm::dvec3{m[1][0], m[1][1], m[1][3]},
-      glm::dvec3{m[3][0] + (double{z} * m[2][0]),
-                 m[3][1] + (double{z} * m[2][1]),
-                 m[3][3] + (double{z} * m[2][3])}};
+  const glm::dmat3 onto{glm::dvec3{m[0][0], m[0][1], m[0][3]},
+                        glm::dvec3{m[1][0], m[1][1], m[1][3]},
+                        glm::dvec3{m[3][0] + (double{z} * m[2][0]),
+                                   m[3][1] + (double{z} * m[2][1]),
+                                   m[3][3] + (double{z} * m[2][3])}};
   const double determinant = glm::determinant(onto);
   if (!std::isfinite(determinant) || 0.0 == determinant) {
     return std::nullopt;
@@ -394,9 +393,9 @@ std::optional<Rect> within(const Rect &box, const Rect &to) noexcept {
 /// Barsky: the parameters it enters and leaves at, or nothing.
 std::optional<std::pair<glm::vec2, glm::vec2>>
 segmentWithin(const glm::vec2 a, const glm::vec2 b, const Rect &box) noexcept {
-  float enter     = 0.0F;
-  float leave     = 1.0F;
-  const auto run  = b - a;
+  float enter    = 0.0F;
+  float leave    = 1.0F;
+  const auto run = b - a;
   for (int axis = 0; axis < 2; ++axis) {
     if (0.0F == run[axis]) {
       if (a[axis] < box.lo(axis) || a[axis] > box.hi(axis)) {
@@ -496,8 +495,8 @@ StretchConfig StretchConfig::fromSettings(const SystemStoreModel &settings) {
       read(names::kCoarseBelow, cfg.coarseBelow, 0.0F, 1.0F, false);
   cfg.clipMargin =
       read(names::kClipMargin, cfg.clipMargin, 0.0F, kUnbounded, false);
-  cfg.maxCellSpan =
-      read(names::kMaxCellSpan, cfg.maxCellSpan, 1.0F, kMaxCellSpanLimit, false);
+  cfg.maxCellSpan   = read(names::kMaxCellSpan, cfg.maxCellSpan, 1.0F,
+                           kMaxCellSpanLimit, false);
   const auto crumbs = settings.getInt64(names::kBreadcrumbs, cfg.breadcrumbs);
   if (crumbs >= 0 && crumbs <= std::numeric_limits<std::uint32_t>::max()) {
     cfg.breadcrumbs = static_cast<std::uint32_t>(crumbs);
@@ -670,11 +669,11 @@ struct StretchVanishingView::Workspace {
   /// negative or not a number is nothing, and one past stretch.maxCellSpan
   /// panes is that (see StretchConfig::maxCellSpan).
   [[nodiscard]] ContentExtent measured(const SubjectId subject) const {
-    auto extent      = in->measure(subject, config->cells.contentMaxWidthPx);
+    auto extent = in->measure(subject, config->cells.contentMaxWidthPx);
     const float most =
         std::min(kMeasureCeilingPx,
-                 stretch().maxCellSpan * std::max({in->frame.widthPx,
-                                                   in->frame.heightPx, 1.0F}));
+                 stretch().maxCellSpan *
+                     std::max({in->frame.widthPx, in->frame.heightPx, 1.0F}));
     const auto safe = [most](const float length) {
       return std::isfinite(length) ? std::clamp(length, 0.0F, most)
                                    : (length > 0.0F ? most : 0.0F);
@@ -957,9 +956,9 @@ struct StretchVanishingView::Workspace {
       }
       const auto seen = see(in->frame, box, item.centre.z, cfg.overfill);
       if (seen.inside) {
-        item.opacity = stretchOpacity(seen.margin, cfg) *
-                       std::pow(cfg.depthFade,
-                                static_cast<float>(std::abs(cell.plane)));
+        item.opacity =
+            stretchOpacity(seen.margin, cfg) *
+            std::pow(cfg.depthFade, static_cast<float>(std::abs(cell.plane)));
         item.content = legibleContent(
             item.opacity, cell.content.lineHeight * seen.pixelsPerUnit, steps);
         out.push(item);
@@ -1036,16 +1035,15 @@ struct StretchVanishingView::Workspace {
           end   = cut->second;
         }
       }
-      out.push(PlacedEdge{
-          .from      = *from.id,
-          .to        = *to.id,
-          .a         = glm::vec3{start, za},
-          .b         = glm::vec3{end, zb},
-          .kind      = EdgeKind::Dimension,
-          .relation  = axis.dim,
-          .opacity   = std::min(from.opacity, to.opacity),
-          .dashClass = axis.dashClass,
-          .label     = label});
+      out.push(PlacedEdge{.from      = *from.id,
+                          .to        = *to.id,
+                          .a         = glm::vec3{start, za},
+                          .b         = glm::vec3{end, zb},
+                          .kind      = EdgeKind::Dimension,
+                          .relation  = axis.dim,
+                          .opacity   = std::min(from.opacity, to.opacity),
+                          .dashClass = axis.dashClass,
+                          .label     = label});
     }
   }
 };

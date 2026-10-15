@@ -591,8 +591,8 @@ void addQuarterArc(gleditor::Canvas &canvas, const glm::vec2 centre,
     const float t1 = t0 + rise;
     // The arc leaves the side at t = 0 (x = radius) and meets the top or
     // bottom at t = radius (x = 0).
-    const float far   = std::sqrt(std::max(0.0F, (radius * radius) - (t0 * t0)));
-    const float near  = std::sqrt(std::max(0.0F, (radius * radius) - (t1 * t1)));
+    const float far  = std::sqrt(std::max(0.0F, (radius * radius) - (t0 * t0)));
+    const float near = std::sqrt(std::max(0.0F, (radius * radius) - (t1 * t1)));
     const float reach = std::min(near, far - stroke);
     const float width = far - reach;
     canvas.addRect(sx > 0.0F ? centre.x + reach : centre.x - far,
@@ -788,8 +788,9 @@ void SlicePresenter::project(const glm::mat4 &toClip, const ui::Size viewport) {
   ++projectionRevision_;
 }
 
-std::vector<std::string> SlicePresenter::hintRowsFitting(
-    const std::string_view hints, const float room) {
+std::vector<std::string>
+SlicePresenter::hintRowsFitting(const std::string_view hints,
+                                const float room) {
   constexpr std::string_view kSeparator = " | ";
   std::vector<std::string> rows;
   const auto widthOf = [this](const std::string_view words) {
@@ -803,8 +804,7 @@ std::vector<std::string> SlicePresenter::hintRowsFitting(
     at              = cut + 1;
     std::string row;
     for (std::size_t from = 0; from <= text.size();) {
-      const auto stop =
-          std::min(text.find(kSeparator, from), text.size());
+      const auto stop = std::min(text.find(kSeparator, from), text.size());
       const auto item = text.substr(from, stop - from);
       from            = stop + kSeparator.size();
       if (item.empty()) {
@@ -812,7 +812,8 @@ std::vector<std::string> SlicePresenter::hintRowsFitting(
       }
       if (row.empty()) {
         row = item;
-      } else if (const auto joined = std::string{row}.append(kSeparator).append(item);
+      } else if (const auto joined =
+                     std::string{row}.append(kSeparator).append(item);
                  widthOf(joined) > room) {
         rows.push_back(std::move(row));
         row = item;
@@ -864,7 +865,8 @@ void SlicePresenter::drawChrome(gleditor::FrameContext &ctx,
       glm::vec4 colour;
     };
     std::vector<Line> lines{Line{chrome.notice, theme_.colours.accent},
-                            Line{trail, theme_.colours.text}};
+                            Line{trail, theme_.colours.text},
+                            Line{chrome.status, theme_.colours.accent}};
     for (const auto &row : rows) {
       lines.push_back(Line{row, theme_.colours.muted});
     }
@@ -1039,8 +1041,8 @@ void SlicePresenter::drawCompass(gleditor::FrameContext &ctx,
       return arm.group ? std::format("{} ({})", arm.shows, arm.members)
                        : arm.shows;
     };
-    float left       = clear.left + margin;
-    float top        = height - clear.top - margin;
+    float left = clear.left + margin;
+    float top  = height - clear.top - margin;
     const float fixed =
         (2.0F * pad) + pointColumn + gap + swatch + gap + glyph + gap;
     const float room  = std::max(0.0F, width - left - margin - fixed);
@@ -1133,11 +1135,11 @@ void SlicePresenter::drawCompass(gleditor::FrameContext &ctx,
       rowTop = rowBottom - gap;
     }
     compass_->commit();
-    compassStamp_   = compass.stamp;
-    compassMetrics_ = metrics_;
-    compassBase_    = clear;
+    compassStamp_    = compass.stamp;
+    compassMetrics_  = metrics_;
+    compassBase_     = clear;
     compassRevision_ = projectionRevision_;
-    compassDrawn_   = true;
+    compassDrawn_    = true;
   }
   if (compassDrawn_) {
     const glm::mat4 ortho =

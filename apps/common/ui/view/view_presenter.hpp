@@ -119,6 +119,9 @@ struct PresentedChrome {
   std::span<const std::string> breadcrumbs;
   /// The latest message, empty for none.
   std::string_view notice;
+  /// The view and sub-view shown: always the first row after the notice, and
+  /// never counted against view.chrome.hintRows.
+  std::string_view status;
   /// The hint line built from the reader's own bindings.
   std::string_view hints;
   /// The strip's padding, in logical pixels: zigzag.hud* (§12.3).
@@ -267,8 +270,8 @@ private:
   void drawGhost(Plane &plane, const PlacedItem &item);
   /// The key hints as the rows that fit @p room pixels, at most
   /// view.chrome.hintRows of them.
-  [[nodiscard]] std::vector<std::string>
-  hintRowsFitting(std::string_view hints, float room);
+  [[nodiscard]] std::vector<std::string> hintRowsFitting(std::string_view hints,
+                                                         float room);
   void drawLabel(RenderState &state, Plane &plane, const PlacedItem &item,
                  std::string_view text, std::optional<std::uint32_t> rule,
                  float maxWidth);

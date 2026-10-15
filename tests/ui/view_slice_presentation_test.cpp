@@ -709,17 +709,15 @@ TEST(ViewChromeTest, KeyHintsWrapToRowsThatFitAndAreCappedBySetting) {
             std::to_string(i) + ": Ctrl+Alt+" + std::to_string(i);
   }
   const float wrapped = chromeClaimFor(*presentation, frame, many);
-  const auto rows =
-      static_cast<int>(std::lround((wrapped - one) / line)) + 1;
+  const auto rows = static_cast<int>(std::lround((wrapped - one) / line)) + 1;
   EXPECT_GE(rows, 2) << "twenty-four commands do not fit one row";
   EXPECT_LE(rows, static_cast<int>(xanadu::ViewDrawConfig{}.hintRows));
 
   // One row when the setting says so, with the rest cut by the ellipsis.
   auto &ui = *fixture.system.at(SystemDocKind::UI);
-  ui.repointCurrentVersion(
-      xanadu::setSetting(ui, ui.primaryCurrentVersion(),
-                         xanadu::settings::kViewChromeHintRows,
-                         std::int64_t{1}));
+  ui.repointCurrentVersion(xanadu::setSetting(
+      ui, ui.primaryCurrentVersion(), xanadu::settings::kViewChromeHintRows,
+      std::int64_t{1}));
   presentation->applySettings();
   EXPECT_NEAR(chromeClaimFor(*presentation, frame, many), one, 1.0e-3F);
 }
@@ -1738,7 +1736,7 @@ TEST(ViewPresenterTest, APatternOfDustOrTooManyDashesIsDrawnSolid) {
   // M2 gate 2, D8: a pattern of lengths too fine to see made a beam for each
   // dash, millions of them, or never finished. A strand that would need more
   // than view.draw.dashMaxCount dashes is one beam.
-  auto draw = xanadu::ViewDrawConfig{};
+  auto draw      = xanadu::ViewDrawConfig{};
   draw.dashes[0] = {1.0e-7F, 1.0e-7F};
   StrandScene dust(false);
   dust.presenter.setDrawConfig(draw);
@@ -1753,7 +1751,7 @@ TEST(ViewPresenterTest, APatternOfDustOrTooManyDashesIsDrawnSolid) {
   EXPECT_LE(cut, xanadu::ViewDrawConfig{}.dashMaxCount);
 
   // The cap is a setting: below what the strand needs it is drawn solid.
-  draw = xanadu::ViewDrawConfig{};
+  draw              = xanadu::ViewDrawConfig{};
   draw.dashMaxCount = static_cast<std::uint32_t>(cut) - 1U;
   StrandScene capped(false);
   capped.presenter.setDrawConfig(draw);

@@ -341,8 +341,8 @@ TEST(ViewDrawConfigTest, ADashPatternOfDustAndACountOfNothingAreRefused) {
                             std::string{"0.5 0.5"});
   head = xanadu::setSetting(store, head, s::kViewDrawDashMaxCount,
                             std::int64_t{0});
-  head = xanadu::setSetting(store, head, s::kViewChromeHintRows,
-                            std::int64_t{-2});
+  head =
+      xanadu::setSetting(store, head, s::kViewChromeHintRows, std::int64_t{-2});
   store.repointCurrentVersion(head);
   const auto read = xanadu::ViewDrawConfig::fromStore(store);
   const xanadu::ViewDrawConfig defaults;
@@ -359,8 +359,8 @@ TEST(ViewDrawConfigTest, ADashPatternOfDustAndACountOfNothingAreRefused) {
                             std::string{"0.4 3"});
   head = xanadu::setSetting(store, head, s::kViewDrawDashMaxCount,
                             std::int64_t{40});
-  head = xanadu::setSetting(store, head, s::kViewChromeHintRows,
-                            std::int64_t{2});
+  head =
+      xanadu::setSetting(store, head, s::kViewChromeHintRows, std::int64_t{2});
   head = xanadu::setSetting(store, head, s::kViewPageDimUnified, 0.6);
   store.repointCurrentVersion(head);
   const auto lowered = xanadu::ViewDrawConfig::fromStore(store);
@@ -374,17 +374,27 @@ TEST(ViewDrawConfigTest, ADashPatternOfDustAndACountOfNothingAreRefused) {
 TEST(ViewDrawConfigTest, EverySettingIsSeededInSystemUiWithItsDefault) {
   const auto specs = xanadu::defaultSettingSpecs(xanadu::SystemDocKind::UI);
   namespace s      = xanadu::settings;
-  for (const auto name :
-       {s::kViewDrawCellBorderPx, s::kViewDrawFocusBorderPx,
-        s::kViewDrawGhostStrokePx, s::kViewDrawGhostCornerShare,
-        s::kViewDrawTickRulePx, s::kViewDrawCoarseBarShare,
-        s::kViewDrawDashDash, s::kViewDrawDashDot, s::kViewDrawDashDashDotDot,
-        s::kViewDrawDashDashDot, s::kViewDrawDashLongShort,
-        s::kViewStrandMinWidthPx, s::kViewStrandOpacityFloor,
-        s::kViewStrandLabelClearPx, s::kViewPageDim, s::kViewPageClearancePx,
-        s::kViewPageDimUnified, s::kViewChromeHintRows,
-        s::kViewDrawDashLeastLength, s::kViewDrawDashMaxCount,
-        s::kViewCompassDodge}) {
+  for (const auto name : {s::kViewDrawCellBorderPx,
+                          s::kViewDrawFocusBorderPx,
+                          s::kViewDrawGhostStrokePx,
+                          s::kViewDrawGhostCornerShare,
+                          s::kViewDrawTickRulePx,
+                          s::kViewDrawCoarseBarShare,
+                          s::kViewDrawDashDash,
+                          s::kViewDrawDashDot,
+                          s::kViewDrawDashDashDotDot,
+                          s::kViewDrawDashDashDot,
+                          s::kViewDrawDashLongShort,
+                          s::kViewStrandMinWidthPx,
+                          s::kViewStrandOpacityFloor,
+                          s::kViewStrandLabelClearPx,
+                          s::kViewPageDim,
+                          s::kViewPageClearancePx,
+                          s::kViewPageDimUnified,
+                          s::kViewChromeHintRows,
+                          s::kViewDrawDashLeastLength,
+                          s::kViewDrawDashMaxCount,
+                          s::kViewCompassDodge}) {
     EXPECT_TRUE(std::ranges::any_of(specs, [name](const auto &spec) {
       return spec.name == name;
     })) << name;

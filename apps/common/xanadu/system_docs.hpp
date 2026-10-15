@@ -387,7 +387,7 @@ inline constexpr std::string_view kViewStrandOpacityFloor =
     "view.strand.opacityFloor";
 inline constexpr std::string_view kViewStrandLabelClearPx =
     "view.strand.labelClearPx";
-inline constexpr std::string_view kViewPageDim = "view.page.dim";
+inline constexpr std::string_view kViewPageDim        = "view.page.dim";
 inline constexpr std::string_view kViewPageDimUnified = "view.page.dimUnified";
 inline constexpr std::string_view kViewChromeHintRows = "view.chrome.hintRows";
 inline constexpr std::string_view kViewPageClearancePx =

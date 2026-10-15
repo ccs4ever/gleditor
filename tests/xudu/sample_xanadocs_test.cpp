@@ -513,9 +513,9 @@ TEST(SampleXanadocsTest, ACellCannotJoinASliceFromABranchForkedBeforeIt) {
   // The slice's own tip, the last operation of the store, takes it.
   const auto sliceTip = unified.segmentedOps().idOf(
       static_cast<std::uint32_t>(unified.segmentedOps().size()));
-  const auto added    = unified.makeCell(sliceTip, "a cell");
-  EXPECT_EQ(unified.segmentedOps().indexOf(added),
-            unified.segmentedOps().size() + 1);
+  const auto before = unified.segmentedOps().size();
+  const auto added  = unified.makeCell(sliceTip, "a cell");
+  EXPECT_EQ(unified.segmentedOps().indexOf(added), before + 1);
 }
 
 } // namespace

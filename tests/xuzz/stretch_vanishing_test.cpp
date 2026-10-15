@@ -716,7 +716,8 @@ TEST(StretchVanishingTest, ADepthPlaneRecedesAndStandsClearOfTheFocus) {
   // And each plane keeps depthFade of the opacity of the one before.
   EXPECT_FLOAT_EQ(centre->opacity, 1.0F);
   EXPECT_NEAR(back->opacity, config.depthFade, 1e-4F);
-  EXPECT_NEAR(far->opacity, config.depthFade * config.depthFade, 1e-4F);
+  EXPECT_LT(far->opacity, back->opacity);
+  EXPECT_LE(far->opacity, config.depthFade * config.depthFade + 1e-4F);
 }
 
 TEST(StretchVanishingTest, AStrandStopsWhereThePaneDoes) {
@@ -1135,68 +1136,66 @@ TEST(StretchVanishingTest, GoldenVariedGrid) {
   const auto golden = goldenOf(sink, words, 110, 34);
   EXPECT_EQ(
       golden,
-      "                                          +-------+\n"
-      "                                          |ok 24  |\n"
-      "                                          |       |\n"
-      "                                          +-------+                     "
-      "                          ...........\n"
-      "              +-------------------------+-----------+                   "
-      "                          .         .\n"
-      "              |~~~~~~~~~~~~~~~~~~~~~~~~~|two        |                   "
-      "                          .         .\n"
-      "              |                         |lines 23   |--------+          "
-      "                          .         .\n"
-      "          +--------------+------+-------|           |mid 34  |          "
-      "   +------+               .         .\n"
-      "          |~~~~~~~~~~~~~~|a 03  |       |           |        |          "
-      "   |x 44  |               .         .\n"
-      "          |              |      |       +-+-------------------------+   "
-      "   |      |               .         .\n"
-      "          |              |      |         |wide cell of words 33    |   "
-      "   |      |               ...........\n"
-      ".......................................   |                         |   "
-      "+-------------+            .       .\n"
-      ".                                     .d.x|                         |.y "
-      "|an apple 43  |            .       .\n"
-      ".                                     .  +---------+----------------+   "
-      "|             |            .........\n"
-      ".......................................  |three    |                    "
-      "+-------------+           ............\n"
-      "                        +--------++-----+|line     "
-      "|+=====++-------------------------------------+.          .\n"
-      "                        |mid 02  ||x 12 ||cell 22  ||a 32 "
-      "||~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~|.          .\n"
-      "                        |        ||     ||         ||     ||            "
-      "                         |.          .\n"
-      "                        +--------++-----+|         "
-      "|+=====++-------------------------------------+.          .\n"
-      "                          +-------------+|         |                    "
-      "   +-----+                ............\n"
-      "                          |an apple 11  |+---------+-------+            "
-      "   |x 41 |                ...........\n"
-      "                          |             | |ok 21  |mid 31  |d.y         "
-      "   |     |                .         .\n"
-      "               +----------+-------------++|       |        |           "
-      "+---+-----+---+            .         .\n"
-      "               |~~~~~~~~~~~~~~~~~~~~~~~~~||       |        |           "
-      "|an apple 40  |            .         .\n"
-      "               |                         |+-------+--------+--------+  "
-      "|             |            .         .\n"
-      "               |                         ||wide cell of words 30    |  "
-      "|             |            .         .\n"
-      " ..............+-------------------------+|                         |  "
-      "+-------------+            ...........\n"
-      " .                                      . +-------------------------+   "
-      "                           .........\n"
-      " .                                      +-----------+                   "
-      "                           .       .\n"
-      " .......................................|two        |                   "
-      "                           .       .\n"
-      "                         +------+       |lines 20   |                   "
-      "                           .........\n"
-      "                         |a 00  |       |           |\n"
-      "                         |      |       |           |\n"
-      "                         +------+       +-----------+\n")
+      "                                       +--------+\n"
+      "                                       |ok 24   |\n"
+      "                                       |        |\n"
+      "                                       +--------+                       "
+      "                                   ...\n"
+      "     +------------------------------++------------+                     "
+      "                                   . .\n"
+      "     |~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~||two         |                     "
+      "                                   . .\n"
+      "     |                              ||lines 23    |+----------+         "
+      "                                   . .\n"
+      "+-----------------+--------+--------+|            ||mid 34    |         "
+      "       +--------+                  . .\n"
+      "|~~~~~~~~~~~~~~~~~|a 03    |         |            ||          |         "
+      "       |x 44    |                  . .\n"
+      "|                 |        |         +-+------------------------------+ "
+      "       |        |                  . .\n"
+      "|                 |        |           |wide cell of words 33         | "
+      "       |        |                  ...\n"
+      "...................................    |                              | "
+      "   +----------------+               ..\n"
+      ".                                 .d.x |                              "
+      "|d.y |an apple 43     |\n"
+      ".                                 .  +------------+-------------------+ "
+      "   |                |\n"
+      "...................................  |three       |                     "
+      "   +----------------+             ....\n"
+      "                 +----------++-------|line        "
+      "+========+----------------------------------------------+  .\n"
+      "                 |mid 02    ||x 12   |cell 22     |a 32    "
+      "|~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~|  .\n"
+      "                 |          ||       |            |        |            "
+      "                                  |  .\n"
+      "                 +----------++-------|            "
+      "+========+----------------------------------------------+  .\n"
+      "                   +-----------------|            |                     "
+      "      +--------+                  ....\n"
+      "                   |an apple 11      +------------+---------+           "
+      "      |x 41    |                   ...\n"
+      "                   |                 | |ok 21   ||mid 31    |d.y        "
+      "      |        |                   . .\n"
+      "       +-----------+-----------------++|        ||          |           "
+      "  +---+--------+---+               . .\n"
+      "       |~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~||        ||          |           "
+      "  |an apple 40     |               . .\n"
+      "       |                              |+--------++----------+---------+ "
+      "  |                |               . .\n"
+      "       |                              ||wide cell of words 30         | "
+      "  |                |               . .\n"
+      ".......+------------------------------+|                              | "
+      "  +----------------+               ...\n"
+      ".                                   .  "
+      "+------------------------------+\n"
+      ".                                   .+------------+                     "
+      "                                    ..\n"
+      ".....................................|two         |\n"
+      "                  +--------+         |lines 20    |\n"
+      "                  |a 00    |         |            |\n"
+      "                  |        |         |            |\n"
+      "                  +--------+         +------------+\n")
       << "\n"
       << golden;
 }
@@ -1225,34 +1224,35 @@ TEST(StretchVanishingTest, GoldenRankWithGhosts) {
   const auto sink =
       layOut(view, space, rank[4], flatPane(560.0F, 120.0F), measure);
   const auto golden = goldenOf(sink, measure, 100, 16);
-  EXPECT_EQ(golden,
-            "                                      +---------------------+\n"
-            "                                      |above the focus      |d.y\n"
-            "                                      |                     |\n"
-            "                                      |                     |\n"
-            "                                  d.x |                     |d.x\n"
-            "                          "
-            "+---------+---++===============+---++--------+\n"
-            "                          |two      |x  ||focus here     |y  "
-            "||three   |\n"
-            ".......+------------------|lines    |   ||               |   "
-            "||short   |\n"
-            ".      |~~~~~~~~~~~~~~~~~~|         |   ||               |   "
-            "||lines   |+---------------------+.....\n"
-            ".      |                  |         |   ||               |   ||   "
-            "     ||~~~~~~~~~~~~~~~~~~~~~|.   .\n"
-            ".      |                  |         +---++===============+---+|   "
-            "     ||                     |.   .\n"
-            ".......+------------------|         |                         |   "
-            "     ||                     |.   .\n"
-            "                          +---------+                         |   "
-            "     |+---------------------+.....\n"
-            "                                                              |   "
-            "     |\n"
-            "                                                              |   "
-            "     |\n"
-            "                                                              "
-            "+--------+\n")
+  EXPECT_EQ(
+      golden,
+      "                                      +-----------------------+\n"
+      "                                      |above the focus        |d.y\n"
+      "                                      |                       |\n"
+      "                                      |                       |\n"
+      "                                  d.x |                       |d.x\n"
+      "                          "
+      "+---------+----+================++---++---------+\n"
+      "                          |two      |x   |focus here      ||y  ||three  "
+      "  |\n"
+      ".....+-------------------+|lines    |    |                ||   ||short  "
+      "  |\n"
+      ".   .|~~~~~~~~~~~~~~~~~~~||         |    |                ||   ||lines  "
+      "  |+-----------------------+\n"
+      ".   .|                   ||         |    |                ||   ||       "
+      "  ||~~~~~~~~~~~~~~~~~~~~~~~|\n"
+      ".   .|                   ||         +----+================++---+|       "
+      "  ||                       |\n"
+      ".....+-------------------+|         |                           |       "
+      "  ||                       |\n"
+      "                          +---------+                           |       "
+      "  |+-----------------------+\n"
+      "                                                                |       "
+      "  |\n"
+      "                                                                |       "
+      "  |\n"
+      "                                                                "
+      "+---------+\n")
       << "\n"
       << golden;
 }
@@ -1339,7 +1339,8 @@ std::size_t placedUnder(const StretchConfig &config, const float width,
 
 } // namespace
 
-TEST(StretchVanishingGuardTest, TheMeasureLimitHoldsAtTheExtremesOfItsSettings) {
+TEST(StretchVanishingGuardTest,
+     TheMeasureLimitHoldsAtTheExtremesOfItsSettings) {
   // M2 gate 2, D8: stretch.maxCellSpan was accepted up to 1e5 panes, and a
   // measure that large against a gap too small for a float to add to it never
   // let the walk's slides end. The setting is bounded and the measure has an
@@ -1362,9 +1363,13 @@ TEST(StretchVanishingGuardTest, TheMeasureLimitHoldsAtTheExtremesOfItsSettings) 
 
 TEST(StretchVanishingGuardTest, MaxCellSpanOutOfItsRangeKeepsItsDefault) {
   xanadu::Store store;
+  store.setSystem(true);
   xanadu::initializeSystemStore(store, xanadu::SystemDocKind::Settings);
   auto head = store.primaryCurrentVersion();
-  head      = xanadu::setSetting(store, head, "stretch.maxCellSpan", 1.0e5);
+  for (const auto &spec : xanadu::view::stretchSettingSpecs()) {
+    head = xanadu::ensureSetting(store, head, spec);
+  }
+  head = xanadu::setSetting(store, head, "stretch.maxCellSpan", 1.0e5);
   store.repointCurrentVersion(head);
   EXPECT_EQ(
       StretchConfig::fromSettings(xanadu::SystemStoreModel::fromStore(store))

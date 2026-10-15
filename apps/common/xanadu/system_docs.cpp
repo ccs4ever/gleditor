@@ -1404,13 +1404,14 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
                        "Shortest drawn or open stretch of a dash pattern, in "
                        "strand widths, above 0",
                        draw.dashLeastLength),
-            SettingSpec{.name  = std::string(settings::kViewDrawDashMaxCount),
-                        .notes = "Most dashes one strand is cut into, at "
-                                 "least 1; a strand needing more is drawn "
-                                 "solid",
-                        .schemas = {{.expectedTypes = {"integer"},
-                                     .defaultValues = {static_cast<
-                                         std::int64_t>(draw.dashMaxCount)}}}},
+            SettingSpec{
+                .name    = std::string(settings::kViewDrawDashMaxCount),
+                .notes   = "Most dashes one strand is cut into, at "
+                           "least 1; a strand needing more is drawn "
+                           "solid",
+                .schemas = {{.expectedTypes = {"integer"},
+                             .defaultValues = {static_cast<std::int64_t>(
+                                 draw.dashMaxCount)}}}},
             lengthSpec(settings::kViewDrawTickRulePx,
                        "Thickness of the rule in a dimension's colour under "
                        "a tick, in logical pixels",
@@ -1462,12 +1463,13 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
                        "unified view while a slice presentation is shown, 0 "
                        "to 1",
                        draw.pageDimUnified),
-            SettingSpec{.name  = std::string(settings::kViewChromeHintRows),
-                        .notes = "Rows the key hints may take at the foot of "
-                                 "the pane, at least 1",
-                        .schemas = {{.expectedTypes = {"integer"},
-                                     .defaultValues = {static_cast<
-                                         std::int64_t>(draw.hintRows)}}}},
+            SettingSpec{
+                .name    = std::string(settings::kViewChromeHintRows),
+                .notes   = "Rows the key hints may take at the foot of "
+                           "the pane, at least 1",
+                .schemas = {{.expectedTypes = {"integer"},
+                             .defaultValues = {static_cast<std::int64_t>(
+                                 draw.hintRows)}}}},
             lengthSpec(settings::kViewPageClearancePx,
                        "How far above the page's top edge a slice "
                        "presentation's focus row stands, in logical pixels",
