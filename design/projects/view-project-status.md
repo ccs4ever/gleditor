@@ -131,6 +131,11 @@ broken. `tools/compare-backends.sh`: OpenGL and GLES agree pixel for pixel, and 
 atlas-growth and minification checks pass; Vulkan is not available under SDL2 offscreen; the run
 fails at its E2E stage on the three E2E reds below.
 
+At `73b68a9` (the end of M2's closing round, 2026-10-15, 4 cores, llvmpipe, no Vulkan device):
+`make -k test` exits 0 — `gleditor_test` 806, `xudu_test` 1319, `xuzz_test` 241, `ui_test` 257, both
+swarm runs (12, 4) — and `compare-backends.sh` exits 0, every image check and E2E scenario agreeing
+between OpenGL and GLES.
+
 ### Known reds, not this project's
 
 None. After the fixes under "Fixed along the way", a full `make -k test` exits 0 (`gleditor_test`
