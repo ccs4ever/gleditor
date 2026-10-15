@@ -1975,8 +1975,10 @@ plane behind or in front, `stretch.layerDepth` apart, starting at `p`'s own x an
 the same rule within that plane, which has its own grid. For depth the slide is along y and the
 outward move along +x. Planes in front of the focus are drawn only where they do not cover it: the
 focus's box stands in each of their grids as an obstacle, so a cell in front is slid clear of it
-rather than drawn over it and clipped. The focus's own neighbour behind starts, and stays, at its x
-and y.
+rather than drawn over it and clipped. A cell behind steps to the left of the one it came from, on
+that cell's own line, so that seen down z no cell's words are hidden behind a nearer box (M2 gate 2,
+D2, D3); and each plane away from the focus keeps `stretch.depthFade` of the opacity of the one
+before, so a plane reads as further or nearer without a turned camera.
 
 #### 9.1.5 Fade and clip
 
@@ -1998,10 +2000,14 @@ inside nor wholly outside — is emitted as a **ghost** instead: a `Marker` with
 cell wholly outside is not emitted at all. A ghost says that a cell is there without showing half of
 one. Its opacity is `stretch.ghostShare` of `stretch.fadeFloor` (plan D1): a fixed opacity of its
 own (0.25 against a floor of 0.15) outshone the dimmest real cell, which a placeholder never does.
-The ghost, the focus mark and view-only chrome are made by one helper, `view_marks`, which every
-view uses (plan §5.6). The presenter applies the same test to each cell's *animated* box, so a cell
-in flight appears only once it is wholly inside, and it uses a margin of `stretch.clipMargin` pixels
-before showing a cell again, so a cell resting on the edge does not flicker as the camera moves.
+The floor is 0.25 and the share 0.8, so a ghost is drawn at 0.2: at 0.09 its outline was a few
+levels above black (M2 gate 2, D1). Its outline has rounded corners, `view.draw.ghostCornerShare` of
+its shorter side in radius, where a stored cell's are square. A ghost, and a strand to one, stops at
+the pane's edge: the layout cuts them to the part of their plane the pane shows (D4). The ghost, the
+focus mark and view-only chrome are made by one helper, `view_marks`, which every view uses (plan
+§5.6). The presenter applies the same test to each cell's *animated* box, so a cell in flight
+appears only once it is wholly inside, and it uses a margin of `stretch.clipMargin` pixels before
+showing a cell again, so a cell resting on the edge does not flicker as the camera moves.
 
 Fading a box and keeping its text readable are separate (plan D2). The floor gives about 1.7:1
 against the theme, far under what text needs, so a cell's content steps down as its opacity falls:
@@ -3124,76 +3130,81 @@ Existing settings are used, not copied: the `ui.*` scale, font-role and touch-si
 `zigzag.cellHorizontalPaddingPx`, `cellVerticalPaddingPx`, `contentMaxWidthPx` (the width limit
 given to the measurer), `rankClearancePx`, `minReadableTextPx` and `connectionBeamWidthPx`.
 
-| Setting                                                            | Default      | Meaning                                                                     |
-| ------------------------------------------------------------------ | ------------ | --------------------------------------------------------------------------- |
-| `view.arena.windowCells`                                           | 4096         | derived cells before a placement tosses and re-derives (§6.7)               |
-| `view.camera.restYaw`, `restPitch`                                 | 12, 8        | the rest camera's turn, so depth is visible                                 |
-| `activity.settleMs`, `activity.bounceMs`                           | 1200, 300    | pause that ends a run of movement; a step undone this soon is a slip        |
-| `subspace.rimBand`                                                 | 48           | band at the pane's edge showing the next space along `u`                    |
-| `view.motion.reduced`                                              | false        | every tween and transition becomes a cut                                    |
-| `view.motion.stepMs`, `stepEase`                                   | 120          | a step, or a move a view does not time; curve out-cubic                     |
-| `view.motion.tossOutMs`, `tossOutEase`                             | 90           | discarded view cells fade in place; in-cubic                                |
-| `view.motion.tossInMs`, `tossInEase`, `tossInScale`                | 160, 0.92    | new view cells fade in, growing from that share; out-cubic                  |
-| `view.motion.viewSwitchMs`, `viewSwitchEase`                       | 220          | cross-fade on a change of view; in-out-cubic                                |
-| `view.motion.subViewMs`, `subViewEase`                             | 150          | a change of sub-view; in-out-cubic                                          |
-| `view.motion.hintEase`                                             | in-out-quad  | curve of a move a view times itself, as today's sworph                      |
-| `view.viewOnlyOpacity`                                             | 0.7          | chrome of view-only items                                                   |
-| `stretch.gap`                                                      | 4            | space between neighbouring boxes                                            |
-| `stretch.minContact`                                               | 12           | least overlap with the cell a box was reached from                          |
-| `stretch.overfill`                                                 | 1.3          | viewport multiple the walk fills                                            |
-| `stretch.layerDepth`                                               | 120          | distance between depth planes                                               |
-| `stretch.fadeBand`, `fadeFloor`                                    | 0.35, 0.15   | outer fraction that fades; the opacity it fades to                          |
-| `stretch.clipMargin`                                               | 6            | margin before a hidden cell is shown again                                  |
-| `stretch.ghostShare`                                               | 0.6          | a ghost's opacity as a share of `fadeFloor` (plan D1)                       |
-| `stretch.abbreviateBelow`, `coarseBelow`                           | 0.75, 0.5    | opacities below which content shortens, then becomes bars (plan D2)         |
-| `stretch.heatSectors`, `stretch.heatFull`                          | 16, 24       | directions the edge heat is summed in; count at full glow                   |
-| `stretch.breadcrumbs`                                              | 6            | cells in the breadcrumb strip                                               |
-| `stretch.maxCellSpan`                                              | 16           | most a cell's measured size may be, as a multiple of the pane's longer side |
-| `view.draw.cellBorderPx`, `focusBorderPx`                          | 1, 2.5       | a cell's border; the focus's, heavier than any edge                         |
-| `view.draw.ghostStrokePx`, `ghostSeamShare`                        | 1, 0.18      | a ghost's outline; the share of its shorter side left open at each corner   |
-| `view.draw.tickRulePx`, `coarseBarShare`                           | 2, 0.45      | the rule under a tick; the share of a line a coarse bar fills               |
-| `view.draw.dash.dash`, `dot`, `dashDotDot`, `dashDot`, `longShort` | "6 3" ...    | each dash style's pattern, in strand widths, drawn then open                |
-| `view.strand.minWidthPx`, `opacityFloor`                           | 5, 0.7       | least width on the screen, and least opacity against fading cells           |
-| `view.strand.labelClearPx`                                         | 2            | room a strand keeps from a label's box                                      |
-| `view.page.dim`                                                    | 0.3          | share of its opacity the page keeps while a slice is shown on its own       |
-| `view.page.clearancePx`                                            | 64           | how far above the page's top edge a slice shown on its own stands           |
-| `ring.radius`, `ring.radiusStep`                                   | 220, 90      | ring 0's least radius; growth per ring                                      |
-| `ring.tiltStep`                                                    | 28           | lean added per pair of rings                                                |
-| `ring.slotWidth`, `ring.slotHeight`                                | 140, 44      | a ring cell's box                                                           |
-| `ring.hubMaxShare`                                                 | 0.4          | most of the pane the hub's content may take                                 |
-| `ring.labelAt`                                                     | 0.55         | where on an edge its label sits                                             |
-| `ring.stubs`                                                       | true         | draw second-hop stubs                                                       |
-| `ring.maxDepth`, `ring.childScale`                                 | 2, 0.5       | how far out neighbours show wheels; a child wheel's size                    |
-| `ring.childGap`, `ring.childBend`                                  | 50, 0.6      | arc left open towards the parent; how far a child wheel curls back          |
-| `ring.flexStep`, `ring.flexTries`                                  | 24, 6        | how a slot is moved clear of a real cell, and how often                     |
-| `ring.nameMinChars`                                                | 6            | shortest a condensed dimension name gets before it is hidden                |
-| `ring.dragThreshold`, `ring.dropRadius`                            | 6, 36        | drag start distance; drop target radius (not below `ui.minTouchPx`)         |
-| `pack.laneMaxLines`, `pack.chipMaxWidth`                           | 3, 220       | limits on a constituent's box                                               |
-| `pack.nestDepth`                                                   | 3            | nested packs drawn before collapsing to a badge                             |
-| `pack.seam`, `pack.spreadGap`                                      | 1, 28        | line between glued lanes; room between them when spread                     |
-| `pack.strandWidth`                                                 | 2            | a strand's thickness                                                        |
-| `rank.halfLife`, `rank.smoothing`, `rank.presentBoost`             | 200, 4, 2    | ranking: decay in runs; pull towards "used"; weight of present dimensions   |
-| `pack.aheadSteps`                                                  | 2            | packs derived beyond the pane                                               |
-| `page.backgroundDepth`, `page.backgroundOpacity`                   | 720, 0.42    | where and how dim a context document is                                     |
-| `page.base.documentGap`, `page.base.pageGap`                       | 432, 32      | between documents; between pages                                            |
-| `page.base.coalesceGap`, `liftDepth`                               | 432, 90      | gap between coalesced pages; how far they come forward                      |
-| `page.base.coalesceStepCap`                                        | 600          | most solver steps; it stops sooner once settled                             |
-| `page.base.physicsUnitPx`                                          | 18           | pixels in one unit of the `physics.*` settings                              |
-| `page.base.bandContext`                                            | 2            | lines shown either side of a passage in a windowed page                     |
-| `page.base.contextOpacity`                                         | 0.42         | pages not taking part while a link is active                                |
-| `page.base.levelTolerance`                                         | 2            | how level tied passages must end up                                         |
-| `page.base.subjectMs`, `rowMs`, `rowDelayMs`                       | 620, 450, 90 | motion of the page brought over and of those making room                    |
-| `stack.spacing`, `stack.gutter`, `stack.deckGap`                   | 60, 48, 240  | along the line; between the two tops; between decks                         |
-| `stack.tuckStrip`                                                  | 40           | strip of the passed stack shown in a narrow pane                            |
-| `stack.nearPages`, `stack.nearFalloff`                             | 6, 0.7       | pages scored behind each top; weight per place                              |
-| `stack.lineStartWeight`, `lineEndWeight`                           | 0.5, 0.2     | value of a partly visible line                                              |
-| `stack.search.azimuthStep`, `recessionStep`                        | 15, 5        | candidate grid                                                              |
-| `stack.search.minRecession`, `maxRecession`                        | 10, 60       | range of the line's angle from the view axis                                |
-| `stack.search.hysteresis`                                          | 0.05         | how much better a new direction must score                                  |
-| `stack.fadePages`, `stack.fadeFloor`                               | 12, 0.08     | fade rate along the line; least opacity                                     |
-| `stack.minPagePx`                                                  | 8            | height below which unmarked pages stop                                      |
-| `stack.minFlipMs`, `flipMs`, `maxTransitionMs`                     | 60, 120, 420 | riffle timings, and the bound that decides riffle or split                  |
-| `stack.splitMs`, `stack.splitLeadMs`                               | 320, 80      | block motion; delay before the target flies in                              |
+| Setting                                                            | Default      | Meaning                                                                    |
+| ------------------------------------------------------------------ | ------------ | -------------------------------------------------------------------------- |
+| `view.arena.windowCells`                                           | 4096         | derived cells before a placement tosses and re-derives (§6.7)              |
+| `view.camera.restYaw`, `restPitch`                                 | 12, 8        | the rest camera's turn, so depth is visible                                |
+| `activity.settleMs`, `activity.bounceMs`                           | 1200, 300    | pause that ends a run of movement; a step undone this soon is a slip       |
+| `subspace.rimBand`                                                 | 48           | band at the pane's edge showing the next space along `u`                   |
+| `view.motion.reduced`                                              | false        | every tween and transition becomes a cut                                   |
+| `view.motion.stepMs`, `stepEase`                                   | 120          | a step, or a move a view does not time; curve out-cubic                    |
+| `view.motion.tossOutMs`, `tossOutEase`                             | 90           | discarded view cells fade in place; in-cubic                               |
+| `view.motion.tossInMs`, `tossInEase`, `tossInScale`                | 160, 0.92    | new view cells fade in, growing from that share; out-cubic                 |
+| `view.motion.viewSwitchMs`, `viewSwitchEase`                       | 220          | cross-fade on a change of view; in-out-cubic                               |
+| `view.motion.subViewMs`, `subViewEase`                             | 150          | a change of sub-view; in-out-cubic                                         |
+| `view.motion.hintEase`                                             | in-out-quad  | curve of a move a view times itself, as today's sworph                     |
+| `view.viewOnlyOpacity`                                             | 0.7          | chrome of view-only items                                                  |
+| `stretch.gap`                                                      | 4            | space between neighbouring boxes                                           |
+| `stretch.minContact`                                               | 12           | least overlap with the cell a box was reached from                         |
+| `stretch.overfill`                                                 | 1.3          | viewport multiple the walk fills                                           |
+| `stretch.layerDepth`                                               | 120          | distance between depth planes                                              |
+| `stretch.depthFade`                                                | 0.8          | share of its opacity a cell keeps for each plane from the focus's          |
+| `stretch.fadeBand`, `fadeFloor`                                    | 0.35, 0.25   | outer fraction that fades; the opacity it fades to                         |
+| `stretch.clipMargin`                                               | 6            | margin before a hidden cell is shown again                                 |
+| `stretch.ghostShare`                                               | 0.8          | a ghost's opacity as a share of `fadeFloor` (plan D1)                      |
+| `stretch.abbreviateBelow`, `coarseBelow`                           | 0.75, 0.5    | opacities below which content shortens, then becomes bars (plan D2)        |
+| `stretch.heatSectors`, `stretch.heatFull`                          | 16, 24       | directions the edge heat is summed in; count at full glow                  |
+| `stretch.breadcrumbs`                                              | 6            | cells in the breadcrumb strip                                              |
+| `stretch.maxCellSpan`                                              | 16           | most a cell's measured size may be, in panes, from 1 to 256 (D8)           |
+| `view.draw.cellBorderPx`, `focusBorderPx`                          | 1, 2.5       | a cell's border; the focus's, heavier than any edge                        |
+| `view.draw.ghostStrokePx`, `ghostCornerShare`                      | 1, 0.3       | a ghost's outline; the radius of its rounded corners, as a share of a side |
+| `view.draw.tickRulePx`, `coarseBarShare`                           | 2, 0.45      | the rule under a tick; the share of a line a coarse bar fills              |
+| `view.draw.dash.dash`, `dot`, `dashDotDot`, `dashDot`, `longShort` | "6 3" ...    | each dash style's pattern, in strand widths, drawn then open               |
+| `view.draw.dashLeastLength`, `dashMaxCount`                        | 0.5, 256     | shortest stretch of a pattern, in widths; most dashes a strand is cut into |
+| `view.strand.minWidthPx`, `opacityFloor`                           | 5, 0.7       | least width on the screen, and least opacity against fading cells          |
+| `view.strand.labelClearPx`                                         | 2            | room a strand keeps from a label's box                                     |
+| `view.page.dim`                                                    | 0.3          | share of its opacity the page keeps while a slice is shown on its own      |
+| `view.page.dimUnified`                                             | 1            | the same in the unified view, where the page is read; 1 leaves it alone    |
+| `view.page.clearancePx`                                            | 64           | how far above the page's top edge a slice shown on its own stands          |
+| `view.chrome.hintRows`                                             | 3            | rows the key hints may take at the foot of the pane                        |
+| `view.compass.dodge`                                               | true         | the compass moves to a free corner when the scene would be under it        |
+| `ring.radius`, `ring.radiusStep`                                   | 220, 90      | ring 0's least radius; growth per ring                                     |
+| `ring.tiltStep`                                                    | 28           | lean added per pair of rings                                               |
+| `ring.slotWidth`, `ring.slotHeight`                                | 140, 44      | a ring cell's box                                                          |
+| `ring.hubMaxShare`                                                 | 0.4          | most of the pane the hub's content may take                                |
+| `ring.labelAt`                                                     | 0.55         | where on an edge its label sits                                            |
+| `ring.stubs`                                                       | true         | draw second-hop stubs                                                      |
+| `ring.maxDepth`, `ring.childScale`                                 | 2, 0.5       | how far out neighbours show wheels; a child wheel's size                   |
+| `ring.childGap`, `ring.childBend`                                  | 50, 0.6      | arc left open towards the parent; how far a child wheel curls back         |
+| `ring.flexStep`, `ring.flexTries`                                  | 24, 6        | how a slot is moved clear of a real cell, and how often                    |
+| `ring.nameMinChars`                                                | 6            | shortest a condensed dimension name gets before it is hidden               |
+| `ring.dragThreshold`, `ring.dropRadius`                            | 6, 36        | drag start distance; drop target radius (not below `ui.minTouchPx`)        |
+| `pack.laneMaxLines`, `pack.chipMaxWidth`                           | 3, 220       | limits on a constituent's box                                              |
+| `pack.nestDepth`                                                   | 3            | nested packs drawn before collapsing to a badge                            |
+| `pack.seam`, `pack.spreadGap`                                      | 1, 28        | line between glued lanes; room between them when spread                    |
+| `pack.strandWidth`                                                 | 2            | a strand's thickness                                                       |
+| `rank.halfLife`, `rank.smoothing`, `rank.presentBoost`             | 200, 4, 2    | ranking: decay in runs; pull towards "used"; weight of present dimensions  |
+| `pack.aheadSteps`                                                  | 2            | packs derived beyond the pane                                              |
+| `page.backgroundDepth`, `page.backgroundOpacity`                   | 720, 0.42    | where and how dim a context document is                                    |
+| `page.base.documentGap`, `page.base.pageGap`                       | 432, 32      | between documents; between pages                                           |
+| `page.base.coalesceGap`, `liftDepth`                               | 432, 90      | gap between coalesced pages; how far they come forward                     |
+| `page.base.coalesceStepCap`                                        | 600          | most solver steps; it stops sooner once settled                            |
+| `page.base.physicsUnitPx`                                          | 18           | pixels in one unit of the `physics.*` settings                             |
+| `page.base.bandContext`                                            | 2            | lines shown either side of a passage in a windowed page                    |
+| `page.base.contextOpacity`                                         | 0.42         | pages not taking part while a link is active                               |
+| `page.base.levelTolerance`                                         | 2            | how level tied passages must end up                                        |
+| `page.base.subjectMs`, `rowMs`, `rowDelayMs`                       | 620, 450, 90 | motion of the page brought over and of those making room                   |
+| `stack.spacing`, `stack.gutter`, `stack.deckGap`                   | 60, 48, 240  | along the line; between the two tops; between decks                        |
+| `stack.tuckStrip`                                                  | 40           | strip of the passed stack shown in a narrow pane                           |
+| `stack.nearPages`, `stack.nearFalloff`                             | 6, 0.7       | pages scored behind each top; weight per place                             |
+| `stack.lineStartWeight`, `lineEndWeight`                           | 0.5, 0.2     | value of a partly visible line                                             |
+| `stack.search.azimuthStep`, `recessionStep`                        | 15, 5        | candidate grid                                                             |
+| `stack.search.minRecession`, `maxRecession`                        | 10, 60       | range of the line's angle from the view axis                               |
+| `stack.search.hysteresis`                                          | 0.05         | how much better a new direction must score                                 |
+| `stack.fadePages`, `stack.fadeFloor`                               | 12, 0.08     | fade rate along the line; least opacity                                    |
+| `stack.minPagePx`                                                  | 8            | height below which unmarked pages stop                                     |
+| `stack.minFlipMs`, `flipMs`, `maxTransitionMs`                     | 60, 120, 420 | riffle timings, and the bound that decides riffle or split                 |
+| `stack.splitMs`, `stack.splitLeadMs`                               | 320, 80      | block motion; delay before the target flies in                             |
 
 The defaults that restate today's constants are converted from them at `Doc::pixelsToWorld` (1/18):
 24 world units of document gap, the same again between coalesced pages, and 40 of background depth.
@@ -3947,6 +3958,15 @@ ______________________________________________________________________
   row cleared of its top edge; a layout cannot be hung by a measure, a pane or a `zigzag.*` length
   that is not a usable size; the presenter allocates nothing while a move animates; and a scripted
   capture waits for a frame that ends with nothing pending.
+- 2026-10-15 — §9.1.4, §9.1.5, §12.3 as built (M2 second closing round, D): a ghost is drawn at 0.2
+  with rounded corners and, like the strands to it, is cut at the pane's edge; a cell behind steps
+  aside to the left of the one it came from and fades by `stretch.depthFade` for each plane; the
+  compass moves to a free corner; a label stands on a chip of its own, so it reads over a page, and
+  the unified view may dim the page by a setting (`view.page.dimUnified`, off by default, since the
+  page is read there) with a dim that holds against the writers that set a page's opacity; the key
+  hints wrap to rows that fit; a dash pattern has a floor and a strand a cap on its dashes;
+  `stretch.maxCellSpan` is bounded at 256 panes and a measure at 2^22 pixels, and the slides of the
+  walk step by one float where a gap is lost to rounding.
 - 2026-10-15 — §7.5, §11.7, §12.2 and the layout list of §12 as built (M2 second closing round, C):
   the reader's focus in a slice moved out of `system://layout` (`slice.<id>.focus` is deleted, no
   reader kept) into `system://activity` as `SliceFocusLog` records, one per rest of

@@ -95,7 +95,17 @@ void Views::drawFrame(gleditor::FrameContext &ctx) {
                          "Update notice delivery failed: {}", error.what());
     }
   }
-  pageDim_.apply(ctx, pagesDimmed_.load() ? pageDimShare_.load() : 1.0F);
+  switch (pagesDimmed_.load()) {
+  case PageDimming::Off:
+    pageDim_.apply(ctx, 1.0F);
+    break;
+  case PageDimming::Alone:
+    pageDim_.apply(ctx, pageDimShare_.load());
+    break;
+  case PageDimming::Beside:
+    pageDim_.apply(ctx, pageDimUnifiedShare_.load());
+    break;
+  }
   const auto cameraBefore = cameraPosition();
   framingWaiting_         = false;
   if (ctx.state.documentsVisible) frameForReading(ctx);

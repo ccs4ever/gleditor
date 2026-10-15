@@ -3061,6 +3061,7 @@ int XuzzApp::run(const int argc, char **argv) {
           {
             const auto draw = xanadu::ViewDrawConfig::fromStore(store);
             views.setPageDimShare(draw.pageDim);
+            views.setPageDimUnifiedShare(draw.pageDimUnified);
             views.setPlacementClearancePx(draw.pageClearancePx);
           }
           for (const auto &presentation : viewPresentations) {
@@ -3110,6 +3111,7 @@ int XuzzApp::run(const int argc, char **argv) {
       map.setVisible(uiCfg.hypertimeMapVisible);
       const auto draw = xanadu::ViewDrawConfig::fromStore(uiStore);
       views.setPageDimShare(draw.pageDim);
+      views.setPageDimUnifiedShare(draw.pageDimUnified);
       views.setPlacementClearancePx(draw.pageClearancePx);
     }
     const auto loIdx = session->systemStoreIndex(xanadu::SystemDocKind::Layout);

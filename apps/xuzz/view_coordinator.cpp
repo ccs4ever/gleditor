@@ -22,7 +22,12 @@ ViewCoordinator::ViewCoordinator(
     AppStateRef state)
     : views_(views), slice_(std::move(slice)),
       bridgeCoordinator_(bridgeCoordinator), renderer_(std::move(renderer)),
-      state_(std::move(state)) {}
+      state_(std::move(state)) {
+  // The program starts in the unified view, which setViewMode() would not
+  // enter (it is already the mode), so its page dim is set here: the slice
+  // stands over the page from the first frame (M2 gate 2, D5).
+  views_.dimPagesBeside();
+}
 
 void ViewCoordinator::setViewMode(const ViewMode mode) {
   if (mode_ == mode) {
@@ -83,7 +88,7 @@ void ViewCoordinator::apply() {
     slice_->setPresentationVisible(true);
     slice_->setPresentationTransformResolver(
         [this] { return views_.presentationTransform(); });
-    views_.dimPages(false);
+    views_.dimPagesBeside();
     if (!bridgeCoordinator_.attached()) {
       bridgeCoordinator_.attach(*slice_);
     }

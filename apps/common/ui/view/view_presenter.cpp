@@ -91,6 +91,24 @@ constexpr std::uint32_t kFirstTag = 1;
   return 0U != (item.flags & itemGhost);
 }
 
+/// Whether a line of @p length drawn at @p width in @p pattern is no more
+/// than @p most dashes: a pattern's period is its lengths times the width, and
+/// a pattern that is not a positive finite period is none.
+[[nodiscard]] bool dashesWithinCap(const std::span<const float> pattern,
+                                   const float width, const float length,
+                                   const std::uint32_t most) noexcept {
+  float period = 0.0F;
+  for (const auto each : pattern) {
+    period += each * width;
+  }
+  if (!std::isfinite(period) || period <= 0.0F || !std::isfinite(length)) {
+    return false;
+  }
+  const double dashes = (static_cast<double>(length) / period) *
+                        static_cast<double>((pattern.size() + 1) / 2);
+  return dashes <= static_cast<double>(most);
+}
+
 } // namespace
 
 std::string spokenMessage(const ViewMessage message,
@@ -554,26 +572,67 @@ void SlicePresenter::drawCell(RenderState &state, Plane &plane,
   }
 }
 
+namespace {
+
+/// One quarter of a rounded outline, as the rows of a staircase one stroke
+/// tall: the canvas draws only upright quads, so a curve is the steps of one.
+/// @p centre is the arc's centre; @p sx and @p sy say which quarter, by the
+/// sign of the way it runs from there.
+void addQuarterArc(gleditor::Canvas &canvas, const glm::vec2 centre,
+                   const float radius, const float sx, const float sy,
+                   const float stroke, const std::uint32_t colour) {
+  constexpr int kMostRows = 32;
+  const int rows          = std::clamp(
+      static_cast<int>(std::lround(radius / std::max(stroke, 1e-6F))), 2,
+      kMostRows);
+  const float rise = radius / static_cast<float>(rows);
+  for (int row = 0; row < rows; ++row) {
+    const float t0 = rise * static_cast<float>(row);
+    const float t1 = t0 + rise;
+    // The arc leaves the side at t = 0 (x = radius) and meets the top or
+    // bottom at t = radius (x = 0).
+    const float far  = std::sqrt(std::max(0.0F, (radius * radius) - (t0 * t0)));
+    const float near = std::sqrt(std::max(0.0F, (radius * radius) - (t1 * t1)));
+    const float reach = std::min(near, far - stroke);
+    const float width = far - reach;
+    canvas.addRect(sx > 0.0F ? centre.x + reach : centre.x - far,
+                   sy > 0.0F ? centre.y + t0 : centre.y - t1, width, rise,
+                   colour);
+  }
+}
+
+} // namespace
+
 void SlicePresenter::drawGhost(Plane &plane, const PlacedItem &item) {
   const float left   = item.centre.x - (item.width / 2.0F);
   const float bottom = item.centre.y - (item.height / 2.0F);
   const float right  = left + item.width;
   const float top    = bottom + item.height;
-  const float seam   = std::min(item.width, item.height) * draw_.ghostSeamShare;
+  const float radius =
+      std::min(item.width, item.height) * draw_.ghostCornerShare;
   GLEDITOR_LOG_TRACE(kCategory,
-                     "ghost {} at {},{} size {}x{} opacity {} seam {}",
+                     "ghost {} at {},{} size {}x{} opacity {} radius {}",
                      item.id.value, item.centre.x, item.centre.y, item.width,
-                     item.height, item.opacity, seam);
+                     item.height, item.opacity, radius);
   const float stroke = deviceStroke(draw_.ghostStrokePx, item.centre);
   const auto colour  = themed(theme_.colours.muted, item.opacity);
-  // Four sides with their corners left open: soft-edged and seamed, never a
-  // square box (plan §5.1 principle 1).
-  const float run  = std::max(0.0F, item.width - (2.0F * seam));
-  const float rise = std::max(0.0F, item.height - (2.0F * seam));
-  plane.body->addRect(left + seam, bottom, run, stroke, colour);
-  plane.body->addRect(left + seam, top - stroke, run, stroke, colour);
-  plane.body->addRect(left, bottom + seam, stroke, rise, colour);
-  plane.body->addRect(right - stroke, bottom + seam, stroke, rise, colour);
+  // Rounded where a stored cell is square (plan §5.1 principle 1, §5.5 #3).
+  const float run  = std::max(0.0F, item.width - (2.0F * radius));
+  const float rise = std::max(0.0F, item.height - (2.0F * radius));
+  plane.body->addRect(left + radius, bottom, run, stroke, colour);
+  plane.body->addRect(left + radius, top - stroke, run, stroke, colour);
+  plane.body->addRect(left, bottom + radius, stroke, rise, colour);
+  plane.body->addRect(right - stroke, bottom + radius, stroke, rise, colour);
+  if (radius > 0.0F) {
+    addQuarterArc(*plane.body, {left + radius, bottom + radius}, radius, -1.0F,
+                  -1.0F, stroke, colour);
+    addQuarterArc(*plane.body, {right - radius, bottom + radius}, radius, 1.0F,
+                  -1.0F, stroke, colour);
+    addQuarterArc(*plane.body, {left + radius, top - radius}, radius, -1.0F,
+                  1.0F, stroke, colour);
+    addQuarterArc(*plane.body, {right - radius, top - radius}, radius, 1.0F,
+                  1.0F, stroke, colour);
+  }
 }
 
 void SlicePresenter::drawLabel(RenderState &state, Plane &plane,
@@ -590,8 +649,13 @@ void SlicePresenter::drawLabel(RenderState &state, Plane &plane,
   // of this frame: a box that grows or shrinks as it fades would otherwise be
   // a new text to shape on every frame it moves.
   const auto &fitted = oneLine(words, captionFont_, maxWidth);
+  // A chip of the surface colour for the words to stand on: a label has no
+  // box of a cell's, and drawn straight onto a page beside the slice it had
+  // black words on white or white on a page's ink (M2 gate 2, D5).
+  const auto chip = themed(theme_.colours.surface, item.opacity);
+  plane.caption->addRect(left, bottom, item.width, item.height, chip);
   plane.caption->addText(state, {left, bottom, item.width, item.height}, fitted,
-                         themed(theme_.colours.text, item.opacity), 0U);
+                         themed(theme_.colours.text, item.opacity), chip);
   if (rule) {
     const float thick = deviceStroke(draw_.tickRulePx, item.centre);
     plane.caption->addRect(left, bottom - thick, item.width, thick, *rule);
@@ -676,7 +740,11 @@ void SlicePresenter::addDashed(const PlacedEdge &edge, const glm::vec3 along,
                                const std::uint32_t colour,
                                const std::span<const float> pattern,
                                const float from, const float to) {
-  if (pattern.empty()) {
+  // A strand that would need more dashes than view.draw.dashMaxCount is drawn
+  // solid: a pattern of fine dashes on a long strand is a beam each, and the
+  // cost of a frame is not the reader's to find out.
+  if (pattern.empty() ||
+      !dashesWithinCap(pattern, width, to, draw_.dashMaxCount)) {
     beams_->add(edge.a + (along * from), edge.a + (along * to), width, colour,
                 0, from / length, to / length);
     return;
@@ -720,6 +788,53 @@ void SlicePresenter::project(const glm::mat4 &toClip, const ui::Size viewport) {
   ++projectionRevision_;
 }
 
+std::vector<std::string>
+SlicePresenter::hintRowsFitting(const std::string_view hints,
+                                const float room) {
+  constexpr std::string_view kSeparator = " | ";
+  std::vector<std::string> rows;
+  const auto widthOf = [this](const std::string_view words) {
+    return oneLine(words, chromeFont_, 0.0F).widthPx;
+  };
+  // Items keep the order they were given, which is most used first; a row
+  // takes as many as fit, so nothing is cut mid-word at the edge.
+  for (std::size_t at = 0; at <= hints.size();) {
+    const auto cut  = std::min(hints.find('\n', at), hints.size());
+    const auto text = hints.substr(at, cut - at);
+    at              = cut + 1;
+    std::string row;
+    for (std::size_t from = 0; from <= text.size();) {
+      const auto stop = std::min(text.find(kSeparator, from), text.size());
+      const auto item = text.substr(from, stop - from);
+      from            = stop + kSeparator.size();
+      if (item.empty()) {
+        continue;
+      }
+      if (row.empty()) {
+        row = item;
+      } else if (const auto joined =
+                     std::string{row}.append(kSeparator).append(item);
+                 widthOf(joined) > room) {
+        rows.push_back(std::move(row));
+        row = item;
+      } else {
+        row = joined;
+      }
+    }
+    if (!row.empty()) {
+      rows.push_back(std::move(row));
+    }
+  }
+  // What does not fit in view.chrome.hintRows rows is the end of the last,
+  // which the line's ellipsis then marks.
+  const std::size_t most = std::max<std::size_t>(1, draw_.hintRows);
+  while (rows.size() > most) {
+    rows[most - 1].append(kSeparator).append(rows.back());
+    rows.pop_back();
+  }
+  return rows;
+}
+
 void SlicePresenter::drawChrome(gleditor::FrameContext &ctx,
                                 const PresentedChrome &chrome) {
   if (!chrome_ || !chromeFont_) {
@@ -728,31 +843,33 @@ void SlicePresenter::drawChrome(gleditor::FrameContext &ctx,
   const auto width  = static_cast<float>(ctx.screenWidth);
   const auto height = static_cast<float>(ctx.screenHeight);
   if (!chromeStamp_ || *chromeStamp_ != chrome.stamp ||
-      chromeMetrics_ != metrics_ || chromeBase_ != ctx.chrome) {
+      chromeMetrics_ != metrics_ || chromeBase_ != ctx.chrome ||
+      chromeWidth_ != width) {
     chrome_->clear();
     chrome_->setTag(render::tagKindNone, 0);
+    // A crumb with no words names nothing: a trail of them is no trail.
     std::string trail;
     for (const auto &crumb : chrome.breadcrumbs) {
-      trail += trail.empty() ? "Walked: " : " › ";
-      trail += crumb;
+      if (!crumb.empty()) {
+        trail += trail.empty() ? "Walked: " : " › ";
+        trail += crumb;
+      }
     }
+    const float padX = metrics_.px(chrome.paddingX);
+    const float padY = metrics_.px(chrome.paddingY);
+    const float line = std::ceil(chromeFont_->metrics().lineHeight);
+    const float room = std::max(0.0F, width - (2.0F * padX));
+    const auto rows  = hintRowsFitting(chrome.hints, room);
     struct Line {
       std::string_view words;
       glm::vec4 colour;
     };
     std::vector<Line> lines{Line{chrome.notice, theme_.colours.accent},
-                            Line{trail, theme_.colours.text}};
-    // A hint holds as many rows as it has lines.
-    for (std::size_t at = 0; at <= chrome.hints.size();) {
-      const auto cut =
-          std::min(chrome.hints.find('\n', at), chrome.hints.size());
-      lines.push_back(
-          Line{chrome.hints.substr(at, cut - at), theme_.colours.muted});
-      at = cut + 1;
+                            Line{trail, theme_.colours.text},
+                            Line{chrome.status, theme_.colours.accent}};
+    for (const auto &row : rows) {
+      lines.push_back(Line{row, theme_.colours.muted});
     }
-    const float padX = metrics_.px(chrome.paddingX);
-    const float padY = metrics_.px(chrome.paddingY);
-    const float line = std::ceil(chromeFont_->metrics().lineHeight);
     const auto count = std::ranges::count_if(
         lines, [](const Line &each) { return !each.words.empty(); });
     chromeClaim_ =
@@ -769,7 +886,6 @@ void SlicePresenter::drawChrome(gleditor::FrameContext &ctx,
         if (each.words.empty()) {
           continue;
         }
-        const float room   = std::max(0.0F, width - (2.0F * padX));
         const auto &fitted = oneLine(each.words, chromeFont_, room);
         chrome_->addText(ctx.state, {padX, top - line, room, line}, fitted,
                          ui::rgba(each.colour), surface);
@@ -780,6 +896,7 @@ void SlicePresenter::drawChrome(gleditor::FrameContext &ctx,
     chromeStamp_   = chrome.stamp;
     chromeMetrics_ = metrics_;
     chromeBase_    = ctx.chrome;
+    chromeWidth_   = width;
   }
   ctx.chrome.bottom += chromeClaim_;
   if (chromeClaim_ > 0.0F) {
@@ -859,7 +976,8 @@ void addDashedRule(gleditor::Canvas &canvas, const ViewDrawConfig &draw,
                    const std::uint32_t colour) {
   const auto pattern = dashPattern(draw, style);
   const float bottom = middle - (thickness / 2.0F);
-  if (pattern.empty()) {
+  if (pattern.empty() ||
+      !dashesWithinCap(pattern, thickness, to - from, draw.dashMaxCount)) {
     canvas.addRect(from, bottom, to - from, thickness, colour);
     return;
   }
@@ -895,7 +1013,8 @@ void SlicePresenter::drawCompass(gleditor::FrameContext &ctx,
       .left   = std::max(ctx.chrome.left, ctx.settledChrome.left),
       .right  = std::max(ctx.chrome.right, ctx.settledChrome.right)};
   if (!compassStamp_ || *compassStamp_ != compass.stamp ||
-      compassMetrics_ != metrics_ || compassBase_ != clear) {
+      compassMetrics_ != metrics_ || compassBase_ != clear ||
+      (compass.config.dodge && compassRevision_ != projectionRevision_)) {
     compass_->clear();
     compass_->setTag(render::tagKindNone, 0);
     const auto &cfg    = compass.config;
@@ -922,8 +1041,8 @@ void SlicePresenter::drawCompass(gleditor::FrameContext &ctx,
       return arm.group ? std::format("{} ({})", arm.shows, arm.members)
                        : arm.shows;
     };
-    const float left = clear.left + margin;
-    const float top  = height - clear.top - margin;
+    float left = clear.left + margin;
+    float top  = height - clear.top - margin;
     const float fixed =
         (2.0F * pad) + pointColumn + gap + swatch + gap + glyph + gap;
     const float room  = std::max(0.0F, width - left - margin - fixed);
@@ -935,6 +1054,48 @@ void SlicePresenter::drawCompass(gleditor::FrameContext &ctx,
     const float panelW = fixed + labelColumn;
     const auto rows    = static_cast<float>(compass.arms.size());
     const float panelH = (2.0F * pad) + (rows * row) + ((rows - 1.0F) * gap);
+    if (cfg.dodge) {
+      // The legend is drawn over the scene, so a cell's words under it are
+      // hidden. It stays where it is until something is under it, then goes
+      // to the corner with the least under it, top left first (M2 gate 2,
+      // D2). The corners are the pane's, inside what others have claimed.
+      const std::array<glm::vec2, 4> corners{
+          glm::vec2{clear.left + margin, height - clear.top - margin},
+          glm::vec2{width - clear.right - margin - panelW,
+                    height - clear.top - margin},
+          glm::vec2{clear.left + margin, clear.bottom + margin + panelH},
+          glm::vec2{width - clear.right - margin - panelW,
+                    clear.bottom + margin + panelH}};
+      const auto covered = [&](const glm::vec2 &corner) {
+        float area = 0.0F;
+        for (std::size_t i = 0; i < projected_.size() && i < drawn_.size();
+             ++i) {
+          if (!projected_[i] || drawnGhost_[i] ||
+              ContentMode::None == drawnContent_[i]) {
+            continue;
+          }
+          const auto &box = projected_[i]->bounds;
+          const float across =
+              std::min(box.left + box.width, corner.x + panelW) -
+              std::max(box.left, corner.x);
+          const float down = std::min(box.bottom + box.height, corner.y) -
+                             std::max(box.bottom, corner.y - panelH);
+          if (across > 0.0F && down > 0.0F) {
+            area += across * down;
+          }
+        }
+        return area;
+      };
+      float least = covered(corners[compassCorner_]);
+      for (std::size_t i = 0; i < corners.size() && least > 0.0F; ++i) {
+        if (const auto area = covered(corners[i]); area < least) {
+          least          = area;
+          compassCorner_ = i;
+        }
+      }
+      left = corners[compassCorner_].x;
+      top  = corners[compassCorner_].y;
+    }
     const float bottom = top - panelH;
 
     const auto surface = ui::rgba(theme_.colours.surface);
@@ -974,10 +1135,11 @@ void SlicePresenter::drawCompass(gleditor::FrameContext &ctx,
       rowTop = rowBottom - gap;
     }
     compass_->commit();
-    compassStamp_   = compass.stamp;
-    compassMetrics_ = metrics_;
-    compassBase_    = clear;
-    compassDrawn_   = true;
+    compassStamp_    = compass.stamp;
+    compassMetrics_  = metrics_;
+    compassBase_     = clear;
+    compassRevision_ = projectionRevision_;
+    compassDrawn_    = true;
   }
   if (compassDrawn_) {
     const glm::mat4 ortho =

@@ -842,7 +842,9 @@ void ViewSlicePresentation::drawFrame(gleditor::FrameContext &ctx) {
   presenter_.drawChrome(
       ctx, PresentedChrome{.breadcrumbs = breadcrumbs_,
                            .notice      = notice_,
-                           .hints       = chromeRows_,
+                           .status      = status_,
+                           .hints       = keyboardHere_.load() ? hintsHere_
+                                                               : hintsElsewhere_,
                            .paddingX    = cells_.hudHorizontalPaddingPx,
                            .paddingY    = cells_.hudVerticalPaddingPx,
                            .stamp       = chromeStamp});
