@@ -22,8 +22,8 @@ You are the orchestrator. Develop on `ccr-4382af96-4tdph5`; push with
 ## 2. Where it stands
 
 - **M0 and M1** are done. **M2** (the spine) has every package in, plus a closing round that fixed
-  what its first gate found. Its gate is not yet passed: the first step is to run the three reviews
-  again (§4).
+  what its first gate found. Its second gate found no blocker but sent it to a second, short closing
+  round; the status file's Next lists it.
 - Landed ahead of their milestones: L1, L2, L5, L8, L9, R5's translucent list and the UI's move onto
   it, P1 to P3, E14, and R4's test (disabled until L7).
 - Not started: M3 onward.
@@ -43,16 +43,12 @@ These are not to be reopened.
 1. Read the status file and check the branch builds and is green on this machine: `make -j$(nproc)`,
    `make -k test`, `./tools/compare-backends.sh`. Record the baseline in the status file if it
    differs from the one there (more cores change timing benchmarks; Vulkan may now run).
-1. Run M2's gate again: the red team, the frame inspector and the UX validator, each a read-only
-   Sonnet worker with its own output and XDG directories (the briefs used the first time are
-   summarised in the status file's M2 rows; the findings they produced, and how each was fixed, are
-   in the closing-round commits `66c3202` and `73b68a9`). Then decide go or no-go and write it in
-   the status file.
-1. Known gaps the closing round left, to judge at the gate (each is in the status file): no magenta
-   xanalink ribbon beside dimension strands in any capture (the shipped `unified_store` refuses a
-   slice added to it: "context operation 5 is in the future relative to parent 4"); per-frame
-   allocation inside the library (`BufferPool`, `Canvas::commit`, `bindOverlayPick`, the pick scene
-   copy); ghosts at D1's opacity 0.09 nearly invisible on a dark ground.
+1. Do M2's second closing round, the list in the status file's Next: two Sonnet workers split so
+   they touch different files (behaviour and persistence; drawing, chrome and guards), each fix with
+   a test that fails without it.
+1. Then a short re-check — the red team on those items, the frame inspector on the frames — and the
+   go or no-go for M2, written in the status file. Both earlier gates' findings and fixes are in the
+   closing-round commits (`66c3202`, `73b68a9`) and the status file.
 
 ## 5. Briefing workers
 

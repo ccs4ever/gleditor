@@ -8,12 +8,12 @@ Last updated: 2026-10-15.
 
 ## Where it stands
 
-| Milestone                 | State                                 |
-| ------------------------- | ------------------------------------- |
-| M0, the tree in its shape | A1 and A2 done; closed                |
-| M1, spikes                | done; closed                          |
-| M2, the spine             | closing round done; gate to run again |
-| M3 onward                 | not started                           |
+| Milestone                 | State                                           |
+| ------------------------- | ----------------------------------------------- |
+| M0, the tree in its shape | A1 and A2 done; closed                          |
+| M1, spikes                | done; closed                                    |
+| M2, the spine             | second gate: no-go until a second closing round |
+| M3 onward                 | not started                                     |
 
 ## Done
 
@@ -82,16 +82,36 @@ changed.
 The project moves to a local machine; [`resume-view-project.md`](resume-view-project.md) is the
 prompt that resumes it.
 
-1. **M2's gate, again**: the red team, the frame inspector and the UX validator on the tree after
-   the closing round, then go or no-go here. Gaps the closing round left, to judge there:
-   - No capture shows a magenta xanalink ribbon beside dimension strands: adding a slice to the
-     shipped `unified_store` is refused ("context operation 5 is in the future relative to parent
-     4"), which may itself be a defect.
-   - Per-frame allocation in the library: `BufferPool::reserve`/`release`, `Canvas::commit`,
-     `RenderState::bindOverlayPick`, and `Renderer` copying the `PickScene` per pick request;
-     `ViewSlicePresentation::drawScene` still builds two id strings a frame.
-   - Ghosts at D1's opacity 0.09 are near invisible on a dark ground.
-   - A changed setting default does not re-seed an existing system xanadoc.
+1. **M2's second closing round.** The second gate (2026-10-15) found no blocker and confirmed most
+   of the first round fixed, but not all; the owner's rule is few things fully done.
+   - Behaviour:
+     - Focus is not restored on reopen. `SlicePresentationSwitch::show()`
+       (`slice_presentation_switch.cpp:122`) pushes the visualizer's focus (home) over the kept one,
+       and `persistFocus()` appends about three operations to `system://layout` per rested step that
+       nothing reads, so the store grows without bound. Keep one value per slice, set in place;
+       restore it; flush on exit; test move, close, reopen. Decide whether a reader's focus belongs
+       in `system://layout` at all or in the activity store (R8).
+     - Choosing a view's own palette row after a sub-view leaves the sub-view
+       (`presentation_palette.cpp:175`); the announcement after it is stale.
+     - A swap leaves the previous notice up; a notice hides the view and sub-view line; the hints
+       bar is not in the accessibility tree; the bind dialog's example names a dimension the slice
+       may not have; "posward" and "negward" in messages.
+   - Drawing:
+     - Ghosts too faint at opacity 0.09 and square-cornered (§5.1.1, §5.5 #3).
+     - Labels overlapped: the focus box over the depth neighbour, the wide neighbour over its
+       neighbour, the compass over text, the focus box over a strand label.
+     - Depth invisible: the d.deep scene differs from the ghosts scene only in the status line.
+     - Strands and ghosts run past the viewport edge (a hairline and a tick at the right).
+     - The page is full white behind the slice in the default unified mode
+       (`view_coordinator.cpp:86`), and PageDim is undone by the onion-skin toggle and
+       `arrangeAlongside` (`views.cpp:2077`, `:2095`); `faded()` assumes a black ground.
+     - The hints bar clips "Back to text" with no ellipsis; an empty "Walked:" line.
+     - No capture shows a magenta xanalink ribbon beside dimension strands, and the gold beams sit
+       behind the inspector panel; adding a slice to `unified_store` is refused ("context operation
+       5 is in the future relative to parent 4"), which may be an engine defect.
+   - Guards: a hand-edited dash pattern of tiny lengths hangs the presenter (no lower bound or cap);
+     `stretch.maxCellSpan` up to 1e5 lets a huge measure hang layout.
+   - Then a short re-check: the red team on these items and the frame inspector on the frames.
 1. Then M3 (packs), one milestone at a time.
 
 The spike branches were never meant to land and stay local to the first machine
@@ -206,6 +226,9 @@ What a fresh Ubuntu 24.04 container needs, beyond the submodules:
   for now, so it does not go red on this.
 
 ## Decisions taken
+
+- M2's second gate (2026-10-15): no-go until a second, short closing round; red team, frame
+  inspector and UX validator found no blocker and most of the first round fixed.
 
 - M2's gate (2026-10-14): no-go until the closing round. Red team, frame inspector and UX validator
   found no blocker; the closing round fixes their should-fix items rather than deferring them.
