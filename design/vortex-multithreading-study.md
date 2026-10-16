@@ -109,7 +109,9 @@ entirely in the arena on `d.cache` ranks: `getOrCreateMemoPin` (`vortex/vortex_c
 `lookupMemo` (`vortex/vortex_core.cpp:524`), `recordMemo` (`vortex/vortex_core.cpp:537`). A system
 GC cursor is spawned at host init (`vortex/vortex_host.cpp:86`, `"sys:gc"`); its sweep reaches
 `core_.collectGarbage()` → `arena_.compact()`, which **moves every run** and is **refused while a
-mark is outstanding** (`zigzag/arena_manifold.hpp:613-624`).
+mark is outstanding** (`zigzag/arena_manifold.hpp:613-624`). The specification-only vicon frontend
+(§6.6) adds one further per-arena rank, `d.scan`, holding a string scan's `&subject`/`&pos`; it is
+shared arena state of exactly the `+d.cursors` kind and must be per-worker for the same reason.
 
 ### 1.2 Why this is a GIL and not merely a hotspot
 
@@ -644,6 +646,61 @@ behind the proof that Stages 1–4 work.
 | memo cache (`d.cache`)    | shared arena rank                | per-worker; shared only via explicit promotion          |
 | GC / `collectGarbage()`   | single global mark               | per-worker, no stop-the-world                           |
 
+### 6.6 vicon and vlace — the two specification-only frontends
+
+Two further frontends are specified but not yet built
+([`vicon-goal-directed-language.md`](vicon-goal-directed-language.md),
+[`vlace-functional-language.md`](vlace-functional-language.md)). Both are explicitly "surface syntax
+and nothing more": each adds no opcode, no new `ArenaManifold` method, and no change to the VM,
+resting entirely on the `#Choice`/`#Fail`/`#Cut` frame, `mark()`/`release()`/`promote()`, and the
+`d.cache` island this study already localizes. That shared dependence is exactly why they inherit
+this plan's substrate — and they bracket the difficulty spectrum rather than landing in the middle
+of it.
+
+**vicon is strictly harder than vprolog, and belongs with it in Stage 5.** vicon's one idea is that
+*every expression is a generator*, and the document is explicit that "a `#Choice` that Vlog takes
+before trying a clause is the same `#Choice` vicon takes before resuming a generator." Where §6.4's
+vprolog touches the global `choiceStack_` only during clause resolution, vicon pushes a
+`ChoicePoint` for `1 to 3`, for `i < j`, for `s ? e`, and for every `every` — so the per-worker
+localization of `choiceStack_`, `ChoicePoint::mark`, and the arena trail (§3.4, §6.5) is not an
+optimization for vicon but a correctness precondition for running it on any worker at all. Three
+points of special treatment follow:
+
+- **`d.scan` is new per-worker state.** String scanning puts the subject and position (`&subject`,
+  `&pos`) on a `d.scan` rank in the arena; it must live in the per-worker arena, never a host-level
+  singleton, or two scans on different workers corrupt each other's position. Under the recommended
+  per-worker-arena model this is automatic (each worker's arena owns its own `d.scan`), but it must
+  be stated, the way §1.1 states it for `+d.cursors`.
+- **A generator is confined to one worker for its life.** Reversible assignment `<-` and
+  position-backtracking are arena-trail effects (the document's own mechanism); since
+  `ChoicePoint::mark` names the owning worker's arena after localization, a single goal-directed
+  evaluation cannot span workers. This is the §4.3 shared-mutable-trail hazard, and the treatment is
+  the same as vprolog's dependent conjuncts: do not split one search across workers.
+- **Co-expressions must be worker-pinned.** `create e` / `activate` (`@`) capture a live choice
+  stack and arena mark in a pinned island; activating one on a *different* worker would move choice
+  state across threads, the migration §3.2 forbids. They are marked optional in the specification,
+  so the hard case defers cleanly — activation is either worker-pinned or a message back to the
+  creating worker. vicon's realistic parallelism is therefore only OR-parallel alternation
+  (`e1 | e2` arms on different workers), gated behind the same `system://settings` flag as
+  vprolog's, in Stage 5.
+
+**vlace is strictly easier than VPL, and belongs in Stage 2.** vlace's defining commitment —
+evaluation runs in an `ArenaManifold` and mints no operation, so a pure expression is referentially
+transparent — *is* this study's architecture expressed as a language. Its type system statically
+marks which code is pure (any worker, any order) and which is `IO` (serialized at the merge point),
+handing the scheduler a checkable partition no other frontend offers; its typed `promote()` boundary
+is independently the study's single-serialized-merge rule, and its `std:xanadu` authoring (§13 of
+that document) lowers to private-arena construction plus one `promote`, the ideal threaded shape.
+vlace should ride the Stage 2 data-parallel path directly alongside VPL. Its one genuine hazard is
+narrow and known: lazy thunks are three-state and *blackholed* (unevaluated → under-evaluation →
+forced), so a thunk shared across workers is a data race on the blackhole transition and the result
+slot (§5.1). Two dispositions: with strict share-nothing arenas a thunk lives in and is forced by
+one worker (safe, but a single unforced thunk cannot be handed to two workers); if cross-worker
+thunk sharing is ever wanted (e.g. a `letrec` stream consumed by parallel folds), it needs an atomic
+compare-and-swap on the blackhole transition so exactly one worker forces — the §5.3 atomic-state-
+transition mitigation applied to one cell kind, and vlace's analogue of the per-worker-vs-shared
+memo open question (§7).
+
 ## 7. Risks, open questions, and non-goals
 
 **Risks.** The schedule-dependence of data races is the operational risk: a passing test proves
@@ -742,6 +799,13 @@ re-verified source: host constructor at `vortex_host.cpp:76` with the member ini
 at `vortex_vm.cpp:137-139` (comment at `:136`) in §1 and §5.1; and the stdlib `CellRef fnOp`
 overloads at `:2224` (map), `:2248` (filter), `:2269` (fold) with the `filter` definition at `:2232`
 (§6.1). The `stepScheduler` serial `for` loop body is `:1079-1087` (closing brace at `:1087`).
+2026-10-16 (rev 4) — added §6.6 covering the two specification-only frontends,
+[`vicon`](vicon-goal-directed-language.md) and [`vlace`](vlace-functional-language.md): vicon is
+strictly harder than vprolog (every expression is a choice point; new per-worker `d.scan` state;
+worker-pinned co-expressions) and joins it in Stage 5, while vlace is strictly easier than VPL
+(whole-language referential transparency, a type-checked pure/`IO` partition, `promote()` as the
+single merge) and joins Stage 2, with its one hazard being cross-worker shared-thunk blackholing.
+Added a `d.scan` forward reference to §1.1's shared-state inventory.
 
 Reconciliation note: this study is grounded in and must stay consistent with
 [`vortex-multithreading-briefing.md`](vortex-multithreading-briefing.md), the code-verified factual
