@@ -7,6 +7,7 @@
 #define COMMON_XANADU_VORTEX_HOST_HPP
 
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -21,6 +22,7 @@
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_stdlib.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
+#include "common/xanadu/vortex/worker_context.hpp"
 #include "common/xanadu/vpl/vpl_engine.hpp"
 #include "common/xanadu/vprolog/compiler.hpp"
 #include "common/xanadu/vql/compiler.hpp"
@@ -65,14 +67,42 @@ public:
   void bindManifold(const Manifold *baseManifold);
   void bindStore(xanadu::Store *store);
 
-  [[nodiscard]] const ArenaManifold &arena() const noexcept { return arena_; }
-  [[nodiscard]] ArenaManifold &arena() noexcept { return arena_; }
-  [[nodiscard]] const VortexCore &core() const noexcept { return core_; }
-  [[nodiscard]] VortexCore &core() noexcept { return core_; }
-  [[nodiscard]] const VortexVM &vm() const noexcept { return vm_; }
-  [[nodiscard]] VortexVM &vm() noexcept { return vm_; }
-  [[nodiscard]] const VortexStdLib &stdlib() const noexcept { return stdlib_; }
-  [[nodiscard]] VortexStdLib &stdlib() noexcept { return stdlib_; }
+  [[nodiscard]] const ArenaManifold &arena() const noexcept {
+    return primary_.arena;
+  }
+  [[nodiscard]] ArenaManifold &arena() noexcept { return primary_.arena; }
+  [[nodiscard]] const VortexCore &core() const noexcept {
+    return primary_.core;
+  }
+  [[nodiscard]] VortexCore &core() noexcept { return primary_.core; }
+  [[nodiscard]] const VortexVM &vm() const noexcept { return primary_.vm; }
+  [[nodiscard]] VortexVM &vm() noexcept { return primary_.vm; }
+  [[nodiscard]] const VortexStdLib &stdlib() const noexcept {
+    return primary_.stdlib;
+  }
+  [[nodiscard]] VortexStdLib &stdlib() noexcept { return primary_.stdlib; }
+
+  // -- Stage 1: movable worker contexts ---------------------------------------
+  /// The host's primary worker context: the one the caller runs on today.
+  /// Every existing accessor above delegates to it, so single-context
+  /// behaviour is unchanged (vortex-multithreading-study.md §3.3).
+  [[nodiscard]] WorkerContext &primaryContext() noexcept { return primary_; }
+  [[nodiscard]] const WorkerContext &primaryContext() const noexcept {
+    return primary_;
+  }
+
+  /// Construct an additional worker context overlaying the SAME shared base
+  /// Manifold as the primary (copy-on-write), owned by the host and returned
+  /// by reference. Stage 1 only lets the host *hold* more than one; it starts
+  /// no thread and the caller still drives execution. The worker pool
+  /// (Stage 2/3) is what will step these concurrently. The returned reference
+  /// is stable (the contexts live in a node-stable container).
+  WorkerContext &makeWorkerContext();
+
+  /// How many worker contexts the host holds, including the primary (>= 1).
+  [[nodiscard]] std::size_t workerContextCount() const noexcept {
+    return 1 + extraContexts_.size();
+  }
   [[nodiscard]] const xanadu::vql::VQLEngine &vqlEngine() const noexcept {
     return vqlEngine_;
   }
@@ -252,10 +282,17 @@ private:
   void initHostServices();
   DimRef resolveDimRef(std::string_view dimName);
 
-  ArenaManifold arena_;
-  VortexCore core_;
-  VortexVM vm_;
-  VortexStdLib stdlib_;
+  // The base Manifold every worker context overlays (nullptr => blank arenas).
+  const Manifold *baseManifold_{nullptr};
+
+  // The primary execution context the host runs on. Declared before the
+  // engines because they bind references into its core/vm (Stage 1).
+  WorkerContext primary_;
+
+  // Additional worker contexts the host holds, each overlaying baseManifold_.
+  // node-stable so references handed out by makeWorkerContext() stay valid.
+  std::deque<std::unique_ptr<WorkerContext>> extraContexts_;
+
   xanadu::vql::VQLEngine vqlEngine_;
   xanadu::vql::VQLCompiler vqlCompiler_;
   xanadu::vpl::VPLEngine vplEngine_;

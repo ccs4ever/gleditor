@@ -74,21 +74,32 @@ VortexHostConfig VortexHostConfig::fromStore(const xanadu::Store &store) {
 }
 
 VortexHost::VortexHost(const Manifold *baseManifold)
-    : arena_(baseManifold), core_(arena_), vm_(core_), stdlib_(core_, vm_),
-      vqlEngine_(core_), vqlCompiler_(core_, vm_), vplEngine_(core_) {
+    : baseManifold_(baseManifold), primary_(baseManifold),
+      vqlEngine_(primary_.core), vqlCompiler_(primary_.core, primary_.vm),
+      vplEngine_(primary_.core) {
   initHostServices();
 }
 
-void VortexHost::initHostServices() {
-  stdlib_.bootstrap();
+WorkerContext &VortexHost::makeWorkerContext() {
+  // Stage 1 (vortex-multithreading-study.md §3.3): hold an additional context
+  // over the SAME shared base. Single-threaded still -- this starts no thread;
+  // it only lets the host own more than one execution context. unique_ptr in a
+  // deque keeps the returned reference stable as more are added.
+  extraContexts_.push_back(std::make_unique<WorkerContext>(baseManifold_));
+  extraContexts_.back()->stdlib.bootstrap();
+  return *extraContexts_.back();
+}
 
-  if (const auto sweepOp = stdlib_.resolve("std:gc/sweep")) {
-    gcCursor_ = vm_.spawnCursor(*sweepOp, "sys:gc");
+void VortexHost::initHostServices() {
+  primary_.stdlib.bootstrap();
+
+  if (const auto sweepOp = primary_.stdlib.resolve("std:gc/sweep")) {
+    gcCursor_ = primary_.vm.spawnCursor(*sweepOp, "sys:gc");
   }
 
   // Register native Vortex routines for keymap actions
   auto regPair = [&](std::string_view legacy, std::string_view canonical) {
-    if (const auto op = stdlib_.resolve(canonical)) {
+    if (const auto op = primary_.stdlib.resolve(canonical)) {
       registerActionRoutine(legacy, *op);
       registerActionRoutine(canonical, *op);
     }
@@ -108,13 +119,19 @@ void VortexHost::initHostServices() {
 }
 
 void VortexHost::bindManifold(const Manifold *baseManifold) {
-  arena_ = ArenaManifold(baseManifold);
+  // Reassign the primary arena in place: primary_.core/vm/stdlib hold
+  // references into primary_.arena, and move-assigning the arena replaces its
+  // contents while keeping those references valid. Record the base so any
+  // worker contexts made afterwards overlay the same one (Stage 1 §3.3).
+  baseManifold_  = baseManifold;
+  primary_.arena = ArenaManifold(baseManifold);
+  extraContexts_.clear();
   initHostServices();
 }
 
 void VortexHost::bindStore(xanadu::Store *store) {
   boundStore_ = store;
-  stdlib_.setBoundStore(store);
+  primary_.stdlib.setBoundStore(store);
   vplEngine_.setStore(store);
   if (boundStore_) {
     loadConfigFromStore(*boundStore_);
@@ -129,7 +146,7 @@ std::size_t VortexHost::stepScheduler(std::optional<std::size_t> cycleBudget) {
   const std::size_t budget = cycleBudget.value_or(config_.schedulerCycleBudget);
   std::size_t executed     = 0;
   for (std::size_t i = 0; i < budget; ++i) {
-    std::size_t stepCount = vm_.stepScheduler();
+    std::size_t stepCount = primary_.vm.stepScheduler();
     if (stepCount == 0) {
       break;
     }
@@ -145,24 +162,27 @@ std::size_t VortexHost::stepScheduler(std::optional<std::size_t> cycleBudget) {
   return executed;
 }
 
-std::size_t VortexHost::triggerGarbageCollection() { return stdlib_.gcSweep(); }
+std::size_t VortexHost::triggerGarbageCollection() {
+  return primary_.stdlib.gcSweep();
+}
 
 DimRef VortexHost::resolveDimRef(std::string_view dimName) {
-  if (dimName == "d.spin") return core_.dims().spin;
-  if (dimName == "d.grab") return core_.dims().grab;
-  if (dimName == "d.step") return core_.dims().step;
-  if (dimName == "d.contract") return core_.dims().contract;
-  if (dimName == "d.clone") return core_.dims().clone;
-  if (dimName == "d.cursors") return core_.dims().cursors;
-  if (dimName == "d.cache") return core_.dims().cache;
-  if (dimName == "d.vars") return core_.dims().vars;
-  if (dimName == "d.values") return core_.dims().values;
-  if (dimName == "d.pinning-cursors") return core_.dims().pinningCursors;
-  if (dimName == "d.name") return core_.dims().name;
-  if (dimName == "d.stdlib") return core_.dims().stdlib;
-  if (dimName == "d.clause") return core_.dims().clause;
+  if (dimName == "d.spin") return primary_.core.dims().spin;
+  if (dimName == "d.grab") return primary_.core.dims().grab;
+  if (dimName == "d.step") return primary_.core.dims().step;
+  if (dimName == "d.contract") return primary_.core.dims().contract;
+  if (dimName == "d.clone") return primary_.core.dims().clone;
+  if (dimName == "d.cursors") return primary_.core.dims().cursors;
+  if (dimName == "d.cache") return primary_.core.dims().cache;
+  if (dimName == "d.vars") return primary_.core.dims().vars;
+  if (dimName == "d.values") return primary_.core.dims().values;
+  if (dimName == "d.pinning-cursors")
+    return primary_.core.dims().pinningCursors;
+  if (dimName == "d.name") return primary_.core.dims().name;
+  if (dimName == "d.stdlib") return primary_.core.dims().stdlib;
+  if (dimName == "d.clause") return primary_.core.dims().clause;
 
-  return core_.mintDimension(dimName);
+  return primary_.core.mintDimension(dimName);
 }
 
 bool VortexHost::dispatchAction(const std::string_view actionName) {
@@ -209,8 +229,8 @@ bool VortexHost::dispatchAction(std::string_view actionName, CellRef focusCell,
   if (customIt != customActionRoutines_.end()) {
     if (const auto routineCell =
             gleditor::fromSentinel<zigzag::noCell>(customIt->second)) {
-      CellRef cursor = vm_.spawnCursor(*routineCell, actionName);
-      if (const auto ran = vm_.run(cursor, 1000); !ran.success) {
+      CellRef cursor = primary_.vm.spawnCursor(*routineCell, actionName);
+      if (const auto ran = primary_.vm.run(cursor, 1000); !ran.success) {
         GLEDITOR_LOG_WARN("vortex.host", "action {} failed: {}", actionName,
                           ran.errorMessage);
       }
@@ -225,98 +245,100 @@ bool VortexHost::dispatchAction(std::string_view actionName, CellRef focusCell,
 
   // Navigation actions
   if (actionName == "step-x-pos" || canonical == "std:nav/step_x_pos") {
-    newFocusOut = stdlib_.zzStep(focusCell, resolveDimRef(axes.x_dimension),
-                                 DimVector::POS);
+    newFocusOut = primary_.stdlib.zzStep(
+        focusCell, resolveDimRef(axes.x_dimension), DimVector::POS);
     return true;
   }
   if (actionName == "step-x-neg" || canonical == "std:nav/step_x_neg") {
-    newFocusOut = stdlib_.zzStep(focusCell, resolveDimRef(axes.x_dimension),
-                                 DimVector::NEG);
+    newFocusOut = primary_.stdlib.zzStep(
+        focusCell, resolveDimRef(axes.x_dimension), DimVector::NEG);
     return true;
   }
   if (actionName == "step-y-pos" || canonical == "std:nav/step_y_pos") {
-    newFocusOut = stdlib_.zzStep(focusCell, resolveDimRef(axes.y_dimension),
-                                 DimVector::POS);
+    newFocusOut = primary_.stdlib.zzStep(
+        focusCell, resolveDimRef(axes.y_dimension), DimVector::POS);
     return true;
   }
   if (actionName == "step-y-neg" || canonical == "std:nav/step_y_neg") {
-    newFocusOut = stdlib_.zzStep(focusCell, resolveDimRef(axes.y_dimension),
-                                 DimVector::NEG);
+    newFocusOut = primary_.stdlib.zzStep(
+        focusCell, resolveDimRef(axes.y_dimension), DimVector::NEG);
     return true;
   }
   if (actionName == "step-z-pos" || canonical == "std:nav/step_z_pos") {
-    newFocusOut = stdlib_.zzStep(focusCell, resolveDimRef(axes.z_dimension),
-                                 DimVector::POS);
+    newFocusOut = primary_.stdlib.zzStep(
+        focusCell, resolveDimRef(axes.z_dimension), DimVector::POS);
     return true;
   }
   if (actionName == "step-z-neg" || canonical == "std:nav/step_z_neg") {
-    newFocusOut = stdlib_.zzStep(focusCell, resolveDimRef(axes.z_dimension),
-                                 DimVector::NEG);
+    newFocusOut = primary_.stdlib.zzStep(
+        focusCell, resolveDimRef(axes.z_dimension), DimVector::NEG);
     return true;
   }
   if (actionName == "hop-head" || canonical == "std:nav/hop_head") {
-    newFocusOut = stdlib_.hopHead(focusCell, resolveDimRef(axes.x_dimension));
+    newFocusOut =
+        primary_.stdlib.hopHead(focusCell, resolveDimRef(axes.x_dimension));
     return true;
   }
   if (actionName == "hop-tail" || canonical == "std:nav/hop_tail") {
-    newFocusOut = stdlib_.hopTail(focusCell, resolveDimRef(axes.x_dimension));
+    newFocusOut =
+        primary_.stdlib.hopTail(focusCell, resolveDimRef(axes.x_dimension));
     return true;
   }
   if (actionName == "jump-home" || canonical == "std:nav/jump_home") {
-    newFocusOut = stdlib_.jumpHome();
+    newFocusOut = primary_.stdlib.jumpHome();
     return true;
   }
 
   // Editing actions
   if (actionName == "insert-cell-x-pos" ||
       canonical == "std:zigzag/insert_cell_x_pos") {
-    newFocusOut = stdlib_.zzInsert(focusCell, resolveDimRef(axes.x_dimension),
-                                   DimVector::POS, "New Cell");
+    newFocusOut = primary_.stdlib.zzInsert(
+        focusCell, resolveDimRef(axes.x_dimension), DimVector::POS, "New Cell");
     return true;
   }
   if (actionName == "insert-cell-x-neg" ||
       canonical == "std:zigzag/insert_cell_x_neg") {
-    newFocusOut = stdlib_.zzInsert(focusCell, resolveDimRef(axes.x_dimension),
-                                   DimVector::NEG, "New Cell");
+    newFocusOut = primary_.stdlib.zzInsert(
+        focusCell, resolveDimRef(axes.x_dimension), DimVector::NEG, "New Cell");
     return true;
   }
   if (actionName == "insert-cell-y-pos" ||
       canonical == "std:zigzag/insert_cell_y_pos") {
-    newFocusOut = stdlib_.zzInsert(focusCell, resolveDimRef(axes.y_dimension),
-                                   DimVector::POS, "New Cell");
+    newFocusOut = primary_.stdlib.zzInsert(
+        focusCell, resolveDimRef(axes.y_dimension), DimVector::POS, "New Cell");
     return true;
   }
   if (actionName == "insert-cell-y-neg" ||
       canonical == "std:zigzag/insert_cell_y_neg") {
-    newFocusOut = stdlib_.zzInsert(focusCell, resolveDimRef(axes.y_dimension),
-                                   DimVector::NEG, "New Cell");
+    newFocusOut = primary_.stdlib.zzInsert(
+        focusCell, resolveDimRef(axes.y_dimension), DimVector::NEG, "New Cell");
     return true;
   }
   if (actionName == "unlink-x-pos" || canonical == "std:zigzag/unlink_x_pos") {
-    stdlib_.zzUnlink(focusCell, resolveDimRef(axes.x_dimension),
-                     DimVector::POS);
+    primary_.stdlib.zzUnlink(focusCell, resolveDimRef(axes.x_dimension),
+                             DimVector::POS);
     return true;
   }
   if (actionName == "unlink-x-neg" || canonical == "std:zigzag/unlink_x_neg") {
-    stdlib_.zzUnlink(focusCell, resolveDimRef(axes.x_dimension),
-                     DimVector::NEG);
+    primary_.stdlib.zzUnlink(focusCell, resolveDimRef(axes.x_dimension),
+                             DimVector::NEG);
     return true;
   }
   if (actionName == "delete-focus-cell" ||
       canonical == "std:zigzag/delete_focus_cell" ||
       canonical == "std:zigzag/delete_focus_cell_bksp") {
-    stdlib_.zzDelete(focusCell);
+    primary_.stdlib.zzDelete(focusCell);
     return true;
   }
   if (actionName == "duplicate-focus-cell" ||
       canonical == "std:zigzag/duplicate") {
-    newFocusOut = stdlib_.zzDuplicate(focusCell);
+    newFocusOut = primary_.stdlib.zzDuplicate(focusCell);
     if (boundStore_ && newFocusOut != noCell &&
         zigzag::isEphemeral(newFocusOut)) {
       zigzag::PromotionBudget budget{.maxOps = 1000};
       auto promoted =
           zigzag::promote(*boundStore_, boundStore_->primaryCurrentVersion(),
-                          arena_, newFocusOut, budget);
+                          primary_.arena, newFocusOut, budget);
       if (!promoted || promoted->cells.empty()) {
         GLEDITOR_LOG_WARN("vortex.edit",
                           "duplicate promotion refused for arena cell {}",
@@ -351,39 +373,39 @@ bool VortexHost::dispatchAction(std::string_view actionName, CellRef focusCell,
     return true;
   }
   if (actionName == "swap-xy" || canonical == "std:ui/swap_axes") {
-    stdlib_.swapAxes(axes);
+    primary_.stdlib.swapAxes(axes);
     return true;
   }
   if (actionName == "cycle-dims-forward" ||
       canonical == "std:ui/cycle_dims_forward") {
-    stdlib_.cycleDims(axes, true);
+    primary_.stdlib.cycleDims(axes, true);
     return true;
   }
   if (actionName == "cycle-dims-backward" ||
       canonical == "std:ui/cycle_dims_backward") {
-    stdlib_.cycleDims(axes, false);
+    primary_.stdlib.cycleDims(axes, false);
     return true;
   }
   if (actionName == "bundle-execution" ||
       canonical == "std:ui/bundle_execution") {
-    stdlib_.applyBundle(axes, DimensionBundle::Execution);
+    primary_.stdlib.applyBundle(axes, DimensionBundle::Execution);
     return true;
   }
   if (actionName == "bundle-scope" || canonical == "std:ui/bundle_scope") {
-    stdlib_.applyBundle(axes, DimensionBundle::Scope);
+    primary_.stdlib.applyBundle(axes, DimensionBundle::Scope);
     return true;
   }
   if (actionName == "bundle-contract" ||
       canonical == "std:ui/bundle_contract") {
-    stdlib_.applyBundle(axes, DimensionBundle::Contract);
+    primary_.stdlib.applyBundle(axes, DimensionBundle::Contract);
     return true;
   }
   if (actionName == "bundle-logic" || canonical == "std:ui/bundle_logic") {
-    stdlib_.applyBundle(axes, DimensionBundle::Logic);
+    primary_.stdlib.applyBundle(axes, DimensionBundle::Logic);
     return true;
   }
   if (actionName == "bundle-stdlib" || canonical == "std:ui/bundle_stdlib") {
-    stdlib_.applyBundle(axes, DimensionBundle::Stdlib);
+    primary_.stdlib.applyBundle(axes, DimensionBundle::Stdlib);
     return true;
   }
   if (actionName == "bundle-cycle" || canonical == "std:ui/bundle_cycle") {
@@ -400,17 +422,18 @@ bool VortexHost::dispatchAction(std::string_view actionName, CellRef focusCell,
                axes.y_dimension == "d.predicate") {
       next = DimensionBundle::Stdlib;
     }
-    stdlib_.applyBundle(axes, next);
+    primary_.stdlib.applyBundle(axes, next);
     return true;
   }
 
   // Stdlib fallback: check if standard library has a registered routine cell
-  const auto stdlibOp = stdlib_.resolve(canonical).or_else([&] {
-    return canonical != actionName ? stdlib_.resolve(actionName) : std::nullopt;
+  const auto stdlibOp = primary_.stdlib.resolve(canonical).or_else([&] {
+    return canonical != actionName ? primary_.stdlib.resolve(actionName)
+                                   : std::nullopt;
   });
   if (stdlibOp) {
-    CellRef cursor = vm_.spawnCursor(*stdlibOp, canonical);
-    if (const auto ran = vm_.run(cursor, 1000); !ran.success) {
+    CellRef cursor = primary_.vm.spawnCursor(*stdlibOp, canonical);
+    if (const auto ran = primary_.vm.run(cursor, 1000); !ran.success) {
       GLEDITOR_LOG_WARN("vortex.host", "action {} failed: {}", canonical,
                         ran.errorMessage);
     }
@@ -422,13 +445,13 @@ bool VortexHost::dispatchAction(std::string_view actionName, CellRef focusCell,
 
 void VortexHost::setView(ViewAxisBinding &axes, std::string_view dimX,
                          std::string_view dimY, std::string_view dimZ) {
-  stdlib_.setView(axes, dimX, dimY, dimZ);
+  primary_.stdlib.setView(axes, dimX, dimY, dimZ);
 }
 
 bool VortexHost::exportLibrary(std::string_view moduleName,
                                const std::string &destinationPath) const {
   xanadu::Store store;
-  if (!stdlib_.exportModuleToStore(moduleName, store)) {
+  if (!primary_.stdlib.exportModuleToStore(moduleName, store)) {
     return false;
   }
   try {
@@ -442,7 +465,7 @@ bool VortexHost::exportLibrary(std::string_view moduleName,
 bool VortexHost::exportStandardLibrary(
     const std::string &destinationPath) const {
   xanadu::Store store;
-  if (!stdlib_.exportStandardLibraryToStore(store)) {
+  if (!primary_.stdlib.exportStandardLibraryToStore(store)) {
     return false;
   }
   try {
@@ -464,7 +487,7 @@ bool VortexHost::importLibrary(const std::string &sourcePath) {
 }
 
 bool VortexHost::importLibrary(const xanadu::Store &store) {
-  CellRef res = stdlib_.importModuleFromStore(store);
+  CellRef res = primary_.stdlib.importModuleFromStore(store);
   return res != noCell;
 }
 
@@ -484,26 +507,27 @@ void VortexHost::registerActionMacro(std::string_view actionName,
 }
 
 std::vector<std::string> VortexHost::availableModules() const {
-  return stdlib_.modules();
+  return primary_.stdlib.modules();
 }
 
 std::vector<std::string>
 VortexHost::symbolsInModule(std::string_view modulePath) const {
-  return stdlib_.symbolsInModule(modulePath);
+  return primary_.stdlib.symbolsInModule(modulePath);
 }
 
 CellRef VortexHost::cloneSymbolToChain(std::string_view symbolPath,
                                        CellRef targetCell) {
   if (symbolPath.starts_with("#")) {
-    CellRef op = arena_.makeCell(symbolPath);
-    if (targetCell != noCell && arena_.contains(targetCell)) {
-      core_.link(targetCell, core_.dims().step, DimVector::POS, op);
+    CellRef op = primary_.arena.makeCell(symbolPath);
+    if (targetCell != noCell && primary_.arena.contains(targetCell)) {
+      primary_.core.link(targetCell, primary_.core.dims().step, DimVector::POS,
+                         op);
     }
     return op;
   }
-  return stdlib_.resolve(symbolPath)
+  return primary_.stdlib.resolve(symbolPath)
       .transform([&](const CellRef sym) {
-        return stdlib_.zzCloneToChain(sym, targetCell);
+        return primary_.stdlib.zzCloneToChain(sym, targetCell);
       })
       .value_or(noCell);
 }
@@ -518,13 +542,13 @@ xanadu::vql::CompilationResult VortexHost::compileAndAttachVQL(
     return result;
   }
 
-  if (targetCell != noCell && arena_.contains(targetCell)) {
+  if (targetCell != noCell && primary_.arena.contains(targetCell)) {
     const DimRef dim = resolveDimRef(attachDimension);
-    core_.link(targetCell, dim, dir, result.entryOpcode);
+    primary_.core.link(targetCell, dim, dir, result.entryOpcode);
   }
 
   if (spawnThread) {
-    vm_.spawnCursor(result.entryOpcode, "vql_exec");
+    primary_.vm.spawnCursor(result.entryOpcode, "vql_exec");
   }
 
   return result;
@@ -534,11 +558,11 @@ std::optional<zigzag::Promoted> VortexHost::promoteAndAttachToStore(
     CellRef entryOpcode, CellRef persistentTarget,
     std::string_view attachDimension, DimVector dir, xanadu::Store &store,
     const xanadu::MicroversionId &parent) {
-  if (entryOpcode == noCell || !arena_.contains(entryOpcode)) {
+  if (entryOpcode == noCell || !primary_.arena.contains(entryOpcode)) {
     return std::nullopt;
   }
 
-  auto promoted = zigzag::promote(store, parent, arena_, entryOpcode);
+  auto promoted = zigzag::promote(store, parent, primary_.arena, entryOpcode);
   if (!promoted || promoted->cells.empty()) {
     return std::nullopt;
   }
@@ -645,8 +669,8 @@ VortexHost::ScriptResult VortexHost::executeScript(std::string_view script,
       if (store && !res.affectedCells.empty()) {
         for (CellRef c : res.affectedCells) {
           if (zigzag::isEphemeral(c)) {
-            if (!zigzag::promote(*store, store->primaryCurrentVersion(), arena_,
-                                 c)) {
+            if (!zigzag::promote(*store, store->primaryCurrentVersion(),
+                                 primary_.arena, c)) {
               // Past the promotion budget, or not a cell of this arena: the
               // result stays in the arena, and the store does not have it.
               GLEDITOR_LOG_WARN("vortex.edit",
@@ -704,8 +728,8 @@ VortexHost::ScriptResult VortexHost::executeScript(std::string_view script,
     if (store && !cells.empty()) {
       for (CellRef c : cells) {
         if (zigzag::isEphemeral(c)) {
-          if (!zigzag::promote(*store, store->primaryCurrentVersion(), arena_,
-                               c)) {
+          if (!zigzag::promote(*store, store->primaryCurrentVersion(),
+                               primary_.arena, c)) {
             // Past the promotion budget, or not a cell of this arena: the
             // result stays in the arena, and the store does not have it.
             GLEDITOR_LOG_WARN("vortex.edit",
@@ -750,7 +774,7 @@ VortexHost::ScriptResult VortexHost::executeVPL(std::string_view expr) {
     }
 
     auto view         = vplEngine_.evaluate(trimmed);
-    res.affectedCells = view.collectCells(arena_);
+    res.affectedCells = view.collectCells(primary_.arena);
     res.success       = true;
     if (view.isScalar()) {
       if (view.isString()) {
@@ -761,7 +785,7 @@ VortexHost::ScriptResult VortexHost::executeVPL(std::string_view expr) {
         res.message = std::format("VPL Result: {}", view.scalarInt());
       }
     } else {
-      auto sh              = view.shape(arena_);
+      auto sh              = view.shape(primary_.arena);
       std::string shapeStr = "[";
       for (std::size_t i = 0; i < sh.size(); ++i) {
         if (i > 0) {
@@ -783,13 +807,13 @@ VortexHost::ScriptResult VortexHost::executeVPL(std::string_view expr) {
 std::vector<LogicSolution> VortexHost::solveLogic(std::string_view goalQuery,
                                                   std::size_t maxSolutions) {
   try {
-    xanadu::vprolog::Compiler compiler(core_);
+    xanadu::vprolog::Compiler compiler(primary_.core);
     auto query = compiler.compileQuery(goalQuery);
     if (query.goals.empty()) {
       return {};
     }
-    return stdlib_.solveQuery(query.goals, compiler.customPredicates(),
-                              maxSolutions);
+    return primary_.stdlib.solveQuery(query.goals, compiler.customPredicates(),
+                                      maxSolutions);
   } catch (const std::exception &err) {
     std::cerr << "VortexHost::solveLogic error: " << err.what() << "\n";
     return {};

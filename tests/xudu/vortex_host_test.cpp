@@ -457,3 +457,53 @@ TEST(VortexHostTest, AppActionDelegateAndCanonicalDispatch) {
   // Fallback to stdlib resolution for sovereign stdlib action
   EXPECT_TRUE(host.dispatchAction("std:xudu/quit", root, axes, newFocus));
 }
+
+// Stage 1 of design/vortex-multithreading-study.md §3.3: the host can hold
+// more than one worker context, each a self-contained
+// {ArenaManifold, VortexCore, VortexVM, VortexStdLib} over the same base.
+// Still single-threaded here -- we only prove the contexts exist, are
+// independent, and that the primary accessors delegate to the primary one.
+TEST(VortexHostTest, HoldsMultipleIndependentWorkerContexts) {
+  VortexHost host;
+
+  // One context to start: the primary.
+  EXPECT_EQ(host.workerContextCount(), 1u);
+  EXPECT_EQ(&host.primaryContext().arena, &host.arena());
+  EXPECT_EQ(&host.primaryContext().core, &host.core());
+  EXPECT_EQ(&host.primaryContext().vm, &host.vm());
+
+  // Make two more. Each overlays the same base and is a distinct object.
+  WorkerContext &w1 = host.makeWorkerContext();
+  WorkerContext &w2 = host.makeWorkerContext();
+  EXPECT_EQ(host.workerContextCount(), 3u);
+  EXPECT_NE(&w1.arena, &w2.arena);
+  EXPECT_NE(&w1.arena, &host.primaryContext().arena);
+  EXPECT_NE(&w1.vm, &w2.vm);
+
+  // Each worker's arena is independent: a cell minted in w1 is not visible as
+  // the same ref content in w2's arena. We assert isolation by minting in one
+  // and checking the other's cursor set is unaffected.
+  const std::size_t primaryCursorsBefore =
+      host.primaryContext().vm.activeCursors().size();
+
+  // Build a trivial runnable op in w1 and spawn a cursor there.
+  CellRef addOp = w1.vm.mintOpcode(OpcodeKind::Add, "#W1_ADD");
+  w1.core.bindInput(addOp,
+                    w1.arena.makeScalarCell(static_cast<std::int64_t>(2)));
+  w1.core.bindInput(addOp,
+                    w1.arena.makeScalarCell(static_cast<std::int64_t>(3)));
+  w1.core.bindOutput(addOp, w1.arena.makeCell());
+  w1.vm.spawnCursor(addOp, "w1_cursor");
+
+  // w1 gained a cursor; the primary and w2 did not -- the +d.cursors ranks are
+  // per-arena, so cursor populations are isolated per worker context.
+  EXPECT_GT(w1.vm.activeCursors().size(), 0u);
+  EXPECT_EQ(host.primaryContext().vm.activeCursors().size(),
+            primaryCursorsBefore);
+  EXPECT_EQ(w2.vm.activeCursors().size(), 0u);
+
+  // Stepping w1's scheduler executes its cursor without touching the others.
+  const std::size_t executed = w1.vm.stepScheduler();
+  EXPECT_GT(executed, 0u);
+  EXPECT_EQ(w2.vm.activeCursors().size(), 0u);
+}
