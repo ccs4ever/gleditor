@@ -301,13 +301,16 @@ void LinkBeams::rebuildStrands(RenderState &state) {
                               : session.packageRenderId(resolved.key);
       const auto append = [&](const LinkEnd &a, const LinkEnd &b, bool drawFrom,
                               bool drawTo) {
-        strands.push_back(Strand{.link     = id,
-                                 .type     = resolved.link.type,
-                                 .tier     = resolved.link.tier,
-                                 .from     = a,
-                                 .to       = b,
-                                 .drawFrom = drawFrom,
-                                 .drawTo   = drawTo});
+        strands.push_back(Strand{
+            .link     = id,
+            .type     = resolved.link.type,
+            .tier     = resolved.link.tier,
+            .from     = a,
+            .to       = b,
+            .drawFrom = drawFrom,
+            .drawTo   = drawTo,
+            .quiet    = session.readerLinkPackages().emphasis(resolved.key) ==
+                     PackageEmphasis::Quiet});
       };
       for (std::size_t i = 0; i < left.size(); ++i)
         append(left[i], right.front(), true, i == 0);
@@ -2021,7 +2024,7 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
       const auto docAlpha   = std::min(fromOpacity, toOpacity);
       const auto colour     = fade(
           linkColourWithInstanceShift(strand.link, strand.type, strand.tier),
-          docAlpha);
+          docAlpha * (strand.quiet ? beamConfig_.packageQuietAlpha : 1.F));
       const auto tagId = static_cast<std::uint32_t>(i);
       const bool isAct = (activeLink && *activeLink == strand.link);
 
@@ -2719,6 +2722,12 @@ void LinkBeams::describe(gleditor::a11y::Builder &into) {
             : "by " + record->owner +
                   (record->curator.empty() ? ""
                                            : "; curator " + record->curator);
+    if (const auto carrier = session.readerLinkPackages().carrier(key))
+      node.description +=
+          session.readerLinkPackages().preference(*carrier).emphasis ==
+                  PackageEmphasis::Quiet
+              ? "; reader emphasis quiet"
+              : "; reader emphasis normal";
     node.value     = open ? "selected" : "";
     node.children  = members;
     node.focusable = true;

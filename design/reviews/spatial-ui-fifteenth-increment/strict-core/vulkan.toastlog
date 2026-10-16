@@ -1,0 +1,10 @@
+backend: vulkan, SDL3
+file: tests/samples/quick_brown_fox.txt
+accessibility: not in this build
+render: vulkan device, AMD Radeon RX Vega (RADV VEGA10) (API 1.4.354)
+glyph cache: atlas 512x512 x1 layers, growing to at most 16384x16384 x64 (device allows 16384x16384 x2048, the vertex encoding 64 layers)
+[TIMING] First page rendered: 47.39 ms (docs in render: 1)
+tagged object at 300,265: kind 1 doc 16382 page 0 cluster 0
+select: doc 0 [20,34)
+wrote screenshot /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-fifteenth/strict-core/vulkan.toast.ppm (800x600)
+[TIMING] Complete render settled: 501.08 ms (docs: 1, total pages: 1, built pages: 1)

@@ -658,6 +658,10 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Endpoint tangent reach as a fraction of horizontal "
                     "separation; bounded 0.05 to 0.45",
          .schemas = {{.expectedTypes = {"float"}, .defaultValues = {0.3}}}},
+        {.name  = "beams.packageQuietAlpha",
+         .notes = "Quiet reader package ribbon and passage-mark opacity; keeps "
+                  "semantic hue and selected-link contrast; bounded 0.15 to 1",
+         .schemas = {{.expectedTypes = {"float"}, .defaultValues = {0.45}}}},
         {.name  = "beams.inactiveLinkAlpha",
          .notes = "Other link opacity while one link is selected; bounded 0.15 "
                   "to 0.8",
@@ -1312,6 +1316,22 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Make the other side of the selected link active",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"Alt+Shift+X"}}}}},
+        {.name    = "std:xuzz/link_retain_package",
+         .notes   = "retain the pinned Link package",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+R"}}}}},
+        {.name    = "std:xuzz/link_remove_package",
+         .notes   = "remove the pinned package from reader inventory",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+M"}}}}},
+        {.name    = "std:xuzz/link_quiet_package",
+         .notes   = "toggle normal or quiet emphasis for the pinned package",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+Q"}}}}},
+        {.name    = "std:xuzz/link_disable_package",
+         .notes   = "disable drawing for the pinned package",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+U"}}}}},
         {.name    = "std:xuzz/link_enable_package",
          .notes   = "Re-enable drawing of the exact pinned Link package",
          .schemas = {{.expectedTypes = {"string"},
@@ -3186,6 +3206,8 @@ LayoutConfig LayoutConfig::fromStore(const Store &store) {
       model.getBool("beams.anchorReducedMotion", false);
   cfg.beams.bracketInkShare =
       curveNumber("beams.bracketInkShare", cfg.beams.bracketInkShare, .2F, 1.F);
+  cfg.beams.packageQuietAlpha = curveNumber(
+      "beams.packageQuietAlpha", cfg.beams.packageQuietAlpha, .15F, 1.F);
   cfg.beams.inactiveLinkAlpha = curveNumber(
       "beams.inactiveLinkAlpha", cfg.beams.inactiveLinkAlpha, .15F, .8F);
   cfg.beams.curveHandleShare = curveNumber(

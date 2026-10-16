@@ -280,6 +280,7 @@ private:
     LinkEnd from;
     LinkEnd to;
     bool drawFrom{true}, drawTo{true};
+    bool quiet{false};
     std::optional<Doc::Anchor> fromAnchor;
     std::optional<Doc::Anchor> toAnchor;
     std::optional<Doc::Anchor> fromEndAnchor;

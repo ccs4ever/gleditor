@@ -1,0 +1,52 @@
+{
+  "connector_gap": {
+    "region": [
+      600,
+      480,
+      839,
+      580
+    ],
+    "differing_pixels": 1032,
+    "max_channel_delta": 97
+  },
+  "body_and_connectors": {
+    "region": [
+      0,
+      475,
+      1440,
+      600
+    ],
+    "differing_pixels": 1177,
+    "max_channel_delta": 97
+  },
+  "minimap": {
+    "region": [
+      45,
+      745,
+      280,
+      920
+    ],
+    "differing_pixels": 1612,
+    "max_channel_delta": 235
+  },
+  "top_chrome": {
+    "region": [
+      0,
+      0,
+      1440,
+      475
+    ],
+    "differing_pixels": 0,
+    "max_channel_delta": 0
+  },
+  "right_text": {
+    "region": [
+      839,
+      479,
+      1100,
+      525
+    ],
+    "differing_pixels": 38,
+    "max_channel_delta": 43
+  }
+}

@@ -7,6 +7,33 @@ session.
 
 ## Current checkpoint
 
+Fifteenth checkpoint (2026-10-16), based on `d41664a3`: reader package preferences now store
+retention, enabled drawing and normal/quiet emphasis independently by immutable carrier hash.
+Downloaded/verified bytes are a separate cache; inspection does not retain or enable a candidate.
+Explicit retention is required before enablement. Removal disables a carrier but preserves its
+emphasis and recoverable removed entry; it leaves any selected Link pinned. Reader inventory,
+downloaded candidates and removed packages have separate native review routes and availability
+counts. Missing payloads keep their exact identities and point to existing signed discovery;
+hash-only fetching is not implemented.
+
+Preferences are strict format 2. Previous format 1 and invalid combinations are refused and
+preserved unchanged, with no compatibility reader. The authored store/node formats do not change.
+Shared commands and governed default chords expose Retain, Remove, Enable/Disable and Quiet/Normal
+on the retained panel. Quiet changes presentation alpha through a live layout setting, preserving
+semantic hue, signed bytes, selection contrast and navigation availability. Session now emits newly
+recomputed decoration styles on the first call, fixing the regression exposed by this work.
+
+Canonical GNU Make and complete UI 241/241, Xuzz 107/107 and package 9/9 pass. Unchanged library
+binaries retain 799/799 and mip/cache 53/53 evidence. Strict GL/GLES/Vulkan comparison passes
+unchanged criteria without exercising actual split recording or broad E2E. Native GL verifies
+separate preference controls, inventory counts, removal/recovery and restart. Root-verified final
+Left 2/Right 3 pins survive the lifecycle and restart with one visit/current 1 and unchanged source
+store hashes. Earlier misnamed cursor frames are classified by their actual labels. The unselected
+normal/quiet pair isolates connector changes from a separate minimap redraw; current left-page
+clipping remains an open layout limitation. See the
+[fifteenth checkpoint](../reviews/spatial-ui-fifteenth-increment/README.md). Full journeys, native
+AT-SPI and optimized performance are not accepted.
+
 Fourteenth checkpoint (2026-10-16), based on `337c0472`: disabling a package now hides its beams,
 hit targets, highlights and anchor motion while retaining its exact selected Link, both endsets,
 independent cursors and frozen Origin. The existing panel explains disabled drawing, refuses Enter,
@@ -548,13 +575,14 @@ captures remain separate from the owning real-Doc/accessibility tests. Complete 
 endpoints and media-position restoration remain open. Older v2 activity remains preserved
 unsupported; do not add a compatibility shim.
 
-Next implement the remaining publication/pin-lifecycle audit findings before D2: retain, enable and
-emphasis need separate governed persisted choices and actual reader controls. The fourteenth
-checkpoint proves the bounded disabled-pin, restart, re-enable and dismissal route; do not infer a
-reader inventory or enrollment from it. Validate explicit replacement, no visited-source operations,
-no preview visits, and unknown identity versus invalid signature/payload versus unavailable content.
-Reuse existing publication, ReaderLinkPackages, preferences and UI seams; do not invent missing
-services or a second view architecture.
+Next reconcile the implemented reader Retain/Enable/Emphasis controls with the publication/pin
+lifecycle audit before D2. Validate carrier-specific replacement and same-title candidates, retained
+and removed inventory counts, unavailable payload and unknown identity versus invalid
+signature/payload versus unavailable referenced content. The fourteenth checkpoint proves the
+bounded disabled-pin route; the fifteenth adds independent preferences. Neither establishes full
+remote acquisition, curator enrollment or guaranteed missing-payload recovery. Reuse existing
+publication, ReaderLinkPackages, preferences and UI seams; do not invent missing services or a
+second view architecture.
 
 The tenth review records bounded unavailable/Cancel/retry evidence. The ninth numeric audit resolves
 the earlier Origin/Back missing-panel discrepancy; confirm future visual findings with decoded

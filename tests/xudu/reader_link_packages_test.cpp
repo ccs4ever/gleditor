@@ -40,15 +40,18 @@ TEST_F(ReaderLinkPackagesTest,
        ExactImmutableChoicesSurviveRestartWithoutEnablingUpdates) {
   const auto path = root / "preferences";
   ReaderLinkPackages reader(path);
-  ASSERT_TRUE(reader.retain(pkg, hash));
+  ASSERT_TRUE(reader.cacheVerified(pkg, hash));
   EXPECT_TRUE(reader.links().empty());
+  EXPECT_FALSE(reader.setEnabled(hash, true));
+  ASSERT_TRUE(reader.setRetained(hash, true));
+  EXPECT_FALSE(reader.enabled(hash));
   ASSERT_TRUE(reader.setEnabled(hash, true));
   const auto key = ReaderLinkPackages::keyOf(hash, 0);
   ASSERT_EQ(reader.links(), std::vector<LinkKey>{key});
   const auto next =
       publishLinkPackage(keys, pkg.salt, pkg.title, 2, 2, {link}, pkg.scrolls);
   const auto nextHash = carrier(next);
-  ASSERT_TRUE(reader.retain(next, nextHash));
+  ASSERT_TRUE(reader.cacheVerified(next, nextHash));
   EXPECT_FALSE(reader.enabled(nextHash));
   EXPECT_NE(key, ReaderLinkPackages::keyOf(nextHash, 0));
   ReaderLinkPackages restarted(path);
@@ -57,20 +60,96 @@ TEST_F(ReaderLinkPackagesTest,
   EXPECT_EQ(restarted.find(key), nullptr);
   EXPECT_TRUE(restarted.links().empty()); // Missing payload is retained as a
                                           // preference, never trusted.
-  ASSERT_TRUE(restarted.retain(pkg, hash));
+  ASSERT_TRUE(restarted.cacheVerified(pkg, hash));
   ASSERT_EQ(restarted.links(), std::vector<LinkKey>{key});
   ASSERT_TRUE(restarted.setEnabled(hash, false));
   EXPECT_EQ(restarted.find(key), nullptr);
-  ASSERT_NE(restarted.retainedPackage(key), nullptr);
-  EXPECT_EQ(restarted.retainedPackage(key)->links, pkg.links);
+  ASSERT_NE(restarted.verifiedPackage(key), nullptr);
+  EXPECT_EQ(restarted.verifiedPackage(key)->links, pkg.links);
   EXPECT_FALSE(restarted.enabled(key));
   ASSERT_TRUE(restarted.setEnabled(key, true));
   EXPECT_TRUE(restarted.enabled(key));
   EXPECT_EQ(restarted.find(key),
-            &restarted.retainedPackage(key)->links.front());
+            &restarted.verifiedPackage(key)->links.front());
   ASSERT_TRUE(restarted.setEnabled(key, false));
   EXPECT_FALSE(ReaderLinkPackages(path).enabled(hash));
-  EXPECT_FALSE(reader.retain(pkg, nextHash));
+  EXPECT_FALSE(reader.cacheVerified(pkg, nextHash));
+}
+TEST_F(ReaderLinkPackagesTest,
+       RetentionEnablementAndEmphasisAreIndependentImmutableChoices) {
+  const auto path = root / "independent";
+  ReaderLinkPackages reader(path);
+  ASSERT_TRUE(reader.cacheVerified(pkg, hash));
+  EXPECT_TRUE(reader.preferences().empty());
+  EXPECT_FALSE(std::filesystem::exists(path));
+  EXPECT_FALSE(reader.setEnabled(hash, true));
+  EXPECT_FALSE(reader.setEmphasis(hash, PackageEmphasis::Quiet));
+  ASSERT_TRUE(reader.setRetained(hash, true));
+  ASSERT_TRUE(reader.setEmphasis(hash, PackageEmphasis::Quiet));
+  EXPECT_EQ(reader.preference(hash),
+            (ReaderPackagePreference{true, false, PackageEmphasis::Quiet}));
+  ASSERT_TRUE(reader.setEnabled(hash, true));
+  const auto key = ReaderLinkPackages::keyOf(hash, 0);
+  EXPECT_EQ(reader.emphasis(key), PackageEmphasis::Quiet);
+  EXPECT_EQ(reader.links(), std::vector<LinkKey>{key});
+  const auto payload = encodeLinkPackage(*reader.verifiedPackage(key));
+  const auto next =
+      publishLinkPackage(keys, pkg.salt, pkg.title, 2, 2, {link}, pkg.scrolls);
+  const auto nextHash = carrier(next);
+  ASSERT_TRUE(reader.cacheVerified(next, nextHash));
+  EXPECT_EQ(reader.preference(nextHash), ReaderPackagePreference{});
+  EXPECT_FALSE(reader.preferences().contains(nextHash));
+  ASSERT_TRUE(reader.setEnabled(hash, false));
+  EXPECT_EQ(reader.preference(hash),
+            (ReaderPackagePreference{true, false, PackageEmphasis::Quiet}));
+  ASSERT_TRUE(reader.setRetained(hash, false));
+  EXPECT_EQ(reader.preference(hash),
+            (ReaderPackagePreference{false, false, PackageEmphasis::Quiet}));
+  EXPECT_EQ(encodeLinkPackage(*reader.verifiedPackage(key)), payload);
+  EXPECT_FALSE(reader.setEnabled(hash, true));
+  ReaderLinkPackages reopened(path);
+  EXPECT_EQ(reopened.preference(hash), reader.preference(hash));
+  EXPECT_TRUE(reopened.containsAuthority(key.authority));
+  EXPECT_EQ(reopened.verifiedPackage(key), nullptr);
+  EXPECT_FALSE(reopened.setRetained(hash, true));
+  EXPECT_FALSE(reopened.setEnabled(hash, true));
+  ASSERT_TRUE(reopened.cacheVerified(pkg, hash));
+  ASSERT_TRUE(reopened.setRetained(hash, true));
+  EXPECT_EQ(reopened.preference(hash),
+            (ReaderPackagePreference{true, false, PackageEmphasis::Quiet}));
+  ASSERT_TRUE(reopened.setEnabled(hash, true));
+  ASSERT_TRUE(reopened.setEmphasis(hash, PackageEmphasis::Normal));
+  EXPECT_TRUE(reopened.enabled(hash));
+  EXPECT_EQ(encodeLinkPackage(*reopened.verifiedPackage(key)), payload);
+}
+TEST_F(ReaderLinkPackagesTest,
+       PreviousBooleanFormatAndImpossibleChoicesArePreserved) {
+  std::filesystem::create_directories(root);
+  const auto path = root / "invalid";
+  using V         = bencode::Value;
+  for (const auto &bytes :
+       {V::dict({{"format", V::integer(1)},
+                 {"choices", V::dict({{hash.hex(), V::integer(1)}})}})
+            .encode(),
+        V::dict({{"format", V::integer(2)},
+                 {"choices",
+                  V::dict({{hash.hex(),
+                            V::dict({{"retained", V::integer(0)},
+                                     {"enabled", V::integer(1)},
+                                     {"emphasis", V::string("quiet")}})}})}})
+            .encode(),
+        V::dict({{"format", V::integer(2)},
+                 {"choices",
+                  V::dict({{hash.hex(),
+                            V::dict({{"retained", V::integer(1)},
+                                     {"enabled", V::integer(0)},
+                                     {"emphasis", V::string("loud")}})}})}})
+            .encode()}) {
+    std::ofstream(path, std::ios::binary) << bytes;
+    EXPECT_THROW(ReaderLinkPackages{path}, ReaderLinkPackagesUnreadable);
+    std::ifstream in(path, std::ios::binary);
+    EXPECT_EQ(std::string(std::istreambuf_iterator<char>(in), {}), bytes);
+  }
 }
 TEST_F(ReaderLinkPackagesTest, NativeLinksResolveAcrossIndependentScrollSlots) {
   auto perma = std::make_shared<UserPermascroll>();

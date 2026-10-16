@@ -31,15 +31,31 @@ ReaderLinkPackages::ReaderLinkPackages(std::filesystem::path path)
     const std::string bytes{std::istreambuf_iterator<char>(input), {}};
     const auto root    = bencode::decode(bytes);
     const auto version = root.asDict().at("format").asInteger();
-    if (version != 1)
-      throw std::runtime_error("expected version 1, got " +
+    if (version != 2)
+      throw std::runtime_error("expected version 2, got " +
                                std::to_string(version));
     if (root.asDict().size() != 2)
       throw std::runtime_error("unexpected fields");
     for (const auto &[hash, value] : root.asDict().at("choices").asDict()) {
-      if (value.asInteger() != 0 && value.asInteger() != 1)
-        throw std::runtime_error("invalid choice");
-      choices.emplace(InfoHash::fromHex(hash), value.asInteger() == 1);
+      const auto &fields = value.asDict();
+      if (fields.size() != 3)
+        throw std::runtime_error("unexpected choice fields");
+      const auto bit = [&](std::string_view name) {
+        const auto value = fields.at(std::string(name)).asInteger();
+        if (value != 0 && value != 1)
+          throw std::runtime_error("invalid choice");
+        return value == 1;
+      };
+      ReaderPackagePreference choice{.retained = bit("retained"),
+                                     .enabled  = bit("enabled")};
+      const auto &emphasis = fields.at("emphasis").asString();
+      if (emphasis == "quiet")
+        choice.emphasis = PackageEmphasis::Quiet;
+      else if (emphasis != "normal")
+        throw std::runtime_error("invalid emphasis");
+      if (choice.enabled && !choice.retained)
+        throw std::runtime_error("enabled package is not retained");
+      choices.emplace(InfoHash::fromHex(hash), choice);
     }
     if (choices.size() > maximumChoices)
       throw std::runtime_error("choice limit");
@@ -51,13 +67,14 @@ ReaderLinkPackages::ReaderLinkPackages(std::filesystem::path path)
         throw std::runtime_error("activity authority collision");
     }
   } catch (const std::exception &error) {
-    throw ReaderLinkPackagesUnreadable("Reader package preferences format 1: " +
+    throw ReaderLinkPackagesUnreadable("Reader package preferences format 2: " +
                                        std::string(error.what()));
   }
 }
 LinkKey ReaderLinkPackages::keyOf(const InfoHash &hash, std::size_t ordinal) {
   // The existing activity authority is 128 bits. Domain-separated immutable
-  // authorities retain that shape; retain() checks the verified reverse map.
+  // authorities retain that shape; cacheVerified() checks the verified reverse
+  // map.
   const auto name = "xudu-reader-package:1:" + hash.hex();
   std::array<unsigned char, SHA256_DIGEST_LENGTH> digest{};
   SHA256(reinterpret_cast<const unsigned char *>(name.data()), name.size(),
@@ -69,8 +86,8 @@ LinkKey ReaderLinkPackages::keyOf(const InfoHash &hash, std::size_t ordinal) {
   return {.authority = authority, .id = static_cast<zigzag::CellRef>(ordinal)};
 }
 std::expected<ReaderLinkPackages *, std::string>
-ReaderLinkPackages::retain(const LinkPackage &package,
-                           const InfoHash &hash) try {
+ReaderLinkPackages::cacheVerified(const LinkPackage &package,
+                                  const InfoHash &hash) try {
   reviewLinkPackage(package);
   const std::vector<TorrentContent> files{
       {.path = "links.xanalinks", .data = encodeLinkPackage(package)}};
@@ -79,14 +96,14 @@ ReaderLinkPackages::retain(const LinkPackage &package,
   if (const auto entry = authorities.find(keyOf(hash, 0).authority);
       entry != authorities.end() && entry->second != hash)
     throw std::invalid_argument("Package activity authority collision");
-  if (!retained.contains(hash) && retained.size() >= maximumChoices)
+  if (!verified.contains(hash) && verified.size() >= maximumChoices)
     throw std::invalid_argument("Retained package limit");
   std::size_t total = enabled(hash) ? members(package) : 0;
-  for (const auto &[other, pkg] : retained)
+  for (const auto &[other, pkg] : verified)
     if (other != hash && enabled(other)) total += members(pkg);
   if (total > maximumEnabledMembers)
     throw std::invalid_argument("Enabled package member limit (4096)");
-  retained.insert_or_assign(hash, package);
+  verified.insert_or_assign(hash, package);
   authorities.insert_or_assign(keyOf(hash, 0).authority, hash);
   return this;
 } catch (const std::exception &error) {
@@ -95,40 +112,84 @@ ReaderLinkPackages::retain(const LinkPackage &package,
 bool ReaderLinkPackages::containsAuthority(const DocumentId &authority) const {
   return authorities.contains(authority);
 }
-bool ReaderLinkPackages::enabled(const InfoHash &hash) const {
+ReaderPackagePreference
+ReaderLinkPackages::preference(const InfoHash &hash) const {
   const auto found = choices.find(hash);
-  return found != choices.end() && found->second;
+  return found == choices.end() ? ReaderPackagePreference{} : found->second;
+}
+bool ReaderLinkPackages::enabled(const InfoHash &hash) const {
+  return preference(hash).enabled;
+}
+PackageEmphasis ReaderLinkPackages::emphasis(const LinkKey &key) const {
+  const auto hash = carrier(key);
+  return hash ? preference(*hash).emphasis : PackageEmphasis::Normal;
 }
 std::expected<ReaderLinkPackages *, std::string>
-ReaderLinkPackages::setEnabled(const InfoHash &hash, bool on) try {
-  if (on && !retained.contains(hash))
-    throw std::invalid_argument(
-        "Verify the immutable package before enabling it");
-  auto next  = choices;
-  next[hash] = on;
+ReaderLinkPackages::setRetained(const InfoHash &hash, bool retained) {
+  if (retained && !verified.contains(hash))
+    return std::unexpected("Verify the immutable package before retaining it");
+  if (!retained && !choices.contains(hash))
+    return std::unexpected("This package has no reader preference to remove");
+  auto next       = choices;
+  auto &choice    = next[hash];
+  choice.retained = retained;
+  if (!retained) choice.enabled = false;
+  return save(std::move(next));
+}
+std::expected<ReaderLinkPackages *, std::string>
+ReaderLinkPackages::setEmphasis(const InfoHash &hash,
+                                PackageEmphasis emphasis) {
+  if (emphasis != PackageEmphasis::Normal && emphasis != PackageEmphasis::Quiet)
+    return std::unexpected("Unknown reader package emphasis");
+  if (!choices.contains(hash))
+    return std::unexpected(
+        "Retain this exact package before choosing emphasis");
+  auto next              = choices;
+  next.at(hash).emphasis = emphasis;
+  return save(std::move(next));
+}
+std::expected<ReaderLinkPackages *, std::string>
+ReaderLinkPackages::setEnabled(const InfoHash &hash, bool on) {
+  if (!choices.contains(hash) || !preference(hash).retained)
+    return std::unexpected("Retain this exact package before enabling it");
+  if (on && !verified.contains(hash))
+    return std::unexpected("Verify the immutable package before enabling it");
+  auto next             = choices;
+  next.at(hash).enabled = on;
+  return save(std::move(next));
+}
+std::expected<ReaderLinkPackages *, std::string>
+ReaderLinkPackages::save(std::map<InfoHash, ReaderPackagePreference> next) try {
   if (next.size() > maximumChoices)
     throw std::invalid_argument("Package choice limit");
   std::size_t total = 0;
-  for (const auto &[key, package] : retained)
-    if (next.contains(key) && next.at(key)) total += members(package);
+  for (const auto &[key, package] : verified)
+    if (next.contains(key) && next.at(key).enabled) total += members(package);
   if (total > maximumEnabledMembers)
     throw std::invalid_argument("Enabled package member limit (4096)");
   if (!file.empty()) {
     if (std::filesystem::is_symlink(file) ||
         std::filesystem::is_symlink(file.string() + ".partial"))
       throw ReaderLinkPackagesUnreadable(
-          "Reader package preferences format 1: unsafe output path");
+          "Reader package preferences format 2: unsafe output path");
     std::filesystem::create_directories(file.parent_path());
     bencode::Dict encoded;
     for (const auto &[key, choice] : next)
-      encoded.emplace(key.hex(), V::integer(choice));
+      encoded.emplace(
+          key.hex(),
+          V::dict(
+              {{"retained", V::integer(choice.retained)},
+               {"enabled", V::integer(choice.enabled)},
+               {"emphasis", V::string(choice.emphasis == PackageEmphasis::Quiet
+                                          ? "quiet"
+                                          : "normal")}}));
     std::ofstream out(file.string() + ".partial",
                       std::ios::binary | std::ios::trunc);
     std::filesystem::permissions(file.string() + ".partial",
                                  std::filesystem::perms::owner_read |
                                      std::filesystem::perms::owner_write);
     out << V::dict({{"choices", V::dict(std::move(encoded))},
-                    {"format", V::integer(1)}})
+                    {"format", V::integer(2)}})
                .encode();
     out.close();
     if (!out)
@@ -142,7 +203,7 @@ ReaderLinkPackages::setEnabled(const InfoHash &hash, bool on) try {
 }
 std::vector<LinkKey> ReaderLinkPackages::links() const {
   std::vector<LinkKey> result;
-  for (const auto &[hash, pkg] : retained) {
+  for (const auto &[hash, pkg] : verified) {
     if (enabled(hash)) {
       const auto authority = keyOf(hash, 0).authority;
       for (std::size_t ordinal = 0; ordinal < pkg.links.size(); ++ordinal)
@@ -163,19 +224,19 @@ bool ReaderLinkPackages::enabled(const LinkKey &key) const {
 }
 std::expected<ReaderLinkPackages *, std::string>
 ReaderLinkPackages::setEnabled(const LinkKey &key, bool on) {
-  if (!retainedPackage(key))
+  if (!verifiedPackage(key))
     return std::unexpected("The exact verified package is unavailable");
   return setEnabled(authorities.at(key.authority), on);
 }
 const LinkPackage *ReaderLinkPackages::package(const LinkKey &key) const {
-  return enabled(key) ? retainedPackage(key) : nullptr;
+  return enabled(key) ? verifiedPackage(key) : nullptr;
 }
 const LinkPackage *
-ReaderLinkPackages::retainedPackage(const LinkKey &key) const {
+ReaderLinkPackages::verifiedPackage(const LinkKey &key) const {
   const auto authority = authorities.find(key.authority);
   if (authority == authorities.end()) return nullptr;
-  const auto pkg = retained.find(authority->second);
-  return pkg != retained.end() && key.id < pkg->second.links.size()
+  const auto pkg = verified.find(authority->second);
+  return pkg != verified.end() && key.id < pkg->second.links.size()
              ? &pkg->second
              : nullptr;
 }

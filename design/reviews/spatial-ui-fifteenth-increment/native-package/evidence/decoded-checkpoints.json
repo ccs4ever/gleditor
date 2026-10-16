@@ -1,0 +1,461 @@
+[
+  {
+    "checkpoint": "evidence/checkpoints/10-retained",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc 55c68c61f032d5bd454a4f30137d92c5 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/11-enabled",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc 55c68c61f032d5bd454a4f30137d92c5 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/12-quiet",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc 55c68c61f032d5bd454a4f30137d92c5 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/13-navigate-link-0",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc 55c68c61f032d5bd454a4f30137d92c5 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/14-restarted-quiet-pin",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc 55c68c61f032d5bd454a4f30137d92c5 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/15-left2-right3",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc 55c68c61f032d5bd454a4f30137d92c5 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/16-disabled-pinned",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc 55c68c61f032d5bd454a4f30137d92c5 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/17-removed-pinned",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc 55c68c61f032d5bd454a4f30137d92c5 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/18-removed-inventory",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc 55c68c61f032d5bd454a4f30137d92c5 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/19-retained-disabled",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc 55c68c61f032d5bd454a4f30137d92c5 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/20-reader-inventory-disabled",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc 55c68c61f032d5bd454a4f30137d92c5 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/21-reenabled-quiet",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc 55c68c61f032d5bd454a4f30137d92c5 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/22-reader-inventory-enabled",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc 55c68c61f032d5bd454a4f30137d92c5 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/23-corrected-left2-right3",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc 55c68c61f032d5bd454a4f30137d92c5 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/24-disabled-pinned-left2-right3",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc 55c68c61f032d5bd454a4f30137d92c5 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/25-removed-pinned-left2-right3",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc 55c68c61f032d5bd454a4f30137d92c5 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/26-retained-disabled-left2-right3",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc 55c68c61f032d5bd454a4f30137d92c5 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/27-reenabled-quiet-left2-right3",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc 55c68c61f032d5bd454a4f30137d92c5 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/28-restarted-final-quiet-pin",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc 55c68c61f032d5bd454a4f30137d92c5 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/29-root-left2-right3",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc 55c68c61f032d5bd454a4f30137d92c5 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/30-root-disabled",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc 55c68c61f032d5bd454a4f30137d92c5 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/31-root-removed",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc 55c68c61f032d5bd454a4f30137d92c5 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/32-root-retained-disabled",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc 55c68c61f032d5bd454a4f30137d92c5 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/33-root-reenabled",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc 55c68c61f032d5bd454a4f30137d92c5 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/34-root-restarted-pins",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc 55c68c61f032d5bd454a4f30137d92c5 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/35-normal-unselected",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc 55c68c61f032d5bd454a4f30137d92c5 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/36-quiet-unselected",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc 55c68c61f032d5bd454a4f30137d92c5 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  }
+]

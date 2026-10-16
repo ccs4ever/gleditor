@@ -228,6 +228,18 @@ struct EnterVisit {
 struct EnableSelectedPackage {
   bool operator==(const EnableSelectedPackage &) const = default;
 };
+struct RetainSelectedPackage {
+  bool operator==(const RetainSelectedPackage &) const = default;
+};
+struct RemoveSelectedPackage {
+  bool operator==(const RemoveSelectedPackage &) const = default;
+};
+struct QuietSelectedPackage {
+  bool operator==(const QuietSelectedPackage &) const = default;
+};
+struct DisableSelectedPackage {
+  bool operator==(const DisableSelectedPackage &) const = default;
+};
 struct CancelEntry {
   bool operator==(const CancelEntry &) const = default;
 };
@@ -238,7 +250,9 @@ using NavigationCommand =
                  nav::StepMember, nav::SelectOccurrence, nav::StepOccurrence,
                  nav::Cross, nav::Enter, nav::EnterAt, nav::ActivityBack,
                  nav::ActivityForward, nav::ReturnToOrigin, nav::Dismiss,
-                 nav::CancelEntry, nav::EnterVisit, nav::EnableSelectedPackage>;
+                 nav::CancelEntry, nav::EnterVisit, nav::EnableSelectedPackage,
+                 nav::RetainSelectedPackage, nav::RemoveSelectedPackage,
+                 nav::QuietSelectedPackage, nav::DisableSelectedPackage>;
 
 enum class NavigationError : std::uint8_t {
   NoLinkSelected,

@@ -277,9 +277,13 @@ NavigationResult LinkNavigator::dispatch(const NavigationCommand &command) {
           const auto visit = activity.find(c.visit);
           if (!visit) return std::unexpected(NavigationError::NoPreviousVisit);
           return restoreVisit(*visit);
-        } else if constexpr (std::is_same_v<Command, nav::CancelEntry> ||
-                             std::is_same_v<Command,
-                                            nav::EnableSelectedPackage>) {
+        } else if constexpr (
+            std::is_same_v<Command, nav::CancelEntry> ||
+            std::is_same_v<Command, nav::EnableSelectedPackage> ||
+            std::is_same_v<Command, nav::RetainSelectedPackage> ||
+            std::is_same_v<Command, nav::RemoveSelectedPackage> ||
+            std::is_same_v<Command, nav::QuietSelectedPackage> ||
+            std::is_same_v<Command, nav::DisableSelectedPackage>) {
           return NavigationEffect{};
         } else {
           static_assert(std::is_same_v<Command, nav::Dismiss>);
@@ -638,22 +642,27 @@ std::string_view name(const NavigationError error) noexcept {
 }
 
 std::string_view name(const NavigationCommand &command) noexcept {
-  static constexpr std::string_view names[] = {"select link",
-                                               "step link",
-                                               "select member",
-                                               "step member",
-                                               "select occurrence",
-                                               "step occurrence",
-                                               "cross",
-                                               "enter",
-                                               "enter at",
-                                               "activity back",
-                                               "activity forward",
-                                               "return to origin",
-                                               "dismiss",
-                                               "cancel entry",
-                                               "enter visit",
-                                               "enable selected package"};
+  static constexpr std::string_view names[] = {
+      "select link",
+      "step link",
+      "select member",
+      "step member",
+      "select occurrence",
+      "step occurrence",
+      "cross",
+      "enter",
+      "enter at",
+      "activity back",
+      "activity forward",
+      "return to origin",
+      "dismiss",
+      "cancel entry",
+      "enter visit",
+      "enable selected package",
+      "retain the pinned Link package",
+      "remove the pinned package from reader inventory",
+      "toggle normal or quiet emphasis for the pinned package",
+      "disable drawing for the pinned package"};
   static_assert(std::size(names) == std::variant_size_v<NavigationCommand>);
   return names[command.index()];
 }
@@ -687,6 +696,14 @@ commandForAction(const std::string_view action) {
   if (kKeymapLinkCross == action) {
     return nav::Cross{};
   }
+  if (action == "std:xuzz/link_retain_package")
+    return nav::RetainSelectedPackage{};
+  if (action == "std:xuzz/link_remove_package")
+    return nav::RemoveSelectedPackage{};
+  if (action == "std:xuzz/link_quiet_package")
+    return nav::QuietSelectedPackage{};
+  if (action == "std:xuzz/link_disable_package")
+    return nav::DisableSelectedPackage{};
   if (action == "std:xuzz/link_enable_package")
     return nav::EnableSelectedPackage{};
   if (action == "std:xuzz/link_cancel_entry") return nav::CancelEntry{};

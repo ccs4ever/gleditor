@@ -461,6 +461,19 @@ public:
   PublicationInbox &publicationInbox();
   LinkPackageExchange &linkPackageExchange();
   ReaderLinkPackages &readerLinkPackages();
+  Session *setPackageQuietAlpha(float alpha) {
+    if (packageQuietAlpha != alpha) {
+      packageQuietAlpha = alpha;
+      invalidate();
+    }
+    return this;
+  }
+  [[nodiscard]] std::expected<Session *, std::string>
+  setLinkPackageRetained(const LinkPackageStatus &package, bool retained);
+  [[nodiscard]] std::expected<Session *, std::string>
+  setLinkPackageRetained(const LinkKey &key, bool retained);
+  [[nodiscard]] std::expected<Session *, std::string>
+  setLinkPackageEmphasis(const InfoHash &hash, PackageEmphasis emphasis);
   [[nodiscard]] std::expected<Session *, std::string>
   setLinkPackageEnabled(const LinkPackageStatus &package, bool enabled);
   [[nodiscard]] std::expected<Session *, std::string>
@@ -887,6 +900,7 @@ private:
   std::unique_ptr<PublicationInbox> publicationInbox_;
   std::unique_ptr<LinkPackageExchange> linkPackageExchange_;
   std::unique_ptr<ReaderLinkPackages> readerLinkPackages_;
+  float packageQuietAlpha{BeamConfig{}.packageQuietAlpha};
   std::map<std::uint64_t, LinkKey> packageRenderKeys_;
   std::map<std::pair<std::string, zigzag::CellRef>, std::uint64_t>
       packageRenderIds_;

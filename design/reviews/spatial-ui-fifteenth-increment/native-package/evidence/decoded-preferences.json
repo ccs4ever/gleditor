@@ -1,0 +1,255 @@
+[
+  {
+    "checkpoint": "14-restarted-quiet-pin",
+    "preference_sha256": "45e2fa7c399df611c47ae8436871471d638372a1066c7d43e50e8ae863213f37",
+    "preference": {
+      "f985e7513550a08b7463fbbc7008e8cb931d75e0": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "15-left2-right3",
+    "preference_sha256": "45e2fa7c399df611c47ae8436871471d638372a1066c7d43e50e8ae863213f37",
+    "preference": {
+      "f985e7513550a08b7463fbbc7008e8cb931d75e0": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "16-disabled-pinned",
+    "preference_sha256": "93942efd36ec08333a7111756b5cc1fbfdd3f5c602c1cbaf9d8a6badd24f7786",
+    "preference": {
+      "f985e7513550a08b7463fbbc7008e8cb931d75e0": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "17-removed-pinned",
+    "preference_sha256": "7c6a5751f21b9b7d30305d9d86cf5f9f76f22669697d2649c12ea55a393fb1a7",
+    "preference": {
+      "f985e7513550a08b7463fbbc7008e8cb931d75e0": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 0
+      }
+    }
+  },
+  {
+    "checkpoint": "18-removed-inventory",
+    "preference_sha256": "7c6a5751f21b9b7d30305d9d86cf5f9f76f22669697d2649c12ea55a393fb1a7",
+    "preference": {
+      "f985e7513550a08b7463fbbc7008e8cb931d75e0": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 0
+      }
+    }
+  },
+  {
+    "checkpoint": "19-retained-disabled",
+    "preference_sha256": "93942efd36ec08333a7111756b5cc1fbfdd3f5c602c1cbaf9d8a6badd24f7786",
+    "preference": {
+      "f985e7513550a08b7463fbbc7008e8cb931d75e0": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "20-reader-inventory-disabled",
+    "preference_sha256": "93942efd36ec08333a7111756b5cc1fbfdd3f5c602c1cbaf9d8a6badd24f7786",
+    "preference": {
+      "f985e7513550a08b7463fbbc7008e8cb931d75e0": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "21-reenabled-quiet",
+    "preference_sha256": "45e2fa7c399df611c47ae8436871471d638372a1066c7d43e50e8ae863213f37",
+    "preference": {
+      "f985e7513550a08b7463fbbc7008e8cb931d75e0": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "22-reader-inventory-enabled",
+    "preference_sha256": "45e2fa7c399df611c47ae8436871471d638372a1066c7d43e50e8ae863213f37",
+    "preference": {
+      "f985e7513550a08b7463fbbc7008e8cb931d75e0": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "23-corrected-left2-right3",
+    "preference_sha256": "45e2fa7c399df611c47ae8436871471d638372a1066c7d43e50e8ae863213f37",
+    "preference": {
+      "f985e7513550a08b7463fbbc7008e8cb931d75e0": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "24-disabled-pinned-left2-right3",
+    "preference_sha256": "93942efd36ec08333a7111756b5cc1fbfdd3f5c602c1cbaf9d8a6badd24f7786",
+    "preference": {
+      "f985e7513550a08b7463fbbc7008e8cb931d75e0": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "25-removed-pinned-left2-right3",
+    "preference_sha256": "7c6a5751f21b9b7d30305d9d86cf5f9f76f22669697d2649c12ea55a393fb1a7",
+    "preference": {
+      "f985e7513550a08b7463fbbc7008e8cb931d75e0": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 0
+      }
+    }
+  },
+  {
+    "checkpoint": "26-retained-disabled-left2-right3",
+    "preference_sha256": "93942efd36ec08333a7111756b5cc1fbfdd3f5c602c1cbaf9d8a6badd24f7786",
+    "preference": {
+      "f985e7513550a08b7463fbbc7008e8cb931d75e0": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "27-reenabled-quiet-left2-right3",
+    "preference_sha256": "45e2fa7c399df611c47ae8436871471d638372a1066c7d43e50e8ae863213f37",
+    "preference": {
+      "f985e7513550a08b7463fbbc7008e8cb931d75e0": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "28-restarted-final-quiet-pin",
+    "preference_sha256": "45e2fa7c399df611c47ae8436871471d638372a1066c7d43e50e8ae863213f37",
+    "preference": {
+      "f985e7513550a08b7463fbbc7008e8cb931d75e0": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "29-root-left2-right3",
+    "preference_sha256": "45e2fa7c399df611c47ae8436871471d638372a1066c7d43e50e8ae863213f37",
+    "preference": {
+      "f985e7513550a08b7463fbbc7008e8cb931d75e0": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "30-root-disabled",
+    "preference_sha256": "93942efd36ec08333a7111756b5cc1fbfdd3f5c602c1cbaf9d8a6badd24f7786",
+    "preference": {
+      "f985e7513550a08b7463fbbc7008e8cb931d75e0": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "31-root-removed",
+    "preference_sha256": "7c6a5751f21b9b7d30305d9d86cf5f9f76f22669697d2649c12ea55a393fb1a7",
+    "preference": {
+      "f985e7513550a08b7463fbbc7008e8cb931d75e0": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 0
+      }
+    }
+  },
+  {
+    "checkpoint": "32-root-retained-disabled",
+    "preference_sha256": "93942efd36ec08333a7111756b5cc1fbfdd3f5c602c1cbaf9d8a6badd24f7786",
+    "preference": {
+      "f985e7513550a08b7463fbbc7008e8cb931d75e0": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "33-root-reenabled",
+    "preference_sha256": "45e2fa7c399df611c47ae8436871471d638372a1066c7d43e50e8ae863213f37",
+    "preference": {
+      "f985e7513550a08b7463fbbc7008e8cb931d75e0": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "34-root-restarted-pins",
+    "preference_sha256": "45e2fa7c399df611c47ae8436871471d638372a1066c7d43e50e8ae863213f37",
+    "preference": {
+      "f985e7513550a08b7463fbbc7008e8cb931d75e0": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "35-normal-unselected",
+    "preference_sha256": "1c7a24cff8b03df631fabbb0330b128d9a060f0b901229c541d8087bbadc3f0e",
+    "preference": {
+      "f985e7513550a08b7463fbbc7008e8cb931d75e0": {
+        "emphasis": "normal",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "36-quiet-unselected",
+    "preference_sha256": "45e2fa7c399df611c47ae8436871471d638372a1066c7d43e50e8ae863213f37",
+    "preference": {
+      "f985e7513550a08b7463fbbc7008e8cb931d75e0": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  }
+]

@@ -1,0 +1,1271 @@
+diff --git a/apps/common/ui/xanadoc/beams.cpp b/apps/common/ui/xanadoc/beams.cpp
+index d920d434..7aae31c9 100644
+--- a/apps/common/ui/xanadoc/beams.cpp
++++ b/apps/common/ui/xanadoc/beams.cpp
+@@ -301,13 +301,16 @@ void LinkBeams::rebuildStrands(RenderState &state) {
+                               : session.packageRenderId(resolved.key);
+       const auto append = [&](const LinkEnd &a, const LinkEnd &b, bool drawFrom,
+                               bool drawTo) {
+-        strands.push_back(Strand{.link     = id,
+-                                 .type     = resolved.link.type,
+-                                 .tier     = resolved.link.tier,
+-                                 .from     = a,
+-                                 .to       = b,
+-                                 .drawFrom = drawFrom,
+-                                 .drawTo   = drawTo});
++        strands.push_back(Strand{
++            .link     = id,
++            .type     = resolved.link.type,
++            .tier     = resolved.link.tier,
++            .from     = a,
++            .to       = b,
++            .drawFrom = drawFrom,
++            .drawTo   = drawTo,
++            .quiet    = session.readerLinkPackages().emphasis(resolved.key) ==
++                     PackageEmphasis::Quiet});
+       };
+       for (std::size_t i = 0; i < left.size(); ++i)
+         append(left[i], right.front(), true, i == 0);
+@@ -2021,7 +2024,7 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
+       const auto docAlpha   = std::min(fromOpacity, toOpacity);
+       const auto colour     = fade(
+           linkColourWithInstanceShift(strand.link, strand.type, strand.tier),
+-          docAlpha);
++          docAlpha * (strand.quiet ? beamConfig_.packageQuietAlpha : 1.F));
+       const auto tagId = static_cast<std::uint32_t>(i);
+       const bool isAct = (activeLink && *activeLink == strand.link);
+ 
+@@ -2719,6 +2722,12 @@ void LinkBeams::describe(gleditor::a11y::Builder &into) {
+             : "by " + record->owner +
+                   (record->curator.empty() ? ""
+                                            : "; curator " + record->curator);
++    if (const auto carrier = session.readerLinkPackages().carrier(key))
++      node.description +=
++          session.readerLinkPackages().preference(*carrier).emphasis ==
++                  PackageEmphasis::Quiet
++              ? "; reader emphasis quiet"
++              : "; reader emphasis normal";
+     node.value     = open ? "selected" : "";
+     node.children  = members;
+     node.focusable = true;
+diff --git a/apps/common/ui/xanadoc/beams.hpp b/apps/common/ui/xanadoc/beams.hpp
+index ccee17fb..6272c6d4 100644
+--- a/apps/common/ui/xanadoc/beams.hpp
++++ b/apps/common/ui/xanadoc/beams.hpp
+@@ -280,6 +280,7 @@ private:
+     LinkEnd from;
+     LinkEnd to;
+     bool drawFrom{true}, drawTo{true};
++    bool quiet{false};
+     std::optional<Doc::Anchor> fromAnchor;
+     std::optional<Doc::Anchor> toAnchor;
+     std::optional<Doc::Anchor> fromEndAnchor;
+diff --git a/apps/common/ui/xanadoc/link_context.cpp b/apps/common/ui/xanadoc/link_context.cpp
+index 428f650b..07f5e094 100644
+--- a/apps/common/ui/xanadoc/link_context.cpp
++++ b/apps/common/ui/xanadoc/link_context.cpp
+@@ -116,7 +116,7 @@ std::optional<Link> LinkContext::recordOf(const std::uint64_t id) const {
+ 
+ std::expected<xanadu::LinkOccurrences, xanadu::LinkQueryError>
+ LinkContext::resolve(const xanadu::LinkKey &key) const {
+-  if (const auto *package = session.readerLinkPackages().retainedPackage(key);
++  if (const auto *package = session.readerLinkPackages().verifiedPackage(key);
+       package && !nativeStoreOf(key))
+     return packageIndex(std::nullopt).resolve(key, *package);
+   return resolveForPresentation(key);
+@@ -306,11 +306,32 @@ LinkContext::execute(const xanadu::NavigationCommand &command) {
+   }
+   const auto named    = keyNamed(command);
+   const auto selected = navigator.selection();
+-  if (std::holds_alternative<nav::EnableSelectedPackage>(command)) {
++  if (std::holds_alternative<nav::EnableSelectedPackage>(command) ||
++      std::holds_alternative<nav::DisableSelectedPackage>(command) ||
++      std::holds_alternative<nav::RetainSelectedPackage>(command) ||
++      std::holds_alternative<nav::RemoveSelectedPackage>(command) ||
++      std::holds_alternative<nav::QuietSelectedPackage>(command)) {
+     if (!selected) return std::unexpected(NavigationError::NoLinkSelected);
+-    if (auto enabled = session.setLinkPackageEnabled(selected->key, true);
+-        !enabled) {
+-      entryUnavailable = enabled.error();
++    const auto hash = selectedPackageCarrier();
++    if (!hash) return std::unexpected(NavigationError::LinkNotFound);
++    const auto result = [&]() -> std::expected<Session *, std::string> {
++      if (std::holds_alternative<nav::RetainSelectedPackage>(command) ||
++          std::holds_alternative<nav::RemoveSelectedPackage>(command))
++        return session.setLinkPackageRetained(
++            selected->key,
++            std::holds_alternative<nav::RetainSelectedPackage>(command));
++      if (std::holds_alternative<nav::QuietSelectedPackage>(command))
++        return session.setLinkPackageEmphasis(
++            *hash, session.readerLinkPackages().preference(*hash).emphasis ==
++                           PackageEmphasis::Normal
++                       ? PackageEmphasis::Quiet
++                       : PackageEmphasis::Normal);
++      return session.setLinkPackageEnabled(
++          selected->key,
++          std::holds_alternative<nav::EnableSelectedPackage>(command));
++    }();
++    if (!result) {
++      entryUnavailable = result.error();
+       ++changes;
+       return std::unexpected(NavigationError::LinkNotFound);
+     }
+@@ -322,7 +343,7 @@ LinkContext::execute(const xanadu::NavigationCommand &command) {
+       selected && named && *named == selected->key &&
+       (std::holds_alternative<nav::SelectMember>(command) ||
+        std::holds_alternative<nav::SelectOccurrence>(command)) &&
+-      session.readerLinkPackages().retainedPackage(*named);
++      session.readerLinkPackages().verifiedPackage(*named);
+   if (named && !browsingPinned && !nativeStoreOf(*named) &&
+       !session.readerLinkPackages().find(*named))
+     return std::unexpected(NavigationError::LinkNotFound);
+diff --git a/apps/common/ui/xanadoc/link_panel_overlay.cpp b/apps/common/ui/xanadoc/link_panel_overlay.cpp
+index 2940b54d..c7453c05 100644
+--- a/apps/common/ui/xanadoc/link_panel_overlay.cpp
++++ b/apps/common/ui/xanadoc/link_panel_overlay.cpp
+@@ -298,7 +298,7 @@ void LinkPanelOverlay::appendInvestigation(std::vector<PanelLine> &lines) {
+     const auto label   = side == LinkSide::Left ? "Left" : "Right";
+     const auto &member = members[*cursor.member];
+     if (const auto *package =
+-            session.readerLinkPackages().retainedPackage(selected->key)) {
++            session.readerLinkPackages().verifiedPackage(selected->key)) {
+       const auto &spans = side == LinkSide::Left
+                               ? package->links[selected->key.id].left
+                               : package->links[selected->key.id].right;
+@@ -399,12 +399,38 @@ void LinkPanelOverlay::rebuildPanel(gleditor::FrameContext &ctx) {
+                                target->range.start, target->range.end)});
+     }
+   }
++  if (const auto carrier = context.selectedPackageCarrier()) {
++    const auto choice = session.readerLinkPackages().preference(*carrier);
++    lines.push_back(
++        {.text =
++             std::string("Reader package: ") +
++             (choice.retained ? "retained" : "not retained") + " · " +
++             (choice.enabled ? "enabled" : "disabled") + " · emphasis " +
++             (choice.emphasis == PackageEmphasis::Quiet ? "quiet" : "normal"),
++         .tone = PanelLine::Tone::Muted});
++    if (choice.retained) {
++      buttons.push_back({.label   = choice.emphasis == PackageEmphasis::Quiet
++                                        ? "Normal package emphasis"
++                                        : "Quiet package emphasis",
++                         .command = nav::QuietSelectedPackage{}});
++      buttons.push_back({.label   = "Remove package from reader",
++                         .command = nav::RemoveSelectedPackage{}});
++      if (choice.enabled)
++        buttons.push_back({.label   = "Disable package drawing",
++                           .command = nav::DisableSelectedPackage{}});
++    } else
++      buttons.push_back(
++          {.label = "Retain package", .command = nav::RetainSelectedPackage{}});
++  }
+   if (context.selectedPackageDisabled()) {
+-    lines.push_back({.text = "Package drawing disabled · re-enable to enter; "
+-                             "pinned Link retained",
+-                     .tone = PanelLine::Tone::Muted});
+-    buttons.push_back({.label   = "Re-enable package",
+-                       .command = nav::EnableSelectedPackage{}});
++    lines.push_back(
++        {.text = "Package drawing disabled · retain and enable to enter; "
++                 "pinned Link retained",
++         .tone = PanelLine::Tone::Muted});
++    if (const auto carrier = context.selectedPackageCarrier();
++        carrier && session.readerLinkPackages().preference(*carrier).retained)
++      buttons.push_back({.label   = "Re-enable package",
++                         .command = nav::EnableSelectedPackage{}});
+     for (auto &button : buttons)
+       if (std::holds_alternative<nav::Enter>(button.command) ||
+           std::holds_alternative<nav::EnterAt>(button.command)) {
+diff --git a/apps/common/ui/xanadoc/session.cpp b/apps/common/ui/xanadoc/session.cpp
+index 9530da4a..14ddcd7e 100644
+--- a/apps/common/ui/xanadoc/session.cpp
++++ b/apps/common/ui/xanadoc/session.cpp
+@@ -706,10 +706,11 @@ ReaderLinkPackages &Session::readerLinkPackages() {
+         xanadocsDirectory().parent_path() / "package-visibility");
+     if (!reader->preferences().empty())
+       for (const auto &status : linkPackageExchange().statuses())
+-        if (status.phase == LinkPackagePhase::Ready ||
+-            status.phase == LinkPackagePhase::Published ||
+-            (!status.received && !status.package.links.empty())) {
+-          if (auto result = reader->retain(status.package, status.hash);
++        if (reader->preferences().contains(status.hash) &&
++            (status.phase == LinkPackagePhase::Ready ||
++             status.phase == LinkPackagePhase::Published ||
++             (!status.received && !status.package.links.empty()))) {
++          if (auto result = reader->cacheVerified(status.package, status.hash);
+               !result)
+             throw ReaderLinkPackagesUnreadable(result.error());
+         }
+@@ -722,6 +723,50 @@ ReaderLinkPackages &Session::readerLinkPackages() {
+   return *readerLinkPackages_;
+ }
+ std::expected<Session *, std::string>
++Session::setLinkPackageRetained(const LinkPackageStatus &package, bool on) try {
++  auto &reader = readerLinkPackages();
++  if (on) {
++    if (package.phase != LinkPackagePhase::Ready &&
++        package.phase != LinkPackagePhase::Published)
++      throw std::invalid_argument("Verify the package before retaining it");
++    for (const auto &entry : stores)
++      if (entry.store &&
++          entry.store->documentId() ==
++              ReaderLinkPackages::keyOf(package.hash, 0).authority)
++        throw std::invalid_argument(
++            "Package authority conflicts with an open store");
++    if (auto result = reader.cacheVerified(package.package, package.hash);
++        !result)
++      throw std::invalid_argument(result.error());
++  }
++  if (auto result = reader.setRetained(package.hash, on); !result)
++    throw ReaderLinkPackagesUnreadable(result.error());
++  invalidate();
++  return this;
++} catch (const std::exception &error) {
++  return std::unexpected(std::string(error.what()));
++}
++std::expected<Session *, std::string>
++Session::setLinkPackageRetained(const LinkKey &key, bool on) {
++  for (const auto &entry : stores)
++    if (entry.store && entry.store->documentId() == key.authority)
++      return std::unexpected("Package authority conflicts with an open store");
++  const auto hash = readerLinkPackages().carrier(key);
++  if (!hash) return std::unexpected("The exact package carrier is unavailable");
++  if (auto result = readerLinkPackages().setRetained(*hash, on); !result)
++    return std::unexpected(result.error());
++  invalidate();
++  return this;
++}
++std::expected<Session *, std::string>
++Session::setLinkPackageEmphasis(const InfoHash &hash,
++                                PackageEmphasis emphasis) {
++  if (auto result = readerLinkPackages().setEmphasis(hash, emphasis); !result)
++    return std::unexpected(result.error());
++  invalidate();
++  return this;
++}
++std::expected<Session *, std::string>
+ Session::setLinkPackageEnabled(const LinkPackageStatus &package, bool on) try {
+   if (on && package.phase != LinkPackagePhase::Ready &&
+       package.phase != LinkPackagePhase::Published)
+@@ -735,7 +780,8 @@ Session::setLinkPackageEnabled(const LinkPackageStatus &package, bool on) try {
+         throw std::invalid_argument(
+             "Package authority conflicts with an open store");
+   if (on)
+-    if (auto result = reader.retain(package.package, package.hash); !result)
++    if (auto result = reader.cacheVerified(package.package, package.hash);
++        !result)
+       throw std::invalid_argument(result.error());
+   if (auto result = reader.setEnabled(package.hash, on); !result)
+     throw ReaderLinkPackagesUnreadable(result.error());
+@@ -3054,8 +3100,12 @@ void Session::decorate(const Doc &doc, std::vector<gleditor::SpanStyle> &out) {
+   for (const auto &key : packageKeys) {
+     const auto *link = readerLinkPackages().find(key);
+     if (!link || link->type == LinkType::Format) continue;
+-    const auto colour = linkColourWithInstanceShift(
+-        packageRenderId(key), link->type, ProminenceTier::Curated);
++    auto colour = linkColourWithInstanceShift(packageRenderId(key), link->type,
++                                              ProminenceTier::Curated);
++    if (readerLinkPackages().emphasis(key) == PackageEmphasis::Quiet)
++      colour = (colour & 0xFFFFFF00U) |
++               static_cast<std::uint32_t>(std::lround(
++                   static_cast<float>(colour & 0xFFU) * packageQuietAlpha));
+     for (const auto *ends : {&link->left, &link->right})
+       for (const auto &span : *ends)
+         for (const auto &match : packageIndex->occurrences(span))
+@@ -3095,6 +3145,7 @@ void Session::decorate(const Doc &doc, std::vector<gleditor::SpanStyle> &out) {
+       }
+     }
+   }
++  out.insert(out.end(), found.begin(), found.end());
+ }
+ 
+ ImageOverlay::ImageOverlay(std::string aFontName)
+diff --git a/apps/common/ui/xanadoc/session.hpp b/apps/common/ui/xanadoc/session.hpp
+index 61871b1f..5d773bd2 100644
+--- a/apps/common/ui/xanadoc/session.hpp
++++ b/apps/common/ui/xanadoc/session.hpp
+@@ -461,6 +461,19 @@ public:
+   PublicationInbox &publicationInbox();
+   LinkPackageExchange &linkPackageExchange();
+   ReaderLinkPackages &readerLinkPackages();
++  Session *setPackageQuietAlpha(float alpha) {
++    if (packageQuietAlpha != alpha) {
++      packageQuietAlpha = alpha;
++      invalidate();
++    }
++    return this;
++  }
++  [[nodiscard]] std::expected<Session *, std::string>
++  setLinkPackageRetained(const LinkPackageStatus &package, bool retained);
++  [[nodiscard]] std::expected<Session *, std::string>
++  setLinkPackageRetained(const LinkKey &key, bool retained);
++  [[nodiscard]] std::expected<Session *, std::string>
++  setLinkPackageEmphasis(const InfoHash &hash, PackageEmphasis emphasis);
+   [[nodiscard]] std::expected<Session *, std::string>
+   setLinkPackageEnabled(const LinkPackageStatus &package, bool enabled);
+   [[nodiscard]] std::expected<Session *, std::string>
+@@ -887,6 +900,7 @@ private:
+   std::unique_ptr<PublicationInbox> publicationInbox_;
+   std::unique_ptr<LinkPackageExchange> linkPackageExchange_;
+   std::unique_ptr<ReaderLinkPackages> readerLinkPackages_;
++  float packageQuietAlpha{BeamConfig{}.packageQuietAlpha};
+   std::map<std::uint64_t, LinkKey> packageRenderKeys_;
+   std::map<std::pair<std::string, zigzag::CellRef>, std::uint64_t>
+       packageRenderIds_;
+diff --git a/apps/common/ui/xanadoc/views_publication_links.cpp b/apps/common/ui/xanadoc/views_publication_links.cpp
+index 082d41e2..c81e4638 100644
+--- a/apps/common/ui/xanadoc/views_publication_links.cpp
++++ b/apps/common/ui/xanadoc/views_publication_links.cpp
+@@ -85,7 +85,7 @@ void Views::publishIndependentLinks() {
+           "Publish independent links",
+           "Choose a signed snapshot containing authored links. Review before "
+           "publishing.",
+-          {actions({"Prepare for review", "Review retained package", "Close"},
++          {actions({"Prepare for review", "Review downloaded package", "Close"},
+                    {"prepare", "cached", "close"}),
+            sources(pubs), std::move(title), std::move(salt)},
+           [this, pubs](const auto &answers) {
+@@ -124,40 +124,133 @@ void Views::publishIndependentLinks() {
+ void Views::linksAndResponses(const std::string &query) {
+   renderer->runWithState([this, query](RenderState &) {
+     try {
+-      if (query == "cached" || query == "matching") {
+-        const auto retained = session.linkPackageExchange().statuses();
+-        auto packages       = choice("Retained package", {}, {});
+-        for (const auto &pkg : retained) {
+-          if (query == "matching" && (pkg.phase != LinkPackagePhase::Ready &&
+-                                      pkg.phase != LinkPackagePhase::Published))
+-            continue;
+-          if (query == "matching" && packageFilterSource &&
+-              !packageReferences(pkg.package, *packageFilterSource))
+-            continue;
++      if (query == "cached" || query == "matching" || query == "reader" ||
++          query == "removed") {
++        const auto statuses = session.linkPackageExchange().statuses();
++        auto &reader        = session.readerLinkPackages();
++        auto packages       = choice("Immutable package carrier", {}, {});
++        std::map<std::string, std::string> ids;
++        std::size_t retainedCount = 0, enabledCount = 0, knownLinks = 0,
++                    enabledLinks = 0, unavailable = 0;
++        for (const auto &[hash, preference] : reader.preferences()) {
++          if (!preference.retained) continue;
++          ++retainedCount;
++          if (preference.enabled) ++enabledCount;
++          if (const auto *payload =
++                  reader.verifiedPackage(ReaderLinkPackages::keyOf(hash, 0))) {
++            knownLinks += payload->links.size();
++            if (preference.enabled) enabledLinks += payload->links.size();
++          } else
++            ++unavailable;
++        }
++        const auto append = [&](const InfoHash &hash, std::string label) {
+           if (packages.options == std::vector<std::string>{"None"}) {
+             packages.options.clear();
+             packages.optionValues.clear();
+           }
+-          packages.options.push_back(
+-              pkg.package.title + " — " +
+-              std::string(linkPackagePhaseName(pkg.phase)));
+-          packages.optionValues.push_back(pkg.id);
++          packages.options.push_back(std::move(label));
++          packages.optionValues.push_back(hash.hex());
++        };
++        for (const auto &status : statuses)
++          ids.emplace(status.hash.hex(), status.id);
++        if (query == "reader" || query == "removed") {
++          for (const auto &[hash, preference] : reader.preferences()) {
++            if (preference.retained != (query == "reader")) continue;
++            const auto *payload =
++                reader.verifiedPackage(ReaderLinkPackages::keyOf(hash, 0));
++            append(hash,
++                   (payload ? payload->title : "Payload unavailable") + " / " +
++                       hash.hex() +
++                       (preference.enabled ? " · enabled" : " · disabled") +
++                       (preference.emphasis == PackageEmphasis::Quiet
++                            ? " · quiet"
++                            : " · normal"));
++          }
++        } else
++          for (const auto &status : statuses) {
++            if (query == "matching" &&
++                (status.phase != LinkPackagePhase::Ready &&
++                 status.phase != LinkPackagePhase::Published))
++              continue;
++            if (query == "matching" && packageFilterSource &&
++                !packageReferences(status.package, *packageFilterSource))
++              continue;
++            append(status.hash,
++                   status.package.title + " / " + status.hash.hex() + " · " +
++                       std::string(linkPackagePhaseName(status.phase)) +
++                       (reader.preference(status.hash).retained
++                            ? " · retained"
++                            : " · not retained"));
++          }
++        auto control =
++            actions({"Show selected package", "Close", "Find packages"},
++                    {"show", "close", "find"});
++        if (query == "reader") {
++          control.options.push_back("Remove from reader");
++          control.optionValues.push_back("remove");
+         }
+-        if (packages.options == std::vector<std::string>{"None"}) {
+-          packages.options      = {"No matching packages"};
+-          packages.optionValues = {""};
++        if (query == "removed") {
++          control.options.push_back("Restore to reader");
++          control.optionValues.push_back("restore");
+         }
++        const auto inventory =
++            std::to_string(retainedCount) + " retained carriers / " +
++            std::to_string(enabledCount) + " enabled; " +
++            std::to_string(knownLinks) + " known retained links / " +
++            std::to_string(enabledLinks) + " drawable links; " +
++            std::to_string(unavailable) + " retained payloads unavailable.";
+         form.open(
+-            "Retained link packages",
+-            query == "matching" && packageFilterSource
+-                ? "Verified endpoints overlap document passages in " +
+-                      packageFilterSource->title + "."
+-                : "Signed endpoints are retained privately for review.",
+-            {actions({"Show selected package", "Close"}, {"show", "close"}),
+-             std::move(packages)},
+-            [this](const auto &answers) {
+-              if (answers[0].answer() == "show" && !answers[1].answer().empty())
+-                linkPackageStatus(answers[1].answer());
++            query == "reader"    ? "Reader package inventory"
++            : query == "removed" ? "Removed reader packages"
++                                 : "Downloaded link packages",
++            inventory +
++                " Downloaded candidates are separate from reader retention.",
++            {std::move(control), std::move(packages)},
++            [this, query, ids = std::move(ids)](const auto &answers) {
++              renderer->runWithState([this, query, ids,
++                                      answers](RenderState &) {
++                const auto action  = answers[0].answer();
++                const auto carrier = answers[1].answer();
++                if (action == "find") {
++                  linksAndResponses();
++                  return;
++                }
++                if (action == "close" || carrier.empty()) return;
++                try {
++                  if (action == "remove") {
++                    if (auto result = session.setLinkPackageRetained(
++                            ReaderLinkPackages::keyOf(
++                                InfoHash::fromHex(carrier), 0),
++                            false);
++                        !result)
++                      throw std::runtime_error(result.error());
++                    if (packageVisibilityChanged) packageVisibilityChanged();
++                    linksAndResponses(query);
++                    return;
++                  }
++                  const auto found = ids.find(carrier);
++                  if (found == ids.end())
++                    throw std::runtime_error(
++                        "Exact verified payload unavailable for carrier " +
++                        carrier +
++                        ". Fetch and verify this immutable carrier to restore "
++                        "it.");
++                  if (action == "restore") {
++                    if (auto result = session.setLinkPackageRetained(
++                            session.linkPackageExchange().status(found->second),
++                            true);
++                        !result)
++                      throw std::runtime_error(result.error());
++                    if (packageVisibilityChanged) packageVisibilityChanged();
++                    linksAndResponses(query);
++                    return;
++                  }
++                  linkPackageStatus(found->second);
++                } catch (const std::exception &error) {
++                  state->showDialog(render::DiagnosticSeverity::Error,
++                                    "Reader package unavailable", error.what());
++                }
++              });
+             });
+         return;
+       }
+@@ -167,16 +260,20 @@ void Views::linksAndResponses(const std::string &query) {
+             "Links and responses",
+             "Search the source's registered global scrolls. No curator key is "
+             "required.",
+-            {actions({"Find packages", "Review retained packages", "Close",
+-                      "Review packages matching selected passages"},
+-                     {"find", "cached", "close", "matching"}),
++            {actions(
++                 {"Find packages", "Review downloaded packages", "Close",
++                  "Review packages matching selected passages",
++                  "Reader package inventory", "Removed reader packages"},
++                 {"find", "cached", "close", "matching", "reader", "removed"}),
+              sources(pubs)},
+             [this, pubs](const auto &answers) {
+               renderer->runWithState([this, pubs, answers](RenderState &) {
+                 try {
+                   if (answers[0].answer() == "close") return;
+-                  if (answers[0].answer() == "cached") {
+-                    linksAndResponses("cached");
++                  if (answers[0].answer() == "cached" ||
++                      answers[0].answer() == "reader" ||
++                      answers[0].answer() == "removed") {
++                    linksAndResponses(answers[0].answer());
+                     return;
+                   }
+                   if (answers[1].answer().empty())
+@@ -237,7 +334,7 @@ void Views::linksAndResponses(const std::string &query) {
+       form.open(
+           "Links and responses", note,
+           {actions({"Refresh progress", "Fetch selected package",
+-                    "Retry discovery", "Review retained packages", "Close"},
++                    "Retry discovery", "Review downloaded packages", "Close"},
+                    {"refresh", "fetch", "retry", "cached", "close"}),
+            std::move(packages)},
+           [this, query, entries,
+@@ -361,16 +458,27 @@ void Views::reviewIndependentLinks(const std::string &id,
+             "Wait for package verification before reviewing endpoints.");
+       const auto &pkg = status.package;
+       reviewLinkPackage(pkg);
+-      const auto enabled = session.readerLinkPackages().enabled(status.hash);
++      const auto preference =
++          session.readerLinkPackages().preference(status.hash);
++      const auto enabled = preference.enabled;
+       auto control =
+           actions({"Inspect selected link", "Open related publication",
+                    "Back to status", "Close", "Inspect full scroll identities"},
+                   {"inspect", "open", "back", "close", "keys"});
+       if (status.phase == LinkPackagePhase::Ready ||
+-          status.phase == LinkPackagePhase::Published || enabled) {
++          status.phase == LinkPackagePhase::Published) {
++        control.options.push_back(preference.retained ? "Remove from reader"
++                                                      : "Retain in reader");
++        control.optionValues.push_back("retain");
++      }
++      if (preference.retained) {
+         control.options.push_back(enabled ? "Disable reader layer"
+                                           : "Enable reader layer");
+         control.optionValues.push_back("toggle");
++        control.options.push_back(preference.emphasis == PackageEmphasis::Quiet
++                                      ? "Normal emphasis"
++                                      : "Quiet emphasis");
++        control.optionValues.push_back("emphasis");
+       }
+       if (enabled) {
+         control.options.push_back("Select link for navigation");
+@@ -407,6 +515,11 @@ void Views::reviewIndependentLinks(const std::string &id,
+           "Review independent links",
+           pkg.title + " — " +
+               (enabled ? "reader layer enabled" : "reader layer disabled") +
++              (preference.retained ? "; retained" : "; not retained") +
++              (preference.emphasis == PackageEmphasis::Quiet
++                   ? "; emphasis quiet"
++                   : "; emphasis normal") +
++              "; carrier " + status.hash.hex() +
+               "; signature verified; enrollment unchecked.",
+           {std::move(control), std::move(curator), std::move(links),
+            endset("Left endset", pkg.links[index].left),
+@@ -417,6 +530,24 @@ void Views::reviewIndependentLinks(const std::string &id,
+               try {
+                 const auto action = answers[0].answer();
+                 if (action == "close") return;
++                if (action == "retain" || action == "emphasis") {
++                  const auto status = session.linkPackageExchange().status(id);
++                  const auto preference =
++                      session.readerLinkPackages().preference(status.hash);
++                  const auto result =
++                      action == "retain"
++                          ? session.setLinkPackageRetained(status,
++                                                           !preference.retained)
++                          : session.setLinkPackageEmphasis(
++                                status.hash,
++                                preference.emphasis == PackageEmphasis::Normal
++                                    ? PackageEmphasis::Quiet
++                                    : PackageEmphasis::Normal);
++                  if (!result) throw std::runtime_error(result.error());
++                  if (packageVisibilityChanged) packageVisibilityChanged();
++                  reviewIndependentLinks(id, index);
++                  return;
++                }
+                 if (action == "toggle") {
+                   const auto status = session.linkPackageExchange().status(id);
+                   if (auto result = session.setLinkPackageEnabled(
+diff --git a/apps/common/xanadu/link_navigation.cpp b/apps/common/xanadu/link_navigation.cpp
+index c595dc6b..25655375 100644
+--- a/apps/common/xanadu/link_navigation.cpp
++++ b/apps/common/xanadu/link_navigation.cpp
+@@ -277,9 +277,13 @@ NavigationResult LinkNavigator::dispatch(const NavigationCommand &command) {
+           const auto visit = activity.find(c.visit);
+           if (!visit) return std::unexpected(NavigationError::NoPreviousVisit);
+           return restoreVisit(*visit);
+-        } else if constexpr (std::is_same_v<Command, nav::CancelEntry> ||
+-                             std::is_same_v<Command,
+-                                            nav::EnableSelectedPackage>) {
++        } else if constexpr (
++            std::is_same_v<Command, nav::CancelEntry> ||
++            std::is_same_v<Command, nav::EnableSelectedPackage> ||
++            std::is_same_v<Command, nav::RetainSelectedPackage> ||
++            std::is_same_v<Command, nav::RemoveSelectedPackage> ||
++            std::is_same_v<Command, nav::QuietSelectedPackage> ||
++            std::is_same_v<Command, nav::DisableSelectedPackage>) {
+           return NavigationEffect{};
+         } else {
+           static_assert(std::is_same_v<Command, nav::Dismiss>);
+@@ -638,22 +642,27 @@ std::string_view name(const NavigationError error) noexcept {
+ }
+ 
+ std::string_view name(const NavigationCommand &command) noexcept {
+-  static constexpr std::string_view names[] = {"select link",
+-                                               "step link",
+-                                               "select member",
+-                                               "step member",
+-                                               "select occurrence",
+-                                               "step occurrence",
+-                                               "cross",
+-                                               "enter",
+-                                               "enter at",
+-                                               "activity back",
+-                                               "activity forward",
+-                                               "return to origin",
+-                                               "dismiss",
+-                                               "cancel entry",
+-                                               "enter visit",
+-                                               "enable selected package"};
++  static constexpr std::string_view names[] = {
++      "select link",
++      "step link",
++      "select member",
++      "step member",
++      "select occurrence",
++      "step occurrence",
++      "cross",
++      "enter",
++      "enter at",
++      "activity back",
++      "activity forward",
++      "return to origin",
++      "dismiss",
++      "cancel entry",
++      "enter visit",
++      "enable selected package",
++      "retain the pinned Link package",
++      "remove the pinned package from reader inventory",
++      "toggle normal or quiet emphasis for the pinned package",
++      "disable drawing for the pinned package"};
+   static_assert(std::size(names) == std::variant_size_v<NavigationCommand>);
+   return names[command.index()];
+ }
+@@ -687,6 +696,14 @@ commandForAction(const std::string_view action) {
+   if (kKeymapLinkCross == action) {
+     return nav::Cross{};
+   }
++  if (action == "std:xuzz/link_retain_package")
++    return nav::RetainSelectedPackage{};
++  if (action == "std:xuzz/link_remove_package")
++    return nav::RemoveSelectedPackage{};
++  if (action == "std:xuzz/link_quiet_package")
++    return nav::QuietSelectedPackage{};
++  if (action == "std:xuzz/link_disable_package")
++    return nav::DisableSelectedPackage{};
+   if (action == "std:xuzz/link_enable_package")
+     return nav::EnableSelectedPackage{};
+   if (action == "std:xuzz/link_cancel_entry") return nav::CancelEntry{};
+diff --git a/apps/common/xanadu/link_navigation.hpp b/apps/common/xanadu/link_navigation.hpp
+index caa82e48..2a19a02d 100644
+--- a/apps/common/xanadu/link_navigation.hpp
++++ b/apps/common/xanadu/link_navigation.hpp
+@@ -228,6 +228,18 @@ struct EnterVisit {
+ struct EnableSelectedPackage {
+   bool operator==(const EnableSelectedPackage &) const = default;
+ };
++struct RetainSelectedPackage {
++  bool operator==(const RetainSelectedPackage &) const = default;
++};
++struct RemoveSelectedPackage {
++  bool operator==(const RemoveSelectedPackage &) const = default;
++};
++struct QuietSelectedPackage {
++  bool operator==(const QuietSelectedPackage &) const = default;
++};
++struct DisableSelectedPackage {
++  bool operator==(const DisableSelectedPackage &) const = default;
++};
+ struct CancelEntry {
+   bool operator==(const CancelEntry &) const = default;
+ };
+@@ -238,7 +250,9 @@ using NavigationCommand =
+                  nav::StepMember, nav::SelectOccurrence, nav::StepOccurrence,
+                  nav::Cross, nav::Enter, nav::EnterAt, nav::ActivityBack,
+                  nav::ActivityForward, nav::ReturnToOrigin, nav::Dismiss,
+-                 nav::CancelEntry, nav::EnterVisit, nav::EnableSelectedPackage>;
++                 nav::CancelEntry, nav::EnterVisit, nav::EnableSelectedPackage,
++                 nav::RetainSelectedPackage, nav::RemoveSelectedPackage,
++                 nav::QuietSelectedPackage, nav::DisableSelectedPackage>;
+ 
+ enum class NavigationError : std::uint8_t {
+   NoLinkSelected,
+diff --git a/apps/common/xanadu/reader_link_packages.cpp b/apps/common/xanadu/reader_link_packages.cpp
+index 4022138a..385653b4 100644
+--- a/apps/common/xanadu/reader_link_packages.cpp
++++ b/apps/common/xanadu/reader_link_packages.cpp
+@@ -31,15 +31,31 @@ ReaderLinkPackages::ReaderLinkPackages(std::filesystem::path path)
+     const std::string bytes{std::istreambuf_iterator<char>(input), {}};
+     const auto root    = bencode::decode(bytes);
+     const auto version = root.asDict().at("format").asInteger();
+-    if (version != 1)
+-      throw std::runtime_error("expected version 1, got " +
++    if (version != 2)
++      throw std::runtime_error("expected version 2, got " +
+                                std::to_string(version));
+     if (root.asDict().size() != 2)
+       throw std::runtime_error("unexpected fields");
+     for (const auto &[hash, value] : root.asDict().at("choices").asDict()) {
+-      if (value.asInteger() != 0 && value.asInteger() != 1)
+-        throw std::runtime_error("invalid choice");
+-      choices.emplace(InfoHash::fromHex(hash), value.asInteger() == 1);
++      const auto &fields = value.asDict();
++      if (fields.size() != 3)
++        throw std::runtime_error("unexpected choice fields");
++      const auto bit = [&](std::string_view name) {
++        const auto value = fields.at(std::string(name)).asInteger();
++        if (value != 0 && value != 1)
++          throw std::runtime_error("invalid choice");
++        return value == 1;
++      };
++      ReaderPackagePreference choice{.retained = bit("retained"),
++                                     .enabled  = bit("enabled")};
++      const auto &emphasis = fields.at("emphasis").asString();
++      if (emphasis == "quiet")
++        choice.emphasis = PackageEmphasis::Quiet;
++      else if (emphasis != "normal")
++        throw std::runtime_error("invalid emphasis");
++      if (choice.enabled && !choice.retained)
++        throw std::runtime_error("enabled package is not retained");
++      choices.emplace(InfoHash::fromHex(hash), choice);
+     }
+     if (choices.size() > maximumChoices)
+       throw std::runtime_error("choice limit");
+@@ -51,13 +67,14 @@ ReaderLinkPackages::ReaderLinkPackages(std::filesystem::path path)
+         throw std::runtime_error("activity authority collision");
+     }
+   } catch (const std::exception &error) {
+-    throw ReaderLinkPackagesUnreadable("Reader package preferences format 1: " +
++    throw ReaderLinkPackagesUnreadable("Reader package preferences format 2: " +
+                                        std::string(error.what()));
+   }
+ }
+ LinkKey ReaderLinkPackages::keyOf(const InfoHash &hash, std::size_t ordinal) {
+   // The existing activity authority is 128 bits. Domain-separated immutable
+-  // authorities retain that shape; retain() checks the verified reverse map.
++  // authorities retain that shape; cacheVerified() checks the verified reverse
++  // map.
+   const auto name = "xudu-reader-package:1:" + hash.hex();
+   std::array<unsigned char, SHA256_DIGEST_LENGTH> digest{};
+   SHA256(reinterpret_cast<const unsigned char *>(name.data()), name.size(),
+@@ -69,8 +86,8 @@ LinkKey ReaderLinkPackages::keyOf(const InfoHash &hash, std::size_t ordinal) {
+   return {.authority = authority, .id = static_cast<zigzag::CellRef>(ordinal)};
+ }
+ std::expected<ReaderLinkPackages *, std::string>
+-ReaderLinkPackages::retain(const LinkPackage &package,
+-                           const InfoHash &hash) try {
++ReaderLinkPackages::cacheVerified(const LinkPackage &package,
++                                  const InfoHash &hash) try {
+   reviewLinkPackage(package);
+   const std::vector<TorrentContent> files{
+       {.path = "links.xanalinks", .data = encodeLinkPackage(package)}};
+@@ -79,14 +96,14 @@ ReaderLinkPackages::retain(const LinkPackage &package,
+   if (const auto entry = authorities.find(keyOf(hash, 0).authority);
+       entry != authorities.end() && entry->second != hash)
+     throw std::invalid_argument("Package activity authority collision");
+-  if (!retained.contains(hash) && retained.size() >= maximumChoices)
++  if (!verified.contains(hash) && verified.size() >= maximumChoices)
+     throw std::invalid_argument("Retained package limit");
+   std::size_t total = enabled(hash) ? members(package) : 0;
+-  for (const auto &[other, pkg] : retained)
++  for (const auto &[other, pkg] : verified)
+     if (other != hash && enabled(other)) total += members(pkg);
+   if (total > maximumEnabledMembers)
+     throw std::invalid_argument("Enabled package member limit (4096)");
+-  retained.insert_or_assign(hash, package);
++  verified.insert_or_assign(hash, package);
+   authorities.insert_or_assign(keyOf(hash, 0).authority, hash);
+   return this;
+ } catch (const std::exception &error) {
+@@ -95,40 +112,84 @@ ReaderLinkPackages::retain(const LinkPackage &package,
+ bool ReaderLinkPackages::containsAuthority(const DocumentId &authority) const {
+   return authorities.contains(authority);
+ }
+-bool ReaderLinkPackages::enabled(const InfoHash &hash) const {
++ReaderPackagePreference
++ReaderLinkPackages::preference(const InfoHash &hash) const {
+   const auto found = choices.find(hash);
+-  return found != choices.end() && found->second;
++  return found == choices.end() ? ReaderPackagePreference{} : found->second;
++}
++bool ReaderLinkPackages::enabled(const InfoHash &hash) const {
++  return preference(hash).enabled;
++}
++PackageEmphasis ReaderLinkPackages::emphasis(const LinkKey &key) const {
++  const auto hash = carrier(key);
++  return hash ? preference(*hash).emphasis : PackageEmphasis::Normal;
++}
++std::expected<ReaderLinkPackages *, std::string>
++ReaderLinkPackages::setRetained(const InfoHash &hash, bool retained) {
++  if (retained && !verified.contains(hash))
++    return std::unexpected("Verify the immutable package before retaining it");
++  if (!retained && !choices.contains(hash))
++    return std::unexpected("This package has no reader preference to remove");
++  auto next       = choices;
++  auto &choice    = next[hash];
++  choice.retained = retained;
++  if (!retained) choice.enabled = false;
++  return save(std::move(next));
++}
++std::expected<ReaderLinkPackages *, std::string>
++ReaderLinkPackages::setEmphasis(const InfoHash &hash,
++                                PackageEmphasis emphasis) {
++  if (emphasis != PackageEmphasis::Normal && emphasis != PackageEmphasis::Quiet)
++    return std::unexpected("Unknown reader package emphasis");
++  if (!choices.contains(hash))
++    return std::unexpected(
++        "Retain this exact package before choosing emphasis");
++  auto next              = choices;
++  next.at(hash).emphasis = emphasis;
++  return save(std::move(next));
++}
++std::expected<ReaderLinkPackages *, std::string>
++ReaderLinkPackages::setEnabled(const InfoHash &hash, bool on) {
++  if (!choices.contains(hash) || !preference(hash).retained)
++    return std::unexpected("Retain this exact package before enabling it");
++  if (on && !verified.contains(hash))
++    return std::unexpected("Verify the immutable package before enabling it");
++  auto next             = choices;
++  next.at(hash).enabled = on;
++  return save(std::move(next));
+ }
+ std::expected<ReaderLinkPackages *, std::string>
+-ReaderLinkPackages::setEnabled(const InfoHash &hash, bool on) try {
+-  if (on && !retained.contains(hash))
+-    throw std::invalid_argument(
+-        "Verify the immutable package before enabling it");
+-  auto next  = choices;
+-  next[hash] = on;
++ReaderLinkPackages::save(std::map<InfoHash, ReaderPackagePreference> next) try {
+   if (next.size() > maximumChoices)
+     throw std::invalid_argument("Package choice limit");
+   std::size_t total = 0;
+-  for (const auto &[key, package] : retained)
+-    if (next.contains(key) && next.at(key)) total += members(package);
++  for (const auto &[key, package] : verified)
++    if (next.contains(key) && next.at(key).enabled) total += members(package);
+   if (total > maximumEnabledMembers)
+     throw std::invalid_argument("Enabled package member limit (4096)");
+   if (!file.empty()) {
+     if (std::filesystem::is_symlink(file) ||
+         std::filesystem::is_symlink(file.string() + ".partial"))
+       throw ReaderLinkPackagesUnreadable(
+-          "Reader package preferences format 1: unsafe output path");
++          "Reader package preferences format 2: unsafe output path");
+     std::filesystem::create_directories(file.parent_path());
+     bencode::Dict encoded;
+     for (const auto &[key, choice] : next)
+-      encoded.emplace(key.hex(), V::integer(choice));
++      encoded.emplace(
++          key.hex(),
++          V::dict(
++              {{"retained", V::integer(choice.retained)},
++               {"enabled", V::integer(choice.enabled)},
++               {"emphasis", V::string(choice.emphasis == PackageEmphasis::Quiet
++                                          ? "quiet"
++                                          : "normal")}}));
+     std::ofstream out(file.string() + ".partial",
+                       std::ios::binary | std::ios::trunc);
+     std::filesystem::permissions(file.string() + ".partial",
+                                  std::filesystem::perms::owner_read |
+                                      std::filesystem::perms::owner_write);
+     out << V::dict({{"choices", V::dict(std::move(encoded))},
+-                    {"format", V::integer(1)}})
++                    {"format", V::integer(2)}})
+                .encode();
+     out.close();
+     if (!out)
+@@ -142,7 +203,7 @@ ReaderLinkPackages::setEnabled(const InfoHash &hash, bool on) try {
+ }
+ std::vector<LinkKey> ReaderLinkPackages::links() const {
+   std::vector<LinkKey> result;
+-  for (const auto &[hash, pkg] : retained) {
++  for (const auto &[hash, pkg] : verified) {
+     if (enabled(hash)) {
+       const auto authority = keyOf(hash, 0).authority;
+       for (std::size_t ordinal = 0; ordinal < pkg.links.size(); ++ordinal)
+@@ -163,19 +224,19 @@ bool ReaderLinkPackages::enabled(const LinkKey &key) const {
+ }
+ std::expected<ReaderLinkPackages *, std::string>
+ ReaderLinkPackages::setEnabled(const LinkKey &key, bool on) {
+-  if (!retainedPackage(key))
++  if (!verifiedPackage(key))
+     return std::unexpected("The exact verified package is unavailable");
+   return setEnabled(authorities.at(key.authority), on);
+ }
+ const LinkPackage *ReaderLinkPackages::package(const LinkKey &key) const {
+-  return enabled(key) ? retainedPackage(key) : nullptr;
++  return enabled(key) ? verifiedPackage(key) : nullptr;
+ }
+ const LinkPackage *
+-ReaderLinkPackages::retainedPackage(const LinkKey &key) const {
++ReaderLinkPackages::verifiedPackage(const LinkKey &key) const {
+   const auto authority = authorities.find(key.authority);
+   if (authority == authorities.end()) return nullptr;
+-  const auto pkg = retained.find(authority->second);
+-  return pkg != retained.end() && key.id < pkg->second.links.size()
++  const auto pkg = verified.find(authority->second);
++  return pkg != verified.end() && key.id < pkg->second.links.size()
+              ? &pkg->second
+              : nullptr;
+ }
+diff --git a/apps/common/xanadu/reader_link_packages.hpp b/apps/common/xanadu/reader_link_packages.hpp
+index 6ce39b31..0978e74b 100644
+--- a/apps/common/xanadu/reader_link_packages.hpp
++++ b/apps/common/xanadu/reader_link_packages.hpp
+@@ -14,33 +14,50 @@ public:
+ };
+ /// Preferences name immutable carriers, never mutable curator names. Retaining
+ /// a newer package cannot turn it on or change an earlier link's identity.
++enum class PackageEmphasis { Normal, Quiet };
++struct ReaderPackagePreference {
++  bool retained{false};
++  bool enabled{false};
++  PackageEmphasis emphasis{PackageEmphasis::Normal};
++
++  bool operator==(const ReaderPackagePreference &) const = default;
++};
+ class ReaderLinkPackages {
+ public:
+   explicit ReaderLinkPackages(std::filesystem::path file);
+   [[nodiscard]] std::expected<ReaderLinkPackages *, std::string>
+-  retain(const LinkPackage &package, const InfoHash &hash);
++  cacheVerified(const LinkPackage &package, const InfoHash &hash);
++  [[nodiscard]] std::expected<ReaderLinkPackages *, std::string>
++  setRetained(const InfoHash &hash, bool retained);
++  [[nodiscard]] std::expected<ReaderLinkPackages *, std::string>
++  setEmphasis(const InfoHash &hash, PackageEmphasis emphasis);
++  [[nodiscard]] ReaderPackagePreference preference(const InfoHash &hash) const;
++  [[nodiscard]] PackageEmphasis emphasis(const LinkKey &key) const;
+   [[nodiscard]] std::expected<ReaderLinkPackages *, std::string>
+   setEnabled(const InfoHash &hash, bool enabled);
+   [[nodiscard]] std::expected<ReaderLinkPackages *, std::string>
+   setEnabled(const LinkKey &key, bool enabled);
+   [[nodiscard]] bool enabled(const LinkKey &key) const;
+   [[nodiscard]] std::optional<InfoHash> carrier(const LinkKey &key) const;
+-  /// Verified retained identity, independent of drawing enablement.
+-  [[nodiscard]] const LinkPackage *retainedPackage(const LinkKey &key) const;
++  /// Verified cached payload, independent of reader retention and drawing.
++  [[nodiscard]] const LinkPackage *verifiedPackage(const LinkKey &key) const;
+   [[nodiscard]] bool containsAuthority(const DocumentId &authority) const;
+   [[nodiscard]] bool enabled(const InfoHash &hash) const;
+   [[nodiscard]] std::vector<LinkKey> links() const;
+   [[nodiscard]] const GlobalLink *find(const LinkKey &key) const;
+   [[nodiscard]] const LinkPackage *package(const LinkKey &key) const;
+   [[nodiscard]] static LinkKey keyOf(const InfoHash &hash, std::size_t ordinal);
+-  [[nodiscard]] const std::map<InfoHash, bool> &preferences() const {
++  [[nodiscard]] const std::map<InfoHash, ReaderPackagePreference> &
++  preferences() const {
+     return choices;
+   }
+ 
+ private:
+   std::filesystem::path file;
+-  std::map<InfoHash, bool> choices;
+-  std::map<InfoHash, LinkPackage> retained;
++  std::map<InfoHash, ReaderPackagePreference> choices;
++  std::map<InfoHash, LinkPackage> verified;
++  [[nodiscard]] std::expected<ReaderLinkPackages *, std::string>
++  save(std::map<InfoHash, ReaderPackagePreference> next);
+   struct AuthorityLess {
+     bool operator()(const DocumentId &left, const DocumentId &right) const {
+       return left.bytes() < right.bytes();
+diff --git a/apps/common/xanadu/system_docs.cpp b/apps/common/xanadu/system_docs.cpp
+index 6edea95e..5bd5125a 100644
+--- a/apps/common/xanadu/system_docs.cpp
++++ b/apps/common/xanadu/system_docs.cpp
+@@ -658,6 +658,10 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
+          .notes   = "Endpoint tangent reach as a fraction of horizontal "
+                     "separation; bounded 0.05 to 0.45",
+          .schemas = {{.expectedTypes = {"float"}, .defaultValues = {0.3}}}},
++        {.name  = "beams.packageQuietAlpha",
++         .notes = "Quiet reader package ribbon and passage-mark opacity; keeps "
++                  "semantic hue and selected-link contrast; bounded 0.15 to 1",
++         .schemas = {{.expectedTypes = {"float"}, .defaultValues = {0.45}}}},
+         {.name  = "beams.inactiveLinkAlpha",
+          .notes = "Other link opacity while one link is selected; bounded 0.15 "
+                   "to 0.8",
+@@ -1312,6 +1316,22 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
+          .notes   = "Make the other side of the selected link active",
+          .schemas = {{.expectedTypes = {"string"},
+                       .defaultValues = {std::string{"Alt+Shift+X"}}}}},
++        {.name    = "std:xuzz/link_retain_package",
++         .notes   = "retain the pinned Link package",
++         .schemas = {{.expectedTypes = {"string"},
++                      .defaultValues = {std::string{"Alt+Shift+R"}}}}},
++        {.name    = "std:xuzz/link_remove_package",
++         .notes   = "remove the pinned package from reader inventory",
++         .schemas = {{.expectedTypes = {"string"},
++                      .defaultValues = {std::string{"Alt+Shift+M"}}}}},
++        {.name    = "std:xuzz/link_quiet_package",
++         .notes   = "toggle normal or quiet emphasis for the pinned package",
++         .schemas = {{.expectedTypes = {"string"},
++                      .defaultValues = {std::string{"Alt+Shift+Q"}}}}},
++        {.name    = "std:xuzz/link_disable_package",
++         .notes   = "disable drawing for the pinned package",
++         .schemas = {{.expectedTypes = {"string"},
++                      .defaultValues = {std::string{"Alt+Shift+U"}}}}},
+         {.name    = "std:xuzz/link_enable_package",
+          .notes   = "Re-enable drawing of the exact pinned Link package",
+          .schemas = {{.expectedTypes = {"string"},
+@@ -3186,6 +3206,8 @@ LayoutConfig LayoutConfig::fromStore(const Store &store) {
+       model.getBool("beams.anchorReducedMotion", false);
+   cfg.beams.bracketInkShare =
+       curveNumber("beams.bracketInkShare", cfg.beams.bracketInkShare, .2F, 1.F);
++  cfg.beams.packageQuietAlpha = curveNumber(
++      "beams.packageQuietAlpha", cfg.beams.packageQuietAlpha, .15F, 1.F);
+   cfg.beams.inactiveLinkAlpha = curveNumber(
+       "beams.inactiveLinkAlpha", cfg.beams.inactiveLinkAlpha, .15F, .8F);
+   cfg.beams.curveHandleShare = curveNumber(
+diff --git a/apps/common/xanadu/system_docs.hpp b/apps/common/xanadu/system_docs.hpp
+index 5fa0107f..0984fe24 100644
+--- a/apps/common/xanadu/system_docs.hpp
++++ b/apps/common/xanadu/system_docs.hpp
+@@ -1026,6 +1026,7 @@ struct BeamConfig {
+   bool anchorReducedMotion{false};
+   float curveHandleShare{0.3F}, curveWeight{1.F}, gatheringShare{0.32F};
+   float inactiveLinkAlpha{0.70F};
++  float packageQuietAlpha{0.45F};
+   std::size_t curveSegments{32};
+   std::size_t bandStrandLimit{7};
+   float bandStrandPitch{2.2F};
+diff --git a/apps/xuzz/xuzz_app.cpp b/apps/xuzz/xuzz_app.cpp
+index 3e810b80..4167e089 100644
+--- a/apps/xuzz/xuzz_app.cpp
++++ b/apps/xuzz/xuzz_app.cpp
+@@ -2806,6 +2806,13 @@ int XuzzApp::run(const int argc, char **argv) {
+        "choose the previous place the member appears"},
+       {kKeymapLinkCross, "make the other side of the link active"},
+       {kKeymapLinkEnter, "go to the chosen place"},
++      {"std:xuzz/link_retain_package", "retain the pinned Link package"},
++      {"std:xuzz/link_remove_package",
++       "remove the pinned package from reader inventory"},
++      {"std:xuzz/link_quiet_package",
++       "toggle normal or quiet emphasis for the pinned package"},
++      {"std:xuzz/link_disable_package",
++       "disable drawing for the pinned package"},
+       {"std:xuzz/link_enable_package", "re-enable the pinned Link package"},
+       {"std:xuzz/link_cancel_entry", "cancel pending endpoint entry"},
+       {kKeymapLinkOrigin, "return to where the link was selected"},
+@@ -3356,6 +3363,7 @@ int XuzzApp::run(const int argc, char **argv) {
+           links.setReadableTextPx(readablePx(layout.readableTextPx));
+           links.setVisible(layout.xanalinkRibbons);
+           links.setBeamConfig(layout.beams);
++          session->setPackageQuietAlpha(layout.beams.packageQuietAlpha);
+           links.tensionEngine().setParams(layout.physics.toTensionParams());
+           pouchDrawer.setDockSide(layout.pouchDock == xanadu::PouchDock::Left
+                                       ? xanadu::PouchDrawer::DockSide::Left
+@@ -3435,6 +3443,7 @@ int XuzzApp::run(const int argc, char **argv) {
+       links.setReadableTextPx(readablePx(loCfg.readableTextPx));
+       links.setVisible(loCfg.xanalinkRibbons);
+       links.setBeamConfig(loCfg.beams);
++      session->setPackageQuietAlpha(loCfg.beams.packageQuietAlpha);
+       links.tensionEngine().setParams(loCfg.physics.toTensionParams());
+       pouchDrawer.setDockSide(loCfg.pouchDock == xanadu::PouchDock::Left
+                                   ? xanadu::PouchDrawer::DockSide::Left
+diff --git a/tests/xudu/reader_link_packages_test.cpp b/tests/xudu/reader_link_packages_test.cpp
+index 102c4f8c..a8df0564 100644
+--- a/tests/xudu/reader_link_packages_test.cpp
++++ b/tests/xudu/reader_link_packages_test.cpp
+@@ -40,15 +40,18 @@ TEST_F(ReaderLinkPackagesTest,
+        ExactImmutableChoicesSurviveRestartWithoutEnablingUpdates) {
+   const auto path = root / "preferences";
+   ReaderLinkPackages reader(path);
+-  ASSERT_TRUE(reader.retain(pkg, hash));
++  ASSERT_TRUE(reader.cacheVerified(pkg, hash));
+   EXPECT_TRUE(reader.links().empty());
++  EXPECT_FALSE(reader.setEnabled(hash, true));
++  ASSERT_TRUE(reader.setRetained(hash, true));
++  EXPECT_FALSE(reader.enabled(hash));
+   ASSERT_TRUE(reader.setEnabled(hash, true));
+   const auto key = ReaderLinkPackages::keyOf(hash, 0);
+   ASSERT_EQ(reader.links(), std::vector<LinkKey>{key});
+   const auto next =
+       publishLinkPackage(keys, pkg.salt, pkg.title, 2, 2, {link}, pkg.scrolls);
+   const auto nextHash = carrier(next);
+-  ASSERT_TRUE(reader.retain(next, nextHash));
++  ASSERT_TRUE(reader.cacheVerified(next, nextHash));
+   EXPECT_FALSE(reader.enabled(nextHash));
+   EXPECT_NE(key, ReaderLinkPackages::keyOf(nextHash, 0));
+   ReaderLinkPackages restarted(path);
+@@ -57,20 +60,96 @@ TEST_F(ReaderLinkPackagesTest,
+   EXPECT_EQ(restarted.find(key), nullptr);
+   EXPECT_TRUE(restarted.links().empty()); // Missing payload is retained as a
+                                           // preference, never trusted.
+-  ASSERT_TRUE(restarted.retain(pkg, hash));
++  ASSERT_TRUE(restarted.cacheVerified(pkg, hash));
+   ASSERT_EQ(restarted.links(), std::vector<LinkKey>{key});
+   ASSERT_TRUE(restarted.setEnabled(hash, false));
+   EXPECT_EQ(restarted.find(key), nullptr);
+-  ASSERT_NE(restarted.retainedPackage(key), nullptr);
+-  EXPECT_EQ(restarted.retainedPackage(key)->links, pkg.links);
++  ASSERT_NE(restarted.verifiedPackage(key), nullptr);
++  EXPECT_EQ(restarted.verifiedPackage(key)->links, pkg.links);
+   EXPECT_FALSE(restarted.enabled(key));
+   ASSERT_TRUE(restarted.setEnabled(key, true));
+   EXPECT_TRUE(restarted.enabled(key));
+   EXPECT_EQ(restarted.find(key),
+-            &restarted.retainedPackage(key)->links.front());
++            &restarted.verifiedPackage(key)->links.front());
+   ASSERT_TRUE(restarted.setEnabled(key, false));
+   EXPECT_FALSE(ReaderLinkPackages(path).enabled(hash));
+-  EXPECT_FALSE(reader.retain(pkg, nextHash));
++  EXPECT_FALSE(reader.cacheVerified(pkg, nextHash));
++}
++TEST_F(ReaderLinkPackagesTest,
++       RetentionEnablementAndEmphasisAreIndependentImmutableChoices) {
++  const auto path = root / "independent";
++  ReaderLinkPackages reader(path);
++  ASSERT_TRUE(reader.cacheVerified(pkg, hash));
++  EXPECT_TRUE(reader.preferences().empty());
++  EXPECT_FALSE(std::filesystem::exists(path));
++  EXPECT_FALSE(reader.setEnabled(hash, true));
++  EXPECT_FALSE(reader.setEmphasis(hash, PackageEmphasis::Quiet));
++  ASSERT_TRUE(reader.setRetained(hash, true));
++  ASSERT_TRUE(reader.setEmphasis(hash, PackageEmphasis::Quiet));
++  EXPECT_EQ(reader.preference(hash),
++            (ReaderPackagePreference{true, false, PackageEmphasis::Quiet}));
++  ASSERT_TRUE(reader.setEnabled(hash, true));
++  const auto key = ReaderLinkPackages::keyOf(hash, 0);
++  EXPECT_EQ(reader.emphasis(key), PackageEmphasis::Quiet);
++  EXPECT_EQ(reader.links(), std::vector<LinkKey>{key});
++  const auto payload = encodeLinkPackage(*reader.verifiedPackage(key));
++  const auto next =
++      publishLinkPackage(keys, pkg.salt, pkg.title, 2, 2, {link}, pkg.scrolls);
++  const auto nextHash = carrier(next);
++  ASSERT_TRUE(reader.cacheVerified(next, nextHash));
++  EXPECT_EQ(reader.preference(nextHash), ReaderPackagePreference{});
++  EXPECT_FALSE(reader.preferences().contains(nextHash));
++  ASSERT_TRUE(reader.setEnabled(hash, false));
++  EXPECT_EQ(reader.preference(hash),
++            (ReaderPackagePreference{true, false, PackageEmphasis::Quiet}));
++  ASSERT_TRUE(reader.setRetained(hash, false));
++  EXPECT_EQ(reader.preference(hash),
++            (ReaderPackagePreference{false, false, PackageEmphasis::Quiet}));
++  EXPECT_EQ(encodeLinkPackage(*reader.verifiedPackage(key)), payload);
++  EXPECT_FALSE(reader.setEnabled(hash, true));
++  ReaderLinkPackages reopened(path);
++  EXPECT_EQ(reopened.preference(hash), reader.preference(hash));
++  EXPECT_TRUE(reopened.containsAuthority(key.authority));
++  EXPECT_EQ(reopened.verifiedPackage(key), nullptr);
++  EXPECT_FALSE(reopened.setRetained(hash, true));
++  EXPECT_FALSE(reopened.setEnabled(hash, true));
++  ASSERT_TRUE(reopened.cacheVerified(pkg, hash));
++  ASSERT_TRUE(reopened.setRetained(hash, true));
++  EXPECT_EQ(reopened.preference(hash),
++            (ReaderPackagePreference{true, false, PackageEmphasis::Quiet}));
++  ASSERT_TRUE(reopened.setEnabled(hash, true));
++  ASSERT_TRUE(reopened.setEmphasis(hash, PackageEmphasis::Normal));
++  EXPECT_TRUE(reopened.enabled(hash));
++  EXPECT_EQ(encodeLinkPackage(*reopened.verifiedPackage(key)), payload);
++}
++TEST_F(ReaderLinkPackagesTest,
++       PreviousBooleanFormatAndImpossibleChoicesArePreserved) {
++  std::filesystem::create_directories(root);
++  const auto path = root / "invalid";
++  using V         = bencode::Value;
++  for (const auto &bytes :
++       {V::dict({{"format", V::integer(1)},
++                 {"choices", V::dict({{hash.hex(), V::integer(1)}})}})
++            .encode(),
++        V::dict({{"format", V::integer(2)},
++                 {"choices",
++                  V::dict({{hash.hex(),
++                            V::dict({{"retained", V::integer(0)},
++                                     {"enabled", V::integer(1)},
++                                     {"emphasis", V::string("quiet")}})}})}})
++            .encode(),
++        V::dict({{"format", V::integer(2)},
++                 {"choices",
++                  V::dict({{hash.hex(),
++                            V::dict({{"retained", V::integer(1)},
++                                     {"enabled", V::integer(0)},
++                                     {"emphasis", V::string("loud")}})}})}})
++            .encode()}) {
++    std::ofstream(path, std::ios::binary) << bytes;
++    EXPECT_THROW(ReaderLinkPackages{path}, ReaderLinkPackagesUnreadable);
++    std::ifstream in(path, std::ios::binary);
++    EXPECT_EQ(std::string(std::istreambuf_iterator<char>(in), {}), bytes);
++  }
+ }
+ TEST_F(ReaderLinkPackagesTest, NativeLinksResolveAcrossIndependentScrollSlots) {
+   auto perma = std::make_shared<UserPermascroll>();
+diff --git a/tests/zigzag/reader_link_packages_ui_test.cpp b/tests/zigzag/reader_link_packages_ui_test.cpp
+index d6797d62..b5c83759 100644
+--- a/tests/zigzag/reader_link_packages_ui_test.cpp
++++ b/tests/zigzag/reader_link_packages_ui_test.cpp
+@@ -69,6 +69,7 @@ TEST_F(ReaderPackageUiTest,
+       .phase = LinkPackagePhase::Ready, .package = pkg, .hash = hash};
+   const auto oldOps = store.opCount(), oldScrolls = store.scrolls().size();
+   const auto oldGeneration = session.generation();
++  ASSERT_TRUE(session.setLinkPackageRetained(status, true));
+   ASSERT_TRUE(session.setLinkPackageEnabled(status, true));
+   EXPECT_GT(session.generation(), oldGeneration);
+   const auto key      = ReaderLinkPackages::keyOf(hash, 0);
+@@ -210,6 +211,44 @@ TEST_F(ReaderPackageUiTest,
+   EXPECT_FALSE(navigation.entryPending());
+   EXPECT_EQ(navigation.currentVisit(), currentVisit);
+   EXPECT_EQ(session.activityForNavigation()->opCount(), activityOps);
++  std::vector<gleditor::SpanStyle> normalStyles;
++  session.decorate(*state.docs.front(), normalStyles);
++  const auto layer = session.linkHighlightLayer(key);
++  const auto normalMark =
++      std::ranges::find(normalStyles, layer, &gleditor::SpanStyle::layer);
++  ASSERT_NE(normalMark, normalStyles.end());
++  ASSERT_TRUE(navigation.execute(nav::QuietSelectedPackage{}));
++  EXPECT_EQ(session.readerLinkPackages().preference(hash),
++            (ReaderPackagePreference{true, true, PackageEmphasis::Quiet}));
++  EXPECT_EQ(selectionContext(*navigation.selection()), pinned);
++  std::vector<gleditor::SpanStyle> quietStyles;
++  session.decorate(*state.docs.front(), quietStyles);
++  const auto quietMark =
++      std::ranges::find(quietStyles, layer, &gleditor::SpanStyle::layer);
++  ASSERT_NE(quietMark, quietStyles.end());
++  EXPECT_EQ(quietMark->colour & 0xFFFFFF00U, normalMark->colour & 0xFFFFFF00U);
++  EXPECT_LT(quietMark->colour & 0xFFU, normalMark->colour & 0xFFU);
++  EXPECT_EQ(quietMark->start, normalMark->start);
++  EXPECT_EQ(quietMark->end, normalMark->end);
++  EXPECT_EQ(
++      encodeLinkPackage(*session.readerLinkPackages().verifiedPackage(key)),
++      encodeLinkPackage(pkg));
++  ASSERT_TRUE(navigation.execute(nav::RemoveSelectedPackage{}));
++  EXPECT_EQ(session.readerLinkPackages().preference(hash),
++            (ReaderPackagePreference{false, false, PackageEmphasis::Quiet}));
++  EXPECT_TRUE(navigation.selectedPackageDisabled());
++  EXPECT_FALSE(navigation.execute(nav::EnableSelectedPackage{}));
++  EXPECT_EQ(selectionContext(*navigation.selection()), pinned);
++  ASSERT_TRUE(navigation.execute(nav::RetainSelectedPackage{}));
++  EXPECT_FALSE(session.readerLinkPackages().enabled(hash));
++  ASSERT_TRUE(navigation.execute(nav::EnableSelectedPackage{}));
++  ASSERT_TRUE(navigation.execute(nav::DisableSelectedPackage{}));
++  EXPECT_EQ(session.readerLinkPackages().preference(hash),
++            (ReaderPackagePreference{true, false, PackageEmphasis::Quiet}));
++  ASSERT_TRUE(navigation.execute(nav::EnableSelectedPackage{}));
++  EXPECT_EQ(session.activityForNavigation()->opCount(), activityOps);
++  EXPECT_EQ(store.opCount(), oldOps);
++  EXPECT_EQ(navigation.currentVisit(), currentVisit);
+   beams.drawFrame(frame);
+   gleditor::a11y::Tree refreshed;
+   gleditor::a11y::Builder freshBuilder(refreshed, 27);
+@@ -244,6 +283,9 @@ TEST_F(ReaderPackageUiTest, RestoringPreferencesRefusesNativeAuthorityOverlap) {
+   {
+     Session original((root / "workspace").string(), perma);
+     original.linkPackageExchange().submit(pkg, false);
++    ASSERT_TRUE(original.setLinkPackageRetained(
++        {.phase = LinkPackagePhase::Ready, .package = pkg, .hash = hash},
++        true));
+     ASSERT_TRUE(original.setLinkPackageEnabled(
+         {.phase = LinkPackagePhase::Ready, .package = pkg, .hash = hash},
+         true));

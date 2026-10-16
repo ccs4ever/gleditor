@@ -69,6 +69,7 @@ TEST_F(ReaderPackageUiTest,
       .phase = LinkPackagePhase::Ready, .package = pkg, .hash = hash};
   const auto oldOps = store.opCount(), oldScrolls = store.scrolls().size();
   const auto oldGeneration = session.generation();
+  ASSERT_TRUE(session.setLinkPackageRetained(status, true));
   ASSERT_TRUE(session.setLinkPackageEnabled(status, true));
   EXPECT_GT(session.generation(), oldGeneration);
   const auto key      = ReaderLinkPackages::keyOf(hash, 0);
@@ -210,6 +211,44 @@ TEST_F(ReaderPackageUiTest,
   EXPECT_FALSE(navigation.entryPending());
   EXPECT_EQ(navigation.currentVisit(), currentVisit);
   EXPECT_EQ(session.activityForNavigation()->opCount(), activityOps);
+  std::vector<gleditor::SpanStyle> normalStyles;
+  session.decorate(*state.docs.front(), normalStyles);
+  const auto layer = session.linkHighlightLayer(key);
+  const auto normalMark =
+      std::ranges::find(normalStyles, layer, &gleditor::SpanStyle::layer);
+  ASSERT_NE(normalMark, normalStyles.end());
+  ASSERT_TRUE(navigation.execute(nav::QuietSelectedPackage{}));
+  EXPECT_EQ(session.readerLinkPackages().preference(hash),
+            (ReaderPackagePreference{true, true, PackageEmphasis::Quiet}));
+  EXPECT_EQ(selectionContext(*navigation.selection()), pinned);
+  std::vector<gleditor::SpanStyle> quietStyles;
+  session.decorate(*state.docs.front(), quietStyles);
+  const auto quietMark =
+      std::ranges::find(quietStyles, layer, &gleditor::SpanStyle::layer);
+  ASSERT_NE(quietMark, quietStyles.end());
+  EXPECT_EQ(quietMark->colour & 0xFFFFFF00U, normalMark->colour & 0xFFFFFF00U);
+  EXPECT_LT(quietMark->colour & 0xFFU, normalMark->colour & 0xFFU);
+  EXPECT_EQ(quietMark->start, normalMark->start);
+  EXPECT_EQ(quietMark->end, normalMark->end);
+  EXPECT_EQ(
+      encodeLinkPackage(*session.readerLinkPackages().verifiedPackage(key)),
+      encodeLinkPackage(pkg));
+  ASSERT_TRUE(navigation.execute(nav::RemoveSelectedPackage{}));
+  EXPECT_EQ(session.readerLinkPackages().preference(hash),
+            (ReaderPackagePreference{false, false, PackageEmphasis::Quiet}));
+  EXPECT_TRUE(navigation.selectedPackageDisabled());
+  EXPECT_FALSE(navigation.execute(nav::EnableSelectedPackage{}));
+  EXPECT_EQ(selectionContext(*navigation.selection()), pinned);
+  ASSERT_TRUE(navigation.execute(nav::RetainSelectedPackage{}));
+  EXPECT_FALSE(session.readerLinkPackages().enabled(hash));
+  ASSERT_TRUE(navigation.execute(nav::EnableSelectedPackage{}));
+  ASSERT_TRUE(navigation.execute(nav::DisableSelectedPackage{}));
+  EXPECT_EQ(session.readerLinkPackages().preference(hash),
+            (ReaderPackagePreference{true, false, PackageEmphasis::Quiet}));
+  ASSERT_TRUE(navigation.execute(nav::EnableSelectedPackage{}));
+  EXPECT_EQ(session.activityForNavigation()->opCount(), activityOps);
+  EXPECT_EQ(store.opCount(), oldOps);
+  EXPECT_EQ(navigation.currentVisit(), currentVisit);
   beams.drawFrame(frame);
   gleditor::a11y::Tree refreshed;
   gleditor::a11y::Builder freshBuilder(refreshed, 27);
@@ -244,6 +283,9 @@ TEST_F(ReaderPackageUiTest, RestoringPreferencesRefusesNativeAuthorityOverlap) {
   {
     Session original((root / "workspace").string(), perma);
     original.linkPackageExchange().submit(pkg, false);
+    ASSERT_TRUE(original.setLinkPackageRetained(
+        {.phase = LinkPackagePhase::Ready, .package = pkg, .hash = hash},
+        true));
     ASSERT_TRUE(original.setLinkPackageEnabled(
         {.phase = LinkPackagePhase::Ready, .package = pkg, .hash = hash},
         true));

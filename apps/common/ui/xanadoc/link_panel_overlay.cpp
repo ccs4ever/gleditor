@@ -298,7 +298,7 @@ void LinkPanelOverlay::appendInvestigation(std::vector<PanelLine> &lines) {
     const auto label   = side == LinkSide::Left ? "Left" : "Right";
     const auto &member = members[*cursor.member];
     if (const auto *package =
-            session.readerLinkPackages().retainedPackage(selected->key)) {
+            session.readerLinkPackages().verifiedPackage(selected->key)) {
       const auto &spans = side == LinkSide::Left
                               ? package->links[selected->key.id].left
                               : package->links[selected->key.id].right;
@@ -399,12 +399,38 @@ void LinkPanelOverlay::rebuildPanel(gleditor::FrameContext &ctx) {
                                target->range.start, target->range.end)});
     }
   }
+  if (const auto carrier = context.selectedPackageCarrier()) {
+    const auto choice = session.readerLinkPackages().preference(*carrier);
+    lines.push_back(
+        {.text =
+             std::string("Reader package: ") +
+             (choice.retained ? "retained" : "not retained") + " · " +
+             (choice.enabled ? "enabled" : "disabled") + " · emphasis " +
+             (choice.emphasis == PackageEmphasis::Quiet ? "quiet" : "normal"),
+         .tone = PanelLine::Tone::Muted});
+    if (choice.retained) {
+      buttons.push_back({.label   = choice.emphasis == PackageEmphasis::Quiet
+                                        ? "Normal package emphasis"
+                                        : "Quiet package emphasis",
+                         .command = nav::QuietSelectedPackage{}});
+      buttons.push_back({.label   = "Remove package from reader",
+                         .command = nav::RemoveSelectedPackage{}});
+      if (choice.enabled)
+        buttons.push_back({.label   = "Disable package drawing",
+                           .command = nav::DisableSelectedPackage{}});
+    } else
+      buttons.push_back(
+          {.label = "Retain package", .command = nav::RetainSelectedPackage{}});
+  }
   if (context.selectedPackageDisabled()) {
-    lines.push_back({.text = "Package drawing disabled · re-enable to enter; "
-                             "pinned Link retained",
-                     .tone = PanelLine::Tone::Muted});
-    buttons.push_back({.label   = "Re-enable package",
-                       .command = nav::EnableSelectedPackage{}});
+    lines.push_back(
+        {.text = "Package drawing disabled · retain and enable to enter; "
+                 "pinned Link retained",
+         .tone = PanelLine::Tone::Muted});
+    if (const auto carrier = context.selectedPackageCarrier();
+        carrier && session.readerLinkPackages().preference(*carrier).retained)
+      buttons.push_back({.label   = "Re-enable package",
+                         .command = nav::EnableSelectedPackage{}});
     for (auto &button : buttons)
       if (std::holds_alternative<nav::Enter>(button.command) ||
           std::holds_alternative<nav::EnterAt>(button.command)) {

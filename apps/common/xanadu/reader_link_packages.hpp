@@ -14,33 +14,50 @@ public:
 };
 /// Preferences name immutable carriers, never mutable curator names. Retaining
 /// a newer package cannot turn it on or change an earlier link's identity.
+enum class PackageEmphasis { Normal, Quiet };
+struct ReaderPackagePreference {
+  bool retained{false};
+  bool enabled{false};
+  PackageEmphasis emphasis{PackageEmphasis::Normal};
+
+  bool operator==(const ReaderPackagePreference &) const = default;
+};
 class ReaderLinkPackages {
 public:
   explicit ReaderLinkPackages(std::filesystem::path file);
   [[nodiscard]] std::expected<ReaderLinkPackages *, std::string>
-  retain(const LinkPackage &package, const InfoHash &hash);
+  cacheVerified(const LinkPackage &package, const InfoHash &hash);
+  [[nodiscard]] std::expected<ReaderLinkPackages *, std::string>
+  setRetained(const InfoHash &hash, bool retained);
+  [[nodiscard]] std::expected<ReaderLinkPackages *, std::string>
+  setEmphasis(const InfoHash &hash, PackageEmphasis emphasis);
+  [[nodiscard]] ReaderPackagePreference preference(const InfoHash &hash) const;
+  [[nodiscard]] PackageEmphasis emphasis(const LinkKey &key) const;
   [[nodiscard]] std::expected<ReaderLinkPackages *, std::string>
   setEnabled(const InfoHash &hash, bool enabled);
   [[nodiscard]] std::expected<ReaderLinkPackages *, std::string>
   setEnabled(const LinkKey &key, bool enabled);
   [[nodiscard]] bool enabled(const LinkKey &key) const;
   [[nodiscard]] std::optional<InfoHash> carrier(const LinkKey &key) const;
-  /// Verified retained identity, independent of drawing enablement.
-  [[nodiscard]] const LinkPackage *retainedPackage(const LinkKey &key) const;
+  /// Verified cached payload, independent of reader retention and drawing.
+  [[nodiscard]] const LinkPackage *verifiedPackage(const LinkKey &key) const;
   [[nodiscard]] bool containsAuthority(const DocumentId &authority) const;
   [[nodiscard]] bool enabled(const InfoHash &hash) const;
   [[nodiscard]] std::vector<LinkKey> links() const;
   [[nodiscard]] const GlobalLink *find(const LinkKey &key) const;
   [[nodiscard]] const LinkPackage *package(const LinkKey &key) const;
   [[nodiscard]] static LinkKey keyOf(const InfoHash &hash, std::size_t ordinal);
-  [[nodiscard]] const std::map<InfoHash, bool> &preferences() const {
+  [[nodiscard]] const std::map<InfoHash, ReaderPackagePreference> &
+  preferences() const {
     return choices;
   }
 
 private:
   std::filesystem::path file;
-  std::map<InfoHash, bool> choices;
-  std::map<InfoHash, LinkPackage> retained;
+  std::map<InfoHash, ReaderPackagePreference> choices;
+  std::map<InfoHash, LinkPackage> verified;
+  [[nodiscard]] std::expected<ReaderLinkPackages *, std::string>
+  save(std::map<InfoHash, ReaderPackagePreference> next);
   struct AuthorityLess {
     bool operator()(const DocumentId &left, const DocumentId &right) const {
       return left.bytes() < right.bytes();

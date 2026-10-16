@@ -706,10 +706,11 @@ ReaderLinkPackages &Session::readerLinkPackages() {
         xanadocsDirectory().parent_path() / "package-visibility");
     if (!reader->preferences().empty())
       for (const auto &status : linkPackageExchange().statuses())
-        if (status.phase == LinkPackagePhase::Ready ||
-            status.phase == LinkPackagePhase::Published ||
-            (!status.received && !status.package.links.empty())) {
-          if (auto result = reader->retain(status.package, status.hash);
+        if (reader->preferences().contains(status.hash) &&
+            (status.phase == LinkPackagePhase::Ready ||
+             status.phase == LinkPackagePhase::Published ||
+             (!status.received && !status.package.links.empty()))) {
+          if (auto result = reader->cacheVerified(status.package, status.hash);
               !result)
             throw ReaderLinkPackagesUnreadable(result.error());
         }
@@ -720,6 +721,50 @@ ReaderLinkPackages &Session::readerLinkPackages() {
     readerLinkPackages_ = std::move(reader);
   }
   return *readerLinkPackages_;
+}
+std::expected<Session *, std::string>
+Session::setLinkPackageRetained(const LinkPackageStatus &package, bool on) try {
+  auto &reader = readerLinkPackages();
+  if (on) {
+    if (package.phase != LinkPackagePhase::Ready &&
+        package.phase != LinkPackagePhase::Published)
+      throw std::invalid_argument("Verify the package before retaining it");
+    for (const auto &entry : stores)
+      if (entry.store &&
+          entry.store->documentId() ==
+              ReaderLinkPackages::keyOf(package.hash, 0).authority)
+        throw std::invalid_argument(
+            "Package authority conflicts with an open store");
+    if (auto result = reader.cacheVerified(package.package, package.hash);
+        !result)
+      throw std::invalid_argument(result.error());
+  }
+  if (auto result = reader.setRetained(package.hash, on); !result)
+    throw ReaderLinkPackagesUnreadable(result.error());
+  invalidate();
+  return this;
+} catch (const std::exception &error) {
+  return std::unexpected(std::string(error.what()));
+}
+std::expected<Session *, std::string>
+Session::setLinkPackageRetained(const LinkKey &key, bool on) {
+  for (const auto &entry : stores)
+    if (entry.store && entry.store->documentId() == key.authority)
+      return std::unexpected("Package authority conflicts with an open store");
+  const auto hash = readerLinkPackages().carrier(key);
+  if (!hash) return std::unexpected("The exact package carrier is unavailable");
+  if (auto result = readerLinkPackages().setRetained(*hash, on); !result)
+    return std::unexpected(result.error());
+  invalidate();
+  return this;
+}
+std::expected<Session *, std::string>
+Session::setLinkPackageEmphasis(const InfoHash &hash,
+                                PackageEmphasis emphasis) {
+  if (auto result = readerLinkPackages().setEmphasis(hash, emphasis); !result)
+    return std::unexpected(result.error());
+  invalidate();
+  return this;
 }
 std::expected<Session *, std::string>
 Session::setLinkPackageEnabled(const LinkPackageStatus &package, bool on) try {
@@ -735,7 +780,8 @@ Session::setLinkPackageEnabled(const LinkPackageStatus &package, bool on) try {
         throw std::invalid_argument(
             "Package authority conflicts with an open store");
   if (on)
-    if (auto result = reader.retain(package.package, package.hash); !result)
+    if (auto result = reader.cacheVerified(package.package, package.hash);
+        !result)
       throw std::invalid_argument(result.error());
   if (auto result = reader.setEnabled(package.hash, on); !result)
     throw ReaderLinkPackagesUnreadable(result.error());
@@ -3054,8 +3100,12 @@ void Session::decorate(const Doc &doc, std::vector<gleditor::SpanStyle> &out) {
   for (const auto &key : packageKeys) {
     const auto *link = readerLinkPackages().find(key);
     if (!link || link->type == LinkType::Format) continue;
-    const auto colour = linkColourWithInstanceShift(
-        packageRenderId(key), link->type, ProminenceTier::Curated);
+    auto colour = linkColourWithInstanceShift(packageRenderId(key), link->type,
+                                              ProminenceTier::Curated);
+    if (readerLinkPackages().emphasis(key) == PackageEmphasis::Quiet)
+      colour = (colour & 0xFFFFFF00U) |
+               static_cast<std::uint32_t>(std::lround(
+                   static_cast<float>(colour & 0xFFU) * packageQuietAlpha));
     for (const auto *ends : {&link->left, &link->right})
       for (const auto &span : *ends)
         for (const auto &match : packageIndex->occurrences(span))
@@ -3095,6 +3145,7 @@ void Session::decorate(const Doc &doc, std::vector<gleditor::SpanStyle> &out) {
       }
     }
   }
+  out.insert(out.end(), found.begin(), found.end());
 }
 
 ImageOverlay::ImageOverlay(std::string aFontName)

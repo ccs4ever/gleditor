@@ -85,7 +85,7 @@ void Views::publishIndependentLinks() {
           "Publish independent links",
           "Choose a signed snapshot containing authored links. Review before "
           "publishing.",
-          {actions({"Prepare for review", "Review retained package", "Close"},
+          {actions({"Prepare for review", "Review downloaded package", "Close"},
                    {"prepare", "cached", "close"}),
            sources(pubs), std::move(title), std::move(salt)},
           [this, pubs](const auto &answers) {
@@ -124,40 +124,133 @@ void Views::publishIndependentLinks() {
 void Views::linksAndResponses(const std::string &query) {
   renderer->runWithState([this, query](RenderState &) {
     try {
-      if (query == "cached" || query == "matching") {
-        const auto retained = session.linkPackageExchange().statuses();
-        auto packages       = choice("Retained package", {}, {});
-        for (const auto &pkg : retained) {
-          if (query == "matching" && (pkg.phase != LinkPackagePhase::Ready &&
-                                      pkg.phase != LinkPackagePhase::Published))
-            continue;
-          if (query == "matching" && packageFilterSource &&
-              !packageReferences(pkg.package, *packageFilterSource))
-            continue;
+      if (query == "cached" || query == "matching" || query == "reader" ||
+          query == "removed") {
+        const auto statuses = session.linkPackageExchange().statuses();
+        auto &reader        = session.readerLinkPackages();
+        auto packages       = choice("Immutable package carrier", {}, {});
+        std::map<std::string, std::string> ids;
+        std::size_t retainedCount = 0, enabledCount = 0, knownLinks = 0,
+                    enabledLinks = 0, unavailable = 0;
+        for (const auto &[hash, preference] : reader.preferences()) {
+          if (!preference.retained) continue;
+          ++retainedCount;
+          if (preference.enabled) ++enabledCount;
+          if (const auto *payload =
+                  reader.verifiedPackage(ReaderLinkPackages::keyOf(hash, 0))) {
+            knownLinks += payload->links.size();
+            if (preference.enabled) enabledLinks += payload->links.size();
+          } else
+            ++unavailable;
+        }
+        const auto append = [&](const InfoHash &hash, std::string label) {
           if (packages.options == std::vector<std::string>{"None"}) {
             packages.options.clear();
             packages.optionValues.clear();
           }
-          packages.options.push_back(
-              pkg.package.title + " — " +
-              std::string(linkPackagePhaseName(pkg.phase)));
-          packages.optionValues.push_back(pkg.id);
+          packages.options.push_back(std::move(label));
+          packages.optionValues.push_back(hash.hex());
+        };
+        for (const auto &status : statuses)
+          ids.emplace(status.hash.hex(), status.id);
+        if (query == "reader" || query == "removed") {
+          for (const auto &[hash, preference] : reader.preferences()) {
+            if (preference.retained != (query == "reader")) continue;
+            const auto *payload =
+                reader.verifiedPackage(ReaderLinkPackages::keyOf(hash, 0));
+            append(hash,
+                   (payload ? payload->title : "Payload unavailable") + " / " +
+                       hash.hex() +
+                       (preference.enabled ? " · enabled" : " · disabled") +
+                       (preference.emphasis == PackageEmphasis::Quiet
+                            ? " · quiet"
+                            : " · normal"));
+          }
+        } else
+          for (const auto &status : statuses) {
+            if (query == "matching" &&
+                (status.phase != LinkPackagePhase::Ready &&
+                 status.phase != LinkPackagePhase::Published))
+              continue;
+            if (query == "matching" && packageFilterSource &&
+                !packageReferences(status.package, *packageFilterSource))
+              continue;
+            append(status.hash,
+                   status.package.title + " / " + status.hash.hex() + " · " +
+                       std::string(linkPackagePhaseName(status.phase)) +
+                       (reader.preference(status.hash).retained
+                            ? " · retained"
+                            : " · not retained"));
+          }
+        auto control =
+            actions({"Show selected package", "Close", "Find packages"},
+                    {"show", "close", "find"});
+        if (query == "reader") {
+          control.options.push_back("Remove from reader");
+          control.optionValues.push_back("remove");
         }
-        if (packages.options == std::vector<std::string>{"None"}) {
-          packages.options      = {"No matching packages"};
-          packages.optionValues = {""};
+        if (query == "removed") {
+          control.options.push_back("Restore to reader");
+          control.optionValues.push_back("restore");
         }
+        const auto inventory =
+            std::to_string(retainedCount) + " retained carriers / " +
+            std::to_string(enabledCount) + " enabled; " +
+            std::to_string(knownLinks) + " known retained links / " +
+            std::to_string(enabledLinks) + " drawable links; " +
+            std::to_string(unavailable) + " retained payloads unavailable.";
         form.open(
-            "Retained link packages",
-            query == "matching" && packageFilterSource
-                ? "Verified endpoints overlap document passages in " +
-                      packageFilterSource->title + "."
-                : "Signed endpoints are retained privately for review.",
-            {actions({"Show selected package", "Close"}, {"show", "close"}),
-             std::move(packages)},
-            [this](const auto &answers) {
-              if (answers[0].answer() == "show" && !answers[1].answer().empty())
-                linkPackageStatus(answers[1].answer());
+            query == "reader"    ? "Reader package inventory"
+            : query == "removed" ? "Removed reader packages"
+                                 : "Downloaded link packages",
+            inventory +
+                " Downloaded candidates are separate from reader retention.",
+            {std::move(control), std::move(packages)},
+            [this, query, ids = std::move(ids)](const auto &answers) {
+              renderer->runWithState([this, query, ids,
+                                      answers](RenderState &) {
+                const auto action  = answers[0].answer();
+                const auto carrier = answers[1].answer();
+                if (action == "find") {
+                  linksAndResponses();
+                  return;
+                }
+                if (action == "close" || carrier.empty()) return;
+                try {
+                  if (action == "remove") {
+                    if (auto result = session.setLinkPackageRetained(
+                            ReaderLinkPackages::keyOf(
+                                InfoHash::fromHex(carrier), 0),
+                            false);
+                        !result)
+                      throw std::runtime_error(result.error());
+                    if (packageVisibilityChanged) packageVisibilityChanged();
+                    linksAndResponses(query);
+                    return;
+                  }
+                  const auto found = ids.find(carrier);
+                  if (found == ids.end())
+                    throw std::runtime_error(
+                        "Exact verified payload unavailable for carrier " +
+                        carrier +
+                        ". Fetch and verify this immutable carrier to restore "
+                        "it.");
+                  if (action == "restore") {
+                    if (auto result = session.setLinkPackageRetained(
+                            session.linkPackageExchange().status(found->second),
+                            true);
+                        !result)
+                      throw std::runtime_error(result.error());
+                    if (packageVisibilityChanged) packageVisibilityChanged();
+                    linksAndResponses(query);
+                    return;
+                  }
+                  linkPackageStatus(found->second);
+                } catch (const std::exception &error) {
+                  state->showDialog(render::DiagnosticSeverity::Error,
+                                    "Reader package unavailable", error.what());
+                }
+              });
             });
         return;
       }
@@ -167,16 +260,20 @@ void Views::linksAndResponses(const std::string &query) {
             "Links and responses",
             "Search the source's registered global scrolls. No curator key is "
             "required.",
-            {actions({"Find packages", "Review retained packages", "Close",
-                      "Review packages matching selected passages"},
-                     {"find", "cached", "close", "matching"}),
+            {actions(
+                 {"Find packages", "Review downloaded packages", "Close",
+                  "Review packages matching selected passages",
+                  "Reader package inventory", "Removed reader packages"},
+                 {"find", "cached", "close", "matching", "reader", "removed"}),
              sources(pubs)},
             [this, pubs](const auto &answers) {
               renderer->runWithState([this, pubs, answers](RenderState &) {
                 try {
                   if (answers[0].answer() == "close") return;
-                  if (answers[0].answer() == "cached") {
-                    linksAndResponses("cached");
+                  if (answers[0].answer() == "cached" ||
+                      answers[0].answer() == "reader" ||
+                      answers[0].answer() == "removed") {
+                    linksAndResponses(answers[0].answer());
                     return;
                   }
                   if (answers[1].answer().empty())
@@ -237,7 +334,7 @@ void Views::linksAndResponses(const std::string &query) {
       form.open(
           "Links and responses", note,
           {actions({"Refresh progress", "Fetch selected package",
-                    "Retry discovery", "Review retained packages", "Close"},
+                    "Retry discovery", "Review downloaded packages", "Close"},
                    {"refresh", "fetch", "retry", "cached", "close"}),
            std::move(packages)},
           [this, query, entries,
@@ -361,16 +458,27 @@ void Views::reviewIndependentLinks(const std::string &id,
             "Wait for package verification before reviewing endpoints.");
       const auto &pkg = status.package;
       reviewLinkPackage(pkg);
-      const auto enabled = session.readerLinkPackages().enabled(status.hash);
+      const auto preference =
+          session.readerLinkPackages().preference(status.hash);
+      const auto enabled = preference.enabled;
       auto control =
           actions({"Inspect selected link", "Open related publication",
                    "Back to status", "Close", "Inspect full scroll identities"},
                   {"inspect", "open", "back", "close", "keys"});
       if (status.phase == LinkPackagePhase::Ready ||
-          status.phase == LinkPackagePhase::Published || enabled) {
+          status.phase == LinkPackagePhase::Published) {
+        control.options.push_back(preference.retained ? "Remove from reader"
+                                                      : "Retain in reader");
+        control.optionValues.push_back("retain");
+      }
+      if (preference.retained) {
         control.options.push_back(enabled ? "Disable reader layer"
                                           : "Enable reader layer");
         control.optionValues.push_back("toggle");
+        control.options.push_back(preference.emphasis == PackageEmphasis::Quiet
+                                      ? "Normal emphasis"
+                                      : "Quiet emphasis");
+        control.optionValues.push_back("emphasis");
       }
       if (enabled) {
         control.options.push_back("Select link for navigation");
@@ -407,6 +515,11 @@ void Views::reviewIndependentLinks(const std::string &id,
           "Review independent links",
           pkg.title + " — " +
               (enabled ? "reader layer enabled" : "reader layer disabled") +
+              (preference.retained ? "; retained" : "; not retained") +
+              (preference.emphasis == PackageEmphasis::Quiet
+                   ? "; emphasis quiet"
+                   : "; emphasis normal") +
+              "; carrier " + status.hash.hex() +
               "; signature verified; enrollment unchecked.",
           {std::move(control), std::move(curator), std::move(links),
            endset("Left endset", pkg.links[index].left),
@@ -417,6 +530,24 @@ void Views::reviewIndependentLinks(const std::string &id,
               try {
                 const auto action = answers[0].answer();
                 if (action == "close") return;
+                if (action == "retain" || action == "emphasis") {
+                  const auto status = session.linkPackageExchange().status(id);
+                  const auto preference =
+                      session.readerLinkPackages().preference(status.hash);
+                  const auto result =
+                      action == "retain"
+                          ? session.setLinkPackageRetained(status,
+                                                           !preference.retained)
+                          : session.setLinkPackageEmphasis(
+                                status.hash,
+                                preference.emphasis == PackageEmphasis::Normal
+                                    ? PackageEmphasis::Quiet
+                                    : PackageEmphasis::Normal);
+                  if (!result) throw std::runtime_error(result.error());
+                  if (packageVisibilityChanged) packageVisibilityChanged();
+                  reviewIndependentLinks(id, index);
+                  return;
+                }
                 if (action == "toggle") {
                   const auto status = session.linkPackageExchange().status(id);
                   if (auto result = session.setLinkPackageEnabled(

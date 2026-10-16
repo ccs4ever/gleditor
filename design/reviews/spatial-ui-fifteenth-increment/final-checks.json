@@ -1,0 +1,78 @@
+{
+  "canonical_build_exit": 0,
+  "final_ui": {
+    "passed": 241,
+    "total": 241,
+    "exit": 0
+  },
+  "fresh_xuzz": {
+    "passed": 107,
+    "total": 107,
+    "exit": 0
+  },
+  "fresh_package": {
+    "passed": 9,
+    "total": 9,
+    "exit": 0
+  },
+  "library_799_and_mip_cache_53_reused_after_hash_verification": true,
+  "verified_binary_hashes": {
+    "build/xuzz": "d791c7ac9b97ade8572aa67c2949735fd4c03ce75780c90829a05ed9cd4e6b5a",
+    "build/libgleditor.so.0": "ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9",
+    "build/gleditor_test": "44562f4e4ea437f8f3c575a8005d5847367860f9b4d4714d2d1b6516cf014f8a",
+    "build/gleditor": "60eb4f7341e46225d20f9732f1b26882973e53a17960de77b04eaa2062f10039"
+  },
+  "strict_core": {
+    "exit": 0,
+    "GL_GLES_ordinary_overlay_differing_pixels": 0,
+    "Vulkan_ordinary_percent": 0.5104,
+    "Vulkan_overlay_percent": 0.5096,
+    "unchanged_limit_percent": 1,
+    "channel_tolerance": 1,
+    "actual_split_recording": false,
+    "broad_E2E": false
+  },
+  "native": {
+    "backend": "OpenGL",
+    "carrier": "f985e7513550a08b7463fbbc7008e8cb931d75e0",
+    "final_binary_sha256": "d791c7ac9b97ade8572aa67c2949735fd4c03ce75780c90829a05ed9cd4e6b5a",
+    "all_10_36_visit_count": 1,
+    "all_10_36_current": 1,
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    },
+    "source_files_unchanged": true,
+    "final_34_selection_payload": "selection3 c299281f1dccfb5fb1be0d8d6492142f 0 1 1 0 2 0 1 1 doc e3b5bb78c1a49f26bb32b8f7d0277c8f a34 0 20 0 1 0 56342 22 0 doc e3b5bb78c1a49f26bb32b8f7d0277c8f a34 21 43 0 1 0 56387 12 0 doc e3b5bb78c1a49f26bb32b8f7d0277c8f a34 66 78 0",
+    "cursor_name_corrections": {
+      "15-22": "Left1/2 Right2/3",
+      "23-28": "Left2/2 Right1/3",
+      "29-34": "Left2/2 Right3/3"
+    },
+    "root_exact_pin_exit": 0,
+    "root_pin_lifecycle_exit": 0,
+    "root_quiet_comparison_exit": 0,
+    "normal_quiet_preserve_retained_enabled": true,
+    "normal_quiet_connector_differing_pixels": 1032,
+    "minimap_redraw_not_attributed_to_emphasis": true,
+    "native_AT_SPI": false,
+    "network_announcement": false,
+    "curator_enrollment_verified": false
+  },
+  "format_version": 2,
+  "old_preference_format_1": "Refused and preserved, no compatibility reader",
+  "open": [
+    "full J23/J24/J25 and J1-J32 acceptance",
+    "same-title candidate native replacement and trust/unavailable variants",
+    "guaranteed exact-carrier payload recovery",
+    "cell/history/media-position endpoints",
+    "native AT-SPI",
+    "optimized performance",
+    "reading camera clipping and minimap redraw",
+    "compact-row identity and retained-context copy polish"
+  ],
+  "format_exit": 0,
+  "lint_exit": 0,
+  "text-policy_exit": 0,
+  "diff_check_exit": 0,
+  "independent_visual_review": "No blocking defect for bounded package increment; compact identity/copy and existing camera/minimap limitations recorded"
+}

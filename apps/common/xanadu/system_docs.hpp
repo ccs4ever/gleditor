@@ -1026,6 +1026,7 @@ struct BeamConfig {
   bool anchorReducedMotion{false};
   float curveHandleShare{0.3F}, curveWeight{1.F}, gatheringShare{0.32F};
   float inactiveLinkAlpha{0.70F};
+  float packageQuietAlpha{0.45F};
   std::size_t curveSegments{32};
   std::size_t bandStrandLimit{7};
   float bandStrandPitch{2.2F};

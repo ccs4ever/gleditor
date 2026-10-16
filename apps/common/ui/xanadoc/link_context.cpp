@@ -116,7 +116,7 @@ std::optional<Link> LinkContext::recordOf(const std::uint64_t id) const {
 
 std::expected<xanadu::LinkOccurrences, xanadu::LinkQueryError>
 LinkContext::resolve(const xanadu::LinkKey &key) const {
-  if (const auto *package = session.readerLinkPackages().retainedPackage(key);
+  if (const auto *package = session.readerLinkPackages().verifiedPackage(key);
       package && !nativeStoreOf(key))
     return packageIndex(std::nullopt).resolve(key, *package);
   return resolveForPresentation(key);
@@ -306,11 +306,32 @@ LinkContext::execute(const xanadu::NavigationCommand &command) {
   }
   const auto named    = keyNamed(command);
   const auto selected = navigator.selection();
-  if (std::holds_alternative<nav::EnableSelectedPackage>(command)) {
+  if (std::holds_alternative<nav::EnableSelectedPackage>(command) ||
+      std::holds_alternative<nav::DisableSelectedPackage>(command) ||
+      std::holds_alternative<nav::RetainSelectedPackage>(command) ||
+      std::holds_alternative<nav::RemoveSelectedPackage>(command) ||
+      std::holds_alternative<nav::QuietSelectedPackage>(command)) {
     if (!selected) return std::unexpected(NavigationError::NoLinkSelected);
-    if (auto enabled = session.setLinkPackageEnabled(selected->key, true);
-        !enabled) {
-      entryUnavailable = enabled.error();
+    const auto hash = selectedPackageCarrier();
+    if (!hash) return std::unexpected(NavigationError::LinkNotFound);
+    const auto result = [&]() -> std::expected<Session *, std::string> {
+      if (std::holds_alternative<nav::RetainSelectedPackage>(command) ||
+          std::holds_alternative<nav::RemoveSelectedPackage>(command))
+        return session.setLinkPackageRetained(
+            selected->key,
+            std::holds_alternative<nav::RetainSelectedPackage>(command));
+      if (std::holds_alternative<nav::QuietSelectedPackage>(command))
+        return session.setLinkPackageEmphasis(
+            *hash, session.readerLinkPackages().preference(*hash).emphasis ==
+                           PackageEmphasis::Normal
+                       ? PackageEmphasis::Quiet
+                       : PackageEmphasis::Normal);
+      return session.setLinkPackageEnabled(
+          selected->key,
+          std::holds_alternative<nav::EnableSelectedPackage>(command));
+    }();
+    if (!result) {
+      entryUnavailable = result.error();
       ++changes;
       return std::unexpected(NavigationError::LinkNotFound);
     }
@@ -322,7 +343,7 @@ LinkContext::execute(const xanadu::NavigationCommand &command) {
       selected && named && *named == selected->key &&
       (std::holds_alternative<nav::SelectMember>(command) ||
        std::holds_alternative<nav::SelectOccurrence>(command)) &&
-      session.readerLinkPackages().retainedPackage(*named);
+      session.readerLinkPackages().verifiedPackage(*named);
   if (named && !browsingPinned && !nativeStoreOf(*named) &&
       !session.readerLinkPackages().find(*named))
     return std::unexpected(NavigationError::LinkNotFound);

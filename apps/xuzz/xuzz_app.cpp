@@ -2806,6 +2806,13 @@ int XuzzApp::run(const int argc, char **argv) {
        "choose the previous place the member appears"},
       {kKeymapLinkCross, "make the other side of the link active"},
       {kKeymapLinkEnter, "go to the chosen place"},
+      {"std:xuzz/link_retain_package", "retain the pinned Link package"},
+      {"std:xuzz/link_remove_package",
+       "remove the pinned package from reader inventory"},
+      {"std:xuzz/link_quiet_package",
+       "toggle normal or quiet emphasis for the pinned package"},
+      {"std:xuzz/link_disable_package",
+       "disable drawing for the pinned package"},
       {"std:xuzz/link_enable_package", "re-enable the pinned Link package"},
       {"std:xuzz/link_cancel_entry", "cancel pending endpoint entry"},
       {kKeymapLinkOrigin, "return to where the link was selected"},
@@ -3356,6 +3363,7 @@ int XuzzApp::run(const int argc, char **argv) {
           links.setReadableTextPx(readablePx(layout.readableTextPx));
           links.setVisible(layout.xanalinkRibbons);
           links.setBeamConfig(layout.beams);
+          session->setPackageQuietAlpha(layout.beams.packageQuietAlpha);
           links.tensionEngine().setParams(layout.physics.toTensionParams());
           pouchDrawer.setDockSide(layout.pouchDock == xanadu::PouchDock::Left
                                       ? xanadu::PouchDrawer::DockSide::Left
@@ -3435,6 +3443,7 @@ int XuzzApp::run(const int argc, char **argv) {
       links.setReadableTextPx(readablePx(loCfg.readableTextPx));
       links.setVisible(loCfg.xanalinkRibbons);
       links.setBeamConfig(loCfg.beams);
+      session->setPackageQuietAlpha(loCfg.beams.packageQuietAlpha);
       links.tensionEngine().setParams(loCfg.physics.toTensionParams());
       pouchDrawer.setDockSide(loCfg.pouchDock == xanadu::PouchDock::Left
                                   ? xanadu::PouchDrawer::DockSide::Left
