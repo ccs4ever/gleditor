@@ -284,6 +284,24 @@ public:
   std::vector<LogicSolution> solveLogic(std::string_view goalQuery,
                                         std::size_t maxSolutions = 50);
 
+  /// Stage 5 (vortex-multithreading-study.md §6.4,
+  /// design/vicon-andor-parallelism.md): opt-in OR-parallel logic search. Runs
+  /// a batch of independent logic goal queries, each on its own worker context
+  /// (its own ArenaManifold / VortexCore / vprolog compiler / solver) over the
+  /// shared frozen base, and returns, per query in submission order, the
+  /// solutions rendered to context-independent strings (one string per
+  /// solution: its variable bindings joined, so results compare across
+  /// arenas). Each branch's arena mark/release and clause-database writes stay
+  /// inside its own context -- no mark/release crosses a worker boundary,
+  /// which dissolves the multiple-binding problem by isolation rather than a
+  /// shared binding store. Gated by config().orParallelSearch: when false
+  /// (the default) it runs the queries SERIALLY on the primary context, so
+  /// serial vprolog behaviour is unchanged. First-solution-wins is submission
+  /// order: query 0's solutions precede query 1's.
+  std::vector<std::vector<std::string>>
+  solveLogicBatchParallel(const std::vector<std::string> &goalQueries,
+                          std::size_t maxSolutions = 50);
+
   /**
    * @brief Persists a named macro into the active sovereign Store
    * (system://keymap).

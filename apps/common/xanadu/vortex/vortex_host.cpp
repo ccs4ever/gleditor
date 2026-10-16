@@ -933,6 +933,98 @@ std::vector<LogicSolution> VortexHost::solveLogic(std::string_view goalQuery,
   }
 }
 
+std::vector<std::vector<std::string>>
+VortexHost::solveLogicBatchParallel(const std::vector<std::string> &goalQueries,
+                                    std::size_t maxSolutions) {
+  std::vector<std::vector<std::string>> results(goalQueries.size());
+  if (goalQueries.empty()) {
+    return results;
+  }
+
+  // Render one solution's variable bindings to a stable, context-independent
+  // string so solutions compare across worker arenas: "name=value" pairs
+  // sorted by variable name, joined. The cell values are rendered through the
+  // owning context's core (a pure const read).
+  const auto renderSolution = [](WorkerContext &ctx,
+                                 const LogicSolution &sol) -> std::string {
+    std::vector<std::string> parts;
+    parts.reserve(sol.bindings.size());
+    for (const auto &[nameCell, valueCell] : sol.bindings) {
+      const auto render = [&ctx](CellRef c) -> std::string {
+        if (c == noCell || !ctx.arena.contains(c)) {
+          return "_";
+        }
+        return std::visit(
+            [](const auto &held) -> std::string {
+              using T = std::remove_cvref_t<decltype(held)>;
+              if constexpr (std::is_same_v<T, std::string>) {
+                return held;
+              } else if constexpr (std::is_same_v<T, bool>) {
+                return held ? "true" : "false";
+              } else {
+                return std::to_string(held);
+              }
+            },
+            ctx.core.render(c));
+      };
+      parts.push_back(render(nameCell) + "=" + render(valueCell));
+    }
+    std::ranges::sort(parts);
+    std::string joined;
+    for (std::size_t i = 0; i < parts.size(); ++i) {
+      if (i != 0) {
+        joined += ';';
+      }
+      joined += parts[i];
+    }
+    return joined;
+  };
+
+  // Solve query i on worker context ctx: compile the query in that context's
+  // core, solve on that context's stdlib, render each solution. Everything --
+  // the clause database, the arena trail, mark/release -- stays inside ctx.
+  const auto runOne = [&](std::size_t i, WorkerContext &ctx) {
+    std::vector<std::string> rendered;
+    try {
+      xanadu::vprolog::Compiler compiler(ctx.core);
+      auto query = compiler.compileQuery(goalQueries[i]);
+      if (query.goals.empty()) {
+        results[i] = {};
+        return;
+      }
+      auto sols = ctx.stdlib.solveQuery(
+          query.goals, compiler.customPredicates(), maxSolutions);
+      rendered.reserve(sols.size());
+      for (const auto &sol : sols) {
+        rendered.push_back(renderSolution(ctx, sol));
+      }
+    } catch (const std::exception &err) {
+      std::cerr << "solveLogicBatchParallel error: " << err.what() << "\n";
+      rendered.clear();
+    }
+    results[i] = std::move(rendered);
+  };
+
+  // Opt-in gate: default off runs serially on the primary context, so serial
+  // vprolog behaviour is unchanged. On, with a pool, fans one query per worker
+  // context; results stay in submission order regardless of completion order.
+  if (config_.orParallelSearch && workerPool_ != nullptr &&
+      goalQueries.size() > 1 && workerPool_->parallelism() > 1) {
+    std::vector<WorkerContext *> contexts;
+    contexts.reserve(goalQueries.size());
+    for (std::size_t i = 0; i < goalQueries.size(); ++i) {
+      contexts.push_back(&makeWorkerContext());
+    }
+    workerPool_->run(static_cast<std::uint32_t>(goalQueries.size()),
+                     [&](std::uint32_t i) { runOne(i, *contexts[i]); });
+  } else {
+    for (std::size_t i = 0; i < goalQueries.size(); ++i) {
+      runOne(i, primary_);
+    }
+  }
+  return results;
+}
+
 bool VortexHost::defineMacro(std::string_view name, std::string_view vqlExpr,
                              xanadu::Store *persistStore) {
   macroRegistry_[std::string(name)] = std::string(vqlExpr);

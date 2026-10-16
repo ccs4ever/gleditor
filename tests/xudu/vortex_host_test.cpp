@@ -624,3 +624,47 @@ TEST(VortexHostTest, ParallelVQLBatchIsDeterministic) {
         << "parallel VQL batch differs at threads=" << threads;
   }
 }
+
+// Stage 5 of design/vortex-multithreading-study.md §6.4 (and
+// design/vicon-andor-parallelism.md): opt-in OR-parallel logic search. A batch
+// of independent logic queries must yield the SAME solution set and the same
+// submission ordering whether the search runs serially (flag off, the default)
+// or OR-parallel across worker contexts (flag on), for any worker count. The
+// queries exercise OR-backtracking (append splits), unification, and negation.
+TEST(VortexHostTest, OrParallelLogicSearchIsDeterministic) {
+  const std::vector<std::string> queries = {
+      "append(X, Y, [1, 2]).",    // 3 solutions via OR-backtracking
+      "member(E, [a, b, c]).",    // 3 solutions
+      "append([1], [2], Z).",     // 1 solution
+      "member(x, [a, b]).",       // 0 solutions (fails)
+      "append(X, Y, [p, q, r]).", // 4 solutions
+  };
+
+  // Baseline: flag OFF (default) runs serially on the primary context.
+  std::vector<std::vector<std::string>> baseline;
+  {
+    VortexHost host;
+    ASSERT_FALSE(host.config().orParallelSearch) << "default must be off";
+    baseline = host.solveLogicBatchParallel(queries);
+  }
+  ASSERT_EQ(baseline.size(), queries.size());
+  // Sanity: the OR-backtracking queries produced multiple solutions and the
+  // failing query produced none -- so the comparison below is meaningful.
+  EXPECT_EQ(baseline[0].size(), 3u) << "append(X,Y,[1,2]) solutions";
+  EXPECT_EQ(baseline[1].size(), 3u) << "member(E,[a,b,c]) solutions";
+  EXPECT_EQ(baseline[3].size(), 0u) << "member(x,[a,b]) must fail";
+  EXPECT_EQ(baseline[4].size(), 4u) << "append(X,Y,[p,q,r]) solutions";
+
+  // Flag ON, across worker counts: must equal the serial baseline exactly,
+  // including per-query solution ordering.
+  for (std::uint32_t threads : {1u, 2u, 4u, 8u}) {
+    VortexHost host;
+    VortexHostConfig cfg = host.config();
+    cfg.orParallelSearch = true;
+    cfg.workerThreads    = threads;
+    host.setConfig(cfg);
+    auto got = host.solveLogicBatchParallel(queries);
+    EXPECT_EQ(got, baseline)
+        << "OR-parallel logic search differs at threads=" << threads;
+  }
+}
