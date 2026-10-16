@@ -109,7 +109,7 @@ ______________________________________________________________________
 - [12. Reconciliation with the convergence](#12-reconciliation-with-the-convergence)
 - [13. The `std:xanadu` package: direct cell and document manipulation][toc-29]
   - [13.1 Why authoring lowers to the arena, not the `Store`][toc-30]
-  - [13.2 The `std:xanadu` module](#132-the-stdxanadu-module)
+  - [13.2 The `std:xanadu` module (defined in Vortex §9)][toc-33]
   - [13.3 Content resolution is staged: the `Resolved` type][toc-31]
   - [13.4 Worked examples: Xanadu concepts in vlace](#134-worked-examples-xanadu-concepts-in-vlace)
   - [13.5 Complex arrangements and heavy navigation derive over existing primitives][toc-32]
@@ -1349,68 +1349,31 @@ the engine already drew it: arena is pure, `promote` is the one authoring effect
 `promote` is the *output*. Nelson's permanence and vlace's purity are the same requirement — content
 that never mutates, addressed by where it is — seen from two sides.
 
-### 13.2 The `std:xanadu` module
+### 13.2 The `std:xanadu` module (defined in Vortex §9)
 
-`std:xanadu` is a **shared Vortex standard-library module** on the `d.stdlib` rank off `home`,
-beside the seven core modules, `std:logic` (Vlog §8.3), `std:goal` (vicon), and `std:fun` (§7) —
-anchored and resolved exactly as they are (Vortex §7.1), and **importable from any front end** (VQL,
-VPL, vicon, vprolog, and vlace alike), not a vlace artifact. vlace brings it in with
-`import "std:xanadu"`; a VQL query or a vprolog program imports the same module and the same verbs.
-Its types are engine/Vortex concepts, not vlace surface sugar — `CellRef`, `DimRef`, `VSpan` (a
-permascroll span: a *name*, not bytes), `Link`, `Manifold` (a frozen replay product), `Arena` (a
-mutable-in-the-arena CoW view), `Mark`, `GlobalSpan`, `Dir = Pos | Neg`,
-`DiffKind = Universal | Shared | Unique | Deleted`, `Resolved a = Pending | Local a | Remote Handle`
-(§13.3) — defined once (convergence R5–R8/R12 own the data model; this module owns the verb
-vocabulary) and brought into a vlace program's scope by the import rather than owned by vlace's
-prelude. The effect column reads in vlace's `IO` terms here; a front end with a different effect
-vocabulary (VQL's non-transparency note, vicon's edge) maps the same arena/read-only-vs-promotes/
-async classification into its own. Each verb cites the C++ symbol it lowers to.
+`std:xanadu` is **not a vlace module** — it is a shared Vortex standard-library package, defined
+normatively in [`vortex-hyperstructural-runtime.md` §9](vortex-hyperstructural-runtime.md), beside
+`std:logic`/`std:goal`/`std:fun` on the `d.stdlib` rank, and importable from VQL, VPL, vicon,
+vprolog, and vlace alike. The full verb table (its ~30 addressing/authoring/resolution verbs, each
+with its C++ lowering), the shared type vocabulary (`CellRef`, `DimRef`, `VSpan`, `Link`,
+`Manifold`, `Arena`, `Mark`, `GlobalSpan`, `Dir`, `DiffKind`, `Resolved`), and the three-layer
+ownership (engine → shared stdlib → per-language surface) all live there, so every front end reads
+one definition.
 
-| name              | signature                                                             | pure / IO           | lowers to                                       |
-| ----------------- | --------------------------------------------------------------------- | ------------------- | ----------------------------------------------- |
-| `rebuildManifold` | `MicroversionId -> Manifold`                                          | pure                | `Store::rebuildManifold` (frozen by value)      |
-| `arena`           | `Manifold -> Arena`                                                   | pure                | `ArenaManifold(const Manifold*)` CoW view       |
-| `base`            | `Arena -> Manifold`                                                   | pure                | the arena's base manifold                       |
-| `home`            | `Manifold -> CellRef`                                                 | pure                | `Manifold::home` (d.doc)                        |
-| `cells`           | `Manifold -> List CellRef`                                            | pure                | `Manifold::cells`                               |
-| `dimensionNamed`  | `String -> Manifold -> Option DimRef`                                 | pure                | `Manifold::dimensionNamed` (d.dims)             |
-| `linked`          | `CellRef -> DimRef -> Dir -> Manifold -> Option CellRef`              | pure, O(1)          | `Manifold::linked`                              |
-| `cloneMaster`     | `CellRef -> DimRef -> Manifold -> Option CellRef`                     | pure                | `Manifold::cloneMaster` (d.clone)               |
-| `contentOf`       | `CellRef -> Manifold -> List VSpan`                                   | pure                | `Manifold::contentOf` (addresses only)          |
-| `historyOf`       | `CellRef -> Manifold -> List OpIndex`                                 | pure                | `Manifold::historyOf` (R7 chain)                |
-| `occurrences`     | `VSpan -> Manifold -> Stream Extent`                                  | pure, O(log N + K)  | `Spanfilade::occurrencesOf`                     |
-| `follow`          | `VSpan -> Manifold -> Stream (Link, Endset)`                          | pure discovery      | `Spanfilade::occurrencesOf` + `Manifold::links` |
-| `diffVersions`    | `List MicroversionId -> Stream (VSpan, DiffKind, Int)`                | pure, paged         | `Store::diffVersions`                           |
-| `globalise`       | `VSpan -> Manifold -> GlobalSpan`                                     | pure                | `publication::globalise`                        |
-| `makeText`        | `String -> Arena -> (CellRef, Arena)`                                 | pure                | `ArenaManifold::makeCell(string_view)`          |
-| `makeScalar`      | `Scalar -> Arena -> (CellRef, Arena)`                                 | pure                | `ArenaManifold::makeScalarCell` (R6 bits)       |
-| `makeDim`         | `String -> Arena -> (DimRef, Arena)`                                  | pure                | `ArenaManifold::ensureDimension` (d.dims)       |
-| `setLink`         | `CellRef -> DimRef -> Dir -> CellRef -> Arena -> Result Arena`        | pure                | `ArenaManifold::link` (both ends)               |
-| `spliceSpan`      | `CellRef -> List VSpan -> Arena -> Result Arena`                      | pure                | `ArenaManifold::setContent` (transclude)        |
-| `insertInRank`    | `CellRef -> CellRef -> DimRef -> Dir -> Arena -> Arena`               | pure                | `ArenaManifold::insertIntoRank`                 |
-| `mark`            | `Arena -> (Mark, Arena)`                                              | pure                | `ArenaManifold::mark`                           |
-| `release`         | `Mark -> Arena -> Arena`                                              | pure                | `ArenaManifold::release`                        |
-| `walk`            | `CellRef -> DimRef -> Dir -> Int -> Arena -> Stream CellRef`          | pure, step-budgeted | `ArenaManifold::materializeFrontier`            |
-| `resolve`         | `VSpan -> IO (Resolved Bytes)`                                        | **IO**              | async `SpanReader` over `managed_torrent`       |
-| `textOf`          | `CellRef -> Manifold -> Resolved String`                              | staged              | `Manifold::textOf` behind `Resolved`            |
-| `localise`        | `GlobalSpan -> IO (Option VSpan)`                                     | **IO**              | `publication::localise`                         |
-| `promote`         | `MicroversionId -> CellRef -> Arena -> IO (Result Overflow Promoted)` | **IO**              | `promote(Store&, parent, arena, root, …)`       |
-| `projectXanadoc`  | `MicroversionId -> Manifold`                                          | pure                | `projectXuduToZigzag(…, &provenance)`           |
-| `storeToSlice`    | `Manifold -> Slice`                                                   | pure                | `storeToSlice`                                  |
+vlace imports it with `import "std:xanadu"` (§7.4) and maps its language-neutral effect
+classification onto vlace's own: a **read-only** verb (reads a frozen `Manifold`) and an **arena**
+verb (builds in an `Arena`, mints no op) are *pure* in vlace's type system; an **effect** verb
+(`promote`, `resolve`, `localise`) is `IO`. The one vlace-specific commitment — why authoring lowers
+to the pure `Arena` and crosses to the spool only through `promote` — is §13.1 above, and it is
+exactly what makes the shared module's "arena" verbs land in vlace's pure fragment. Three shapes of
+the shared module matter most to a vlace program and are recapped here because the examples (§13.4)
+rely on them:
 
-Three shapes the engine forces, each a correction a naive binding would get wrong:
-
-- **`follow` does not lower to `Store::linksTouching`.** That method is a linear `views::filter`
-  over every link (store.hpp), $O(n)$. Bidirectional link following lowers to the Spanfilade's
-  $O(\log N + K)$ interval stabbing (`Spanfilade::occurrencesOf`), yielding a $K$-bounded stream —
-  the difference between a Xanadu that scales and one that does not.
-- **`promote` returns `Result Overflow Promoted`, never a bare value.** The C++ returns `nullopt` on
-  a `PromotionBudget` overflow or a bad root; vlace makes that a typed `Err Overflow` rather than a
-  silent nothing, honouring §6.6's error model.
-- **`promote` must preserve `d.clone` sharing** (§6.5): a promoted subgraph that transcludes shared
-  spans emits them once and links both roots, so a transclusion stays $O(1)$ in new ops rather than
-  copying the quoted content — which is just absolute-transclusion-no-duplication restated as a
-  promotion requirement.
+- `follow` lowers to the Spanfilade's $O(\log N + K)$ stabbing, not `Store::linksTouching`'s $O(n)$
+  scan (Vortex §9.2).
+- `promote` returns `Result Overflow Promoted` — a budget overflow is a typed `Err`, honouring
+  §6.6's error model — and preserves `d.clone` sharing so a transclusion stays $O(1)$ in new ops.
+- content resolution is staged through `Resolved` (§13.3), so a swarm fetch never blocks evaluation.
 
 ### 13.3 Content resolution is staged: the `Resolved` type
 
@@ -1617,3 +1580,4 @@ Editorial changes that alter no normative text bump neither.
 [toc-30]: #131-why-authoring-lowers-to-the-arena-not-the-store
 [toc-31]: #133-content-resolution-is-staged-the-resolved-type
 [toc-32]: #135-complex-arrangements-and-heavy-navigation-derive-over-existing-primitives
+[toc-33]: #132-the-stdxanadu-module-defined-in-vortex-9
