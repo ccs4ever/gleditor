@@ -2806,6 +2806,7 @@ int XuzzApp::run(const int argc, char **argv) {
        "choose the previous place the member appears"},
       {kKeymapLinkCross, "make the other side of the link active"},
       {kKeymapLinkEnter, "go to the chosen place"},
+      {"std:xuzz/link_enable_package", "re-enable the pinned Link package"},
       {"std:xuzz/link_cancel_entry", "cancel pending endpoint entry"},
       {kKeymapLinkOrigin, "return to where the link was selected"},
       {kKeymapLinkDismiss, "put the selected link away"},

@@ -1,0 +1,671 @@
+diff --git a/apps/common/ui/xanadoc/beams.cpp b/apps/common/ui/xanadoc/beams.cpp
+index fb8e4881..d920d434 100644
+--- a/apps/common/ui/xanadoc/beams.cpp
++++ b/apps/common/ui/xanadoc/beams.cpp
+@@ -1610,6 +1610,8 @@ bool LinkBeams::picked(const render::PickingResult &pick,
+   if (render::tagKindBeam != pick.tag.kind) {
+     return false;
+   }
++  // A queued GPU pick belongs to the frame that produced these strands.
++  if (session.generation() != builtFor) return true;
+   // Ours whatever happens next: a beam was clicked, and the click must not
+   // fall through to the page behind it.
+   if (pick.tag.clusterIndex >= kTagLoomBase) {
+@@ -1736,29 +1738,32 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
+   // executed on the spot: they come from another thread, and following a link
+   // moves the caret and might open a document.
+   {
+-    std::vector<xanadu::NavigationCommand> asked;
++    std::vector<std::pair<std::uint64_t, xanadu::NavigationCommand>> asked;
+     {
+       const std::scoped_lock locker(askedGuard);
+       asked.swap(askedFor);
+     }
+     if (linkContext_ != nullptr) {
+-      for (const auto &command : asked) {
+-        std::ignore = linkContext_->execute(command);
++      for (const auto &[generation, command] : asked) {
++        if (generation == session.generation())
++          std::ignore = linkContext_->execute(command);
+       }
+     }
+   }
+ 
+   const auto selected = linkContext_ != nullptr ? linkContext_->selection()
+                                                 : gleditor::cpp26::nullopt;
+-  activeLink          = selected
+-                            ? std::optional<std::uint64_t>(
++  const bool drawingSelected =
++      selected && !linkContext_->selectedPackageDisabled();
++  activeLink = drawingSelected
++                   ? std::optional<std::uint64_t>(
+                          selected->key.authority == session.store().documentId()
+                              ? static_cast<std::uint64_t>(selected->key.id)
+                              : session.packageRenderId(selected->key))
+-                            : std::nullopt;
++                   : std::nullopt;
+ 
+   std::optional<AnchorFocus> anchorFocus;
+-  if (selected && selected->occurrences) {
++  if (drawingSelected && selected->occurrences) {
+     const auto &cursor  = selected->cursor(selected->active);
+     const auto &members = selected->occurrences->members(selected->active);
+     if (cursor.member && cursor.occurrence && *cursor.member < members.size()) {
+@@ -2731,7 +2736,8 @@ void LinkBeams::describe(gleditor::a11y::Builder &into) {
+   }
+ 
+   const std::scoped_lock locker(askedGuard);
+-  accessibleNodes = std::move(nodes);
++  accessibleNodes      = std::move(nodes);
++  accessibleGeneration = session.generation();
+ }
+ 
+ std::uint64_t LinkBeams::accessibilityRevision() const {
+@@ -2761,7 +2767,7 @@ bool LinkBeams::performAction(const std::uint64_t nodeId,
+     // Focus on a link node reads it; it asks for nothing to be done.
+     return false;
+   }
+-  askedFor.push_back(*command);
++  askedFor.emplace_back(accessibleGeneration, *command);
+   return true;
+ }
+ 
+diff --git a/apps/common/ui/xanadoc/beams.hpp b/apps/common/ui/xanadoc/beams.hpp
+index 49a4b5d4..ccee17fb 100644
+--- a/apps/common/ui/xanadoc/beams.hpp
++++ b/apps/common/ui/xanadoc/beams.hpp
+@@ -578,7 +578,8 @@ private:
+   /// carried out on the render thread, where entering an endpoint moves the
+   /// caret.
+   mutable std::mutex askedGuard;
+-  std::vector<xanadu::NavigationCommand> askedFor;
++  std::vector<std::pair<std::uint64_t, xanadu::NavigationCommand>> askedFor;
++  std::uint64_t accessibleGeneration{};
+   /// What each link, member and occurrence node published by describe()
+   /// stands for, by local node id; guarded by askedGuard.
+   std::vector<std::pair<std::uint64_t, xanadu::AccessibleLinkNode>>
+diff --git a/apps/common/ui/xanadoc/link_context.cpp b/apps/common/ui/xanadoc/link_context.cpp
+index f7f539f8..428f650b 100644
+--- a/apps/common/ui/xanadoc/link_context.cpp
++++ b/apps/common/ui/xanadoc/link_context.cpp
+@@ -82,11 +82,25 @@ const Store *LinkContext::nativeStoreOf(const LinkKey &key) const {
+   return nullptr;
+ }
+ 
++std::optional<InfoHash> LinkContext::selectedPackageCarrier() const {
++  const auto selected = navigator.selection();
++  return selected && !nativeStoreOf(selected->key)
++             ? session.readerLinkPackages().carrier(selected->key)
++             : std::nullopt;
++}
++bool LinkContext::selectedPackageDisabled() const {
++  const auto selected = navigator.selection();
++  return selected && !nativeStoreOf(selected->key) &&
++         session.readerLinkPackages().containsAuthority(
++             selected->key.authority) &&
++         !session.readerLinkPackages().enabled(selected->key);
++}
+ void LinkContext::packageVisibilityChanged() {
+   const auto selected = navigator.selection();
+-  if (selected && !nativeStoreOf(selected->key) &&
+-      !session.readerLinkPackages().find(selected->key))
+-    std::ignore = execute(nav::Dismiss{});
++  if (selected && !nativeStoreOf(selected->key)) {
++    if (selectedPackageDisabled()) pendingEntry.reset();
++    ++changes;
++  }
+ }
+ 
+ std::optional<Link> LinkContext::recordOf(const std::uint64_t id) const {
+@@ -102,6 +116,9 @@ std::optional<Link> LinkContext::recordOf(const std::uint64_t id) const {
+ 
+ std::expected<xanadu::LinkOccurrences, xanadu::LinkQueryError>
+ LinkContext::resolve(const xanadu::LinkKey &key) const {
++  if (const auto *package = session.readerLinkPackages().retainedPackage(key);
++      package && !nativeStoreOf(key))
++    return packageIndex(std::nullopt).resolve(key, *package);
+   return resolveForPresentation(key);
+ }
+ 
+@@ -289,10 +306,33 @@ LinkContext::execute(const xanadu::NavigationCommand &command) {
+   }
+   const auto named    = keyNamed(command);
+   const auto selected = navigator.selection();
+-  if (named && !nativeStoreOf(*named) &&
++  if (std::holds_alternative<nav::EnableSelectedPackage>(command)) {
++    if (!selected) return std::unexpected(NavigationError::NoLinkSelected);
++    if (auto enabled = session.setLinkPackageEnabled(selected->key, true);
++        !enabled) {
++      entryUnavailable = enabled.error();
++      ++changes;
++      return std::unexpected(NavigationError::LinkNotFound);
++    }
++    entryUnavailable.clear();
++    packageVisibilityChanged();
++    return NavigationEffect{};
++  }
++  const bool browsingPinned =
++      selected && named && *named == selected->key &&
++      (std::holds_alternative<nav::SelectMember>(command) ||
++       std::holds_alternative<nav::SelectOccurrence>(command)) &&
++      session.readerLinkPackages().retainedPackage(*named);
++  if (named && !browsingPinned && !nativeStoreOf(*named) &&
+       !session.readerLinkPackages().find(*named))
+     return std::unexpected(NavigationError::LinkNotFound);
+   entryUnavailable.clear();
++  if (selectedPackageDisabled() &&
++      (std::holds_alternative<nav::Enter>(command) ||
++       std::holds_alternative<nav::EnterAt>(command))) {
++    ++changes;
++    return std::unexpected(NavigationError::PackageDisabled);
++  }
+   std::optional<OccurrenceSite> target;
+   if (const auto *restore = std::get_if<nav::EnterVisit>(&command)) {
+     if (const auto visit = activity.find(restore->visit))
+diff --git a/apps/common/ui/xanadoc/link_context.hpp b/apps/common/ui/xanadoc/link_context.hpp
+index e4c86a8c..7285b84e 100644
+--- a/apps/common/ui/xanadoc/link_context.hpp
++++ b/apps/common/ui/xanadoc/link_context.hpp
+@@ -134,6 +134,8 @@ public:
+   presentationLinks(int cellRadius) const;
+   [[nodiscard]] std::optional<Link> recordOf(std::uint64_t renderId) const;
+   void packageVisibilityChanged();
++  [[nodiscard]] bool selectedPackageDisabled() const;
++  [[nodiscard]] std::optional<InfoHash> selectedPackageCarrier() const;
+   void recordReadingOrigin() { noteOrigin(); }
+   void recordSourceArrival(const OccurrenceSite &site);
+   LinkContext *setUnavailableHandler(std::function<void(std::string)> handler) {
+diff --git a/apps/common/ui/xanadoc/link_panel_overlay.cpp b/apps/common/ui/xanadoc/link_panel_overlay.cpp
+index ceb17a10..2940b54d 100644
+--- a/apps/common/ui/xanadoc/link_panel_overlay.cpp
++++ b/apps/common/ui/xanadoc/link_panel_overlay.cpp
+@@ -59,7 +59,7 @@ void LinkPanelOverlay::rebuildHighlights() {
+ 
+   const auto selected      = context.selection();
+   std::uint32_t linkColour = 0;
+-  if (selected && selected->occurrences) {
++  if (selected && selected->occurrences && !context.selectedPackageDisabled()) {
+     linkColour =
+         session.selectedLinkColour(selected->key, selected->occurrences->link);
+     // Uniform RGB scaling keeps the link hue while giving its edge contrast
+@@ -146,8 +146,8 @@ LinkPanelOverlay::noteNavigationSelection(const Caret &caret,
+ std::optional<gleditor::SpanStyle>
+ LinkPanelOverlay::selectionStyle(const Doc &doc, const Caret &caret) {
+   const auto selected = context.selection();
+-  if (!ownedSelection || !caret.hasSelection() ||
+-      caret.documentIndex() != doc.documentIndex() ||
++  if (context.selectedPackageDisabled() || !ownedSelection ||
++      !caret.hasSelection() || caret.documentIndex() != doc.documentIndex() ||
+       caret.selectionRevision() != ownedSelection->revision || !selected ||
+       selected->key != ownedSelection->key ||
+       selected->generation != ownedSelection->generation ||
+@@ -261,6 +261,8 @@ void LinkPanelOverlay::appendInvestigation(std::vector<PanelLine> &lines) {
+     lines.front().text += std::format(" · visit {}", visit->value);
+   lines.front().compactIdentity = lines.front().text;
+   append("Link authority: " + selected->key.authority.str());
++  if (const auto carrier = context.selectedPackageCarrier())
++    append("Package carrier: " + carrier->hex());
+   const auto place = [&](std::string_view label, const OccurrenceSite &site) {
+     std::visit(
+         [&](const auto &at) {
+@@ -295,6 +297,26 @@ void LinkPanelOverlay::appendInvestigation(std::vector<PanelLine> &lines) {
+     if (!cursor.member || *cursor.member >= members.size()) continue;
+     const auto label   = side == LinkSide::Left ? "Left" : "Right";
+     const auto &member = members[*cursor.member];
++    if (const auto *package =
++            session.readerLinkPackages().retainedPackage(selected->key)) {
++      const auto &spans = side == LinkSide::Left
++                              ? package->links[selected->key.id].left
++                              : package->links[selected->key.id].right;
++      const auto &span  = spans[*cursor.member];
++      append(std::format("{} signed scroll: {}\nSource bytes {}–{}", label,
++                         span.scroll, span.start, span.end()));
++      if (cursor.occurrence && *cursor.occurrence < member.occurrences.size()) {
++        const auto &site = member.occurrences[*cursor.occurrence].site;
++        place(std::string(label) + " occurrence", site);
++        if (const auto *cell = std::get_if<CellSite>(&site))
++          append(std::format("{} occurrence cell: {}", label, cell->cell));
++      } else {
++        append(std::format(
++            "{} occurrence not chosen · choose a place for exact identity",
++            label));
++      }
++      continue;
++    }
+     if (!cursor.occurrence) {
+       append(std::format(
+           "{} member {} · {} · choose a place for exact identity", label,
+@@ -377,6 +399,19 @@ void LinkPanelOverlay::rebuildPanel(gleditor::FrameContext &ctx) {
+                                target->range.start, target->range.end)});
+     }
+   }
++  if (context.selectedPackageDisabled()) {
++    lines.push_back({.text = "Package drawing disabled · re-enable to enter; "
++                             "pinned Link retained",
++                     .tone = PanelLine::Tone::Muted});
++    buttons.push_back({.label   = "Re-enable package",
++                       .command = nav::EnableSelectedPackage{}});
++    for (auto &button : buttons)
++      if (std::holds_alternative<nav::Enter>(button.command) ||
++          std::holds_alternative<nav::EnterAt>(button.command)) {
++        button.label   = "Enter unavailable";
++        button.enabled = false;
++      }
++  }
+   if (!context.entryStatus().empty()) {
+     lines.push_back(
+         {.text = context.entryStatus(), .tone = PanelLine::Tone::Muted});
+diff --git a/apps/common/ui/xanadoc/session.cpp b/apps/common/ui/xanadoc/session.cpp
+index a64ab3c1..9530da4a 100644
+--- a/apps/common/ui/xanadoc/session.cpp
++++ b/apps/common/ui/xanadoc/session.cpp
+@@ -744,6 +744,16 @@ Session::setLinkPackageEnabled(const LinkPackageStatus &package, bool on) try {
+ } catch (const std::exception &error) {
+   return std::unexpected(std::string(error.what()));
+ }
++std::expected<Session *, std::string>
++Session::setLinkPackageEnabled(const LinkKey &key, bool on) {
++  for (const auto &entry : stores)
++    if (entry.store && entry.store->documentId() == key.authority)
++      return std::unexpected("Package authority conflicts with an open store");
++  if (auto result = readerLinkPackages().setEnabled(key, on); !result)
++    return std::unexpected(result.error());
++  invalidate();
++  return this;
++}
+ std::uint64_t Session::packageRenderId(const LinkKey &key) {
+   const auto name = std::pair{key.authority.str(), key.id};
+   if (const auto found = packageRenderIds_.find(name);
+diff --git a/apps/common/ui/xanadoc/session.hpp b/apps/common/ui/xanadoc/session.hpp
+index 4acee66d..61871b1f 100644
+--- a/apps/common/ui/xanadoc/session.hpp
++++ b/apps/common/ui/xanadoc/session.hpp
+@@ -463,6 +463,8 @@ public:
+   ReaderLinkPackages &readerLinkPackages();
+   [[nodiscard]] std::expected<Session *, std::string>
+   setLinkPackageEnabled(const LinkPackageStatus &package, bool enabled);
++  [[nodiscard]] std::expected<Session *, std::string>
++  setLinkPackageEnabled(const LinkKey &key, bool enabled);
+   [[nodiscard]] std::uint64_t packageRenderId(const LinkKey &key);
+   [[nodiscard]] std::uint32_t selectedLinkColour(const LinkKey &key,
+                                                  const Link &link);
+diff --git a/apps/common/xanadu/link_navigation.cpp b/apps/common/xanadu/link_navigation.cpp
+index 25a070eb..c595dc6b 100644
+--- a/apps/common/xanadu/link_navigation.cpp
++++ b/apps/common/xanadu/link_navigation.cpp
+@@ -277,7 +277,9 @@ NavigationResult LinkNavigator::dispatch(const NavigationCommand &command) {
+           const auto visit = activity.find(c.visit);
+           if (!visit) return std::unexpected(NavigationError::NoPreviousVisit);
+           return restoreVisit(*visit);
+-        } else if constexpr (std::is_same_v<Command, nav::CancelEntry>) {
++        } else if constexpr (std::is_same_v<Command, nav::CancelEntry> ||
++                             std::is_same_v<Command,
++                                            nav::EnableSelectedPackage>) {
+           return NavigationEffect{};
+         } else {
+           static_assert(std::is_same_v<Command, nav::Dismiss>);
+@@ -623,6 +625,8 @@ std::string_view name(const NavigationError error) noexcept {
+     return "stale resolution";
+   case NavigationError::LinkNotFound:
+     return "link not found";
++  case NavigationError::PackageDisabled:
++    return "reader package drawing disabled";
+   case NavigationError::NoOrigin:
+     return "no origin";
+   case NavigationError::NoPreviousVisit:
+@@ -648,7 +652,8 @@ std::string_view name(const NavigationCommand &command) noexcept {
+                                                "return to origin",
+                                                "dismiss",
+                                                "cancel entry",
+-                                               "enter visit"};
++                                               "enter visit",
++                                               "enable selected package"};
+   static_assert(std::size(names) == std::variant_size_v<NavigationCommand>);
+   return names[command.index()];
+ }
+@@ -682,6 +687,8 @@ commandForAction(const std::string_view action) {
+   if (kKeymapLinkCross == action) {
+     return nav::Cross{};
+   }
++  if (action == "std:xuzz/link_enable_package")
++    return nav::EnableSelectedPackage{};
+   if (action == "std:xuzz/link_cancel_entry") return nav::CancelEntry{};
+   if (kKeymapLinkEnter == action) {
+     return nav::Enter{};
+diff --git a/apps/common/xanadu/link_navigation.hpp b/apps/common/xanadu/link_navigation.hpp
+index 55f35ce3..caa82e48 100644
+--- a/apps/common/xanadu/link_navigation.hpp
++++ b/apps/common/xanadu/link_navigation.hpp
+@@ -224,6 +224,10 @@ struct EnterVisit {
+   VisitId visit;
+   bool operator==(const EnterVisit &) const = default;
+ };
++/// Ask the host to re-enable the exact retained package of the pinned Link.
++struct EnableSelectedPackage {
++  bool operator==(const EnableSelectedPackage &) const = default;
++};
+ struct CancelEntry {
+   bool operator==(const CancelEntry &) const = default;
+ };
+@@ -234,7 +238,7 @@ using NavigationCommand =
+                  nav::StepMember, nav::SelectOccurrence, nav::StepOccurrence,
+                  nav::Cross, nav::Enter, nav::EnterAt, nav::ActivityBack,
+                  nav::ActivityForward, nav::ReturnToOrigin, nav::Dismiss,
+-                 nav::CancelEntry, nav::EnterVisit>;
++                 nav::CancelEntry, nav::EnterVisit, nav::EnableSelectedPackage>;
+ 
+ enum class NavigationError : std::uint8_t {
+   NoLinkSelected,
+@@ -249,6 +253,7 @@ enum class NavigationError : std::uint8_t {
+   /// Occurrences supplied for a selection that has since been replaced.
+   StaleGeneration,
+   LinkNotFound,
++  PackageDisabled,
+   NoOrigin,
+   NoPreviousVisit,
+   NoCandidates,
+diff --git a/apps/common/xanadu/reader_link_packages.cpp b/apps/common/xanadu/reader_link_packages.cpp
+index 775dc26e..4022138a 100644
+--- a/apps/common/xanadu/reader_link_packages.cpp
++++ b/apps/common/xanadu/reader_link_packages.cpp
+@@ -46,7 +46,7 @@ ReaderLinkPackages::ReaderLinkPackages(std::filesystem::path path)
+     for (const auto &[hash, on] : choices) {
+       (void)on;
+       const auto [entry, inserted] =
+-          authorities.emplace(keyOf(hash, 0).authority.str(), hash);
++          authorities.emplace(keyOf(hash, 0).authority, hash);
+       if (!inserted && entry->second != hash)
+         throw std::runtime_error("activity authority collision");
+     }
+@@ -76,7 +76,7 @@ ReaderLinkPackages::retain(const LinkPackage &package,
+       {.path = "links.xanalinks", .data = encodeLinkPackage(package)}};
+   if (makeTorrent(files, "link-package").hash != hash)
+     throw std::invalid_argument("Package carrier identity mismatch");
+-  if (const auto entry = authorities.find(keyOf(hash, 0).authority.str());
++  if (const auto entry = authorities.find(keyOf(hash, 0).authority);
+       entry != authorities.end() && entry->second != hash)
+     throw std::invalid_argument("Package activity authority collision");
+   if (!retained.contains(hash) && retained.size() >= maximumChoices)
+@@ -87,13 +87,13 @@ ReaderLinkPackages::retain(const LinkPackage &package,
+   if (total > maximumEnabledMembers)
+     throw std::invalid_argument("Enabled package member limit (4096)");
+   retained.insert_or_assign(hash, package);
+-  authorities.insert_or_assign(keyOf(hash, 0).authority.str(), hash);
++  authorities.insert_or_assign(keyOf(hash, 0).authority, hash);
+   return this;
+ } catch (const std::exception &error) {
+   return std::unexpected(std::string(error.what()));
+ }
+ bool ReaderLinkPackages::containsAuthority(const DocumentId &authority) const {
+-  return authorities.contains(authority.str());
++  return authorities.contains(authority);
+ }
+ bool ReaderLinkPackages::enabled(const InfoHash &hash) const {
+   const auto found = choices.find(hash);
+@@ -152,10 +152,28 @@ std::vector<LinkKey> ReaderLinkPackages::links() const {
+   }
+   return result;
+ }
++std::optional<InfoHash> ReaderLinkPackages::carrier(const LinkKey &key) const {
++  const auto found = authorities.find(key.authority);
++  return found == authorities.end() ? std::nullopt
++                                    : std::optional{found->second};
++}
++bool ReaderLinkPackages::enabled(const LinkKey &key) const {
++  const auto authority = authorities.find(key.authority);
++  return authority != authorities.end() && enabled(authority->second);
++}
++std::expected<ReaderLinkPackages *, std::string>
++ReaderLinkPackages::setEnabled(const LinkKey &key, bool on) {
++  if (!retainedPackage(key))
++    return std::unexpected("The exact verified package is unavailable");
++  return setEnabled(authorities.at(key.authority), on);
++}
+ const LinkPackage *ReaderLinkPackages::package(const LinkKey &key) const {
+-  const auto authority = authorities.find(key.authority.str());
+-  if (authority == authorities.end() || !enabled(authority->second))
+-    return nullptr;
++  return enabled(key) ? retainedPackage(key) : nullptr;
++}
++const LinkPackage *
++ReaderLinkPackages::retainedPackage(const LinkKey &key) const {
++  const auto authority = authorities.find(key.authority);
++  if (authority == authorities.end()) return nullptr;
+   const auto pkg = retained.find(authority->second);
+   return pkg != retained.end() && key.id < pkg->second.links.size()
+              ? &pkg->second
+diff --git a/apps/common/xanadu/reader_link_packages.hpp b/apps/common/xanadu/reader_link_packages.hpp
+index beca2f7a..6ce39b31 100644
+--- a/apps/common/xanadu/reader_link_packages.hpp
++++ b/apps/common/xanadu/reader_link_packages.hpp
+@@ -5,6 +5,7 @@
+ #include "link_occurrences.hpp"
+ #include "link_package.hpp"
+ #include <filesystem>
++#include <optional>
+ 
+ namespace xanadu {
+ class ReaderLinkPackagesUnreadable : public std::runtime_error {
+@@ -20,6 +21,12 @@ public:
+   retain(const LinkPackage &package, const InfoHash &hash);
+   [[nodiscard]] std::expected<ReaderLinkPackages *, std::string>
+   setEnabled(const InfoHash &hash, bool enabled);
++  [[nodiscard]] std::expected<ReaderLinkPackages *, std::string>
++  setEnabled(const LinkKey &key, bool enabled);
++  [[nodiscard]] bool enabled(const LinkKey &key) const;
++  [[nodiscard]] std::optional<InfoHash> carrier(const LinkKey &key) const;
++  /// Verified retained identity, independent of drawing enablement.
++  [[nodiscard]] const LinkPackage *retainedPackage(const LinkKey &key) const;
+   [[nodiscard]] bool containsAuthority(const DocumentId &authority) const;
+   [[nodiscard]] bool enabled(const InfoHash &hash) const;
+   [[nodiscard]] std::vector<LinkKey> links() const;
+@@ -34,7 +41,12 @@ private:
+   std::filesystem::path file;
+   std::map<InfoHash, bool> choices;
+   std::map<InfoHash, LinkPackage> retained;
+-  std::map<std::string, InfoHash> authorities;
++  struct AuthorityLess {
++    bool operator()(const DocumentId &left, const DocumentId &right) const {
++      return left.bytes() < right.bytes();
++    }
++  };
++  std::map<DocumentId, InfoHash, AuthorityLess> authorities;
+ };
+ struct PackageDocumentView {
+   const Store &store;
+diff --git a/apps/common/xanadu/system_docs.cpp b/apps/common/xanadu/system_docs.cpp
+index 2eb56de4..6edea95e 100644
+--- a/apps/common/xanadu/system_docs.cpp
++++ b/apps/common/xanadu/system_docs.cpp
+@@ -1312,6 +1312,10 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
+          .notes   = "Make the other side of the selected link active",
+          .schemas = {{.expectedTypes = {"string"},
+                       .defaultValues = {std::string{"Alt+Shift+X"}}}}},
++        {.name    = "std:xuzz/link_enable_package",
++         .notes   = "Re-enable drawing of the exact pinned Link package",
++         .schemas = {{.expectedTypes = {"string"},
++                      .defaultValues = {std::string{"Alt+Shift+E"}}}}},
+         {.name    = "std:xuzz/link_cancel_entry",
+          .notes   = "Cancel pending endpoint entry without dismissing the link",
+          .schemas = {{.expectedTypes = {"string"},
+diff --git a/apps/xuzz/xuzz_app.cpp b/apps/xuzz/xuzz_app.cpp
+index d2bc0fdd..3e810b80 100644
+--- a/apps/xuzz/xuzz_app.cpp
++++ b/apps/xuzz/xuzz_app.cpp
+@@ -2806,6 +2806,7 @@ int XuzzApp::run(const int argc, char **argv) {
+        "choose the previous place the member appears"},
+       {kKeymapLinkCross, "make the other side of the link active"},
+       {kKeymapLinkEnter, "go to the chosen place"},
++      {"std:xuzz/link_enable_package", "re-enable the pinned Link package"},
+       {"std:xuzz/link_cancel_entry", "cancel pending endpoint entry"},
+       {kKeymapLinkOrigin, "return to where the link was selected"},
+       {kKeymapLinkDismiss, "put the selected link away"},
+diff --git a/tests/xudu/reader_link_packages_test.cpp b/tests/xudu/reader_link_packages_test.cpp
+index f126ca64..102c4f8c 100644
+--- a/tests/xudu/reader_link_packages_test.cpp
++++ b/tests/xudu/reader_link_packages_test.cpp
+@@ -61,6 +61,14 @@ TEST_F(ReaderLinkPackagesTest,
+   ASSERT_EQ(restarted.links(), std::vector<LinkKey>{key});
+   ASSERT_TRUE(restarted.setEnabled(hash, false));
+   EXPECT_EQ(restarted.find(key), nullptr);
++  ASSERT_NE(restarted.retainedPackage(key), nullptr);
++  EXPECT_EQ(restarted.retainedPackage(key)->links, pkg.links);
++  EXPECT_FALSE(restarted.enabled(key));
++  ASSERT_TRUE(restarted.setEnabled(key, true));
++  EXPECT_TRUE(restarted.enabled(key));
++  EXPECT_EQ(restarted.find(key),
++            &restarted.retainedPackage(key)->links.front());
++  ASSERT_TRUE(restarted.setEnabled(key, false));
+   EXPECT_FALSE(ReaderLinkPackages(path).enabled(hash));
+   EXPECT_FALSE(reader.retain(pkg, nextHash));
+ }
+diff --git a/tests/zigzag/reader_link_packages_ui_test.cpp b/tests/zigzag/reader_link_packages_ui_test.cpp
+index cc729ba6..d6797d62 100644
+--- a/tests/zigzag/reader_link_packages_ui_test.cpp
++++ b/tests/zigzag/reader_link_packages_ui_test.cpp
+@@ -1,6 +1,7 @@
+ #include "../lib/mocks/world_device.hpp"
+ #include "common/ui/xanadoc/beams.hpp"
+ #include "common/ui/xanadoc/link_context.hpp"
++#include "common/ui/xanadoc/link_panel_overlay.hpp"
+ #include <algorithm>
+ #include <cmath>
+ #include <cstdlib>
+@@ -38,9 +39,8 @@ protected:
+     std::filesystem::remove_all(root);
+   }
+ };
+-TEST_F(
+-    ReaderPackageUiTest,
+-    EnabledPackageUsesSharedNavigationAndAccessibleIdentityThenDismissesWithoutMutation) {
++TEST_F(ReaderPackageUiTest,
++       EnabledPackageKeepsItsPinnedIdentityWhenDrawingIsDisabled) {
+   auto perma = std::make_shared<UserPermascroll>();
+   Session session((root / "workspace").string(), perma);
+   auto &store        = session.store();
+@@ -82,9 +82,12 @@ TEST_F(
+   });
+   WorldRecordingDevice device;
+   RenderState state{&device};
+-  state.docs.push_back(Doc::create(
+-      {}, &device, glm::mat4{1},
+-      gleditor::MemoryTextSource({}, "012345678901234567890123456789")));
++  auto app      = std::make_shared<AppState>();
++  auto renderer = Renderer::create(app, render::Backend::OpenGL);
++  state.docs.push_back(
++      Doc::create(renderer, &device, glm::mat4{1},
++                  gleditor::MemoryTextSource("012345678901234567890123456789",
++                                             "package-lifecycle")));
+   LinkBeams beams(session, nullptr);
+   beams.setLinkContext(&navigation);
+   beams.deviceReady(device, {});
+@@ -118,13 +121,17 @@ TEST_F(
+   EXPECT_EQ(session.activityForNavigation()->opCount(), activityOps);
+   EXPECT_EQ(focused, (Extent{24, 27}));
+   session.views().push_back(view);
++  const auto pinned       = selectionContext(*navigation.selection());
++  const auto currentVisit = navigation.currentVisit();
+   // Queue the accessible action while enabled, then disable before delivery.
+   ASSERT_TRUE(
+       beams.performAction(renderId + 1, gleditor::a11y::Action::Click, {}));
+   ASSERT_TRUE(session.setLinkPackageEnabled(status, false));
+   navigation.packageVisibilityChanged();
+   beams.drawFrame(frame);
+-  EXPECT_FALSE(navigation.selection());
++  ASSERT_TRUE(navigation.selection());
++  EXPECT_EQ(selectionContext(*navigation.selection()), pinned);
++  EXPECT_EQ(navigation.currentVisit(), currentVisit);
+   EXPECT_EQ(session.activityForNavigation()->opCount(), activityOps);
+   EXPECT_THROW(session.addStore(std::make_unique<Store>(perma, key.authority),
+                                 (root / "collision").string()),
+@@ -135,6 +142,90 @@ TEST_F(
+   EXPECT_TRUE(store.links().empty());
+   EXPECT_FALSE(session.readerLinkPackages().enabled(hash));
+   EXPECT_FALSE(navigation.resolveForPresentation(key));
++  EXPECT_TRUE(navigation.selectedPackageDisabled());
++  EXPECT_EQ(navigation.selectedPackageCarrier(), std::optional{hash});
++  const auto refused = navigation.execute(nav::Enter{});
++  ASSERT_FALSE(refused);
++  EXPECT_EQ(refused.error(), NavigationError::PackageDisabled);
++  EXPECT_EQ(navigation.currentVisit(), currentVisit);
++  EXPECT_EQ(session.activityForNavigation()->opCount(), activityOps);
++  EXPECT_EQ(selectionContext(*navigation.selection()), pinned);
++
++  LinkContext restored(session);
++  restored.restoreSelection(pinned);
++  ASSERT_TRUE(restored.selection());
++  ASSERT_TRUE(restored.selection()->occurrences);
++  EXPECT_TRUE(restored.selectedPackageDisabled());
++  EXPECT_EQ(selectionContext(*restored.selection()), pinned);
++  EXPECT_EQ(restored.selection()->occurrences->left.size(), 2U);
++  EXPECT_EQ(restored.selection()->occurrences->right.size(), 3U);
++  EXPECT_FALSE(restored.execute(nav::SelectLink{.key = key}));
++  EXPECT_EQ(session.activityForNavigation()->opCount(), activityOps);
++
++  LinkPanelOverlay panel(navigation, session);
++  panel.deviceReady(device, {});
++  frame.metrics.screenWidth  = 800;
++  frame.metrics.screenHeight = 600;
++  panel.drawFrame(frame);
++  frame.settledChrome = frame.chrome;
++  panel.drawFrame(frame);
++  gleditor::a11y::Tree panelTree;
++  gleditor::a11y::Builder panelBuilder(panelTree, 27);
++  panel.describe(panelBuilder);
++  EXPECT_TRUE(std::ranges::any_of(panelTree.nodes, [](const auto &node) {
++    return node.label.contains("Package drawing disabled");
++  }));
++  const auto disabledEnter = std::ranges::find(
++      panelTree.nodes, "Enter unavailable", &gleditor::a11y::Node::label);
++  ASSERT_NE(disabledEnter, panelTree.nodes.end());
++  EXPECT_FALSE(disabledEnter->focusable);
++  EXPECT_EQ(disabledEnter->actions, 0U);
++  EXPECT_FALSE(panel.performAction(disabledEnter->id,
++                                   gleditor::a11y::Action::Click, {}));
++  const auto reenable = std::ranges::find(panelTree.nodes, "Re-enable package",
++                                          &gleditor::a11y::Node::label);
++  ASSERT_NE(reenable, panelTree.nodes.end());
++  EXPECT_TRUE(
++      panel.performAction(reenable->id, gleditor::a11y::Action::Click, {}));
++  panel.drawFrame(frame);
++  EXPECT_FALSE(navigation.selectedPackageDisabled());
++  EXPECT_EQ(selectionContext(*navigation.selection()), pinned);
++  EXPECT_EQ(navigation.currentVisit(), currentVisit);
++  EXPECT_EQ(session.activityForNavigation()->opCount(), activityOps);
++  EXPECT_TRUE(navigation.resolveForPresentation(key));
++  ASSERT_TRUE(navigation.execute(nav::Enter{}));
++  ASSERT_TRUE(navigation.entryPending());
++  ASSERT_TRUE(session.setLinkPackageEnabled(status, false));
++  navigation.packageVisibilityChanged();
++  EXPECT_FALSE(navigation.entryPending());
++  EXPECT_EQ(navigation.currentVisit(), currentVisit);
++  EXPECT_EQ(selectionContext(*navigation.selection()), pinned);
++  state.docs.front()->makePages();
++  std::ignore = state.docs.front()->buildPendingPages(state);
++  navigation.advanceFrame(state);
++  EXPECT_EQ(navigation.currentVisit(), currentVisit);
++  EXPECT_EQ(session.activityForNavigation()->opCount(), activityOps);
++  ASSERT_TRUE(navigation.execute(nav::EnableSelectedPackage{}));
++  navigation.advanceFrame(state);
++  EXPECT_FALSE(navigation.entryPending());
++  EXPECT_EQ(navigation.currentVisit(), currentVisit);
++  EXPECT_EQ(session.activityForNavigation()->opCount(), activityOps);
++  beams.drawFrame(frame);
++  gleditor::a11y::Tree refreshed;
++  gleditor::a11y::Builder freshBuilder(refreshed, 27);
++  beams.describe(freshBuilder);
++  ASSERT_TRUE(
++      beams.performAction(renderId + 1, gleditor::a11y::Action::Click, {}));
++  ASSERT_TRUE(session.setLinkPackageEnabled(status, false));
++  navigation.packageVisibilityChanged();
++  ASSERT_TRUE(session.setLinkPackageEnabled(status, true));
++  navigation.packageVisibilityChanged();
++  ASSERT_TRUE(navigation.execute(nav::Dismiss{}));
++  beams.drawFrame(frame);
++  EXPECT_FALSE(navigation.selection());
++  EXPECT_EQ(navigation.currentVisit(), currentVisit);
++  EXPECT_EQ(session.activityForNavigation()->opCount(), activityOps);
++  EXPECT_EQ(store.opCount(), oldOps);
+ }
+ TEST_F(ReaderPackageUiTest, RestoringPreferencesRefusesNativeAuthorityOverlap) {
+   auto perma         = std::make_shared<UserPermascroll>();

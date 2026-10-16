@@ -1,0 +1,134 @@
+[
+  {
+    "raw_path": "build/validation-fourteenth/strict-final-offscreen/coarse0.ppm",
+    "ppm_sha256": "a374502e048096226564d29f012136ae80fd87d53e6e8163a22e68bc54935f49",
+    "rgb_sha256": "64a8226cd7078884c9a689445d367e9ef237d58f7e0a3d86e02a8c474ce6ca19",
+    "png": "coarse0.png"
+  },
+  {
+    "raw_path": "build/validation-fourteenth/strict-final-offscreen/coarse999.ppm",
+    "ppm_sha256": "b11b8a2f3283c8cf03f5697bdbfc9c2307eedfd891851a888ee1c976d9a5077b",
+    "rgb_sha256": "d795d1e0e2bb82c2db0eba1583349ff901b837bcef4d756f150825e804fec8d4",
+    "png": "coarse999.png"
+  },
+  {
+    "raw_path": "build/validation-fourteenth/strict-final-offscreen/opengl.grown.ppm",
+    "ppm_sha256": "5a952c969ac636f2d25f38bec6409c52a6c57446fe9975e033fe56a22332d679",
+    "rgb_sha256": "c4133ff929acb597caa4384c28ff2fa4a3a7c13ea3892fdf7490b9235b23abca",
+    "png": "opengl.grown.png"
+  },
+  {
+    "raw_path": "build/validation-fourteenth/strict-final-offscreen/opengl.nocull.ppm",
+    "ppm_sha256": "5a952c969ac636f2d25f38bec6409c52a6c57446fe9975e033fe56a22332d679",
+    "rgb_sha256": "c4133ff929acb597caa4384c28ff2fa4a3a7c13ea3892fdf7490b9235b23abca",
+    "png": "opengl.nocull.png"
+  },
+  {
+    "raw_path": "build/validation-fourteenth/strict-final-offscreen/opengl.ppm",
+    "ppm_sha256": "5a952c969ac636f2d25f38bec6409c52a6c57446fe9975e033fe56a22332d679",
+    "rgb_sha256": "c4133ff929acb597caa4384c28ff2fa4a3a7c13ea3892fdf7490b9235b23abca",
+    "png": "opengl.png"
+  },
+  {
+    "raw_path": "build/validation-fourteenth/strict-final-offscreen/opengl.toast.ppm",
+    "ppm_sha256": "0dd7a82879179e0c8b1a5157b3b06e72b35782216cfcbbd5fcf707473e70d92a",
+    "rgb_sha256": "a4c4b82c365e8e4475f793175de8adae3f8e1c7f0a2b68d608a76145770f0db4",
+    "png": "opengl.toast.png"
+  },
+  {
+    "raw_path": "build/validation-fourteenth/strict-final-offscreen/opengl.zoom15.05.ppm",
+    "ppm_sha256": "d6d690b58d29b7f6f5ddcdf62bfba1e3f81d903efc1771bc7cc0bd6a296db72c",
+    "rgb_sha256": "5ee2a66e8ff667df098a75ea78dea5c77ae92e04717c0b3c01b70858faf05185",
+    "png": "opengl.zoom15.05.png"
+  },
+  {
+    "raw_path": "build/validation-fourteenth/strict-final-offscreen/opengl.zoom15.ppm",
+    "ppm_sha256": "a374502e048096226564d29f012136ae80fd87d53e6e8163a22e68bc54935f49",
+    "rgb_sha256": "64a8226cd7078884c9a689445d367e9ef237d58f7e0a3d86e02a8c474ce6ca19",
+    "png": "opengl.zoom15.png"
+  },
+  {
+    "raw_path": "build/validation-fourteenth/strict-final-offscreen/opengles.grown.ppm",
+    "ppm_sha256": "5a952c969ac636f2d25f38bec6409c52a6c57446fe9975e033fe56a22332d679",
+    "rgb_sha256": "c4133ff929acb597caa4384c28ff2fa4a3a7c13ea3892fdf7490b9235b23abca",
+    "png": "opengles.grown.png"
+  },
+  {
+    "raw_path": "build/validation-fourteenth/strict-final-offscreen/opengles.nocull.ppm",
+    "ppm_sha256": "5a952c969ac636f2d25f38bec6409c52a6c57446fe9975e033fe56a22332d679",
+    "rgb_sha256": "c4133ff929acb597caa4384c28ff2fa4a3a7c13ea3892fdf7490b9235b23abca",
+    "png": "opengles.nocull.png"
+  },
+  {
+    "raw_path": "build/validation-fourteenth/strict-final-offscreen/opengles.ppm",
+    "ppm_sha256": "5a952c969ac636f2d25f38bec6409c52a6c57446fe9975e033fe56a22332d679",
+    "rgb_sha256": "c4133ff929acb597caa4384c28ff2fa4a3a7c13ea3892fdf7490b9235b23abca",
+    "png": "opengles.png"
+  },
+  {
+    "raw_path": "build/validation-fourteenth/strict-final-offscreen/opengles.toast.ppm",
+    "ppm_sha256": "0dd7a82879179e0c8b1a5157b3b06e72b35782216cfcbbd5fcf707473e70d92a",
+    "rgb_sha256": "a4c4b82c365e8e4475f793175de8adae3f8e1c7f0a2b68d608a76145770f0db4",
+    "png": "opengles.toast.png"
+  },
+  {
+    "raw_path": "build/validation-fourteenth/strict-final-offscreen/opengles.zoom15.05.ppm",
+    "ppm_sha256": "d6d690b58d29b7f6f5ddcdf62bfba1e3f81d903efc1771bc7cc0bd6a296db72c",
+    "rgb_sha256": "5ee2a66e8ff667df098a75ea78dea5c77ae92e04717c0b3c01b70858faf05185",
+    "png": "opengles.zoom15.05.png"
+  },
+  {
+    "raw_path": "build/validation-fourteenth/strict-final-offscreen/opengles.zoom15.ppm",
+    "ppm_sha256": "a374502e048096226564d29f012136ae80fd87d53e6e8163a22e68bc54935f49",
+    "rgb_sha256": "64a8226cd7078884c9a689445d367e9ef237d58f7e0a3d86e02a8c474ce6ca19",
+    "png": "opengles.zoom15.png"
+  },
+  {
+    "raw_path": "build/validation-fourteenth/strict-final-offscreen/vk.threads1.ppm",
+    "ppm_sha256": "428209106f948026adb55f1108c1ab78f70c43dcc1a12b823b1012b679531300",
+    "rgb_sha256": "7526dba5b94003c25885523fdc6ba0cca4733c0e22a439dd9ffeb4631120728b",
+    "png": "vk.threads1.png"
+  },
+  {
+    "raw_path": "build/validation-fourteenth/strict-final-offscreen/vk.threads4.ppm",
+    "ppm_sha256": "428209106f948026adb55f1108c1ab78f70c43dcc1a12b823b1012b679531300",
+    "rgb_sha256": "7526dba5b94003c25885523fdc6ba0cca4733c0e22a439dd9ffeb4631120728b",
+    "png": "vk.threads4.png"
+  },
+  {
+    "raw_path": "build/validation-fourteenth/strict-final-offscreen/vulkan.grown.ppm",
+    "ppm_sha256": "428209106f948026adb55f1108c1ab78f70c43dcc1a12b823b1012b679531300",
+    "rgb_sha256": "7526dba5b94003c25885523fdc6ba0cca4733c0e22a439dd9ffeb4631120728b",
+    "png": "vulkan.grown.png"
+  },
+  {
+    "raw_path": "build/validation-fourteenth/strict-final-offscreen/vulkan.nocull.ppm",
+    "ppm_sha256": "428209106f948026adb55f1108c1ab78f70c43dcc1a12b823b1012b679531300",
+    "rgb_sha256": "7526dba5b94003c25885523fdc6ba0cca4733c0e22a439dd9ffeb4631120728b",
+    "png": "vulkan.nocull.png"
+  },
+  {
+    "raw_path": "build/validation-fourteenth/strict-final-offscreen/vulkan.ppm",
+    "ppm_sha256": "428209106f948026adb55f1108c1ab78f70c43dcc1a12b823b1012b679531300",
+    "rgb_sha256": "7526dba5b94003c25885523fdc6ba0cca4733c0e22a439dd9ffeb4631120728b",
+    "png": "vulkan.png"
+  },
+  {
+    "raw_path": "build/validation-fourteenth/strict-final-offscreen/vulkan.toast.ppm",
+    "ppm_sha256": "0be1a0a7e0927b5f4110d4d575ac80d1368de0931ad56994582bc2854c79942b",
+    "rgb_sha256": "88c8682ac4768128b70955e3e5704a55c608a8fa0d70cc4e508fcc5af57eb6e9",
+    "png": "vulkan.toast.png"
+  },
+  {
+    "raw_path": "build/validation-fourteenth/strict-final-offscreen/vulkan.zoom15.05.ppm",
+    "ppm_sha256": "78219f78b1de6a448cb1cc470971182a521ed47eee17ffd39b47c8782057bb3b",
+    "rgb_sha256": "6fd7252a686e316b996630cdf3d2914b9081a81f5957b3b288fd45731abbc4a1",
+    "png": "vulkan.zoom15.05.png"
+  },
+  {
+    "raw_path": "build/validation-fourteenth/strict-final-offscreen/vulkan.zoom15.ppm",
+    "ppm_sha256": "7988112676139f70dd687bee7dab37e585af951dacb37fc754d1b94604e9155b",
+    "rgb_sha256": "d6a3beca3d5637a2c2a1f84ab8fc519a04e3a89e927499a16ce64d88008fb542",
+    "png": "vulkan.zoom15.png"
+  }
+]

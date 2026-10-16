@@ -59,7 +59,7 @@ void LinkPanelOverlay::rebuildHighlights() {
 
   const auto selected      = context.selection();
   std::uint32_t linkColour = 0;
-  if (selected && selected->occurrences) {
+  if (selected && selected->occurrences && !context.selectedPackageDisabled()) {
     linkColour =
         session.selectedLinkColour(selected->key, selected->occurrences->link);
     // Uniform RGB scaling keeps the link hue while giving its edge contrast
@@ -146,8 +146,8 @@ LinkPanelOverlay::noteNavigationSelection(const Caret &caret,
 std::optional<gleditor::SpanStyle>
 LinkPanelOverlay::selectionStyle(const Doc &doc, const Caret &caret) {
   const auto selected = context.selection();
-  if (!ownedSelection || !caret.hasSelection() ||
-      caret.documentIndex() != doc.documentIndex() ||
+  if (context.selectedPackageDisabled() || !ownedSelection ||
+      !caret.hasSelection() || caret.documentIndex() != doc.documentIndex() ||
       caret.selectionRevision() != ownedSelection->revision || !selected ||
       selected->key != ownedSelection->key ||
       selected->generation != ownedSelection->generation ||
@@ -261,6 +261,8 @@ void LinkPanelOverlay::appendInvestigation(std::vector<PanelLine> &lines) {
     lines.front().text += std::format(" · visit {}", visit->value);
   lines.front().compactIdentity = lines.front().text;
   append("Link authority: " + selected->key.authority.str());
+  if (const auto carrier = context.selectedPackageCarrier())
+    append("Package carrier: " + carrier->hex());
   const auto place = [&](std::string_view label, const OccurrenceSite &site) {
     std::visit(
         [&](const auto &at) {
@@ -295,6 +297,26 @@ void LinkPanelOverlay::appendInvestigation(std::vector<PanelLine> &lines) {
     if (!cursor.member || *cursor.member >= members.size()) continue;
     const auto label   = side == LinkSide::Left ? "Left" : "Right";
     const auto &member = members[*cursor.member];
+    if (const auto *package =
+            session.readerLinkPackages().retainedPackage(selected->key)) {
+      const auto &spans = side == LinkSide::Left
+                              ? package->links[selected->key.id].left
+                              : package->links[selected->key.id].right;
+      const auto &span  = spans[*cursor.member];
+      append(std::format("{} signed scroll: {}\nSource bytes {}–{}", label,
+                         span.scroll, span.start, span.end()));
+      if (cursor.occurrence && *cursor.occurrence < member.occurrences.size()) {
+        const auto &site = member.occurrences[*cursor.occurrence].site;
+        place(std::string(label) + " occurrence", site);
+        if (const auto *cell = std::get_if<CellSite>(&site))
+          append(std::format("{} occurrence cell: {}", label, cell->cell));
+      } else {
+        append(std::format(
+            "{} occurrence not chosen · choose a place for exact identity",
+            label));
+      }
+      continue;
+    }
     if (!cursor.occurrence) {
       append(std::format(
           "{} member {} · {} · choose a place for exact identity", label,
@@ -376,6 +398,19 @@ void LinkPanelOverlay::rebuildPanel(gleditor::FrameContext &ctx) {
           {.text = std::format("State {} · bytes {}–{}", target->version.str(),
                                target->range.start, target->range.end)});
     }
+  }
+  if (context.selectedPackageDisabled()) {
+    lines.push_back({.text = "Package drawing disabled · re-enable to enter; "
+                             "pinned Link retained",
+                     .tone = PanelLine::Tone::Muted});
+    buttons.push_back({.label   = "Re-enable package",
+                       .command = nav::EnableSelectedPackage{}});
+    for (auto &button : buttons)
+      if (std::holds_alternative<nav::Enter>(button.command) ||
+          std::holds_alternative<nav::EnterAt>(button.command)) {
+        button.label   = "Enter unavailable";
+        button.enabled = false;
+      }
   }
   if (!context.entryStatus().empty()) {
     lines.push_back(

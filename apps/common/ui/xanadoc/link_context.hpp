@@ -134,6 +134,8 @@ public:
   presentationLinks(int cellRadius) const;
   [[nodiscard]] std::optional<Link> recordOf(std::uint64_t renderId) const;
   void packageVisibilityChanged();
+  [[nodiscard]] bool selectedPackageDisabled() const;
+  [[nodiscard]] std::optional<InfoHash> selectedPackageCarrier() const;
   void recordReadingOrigin() { noteOrigin(); }
   void recordSourceArrival(const OccurrenceSite &site);
   LinkContext *setUnavailableHandler(std::function<void(std::string)> handler) {

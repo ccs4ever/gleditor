@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+base=$PWD/build/validation-fourteenth
+run=$base/native
+export SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1
+export XDG_DATA_HOME=$run/data XDG_CONFIG_HOME=$run/config XDG_CACHE_HOME=$run/cache
+export GNUPGHOME=$run/gpg
+export PATH=/tmp/spatial-xvfb/usr/bin:$PATH
+app=("$base/frozen-final/xuzz" --backend opengl --resize 1440,1000 --profile
+ --wait-ms 1500 --dump-a11y --capture "$run/raw/15-restarted-disabled-pin.ppm" --wait-ms 3000
+ --click-label 'Inspect members' --dump-a11y --capture "$run/raw/16-final-disabled-inspector.ppm" --wait-ms 3000
+ --click-label 'Fold investigation' --click-label 'Re-enable package' --wait-ms 1000
+ --dump-a11y --capture "$run/raw/17-explicit-reenable-same-pin.ppm" --wait-ms 3000
+ --click-label Enter --wait-ms 1500
+ --dump-a11y --capture "$run/raw/18-explicit-enter-endpoint.ppm" --wait-ms 3000
+ --chord 'Alt+Shift+O' --wait-ms 1500
+ --dump-a11y --capture "$run/raw/19-origin-no-extra-visit.ppm" --wait-ms 3000
+ --chord Ctrl+Q)
+printf '%q ' "${app[@]}" > "$run/evidence/reenable-package-argv.txt"; printf '\n' >> "$run/evidence/reenable-package-argv.txt"
+LD_LIBRARY_PATH="$base/frozen-final${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" SPDLOG_LEVEL=xuzz.keymap=debug timeout --signal=TERM --kill-after=5s 240s xvfb-run -a -s '-noreset -screen 0 1600x1200x24' "${app[@]}" > "$run/evidence/reenable-package.log" 2>&1 & native_pid=$!
+snapshot() {
+ local step=$1 target="$run/evidence/checkpoints/$1"
+ mkdir -p "$target"
+ mapfile -t stores < <(find "$run/data/xudu/xanadocs" -mindepth 1 -maxdepth 1 -type d ! -name default | sort)
+ for index in "${!stores[@]}"; do
+  "$base/frozen-final/xudu-dump" --section=ops --permascroll="$run/data/xuzz/permascroll/default" "${stores[$index]}" > "$target/source-$index.ops.txt"
+  sha256sum "${stores[$index]}/ops.nodes" "${stores[$index]}/store.tables" > "$target/source-$index.files.sha256"
+ done
+ "$base/frozen-final/xudu-dump" --section=ops --permascroll="$run/data/xuzz/permascroll/default" "$run/data/xudu/activity" > "$target/activity.ops.txt"
+}
+for step in 15-restarted-disabled-pin 16-final-disabled-inspector 17-explicit-reenable-same-pin 18-explicit-enter-endpoint 19-origin-no-extra-visit; do
+ frame="$run/raw/$step.ppm"
+ ready=false
+ for _ in $(seq 1 120); do
+  [[ -s "$frame" && $(stat -c %s "$frame") -eq 4320017 ]] && { ready=true; break; }
+  kill -0 "$native_pid" 2>/dev/null || break
+  sleep .25
+ done
+ if [[ $ready == true ]]; then snapshot "$step"; else printf missing > "$run/evidence/$step.missing"; fi
+done
+run_exit=0; wait "$native_pid" || run_exit=$?
+printf '%s\n' "$run_exit" > "$run/evidence/reenable-package.exit"
+exit "$run_exit"

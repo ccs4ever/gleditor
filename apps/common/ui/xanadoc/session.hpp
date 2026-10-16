@@ -463,6 +463,8 @@ public:
   ReaderLinkPackages &readerLinkPackages();
   [[nodiscard]] std::expected<Session *, std::string>
   setLinkPackageEnabled(const LinkPackageStatus &package, bool enabled);
+  [[nodiscard]] std::expected<Session *, std::string>
+  setLinkPackageEnabled(const LinkKey &key, bool enabled);
   [[nodiscard]] std::uint64_t packageRenderId(const LinkKey &key);
   [[nodiscard]] std::uint32_t selectedLinkColour(const LinkKey &key,
                                                  const Link &link);

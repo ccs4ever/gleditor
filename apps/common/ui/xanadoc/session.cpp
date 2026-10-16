@@ -744,6 +744,16 @@ Session::setLinkPackageEnabled(const LinkPackageStatus &package, bool on) try {
 } catch (const std::exception &error) {
   return std::unexpected(std::string(error.what()));
 }
+std::expected<Session *, std::string>
+Session::setLinkPackageEnabled(const LinkKey &key, bool on) {
+  for (const auto &entry : stores)
+    if (entry.store && entry.store->documentId() == key.authority)
+      return std::unexpected("Package authority conflicts with an open store");
+  if (auto result = readerLinkPackages().setEnabled(key, on); !result)
+    return std::unexpected(result.error());
+  invalidate();
+  return this;
+}
 std::uint64_t Session::packageRenderId(const LinkKey &key) {
   const auto name = std::pair{key.authority.str(), key.id};
   if (const auto found = packageRenderIds_.find(name);

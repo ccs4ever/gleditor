@@ -1,0 +1,12 @@
+MESA-EGL: warning: Not allowed to force software rendering when API explicitly selects a hardware device.
+backend: opengl, SDL3
+file: tests/samples/quick_brown_fox.txt
+accessibility: not in this build
+render: opengl device, version 4.6 (Core Profile) Mesa 26.2.4-arch3.1
+glyph cache: atlas 64x64 x1 layers, growing to at most 16384x16384 x64 (device allows 16384x16384 x2048, the vertex encoding 64 layers)
+glyph cache: atlas 64x64 x1 -> 128x128 x1 (2 glyphs, 1920 texels placed, largest 24x40, 1 palettes)
+glyph cache: atlas 128x128 x1 -> 256x256 x1 (15 glyphs, 14720 texels placed, largest 32x40, 1 palettes)
+glyph cache: atlas 256x256 x1 -> 512x512 x1 (53 glyphs, 58880 texels placed, largest 32x40, 1 palettes)
+[TIMING] First page rendered: 104.72 ms (docs in render: 1)
+wrote screenshot /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-fourteenth/strict-final-offscreen/opengl.grown.ppm (800x600)
+[TIMING] Complete render settled: 492.35 ms (docs: 1, total pages: 1, built pages: 1)

@@ -1,0 +1,38 @@
+{
+  "source_revision": "337c04727ba167f226e2ccb6f451b1e0d1cc7b2d",
+  "phase_application_builds": {
+    "00-14": {
+      "application": "e8c...",
+      "meaning": "initial package enable/disable lifecycle through disabled Enter"
+    },
+    "15-27": {
+      "application_sha256": "b30fb771a3110fd521a86775ec5ca15ffb3c45650a3182a042621257afd89373",
+      "meaning": "restart, same-pin re-enable, exact Enter/Origin, chord re-enable and explicit Dismiss"
+    }
+  },
+  "native_environment": {
+    "SDL_VIDEODRIVER": "offscreen",
+    "SDL_AUDIODRIVER": "dummy",
+    "LIBGL_ALWAYS_SOFTWARE": "1",
+    "XDG_DATA_HOME": "build/validation-fourteenth/native/data",
+    "XDG_CONFIG_HOME": "build/validation-fourteenth/native/config",
+    "XDG_CACHE_HOME": "build/validation-fourteenth/native/cache"
+  },
+  "workflow_facts": {
+    "local_publication_signing": "genuine local OpenPGP signing",
+    "publication_announcement": false,
+    "native_link_identity": "Link 22 in the source store",
+    "package_link_identity": "Link 0 in the immutable package carrier",
+    "these_are_distinct_links": true,
+    "final_retry": "steps 24–27, lowercase key names, exit 0",
+    "failed_attempt": "steps 20–23 used uppercase key names; step 23 frame absent; exit 1",
+    "raw_step_23_exists": false
+  },
+  "excluded_inputs": [
+    "private GPG key/profile",
+    "XDG configuration and data profiles",
+    "permascroll binaries",
+    "store binaries (ops.nodes/store.tables)",
+    "application binaries"
+  ]
+}

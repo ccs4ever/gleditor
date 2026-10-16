@@ -1,0 +1,88 @@
+{
+  "canonical_build_exit": 0,
+  "fresh_ui": {
+    "passed": 241,
+    "total": 241,
+    "exit": 0
+  },
+  "fresh_xuzz": {
+    "passed": 107,
+    "total": 107,
+    "exit": 0
+  },
+  "fresh_package": {
+    "passed": 7,
+    "total": 7,
+    "exit": 0
+  },
+  "red_disabled_pin_exit": 1,
+  "reused_after_hash_verification": {
+    "library": 799,
+    "owning_cache_mip": 53
+  },
+  "strict_core": {
+    "exit": 0,
+    "backends": [
+      "OpenGL",
+      "OpenGL ES",
+      "Vulkan"
+    ],
+    "GL_GLES_ordinary_overlay_differing_pixels": 0,
+    "Vulkan_ordinary_percent": 0.5104,
+    "Vulkan_overlay_percent": 0.5096,
+    "unchanged_limit_percent": 1,
+    "channel_tolerance": 1,
+    "split_recording_exercised": false,
+    "broad_E2E_accepted": false
+  },
+  "native": {
+    "intermediate_app_sha256": "e8c2fe78bcb63f9fce2f2b183f05d383f8ff4ed08dc89f5cdf2b35fb38033ce7",
+    "final_app_sha256": "b30fb771a3110fd521a86775ec5ca15ffb3c45650a3182a042621257afd89373",
+    "carrier": "da9e373b1f09392112a9e2f36a339defd68168bf",
+    "link_authority": "local:d9c0fdf9a764d165ab2adba1e83f1ea1",
+    "link_ordinal": 0,
+    "final_15_19_visit_count": [
+      1,
+      1,
+      1,
+      2,
+      2
+    ],
+    "final_15_19_current": [
+      1,
+      1,
+      1,
+      2,
+      1
+    ],
+    "retry_24_27_visit_count": [
+      2,
+      2,
+      2,
+      2
+    ],
+    "retry_24_27_current": [
+      1,
+      1,
+      1,
+      1
+    ],
+    "failed_20_22_attempt_exit": 1,
+    "final_15_19_exit": 0,
+    "retry_24_27_exit": 0,
+    "source_ops_sha256": "e5e12091a62bf859ea433540fd312eb53e6b1f01a366028a7b61a7a4edd19296",
+    "network_announcement": false,
+    "curator_enrollment_verified": false
+  },
+  "open": [
+    "separate reader Retain/Enable/Emphasis model and controls",
+    "full J24/J25 and J1-J32 acceptance",
+    "native AT-SPI",
+    "optimized performance",
+    "complete cell/history/media-position restoration"
+  ],
+  "manifest_note": "Nested snapshot checksums retain original absolute run paths; top inventory uses relative archive paths. Failed20\u201322 native attempt is not behavior proof;23 frame absent.",
+  "format_exit": 0,
+  "lint_exit": 0,
+  "text-policy_exit": 0
+}

@@ -1,6 +1,7 @@
 #include "../lib/mocks/world_device.hpp"
 #include "common/ui/xanadoc/beams.hpp"
 #include "common/ui/xanadoc/link_context.hpp"
+#include "common/ui/xanadoc/link_panel_overlay.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -38,9 +39,8 @@ protected:
     std::filesystem::remove_all(root);
   }
 };
-TEST_F(
-    ReaderPackageUiTest,
-    EnabledPackageUsesSharedNavigationAndAccessibleIdentityThenDismissesWithoutMutation) {
+TEST_F(ReaderPackageUiTest,
+       EnabledPackageKeepsItsPinnedIdentityWhenDrawingIsDisabled) {
   auto perma = std::make_shared<UserPermascroll>();
   Session session((root / "workspace").string(), perma);
   auto &store        = session.store();
@@ -82,9 +82,12 @@ TEST_F(
   });
   WorldRecordingDevice device;
   RenderState state{&device};
-  state.docs.push_back(Doc::create(
-      {}, &device, glm::mat4{1},
-      gleditor::MemoryTextSource({}, "012345678901234567890123456789")));
+  auto app      = std::make_shared<AppState>();
+  auto renderer = Renderer::create(app, render::Backend::OpenGL);
+  state.docs.push_back(
+      Doc::create(renderer, &device, glm::mat4{1},
+                  gleditor::MemoryTextSource("012345678901234567890123456789",
+                                             "package-lifecycle")));
   LinkBeams beams(session, nullptr);
   beams.setLinkContext(&navigation);
   beams.deviceReady(device, {});
@@ -118,13 +121,17 @@ TEST_F(
   EXPECT_EQ(session.activityForNavigation()->opCount(), activityOps);
   EXPECT_EQ(focused, (Extent{24, 27}));
   session.views().push_back(view);
+  const auto pinned       = selectionContext(*navigation.selection());
+  const auto currentVisit = navigation.currentVisit();
   // Queue the accessible action while enabled, then disable before delivery.
   ASSERT_TRUE(
       beams.performAction(renderId + 1, gleditor::a11y::Action::Click, {}));
   ASSERT_TRUE(session.setLinkPackageEnabled(status, false));
   navigation.packageVisibilityChanged();
   beams.drawFrame(frame);
-  EXPECT_FALSE(navigation.selection());
+  ASSERT_TRUE(navigation.selection());
+  EXPECT_EQ(selectionContext(*navigation.selection()), pinned);
+  EXPECT_EQ(navigation.currentVisit(), currentVisit);
   EXPECT_EQ(session.activityForNavigation()->opCount(), activityOps);
   EXPECT_THROW(session.addStore(std::make_unique<Store>(perma, key.authority),
                                 (root / "collision").string()),
@@ -135,6 +142,90 @@ TEST_F(
   EXPECT_TRUE(store.links().empty());
   EXPECT_FALSE(session.readerLinkPackages().enabled(hash));
   EXPECT_FALSE(navigation.resolveForPresentation(key));
+  EXPECT_TRUE(navigation.selectedPackageDisabled());
+  EXPECT_EQ(navigation.selectedPackageCarrier(), std::optional{hash});
+  const auto refused = navigation.execute(nav::Enter{});
+  ASSERT_FALSE(refused);
+  EXPECT_EQ(refused.error(), NavigationError::PackageDisabled);
+  EXPECT_EQ(navigation.currentVisit(), currentVisit);
+  EXPECT_EQ(session.activityForNavigation()->opCount(), activityOps);
+  EXPECT_EQ(selectionContext(*navigation.selection()), pinned);
+
+  LinkContext restored(session);
+  restored.restoreSelection(pinned);
+  ASSERT_TRUE(restored.selection());
+  ASSERT_TRUE(restored.selection()->occurrences);
+  EXPECT_TRUE(restored.selectedPackageDisabled());
+  EXPECT_EQ(selectionContext(*restored.selection()), pinned);
+  EXPECT_EQ(restored.selection()->occurrences->left.size(), 2U);
+  EXPECT_EQ(restored.selection()->occurrences->right.size(), 3U);
+  EXPECT_FALSE(restored.execute(nav::SelectLink{.key = key}));
+  EXPECT_EQ(session.activityForNavigation()->opCount(), activityOps);
+
+  LinkPanelOverlay panel(navigation, session);
+  panel.deviceReady(device, {});
+  frame.metrics.screenWidth  = 800;
+  frame.metrics.screenHeight = 600;
+  panel.drawFrame(frame);
+  frame.settledChrome = frame.chrome;
+  panel.drawFrame(frame);
+  gleditor::a11y::Tree panelTree;
+  gleditor::a11y::Builder panelBuilder(panelTree, 27);
+  panel.describe(panelBuilder);
+  EXPECT_TRUE(std::ranges::any_of(panelTree.nodes, [](const auto &node) {
+    return node.label.contains("Package drawing disabled");
+  }));
+  const auto disabledEnter = std::ranges::find(
+      panelTree.nodes, "Enter unavailable", &gleditor::a11y::Node::label);
+  ASSERT_NE(disabledEnter, panelTree.nodes.end());
+  EXPECT_FALSE(disabledEnter->focusable);
+  EXPECT_EQ(disabledEnter->actions, 0U);
+  EXPECT_FALSE(panel.performAction(disabledEnter->id,
+                                   gleditor::a11y::Action::Click, {}));
+  const auto reenable = std::ranges::find(panelTree.nodes, "Re-enable package",
+                                          &gleditor::a11y::Node::label);
+  ASSERT_NE(reenable, panelTree.nodes.end());
+  EXPECT_TRUE(
+      panel.performAction(reenable->id, gleditor::a11y::Action::Click, {}));
+  panel.drawFrame(frame);
+  EXPECT_FALSE(navigation.selectedPackageDisabled());
+  EXPECT_EQ(selectionContext(*navigation.selection()), pinned);
+  EXPECT_EQ(navigation.currentVisit(), currentVisit);
+  EXPECT_EQ(session.activityForNavigation()->opCount(), activityOps);
+  EXPECT_TRUE(navigation.resolveForPresentation(key));
+  ASSERT_TRUE(navigation.execute(nav::Enter{}));
+  ASSERT_TRUE(navigation.entryPending());
+  ASSERT_TRUE(session.setLinkPackageEnabled(status, false));
+  navigation.packageVisibilityChanged();
+  EXPECT_FALSE(navigation.entryPending());
+  EXPECT_EQ(navigation.currentVisit(), currentVisit);
+  EXPECT_EQ(selectionContext(*navigation.selection()), pinned);
+  state.docs.front()->makePages();
+  std::ignore = state.docs.front()->buildPendingPages(state);
+  navigation.advanceFrame(state);
+  EXPECT_EQ(navigation.currentVisit(), currentVisit);
+  EXPECT_EQ(session.activityForNavigation()->opCount(), activityOps);
+  ASSERT_TRUE(navigation.execute(nav::EnableSelectedPackage{}));
+  navigation.advanceFrame(state);
+  EXPECT_FALSE(navigation.entryPending());
+  EXPECT_EQ(navigation.currentVisit(), currentVisit);
+  EXPECT_EQ(session.activityForNavigation()->opCount(), activityOps);
+  beams.drawFrame(frame);
+  gleditor::a11y::Tree refreshed;
+  gleditor::a11y::Builder freshBuilder(refreshed, 27);
+  beams.describe(freshBuilder);
+  ASSERT_TRUE(
+      beams.performAction(renderId + 1, gleditor::a11y::Action::Click, {}));
+  ASSERT_TRUE(session.setLinkPackageEnabled(status, false));
+  navigation.packageVisibilityChanged();
+  ASSERT_TRUE(session.setLinkPackageEnabled(status, true));
+  navigation.packageVisibilityChanged();
+  ASSERT_TRUE(navigation.execute(nav::Dismiss{}));
+  beams.drawFrame(frame);
+  EXPECT_FALSE(navigation.selection());
+  EXPECT_EQ(navigation.currentVisit(), currentVisit);
+  EXPECT_EQ(session.activityForNavigation()->opCount(), activityOps);
+  EXPECT_EQ(store.opCount(), oldOps);
 }
 TEST_F(ReaderPackageUiTest, RestoringPreferencesRefusesNativeAuthorityOverlap) {
   auto perma         = std::make_shared<UserPermascroll>();

@@ -1610,6 +1610,8 @@ bool LinkBeams::picked(const render::PickingResult &pick,
   if (render::tagKindBeam != pick.tag.kind) {
     return false;
   }
+  // A queued GPU pick belongs to the frame that produced these strands.
+  if (session.generation() != builtFor) return true;
   // Ours whatever happens next: a beam was clicked, and the click must not
   // fall through to the page behind it.
   if (pick.tag.clusterIndex >= kTagLoomBase) {
@@ -1736,29 +1738,32 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
   // executed on the spot: they come from another thread, and following a link
   // moves the caret and might open a document.
   {
-    std::vector<xanadu::NavigationCommand> asked;
+    std::vector<std::pair<std::uint64_t, xanadu::NavigationCommand>> asked;
     {
       const std::scoped_lock locker(askedGuard);
       asked.swap(askedFor);
     }
     if (linkContext_ != nullptr) {
-      for (const auto &command : asked) {
-        std::ignore = linkContext_->execute(command);
+      for (const auto &[generation, command] : asked) {
+        if (generation == session.generation())
+          std::ignore = linkContext_->execute(command);
       }
     }
   }
 
   const auto selected = linkContext_ != nullptr ? linkContext_->selection()
                                                 : gleditor::cpp26::nullopt;
-  activeLink          = selected
-                            ? std::optional<std::uint64_t>(
+  const bool drawingSelected =
+      selected && !linkContext_->selectedPackageDisabled();
+  activeLink = drawingSelected
+                   ? std::optional<std::uint64_t>(
                          selected->key.authority == session.store().documentId()
                              ? static_cast<std::uint64_t>(selected->key.id)
                              : session.packageRenderId(selected->key))
-                            : std::nullopt;
+                   : std::nullopt;
 
   std::optional<AnchorFocus> anchorFocus;
-  if (selected && selected->occurrences) {
+  if (drawingSelected && selected->occurrences) {
     const auto &cursor  = selected->cursor(selected->active);
     const auto &members = selected->occurrences->members(selected->active);
     if (cursor.member && cursor.occurrence && *cursor.member < members.size()) {
@@ -2731,7 +2736,8 @@ void LinkBeams::describe(gleditor::a11y::Builder &into) {
   }
 
   const std::scoped_lock locker(askedGuard);
-  accessibleNodes = std::move(nodes);
+  accessibleNodes      = std::move(nodes);
+  accessibleGeneration = session.generation();
 }
 
 std::uint64_t LinkBeams::accessibilityRevision() const {
@@ -2761,7 +2767,7 @@ bool LinkBeams::performAction(const std::uint64_t nodeId,
     // Focus on a link node reads it; it asks for nothing to be done.
     return false;
   }
-  askedFor.push_back(*command);
+  askedFor.emplace_back(accessibleGeneration, *command);
   return true;
 }
 

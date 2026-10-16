@@ -578,7 +578,8 @@ private:
   /// carried out on the render thread, where entering an endpoint moves the
   /// caret.
   mutable std::mutex askedGuard;
-  std::vector<xanadu::NavigationCommand> askedFor;
+  std::vector<std::pair<std::uint64_t, xanadu::NavigationCommand>> askedFor;
+  std::uint64_t accessibleGeneration{};
   /// What each link, member and occurrence node published by describe()
   /// stands for, by local node id; guarded by askedGuard.
   std::vector<std::pair<std::uint64_t, xanadu::AccessibleLinkNode>>

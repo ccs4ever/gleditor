@@ -5,6 +5,7 @@
 #include "link_occurrences.hpp"
 #include "link_package.hpp"
 #include <filesystem>
+#include <optional>
 
 namespace xanadu {
 class ReaderLinkPackagesUnreadable : public std::runtime_error {
@@ -20,6 +21,12 @@ public:
   retain(const LinkPackage &package, const InfoHash &hash);
   [[nodiscard]] std::expected<ReaderLinkPackages *, std::string>
   setEnabled(const InfoHash &hash, bool enabled);
+  [[nodiscard]] std::expected<ReaderLinkPackages *, std::string>
+  setEnabled(const LinkKey &key, bool enabled);
+  [[nodiscard]] bool enabled(const LinkKey &key) const;
+  [[nodiscard]] std::optional<InfoHash> carrier(const LinkKey &key) const;
+  /// Verified retained identity, independent of drawing enablement.
+  [[nodiscard]] const LinkPackage *retainedPackage(const LinkKey &key) const;
   [[nodiscard]] bool containsAuthority(const DocumentId &authority) const;
   [[nodiscard]] bool enabled(const InfoHash &hash) const;
   [[nodiscard]] std::vector<LinkKey> links() const;
@@ -34,7 +41,12 @@ private:
   std::filesystem::path file;
   std::map<InfoHash, bool> choices;
   std::map<InfoHash, LinkPackage> retained;
-  std::map<std::string, InfoHash> authorities;
+  struct AuthorityLess {
+    bool operator()(const DocumentId &left, const DocumentId &right) const {
+      return left.bytes() < right.bytes();
+    }
+  };
+  std::map<DocumentId, InfoHash, AuthorityLess> authorities;
 };
 struct PackageDocumentView {
   const Store &store;

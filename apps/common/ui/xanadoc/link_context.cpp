@@ -82,11 +82,25 @@ const Store *LinkContext::nativeStoreOf(const LinkKey &key) const {
   return nullptr;
 }
 
+std::optional<InfoHash> LinkContext::selectedPackageCarrier() const {
+  const auto selected = navigator.selection();
+  return selected && !nativeStoreOf(selected->key)
+             ? session.readerLinkPackages().carrier(selected->key)
+             : std::nullopt;
+}
+bool LinkContext::selectedPackageDisabled() const {
+  const auto selected = navigator.selection();
+  return selected && !nativeStoreOf(selected->key) &&
+         session.readerLinkPackages().containsAuthority(
+             selected->key.authority) &&
+         !session.readerLinkPackages().enabled(selected->key);
+}
 void LinkContext::packageVisibilityChanged() {
   const auto selected = navigator.selection();
-  if (selected && !nativeStoreOf(selected->key) &&
-      !session.readerLinkPackages().find(selected->key))
-    std::ignore = execute(nav::Dismiss{});
+  if (selected && !nativeStoreOf(selected->key)) {
+    if (selectedPackageDisabled()) pendingEntry.reset();
+    ++changes;
+  }
 }
 
 std::optional<Link> LinkContext::recordOf(const std::uint64_t id) const {
@@ -102,6 +116,9 @@ std::optional<Link> LinkContext::recordOf(const std::uint64_t id) const {
 
 std::expected<xanadu::LinkOccurrences, xanadu::LinkQueryError>
 LinkContext::resolve(const xanadu::LinkKey &key) const {
+  if (const auto *package = session.readerLinkPackages().retainedPackage(key);
+      package && !nativeStoreOf(key))
+    return packageIndex(std::nullopt).resolve(key, *package);
   return resolveForPresentation(key);
 }
 
@@ -289,10 +306,33 @@ LinkContext::execute(const xanadu::NavigationCommand &command) {
   }
   const auto named    = keyNamed(command);
   const auto selected = navigator.selection();
-  if (named && !nativeStoreOf(*named) &&
+  if (std::holds_alternative<nav::EnableSelectedPackage>(command)) {
+    if (!selected) return std::unexpected(NavigationError::NoLinkSelected);
+    if (auto enabled = session.setLinkPackageEnabled(selected->key, true);
+        !enabled) {
+      entryUnavailable = enabled.error();
+      ++changes;
+      return std::unexpected(NavigationError::LinkNotFound);
+    }
+    entryUnavailable.clear();
+    packageVisibilityChanged();
+    return NavigationEffect{};
+  }
+  const bool browsingPinned =
+      selected && named && *named == selected->key &&
+      (std::holds_alternative<nav::SelectMember>(command) ||
+       std::holds_alternative<nav::SelectOccurrence>(command)) &&
+      session.readerLinkPackages().retainedPackage(*named);
+  if (named && !browsingPinned && !nativeStoreOf(*named) &&
       !session.readerLinkPackages().find(*named))
     return std::unexpected(NavigationError::LinkNotFound);
   entryUnavailable.clear();
+  if (selectedPackageDisabled() &&
+      (std::holds_alternative<nav::Enter>(command) ||
+       std::holds_alternative<nav::EnterAt>(command))) {
+    ++changes;
+    return std::unexpected(NavigationError::PackageDisabled);
+  }
   std::optional<OccurrenceSite> target;
   if (const auto *restore = std::get_if<nav::EnterVisit>(&command)) {
     if (const auto visit = activity.find(restore->visit))

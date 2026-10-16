@@ -61,6 +61,14 @@ TEST_F(ReaderLinkPackagesTest,
   ASSERT_EQ(restarted.links(), std::vector<LinkKey>{key});
   ASSERT_TRUE(restarted.setEnabled(hash, false));
   EXPECT_EQ(restarted.find(key), nullptr);
+  ASSERT_NE(restarted.retainedPackage(key), nullptr);
+  EXPECT_EQ(restarted.retainedPackage(key)->links, pkg.links);
+  EXPECT_FALSE(restarted.enabled(key));
+  ASSERT_TRUE(restarted.setEnabled(key, true));
+  EXPECT_TRUE(restarted.enabled(key));
+  EXPECT_EQ(restarted.find(key),
+            &restarted.retainedPackage(key)->links.front());
+  ASSERT_TRUE(restarted.setEnabled(key, false));
   EXPECT_FALSE(ReaderLinkPackages(path).enabled(hash));
   EXPECT_FALSE(reader.retain(pkg, nextHash));
 }

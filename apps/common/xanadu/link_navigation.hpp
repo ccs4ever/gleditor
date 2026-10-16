@@ -224,6 +224,10 @@ struct EnterVisit {
   VisitId visit;
   bool operator==(const EnterVisit &) const = default;
 };
+/// Ask the host to re-enable the exact retained package of the pinned Link.
+struct EnableSelectedPackage {
+  bool operator==(const EnableSelectedPackage &) const = default;
+};
 struct CancelEntry {
   bool operator==(const CancelEntry &) const = default;
 };
@@ -234,7 +238,7 @@ using NavigationCommand =
                  nav::StepMember, nav::SelectOccurrence, nav::StepOccurrence,
                  nav::Cross, nav::Enter, nav::EnterAt, nav::ActivityBack,
                  nav::ActivityForward, nav::ReturnToOrigin, nav::Dismiss,
-                 nav::CancelEntry, nav::EnterVisit>;
+                 nav::CancelEntry, nav::EnterVisit, nav::EnableSelectedPackage>;
 
 enum class NavigationError : std::uint8_t {
   NoLinkSelected,
@@ -249,6 +253,7 @@ enum class NavigationError : std::uint8_t {
   /// Occurrences supplied for a selection that has since been replaced.
   StaleGeneration,
   LinkNotFound,
+  PackageDisabled,
   NoOrigin,
   NoPreviousVisit,
   NoCandidates,

@@ -46,7 +46,7 @@ ReaderLinkPackages::ReaderLinkPackages(std::filesystem::path path)
     for (const auto &[hash, on] : choices) {
       (void)on;
       const auto [entry, inserted] =
-          authorities.emplace(keyOf(hash, 0).authority.str(), hash);
+          authorities.emplace(keyOf(hash, 0).authority, hash);
       if (!inserted && entry->second != hash)
         throw std::runtime_error("activity authority collision");
     }
@@ -76,7 +76,7 @@ ReaderLinkPackages::retain(const LinkPackage &package,
       {.path = "links.xanalinks", .data = encodeLinkPackage(package)}};
   if (makeTorrent(files, "link-package").hash != hash)
     throw std::invalid_argument("Package carrier identity mismatch");
-  if (const auto entry = authorities.find(keyOf(hash, 0).authority.str());
+  if (const auto entry = authorities.find(keyOf(hash, 0).authority);
       entry != authorities.end() && entry->second != hash)
     throw std::invalid_argument("Package activity authority collision");
   if (!retained.contains(hash) && retained.size() >= maximumChoices)
@@ -87,13 +87,13 @@ ReaderLinkPackages::retain(const LinkPackage &package,
   if (total > maximumEnabledMembers)
     throw std::invalid_argument("Enabled package member limit (4096)");
   retained.insert_or_assign(hash, package);
-  authorities.insert_or_assign(keyOf(hash, 0).authority.str(), hash);
+  authorities.insert_or_assign(keyOf(hash, 0).authority, hash);
   return this;
 } catch (const std::exception &error) {
   return std::unexpected(std::string(error.what()));
 }
 bool ReaderLinkPackages::containsAuthority(const DocumentId &authority) const {
-  return authorities.contains(authority.str());
+  return authorities.contains(authority);
 }
 bool ReaderLinkPackages::enabled(const InfoHash &hash) const {
   const auto found = choices.find(hash);
@@ -152,10 +152,28 @@ std::vector<LinkKey> ReaderLinkPackages::links() const {
   }
   return result;
 }
+std::optional<InfoHash> ReaderLinkPackages::carrier(const LinkKey &key) const {
+  const auto found = authorities.find(key.authority);
+  return found == authorities.end() ? std::nullopt
+                                    : std::optional{found->second};
+}
+bool ReaderLinkPackages::enabled(const LinkKey &key) const {
+  const auto authority = authorities.find(key.authority);
+  return authority != authorities.end() && enabled(authority->second);
+}
+std::expected<ReaderLinkPackages *, std::string>
+ReaderLinkPackages::setEnabled(const LinkKey &key, bool on) {
+  if (!retainedPackage(key))
+    return std::unexpected("The exact verified package is unavailable");
+  return setEnabled(authorities.at(key.authority), on);
+}
 const LinkPackage *ReaderLinkPackages::package(const LinkKey &key) const {
-  const auto authority = authorities.find(key.authority.str());
-  if (authority == authorities.end() || !enabled(authority->second))
-    return nullptr;
+  return enabled(key) ? retainedPackage(key) : nullptr;
+}
+const LinkPackage *
+ReaderLinkPackages::retainedPackage(const LinkKey &key) const {
+  const auto authority = authorities.find(key.authority);
+  if (authority == authorities.end()) return nullptr;
   const auto pkg = retained.find(authority->second);
   return pkg != retained.end() && key.id < pkg->second.links.size()
              ? &pkg->second

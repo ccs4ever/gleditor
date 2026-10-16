@@ -277,7 +277,9 @@ NavigationResult LinkNavigator::dispatch(const NavigationCommand &command) {
           const auto visit = activity.find(c.visit);
           if (!visit) return std::unexpected(NavigationError::NoPreviousVisit);
           return restoreVisit(*visit);
-        } else if constexpr (std::is_same_v<Command, nav::CancelEntry>) {
+        } else if constexpr (std::is_same_v<Command, nav::CancelEntry> ||
+                             std::is_same_v<Command,
+                                            nav::EnableSelectedPackage>) {
           return NavigationEffect{};
         } else {
           static_assert(std::is_same_v<Command, nav::Dismiss>);
@@ -623,6 +625,8 @@ std::string_view name(const NavigationError error) noexcept {
     return "stale resolution";
   case NavigationError::LinkNotFound:
     return "link not found";
+  case NavigationError::PackageDisabled:
+    return "reader package drawing disabled";
   case NavigationError::NoOrigin:
     return "no origin";
   case NavigationError::NoPreviousVisit:
@@ -648,7 +652,8 @@ std::string_view name(const NavigationCommand &command) noexcept {
                                                "return to origin",
                                                "dismiss",
                                                "cancel entry",
-                                               "enter visit"};
+                                               "enter visit",
+                                               "enable selected package"};
   static_assert(std::size(names) == std::variant_size_v<NavigationCommand>);
   return names[command.index()];
 }
@@ -682,6 +687,8 @@ commandForAction(const std::string_view action) {
   if (kKeymapLinkCross == action) {
     return nav::Cross{};
   }
+  if (action == "std:xuzz/link_enable_package")
+    return nav::EnableSelectedPackage{};
   if (action == "std:xuzz/link_cancel_entry") return nav::CancelEntry{};
   if (kKeymapLinkEnter == action) {
     return nav::Enter{};

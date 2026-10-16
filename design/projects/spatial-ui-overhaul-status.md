@@ -7,6 +7,33 @@ session.
 
 ## Current checkpoint
 
+Fourteenth checkpoint (2026-10-16), based on `337c0472`: disabling a package now hides its beams,
+hit targets, highlights and anchor motion while retaining its exact selected Link, both endsets,
+independent cursors and frozen Origin. The existing panel explains disabled drawing, refuses Enter,
+and offers explicit Re-enable. `Alt+Shift+E` uses the governed navigation action. Disable cancels
+pending entry; generation checks reject queued beam work after visibility changes. Enabled-only
+rendering/query APIs remain separate from verified retained payload lookup.
+
+Actual native OpenGL controls authored a two-left/three-right Link, signed a local publication,
+prepared its independent package without network announcement, and enabled it through the existing
+verification gate. This does not establish curator enrollment. Left 2/2 and Right 3/3 survive
+disable and restart. Re-enable preserves those pins; explicit Enter changes visits 1→2 and Origin
+returns current 2→1 without a third visit. A second restart, disable, governed re-enable chord and
+explicit dismissal preserve two visits. Source dumps and source store files remain unchanged. The
+original native Link remains visible independently of the disabled package copy.
+
+Canonical GNU Make, fresh UI 241/241, Xuzz 107/107 and package 7/7 checks pass. The expanded UI test
+uses actual page readiness to check pending-entry cancellation and no late commit after re-enable.
+Unchanged library binaries permit reuse of 799/799 and mip/cache 53/53 evidence. Strict offscreen
+GL/GLES/Vulkan comparison passes unchanged criteria; X11 Vulkan presentation was unavailable in a
+separate retained attempt. No actual split recording, broad E2E, native AT-SPI or optimized
+performance acceptance is added. See the
+[fourteenth checkpoint](../reviews/spatial-ui-fourteenth-increment/README.md).
+
+This completes the bounded disabled-but-pinned prerequisite. Separate persisted reader Retain,
+Enable and Emphasis choices and their controls remain the next service package before D2 history
+enumeration. Full J24/J25 and complete J1–J32 acceptance remain open.
+
 Thirteenth checkpoint (2026-10-15), based on `3cb0634d`: Walks now receives the current visit
 separately from its selected preview. Its notice starts with the current visit ID and that row has a
 textual current marker. Preview does not change the reading place. Back, Forward, Enter Visit and
@@ -521,13 +548,13 @@ captures remain separate from the owning real-Doc/accessibility tests. Complete 
 endpoints and media-position restoration remain open. Older v2 activity remains preserved
 unsupported; do not add a compatibility shim.
 
-Then implement the publication/pin-lifecycle audit findings before D2: disabling a package must
-retain its selected immutable Link with an explicit disabled-drawing explanation; retain, enable and
-emphasis need separate governed persisted choices and actual reader controls. Validate restart,
-explicit replacement/dismissal, no visited-source operations, no preview visits, and unknown
-identity versus invalid signature/payload versus unavailable content. Reuse existing publication,
-ReaderLinkPackages, preferences and UI seams; do not invent missing services or a second view
-architecture. The audit is a requirement map, not a native lifecycle acceptance.
+Next implement the remaining publication/pin-lifecycle audit findings before D2: retain, enable and
+emphasis need separate governed persisted choices and actual reader controls. The fourteenth
+checkpoint proves the bounded disabled-pin, restart, re-enable and dismissal route; do not infer a
+reader inventory or enrollment from it. Validate explicit replacement, no visited-source operations,
+no preview visits, and unknown identity versus invalid signature/payload versus unavailable content.
+Reuse existing publication, ReaderLinkPackages, preferences and UI seams; do not invent missing
+services or a second view architecture.
 
 The tenth review records bounded unavailable/Cancel/retry evidence. The ninth numeric audit resolves
 the earlier Origin/Back missing-panel discrepancy; confirm future visual findings with decoded

@@ -1,0 +1,56 @@
+{
+  "base_commit": "337c04727ba167f226e2ccb6f451b1e0d1cc7b2d",
+  "patch_sha256": "a1c1d0e3d6b501c7a116acf755c82cb3412fb3697b33a672905a19af9619f44a",
+  "source_sha256": {
+    "apps/common/ui/xanadoc/beams.cpp": "a176ff5e3902dea749ca7e0f19345f9bcab972a91df61c432489c49e7222f0d7",
+    "apps/common/ui/xanadoc/beams.hpp": "c078e17ba95df160c17528601bd1e62010ddd86373451368b46fe48cb3e1e3f7",
+    "apps/common/ui/xanadoc/link_context.cpp": "caa1906d75d847eef559b99a0b98d773089608334358105c6e7408b9975c91cc",
+    "apps/common/ui/xanadoc/link_context.hpp": "8e03810911038b368be73b4bbba6bc75f2625ba6a6e67f4620b190de75633a07",
+    "apps/common/ui/xanadoc/link_panel_overlay.cpp": "cb1df7c05770ff89e1fa8275bd728d49da95a66393544110dafa075f97890dd8",
+    "apps/common/ui/xanadoc/session.cpp": "7168cf37314a34463e24b8a68d6d02f8808816df4b2eaf8eeccefa901c111285",
+    "apps/common/ui/xanadoc/session.hpp": "e66dec034d36eb02acd7730cdc8edd3d2dfa564c7e998039873456f5eb45cd68",
+    "apps/common/xanadu/link_navigation.cpp": "58d185f92121fe04c552071cb884d55825581d8f72f473b9280aaee30102bfdb",
+    "apps/common/xanadu/link_navigation.hpp": "87db781dd68fff632ecf696b1dc11be6584a61c55ba7b369f9c618d99bfcc61d",
+    "apps/common/xanadu/reader_link_packages.cpp": "d7c12847cee37bb9fe8bcbd1567363c71d64ee3ff3cacde8d23bce09ccddd5ea",
+    "apps/common/xanadu/reader_link_packages.hpp": "b6e821b4c2447c134325174e66657341bbf5df4277ade040a938a87a2b4f7f8e",
+    "apps/common/xanadu/system_docs.cpp": "6efc2c732a925c921b002d0e606ec9d9d6eb3d2a19e019605abce679ca529b1b",
+    "apps/xuzz/xuzz_app.cpp": "3ce4d13147946c1886a37709dd062db5d123515861310cf8373c22de4da0ed53",
+    "tests/xudu/reader_link_packages_test.cpp": "0e7022f7e90e450d1ae72226a38f83e8e29646f6aafbdb6dda77a6db2630566c",
+    "tests/zigzag/reader_link_packages_ui_test.cpp": "9789ddb3e5bb3745b3e82007cda4a6ff09d709d6a9f514fff726e3738a96f2bf"
+  },
+  "binaries": {
+    "build/xuzz": "b30fb771a3110fd521a86775ec5ca15ffb3c45650a3182a042621257afd89373",
+    "build/zigzag_test": "79c31b69dd0209f51d50660c0c75acdc198ed99e9ce149a82dd4aa04c6daa052",
+    "build/xuzz_test": "5a5c0c737d75e93a7634fb06d821763c81ad24a85cb62649576c06f3cc81cf27",
+    "build/xudu_test": "506c8432bd6981609019316a65104ed550c27a432a44e08c4b27091039af35b0",
+    "build/libgleditor.so.0": "ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9",
+    "build/gleditor_test": "44562f4e4ea437f8f3c575a8005d5847367860f9b4d4714d2d1b6516cf014f8a",
+    "build/gleditor": "0d9dcb70311d1157a66dccca30cbb54ffcf24f4071b25361517a7ef50be30c57"
+  },
+  "build_exit": 0,
+  "fresh_ui": 241,
+  "fresh_xuzz": 107,
+  "fresh_package": 7,
+  "library_reused_after_hash_verification": 799,
+  "owning_cache_mip_reused": 53,
+  "optimized_performance_accepted": false,
+  "native_phase_note": "Intermediate e8c through14, final b30 from15; no equivalence claim. Final build7 changes tests only; built app equals frozen-final.",
+  "strict_environment": {
+    "SDL_VIDEODRIVER": "offscreen",
+    "SDL_AUDIODRIVER": "dummy",
+    "LIBGL_ALWAYS_SOFTWARE": "1",
+    "XDG_DATA_HOME": "$PWD/build/validation-fourteenth/xdg-strict-final-offscreen/data",
+    "XDG_CONFIG_HOME": "$PWD/build/validation-fourteenth/xdg-strict-final-offscreen/config",
+    "XDG_CACHE_HOME": "$PWD/build/validation-fourteenth/xdg-strict-final-offscreen/cache",
+    "command": "OUT=$PWD/build/validation-fourteenth/strict-final-offscreen XUDU_TEST_BIN=/nonexistent xvfb-run -a -s '-noreset -screen 0 1024x768x24' tools/compare-backends.sh"
+  },
+  "ui7_environment": {
+    "SDL_VIDEODRIVER": "offscreen",
+    "SDL_AUDIODRIVER": "dummy",
+    "LIBGL_ALWAYS_SOFTWARE": "1",
+    "XDG_DATA_HOME": "$PWD/build/validation-fourteenth/xdg-ui7/data",
+    "XDG_CONFIG_HOME": "$PWD/build/validation-fourteenth/xdg-ui7/config",
+    "XDG_CACHE_HOME": "$PWD/build/validation-fourteenth/xdg-ui7/cache",
+    "command": "xvfb-run -a -s '-noreset -screen 0 1024x768x24' build/zigzag_test"
+  }
+}
