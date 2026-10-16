@@ -829,6 +829,11 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
                     "serially",
          .schemas = {{.expectedTypes = {"integer"},
                       .defaultValues = {std::int64_t{1024}}}}},
+        {.name  = std::string(settings::kVortexOrParallelSearch),
+         .notes = "Opt-in: run vprolog OR-parallel logic search across worker "
+                  "contexts (independent goals on private arenas, merged by "
+                  "submission index). Default off; serial search is unchanged",
+         .schemas = {{.expectedTypes = {"boolean"}, .defaultValues = {false}}}},
     };
     break;
 

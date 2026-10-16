@@ -244,6 +244,8 @@ inline constexpr std::string_view kVortexWorkerThreads =
     "vortex.worker_threads";
 inline constexpr std::string_view kVortexParallelThreshold =
     "vortex.parallel_threshold";
+inline constexpr std::string_view kVortexOrParallelSearch =
+    "vortex.or_parallel_search";
 
 // UI
 inline constexpr std::string_view kTabBarVisible       = "tabBarVisible";

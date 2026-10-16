@@ -51,6 +51,11 @@ struct VortexHostConfig {
   /// smaller arrays run serially.
   std::size_t parallelThreshold{1024};
 
+  /// Opt-in: run vprolog OR-parallel logic search across worker contexts.
+  /// Default false; serial search is unchanged (vortex-multithreading-study.md
+  /// §6.4 / design/vicon-andor-parallelism.md).
+  bool orParallelSearch{false};
+
   [[nodiscard]] static VortexHostConfig fromStore(const xanadu::Store &store);
 };
 

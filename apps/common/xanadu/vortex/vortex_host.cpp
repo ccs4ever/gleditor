@@ -87,6 +87,12 @@ VortexHostConfig VortexHostConfig::fromStore(const xanadu::Store &store) {
         static_cast<std::size_t>(std::get<std::int64_t>(thresholdVals[0]));
   }
 
+  const auto orParVals =
+      xanadu::getSetting(store, xanadu::settings::kVortexOrParallelSearch);
+  if (!orParVals.empty() && std::holds_alternative<bool>(orParVals[0])) {
+    cfg.orParallelSearch = std::get<bool>(orParVals[0]);
+  }
+
   return cfg;
 }
 
