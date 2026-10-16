@@ -587,6 +587,21 @@ public:
   ArenaManifold *insertIntoRank(CellRef cell, CellRef anchor, DimRef dim,
                                 DimVector dir = DimVector::POS);
 
+  /**
+   * @brief Link an existing sequence of cells into a rank along @p dim.
+   *
+   * Chains @p cells consecutively -- cells[i] @p dir-ward of cells[i-1] --
+   * each a single link() that writes both reciprocal ends (RL1). This is the
+   * one shared home for "turn a vector of cells into a rank," promoted out of
+   * the per-element loops the VPL and VQL front ends used to hand-roll (each
+   * of which re-derived the reciprocal edge and could silently build a
+   * one-sided chain). noCell entries are skipped. Empty or single-element
+   * input is a no-op success. Returns the first refusal, or this arena for
+   * fluent chaining.
+   */
+  ArenaResult linkChain(std::span<const CellRef> cells, DimRef dim,
+                        DimVector dir = DimVector::POS);
+
   // -- choice points ---------------------------------------------------------
 
   /// Take a choice point. Reads seven lengths; allocates nothing.

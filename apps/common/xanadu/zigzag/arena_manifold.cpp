@@ -4,6 +4,7 @@
 #include <bit>
 #include <cstddef>
 #include <limits>
+#include <span>
 #include <sstream>
 #include <tuple>
 #include <unordered_map>
@@ -1424,6 +1425,30 @@ ArenaManifold *ArenaManifold::insertIntoRank(const CellRef cell,
   std::ignore          = link(anchor, dim, dir, cell);
   if (displaced.has_value() && *displaced != noCell) {
     std::ignore = link(cell, dim, dir, *displaced);
+  }
+  return this;
+}
+
+ArenaResult ArenaManifold::linkChain(const std::span<const CellRef> cells,
+                                     const DimRef dim, const DimVector dir) {
+  if (noCell == dim) {
+    return this;
+  }
+  // Chain consecutive non-absent cells. Each link() writes both reciprocal
+  // ends (RL1); the first refusal stops and is returned, having changed only
+  // what the successful links before it did -- the caller releases its mark on
+  // a refusal exactly as it would for a single link().
+  CellRef prev = noCell;
+  for (const CellRef cur : cells) {
+    if (noCell == cur) {
+      continue;
+    }
+    if (noCell != prev) {
+      if (auto res = link(prev, dim, dir, cur); !res.has_value()) {
+        return res;
+      }
+    }
+    prev = cur;
   }
   return this;
 }
