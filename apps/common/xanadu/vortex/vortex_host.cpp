@@ -642,6 +642,77 @@ VortexHost::executeVQL(std::string_view queryOrWeave,
   }
 }
 
+std::vector<std::vector<std::string>> VortexHost::executeVQLBatchParallel(
+    const std::vector<std::string> &queries,
+    gleditor::cpp26::function_ref<void(WorkerContext &, std::size_t)> prepare) {
+  std::vector<std::vector<std::string>> results(queries.size());
+  if (queries.empty()) {
+    return results;
+  }
+
+  // One worker context per query, each overlaying the shared frozen base.
+  // Building them up front (serially) keeps makeWorkerContext single-threaded;
+  // the parallel phase only touches each context's own arena.
+  std::vector<WorkerContext *> contexts;
+  contexts.reserve(queries.size());
+  for (std::size_t i = 0; i < queries.size(); ++i) {
+    contexts.push_back(&makeWorkerContext());
+  }
+
+  // Runs query i on context i: populate its ephemeral cells, then evaluate the
+  // query on a VQLEngine bound to that context's core, rendering results to
+  // context-independent strings so the batch is comparable and deterministic.
+  const auto runOne = [&](std::size_t i) {
+    WorkerContext &ctx = *contexts[i];
+    prepare(ctx, i);
+    xanadu::vql::VQLEngine engine(ctx.core);
+    std::vector<CellRef> cells;
+    try {
+      xanadu::vql::Parser parser(queries[i]);
+      auto expr = parser.parseQuery();
+      if (std::holds_alternative<xanadu::vql::PathExpression>(expr.expr)) {
+        cells = engine.evaluatePath(
+            std::get<xanadu::vql::PathExpression>(expr.expr), {});
+      } else {
+        cells = engine.execute(expr);
+      }
+    } catch (const std::exception &) {
+      cells.clear();
+    }
+    std::vector<std::string> rendered;
+    rendered.reserve(cells.size());
+    for (const CellRef c : cells) {
+      // Render each result cell to a context-independent string so the batch
+      // is comparable across worker arenas and deterministic.
+      const CellValue v = ctx.core.render(c);
+      rendered.push_back(std::visit(
+          [](const auto &held) -> std::string {
+            using T = std::remove_cvref_t<decltype(held)>;
+            if constexpr (std::is_same_v<T, std::string>) {
+              return held;
+            } else if constexpr (std::is_same_v<T, bool>) {
+              return held ? "true" : "false";
+            } else {
+              return std::to_string(held);
+            }
+          },
+          v));
+    }
+    results[i] = std::move(rendered);
+  };
+
+  if (workerPool_ != nullptr && queries.size() > 1 &&
+      workerPool_->parallelism() > 1) {
+    workerPool_->run(static_cast<std::uint32_t>(queries.size()),
+                     [&](std::uint32_t i) { runOne(i); });
+  } else {
+    for (std::size_t i = 0; i < queries.size(); ++i) {
+      runOne(i);
+    }
+  }
+  return results;
+}
+
 std::optional<CellRef> VortexHost::navigatePath(std::string_view pathExpr,
                                                 CellRef currentFocus) {
   try {

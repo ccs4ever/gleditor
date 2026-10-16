@@ -572,3 +572,55 @@ TEST(VortexHostTest, ParallelIndependentCursorsAreDeterministic) {
     EXPECT_EQ(jobs[i].ctx->vm.activeCursors().size(), 1u);
   }
 }
+
+// Stage 4 of design/vortex-multithreading-study.md §6.3: parallel VQL. A batch
+// of independent queries runs one-per-worker-context over the shared frozen
+// base; results must be identical and identically ordered to the serial
+// baseline for any worker count, and no persistent cross-store link is created
+// (each worker owns an ephemeral arena; nothing is promoted). We populate each
+// worker context with the same people list and run "##/d.people" per query.
+TEST(VortexHostTest, ParallelVQLBatchIsDeterministic) {
+  constexpr std::size_t kQueries = 6;
+
+  // prepare(): build an identical d.people list in each worker context's arena
+  // so every query sees the same data. The list length varies with the query
+  // index so the per-query result is distinct and order-sensitive.
+  auto prepare = [](WorkerContext &ctx, std::size_t i) {
+    const DimRef dPeople = ctx.core.findOrMintDimension("d.people");
+    CellRef prev         = ctx.core.home();
+    for (std::size_t k = 0; k <= i; ++k) {
+      CellRef person =
+          ctx.arena.makeCell("P" + std::to_string(i) + "_" + std::to_string(k));
+      zigzag::expectWritten(
+          ctx.arena.link(prev, dPeople, zigzag::DimVector::POS, person));
+      prev = person;
+    }
+  };
+
+  const std::vector<std::string> queries(kQueries, "##/d.people");
+
+  // Serial baseline: a single worker (pool of 1 => caller-only).
+  std::vector<std::vector<std::string>> baseline;
+  {
+    VortexHost host;
+    // Force serial by configuring a 1-thread pool.
+    VortexHostConfig cfg = host.config();
+    cfg.workerThreads    = 1;
+    host.setConfig(cfg);
+    baseline = host.executeVQLBatchParallel(queries, prepare);
+  }
+  ASSERT_EQ(baseline.size(), kQueries);
+  for (std::size_t i = 0; i < kQueries; ++i) {
+    EXPECT_EQ(baseline[i].size(), i + 1) << "baseline query " << i;
+  }
+
+  for (std::uint32_t threads : {1u, 2u, 4u, 8u}) {
+    VortexHost host;
+    VortexHostConfig cfg = host.config();
+    cfg.workerThreads    = threads;
+    host.setConfig(cfg);
+    auto got = host.executeVQLBatchParallel(queries, prepare);
+    EXPECT_EQ(got, baseline)
+        << "parallel VQL batch differs at threads=" << threads;
+  }
+}

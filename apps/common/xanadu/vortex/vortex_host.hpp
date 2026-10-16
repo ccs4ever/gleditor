@@ -137,8 +137,11 @@ public:
   }
 
   // -- Configuration ----------------------------------------------------------
-  void setConfig(VortexHostConfig config) noexcept {
+  void setConfig(VortexHostConfig config) {
     config_ = std::move(config);
+    // Rebuild the data-parallel worker pool so a worker_threads change takes
+    // effect immediately (Stage 2/4).
+    applyParallelConfig();
   }
   [[nodiscard]] const VortexHostConfig &config() const noexcept {
     return config_;
@@ -234,6 +237,21 @@ public:
   std::vector<CellRef>
   executeVQL(std::string_view queryOrWeave,
              const std::vector<CellRef> &contextCells = {});
+
+  /// Stage 4 (vortex-multithreading-study.md §6.3): run a batch of independent
+  /// VQL queries in parallel, one per worker context over the shared frozen
+  /// base, and return their result sets in submission (query) order regardless
+  /// of completion order. Each query runs on its own ArenaManifold/VortexCore/
+  /// VQLEngine, so the runs share no mutable state and create no persistent
+  /// cross-store link; results are deterministic and identically ordered for
+  /// any worker count. @p prepare is called once per worker context (with its
+  /// query index) before its query, to populate the ephemeral per-worker cells
+  /// the query reads (the overlay keeps the shared base read-only). Falls back
+  /// to serial when no pool or a single query.
+  std::vector<std::vector<std::string>> executeVQLBatchParallel(
+      const std::vector<std::string> &queries,
+      gleditor::cpp26::function_ref<void(WorkerContext &, std::size_t)>
+          prepare);
 
   /**
    * @brief Evaluates a VQL path relative to currentFocus (or ##), returning the
