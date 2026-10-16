@@ -684,3 +684,90 @@ TEST_F(ReaderPackageUiTest, RestoredClosedPlaceNeverEntersAnotherOpenVersion) {
   EXPECT_EQ(resumed.walkEntries().size(), visits + 1);
   EXPECT_EQ(store.opCount(), operations);
 }
+
+TEST_F(ReaderPackageUiTest, SavedVisitRestorationWaitsForExactPageAnchors) {
+  for (int kind = 0; kind < 4; ++kind) {
+    SCOPED_TRACE(kind);
+    auto perma = std::make_shared<UserPermascroll>();
+    Session session((root / ("restore-" + std::to_string(kind))).string(),
+                    perma);
+    auto &store       = session.store();
+    const auto text   = store.insert({}, 0, "origin destination");
+    const auto pieces = store.rebuild(text);
+    const auto head =
+        store.addLink(text, Link{.left  = pieces.spansFor(0, 6),
+                                 .right = pieces.spansFor(7, 11)});
+    session.viewOpened(head);
+    const LinkKey key{store.documentId(), store.links().begin()->first};
+    LinkContext navigation(session);
+    navigation.setFocusDocument([](std::size_t, Extent) {});
+    navigation.setCaretQuery([] {
+      return std::optional{LinkContext::CaretPosition{
+          .view = 0, .offset = 0, .selection = Extent{0, 6}}};
+    });
+    navigation.recordSourceArrival(
+        DocumentSite{store.documentId(), head, {0, 6}});
+    const auto origin = navigation.currentVisit();
+    ASSERT_TRUE(origin);
+    ASSERT_TRUE(navigation.execute(nav::SelectLink{.key = key}));
+    ASSERT_TRUE(navigation.execute(nav::SelectOccurrence{
+        .key = key, .side = LinkSide::Right, .member = 0, .occurrence = 0}));
+    ASSERT_TRUE(navigation.execute(nav::Enter{}));
+    const auto destination = navigation.currentVisit();
+    ASSERT_TRUE(destination && destination != origin);
+    NavigationCommand command = nav::ActivityBack{};
+    auto expected             = origin;
+    if (kind == 1) {
+      ASSERT_TRUE(navigation.execute(nav::ActivityBack{}));
+      command  = nav::ActivityForward{*destination};
+      expected = destination;
+    } else if (kind == 2) {
+      command = nav::EnterVisit{*origin};
+    } else if (kind == 3) {
+      command = nav::ReturnToOrigin{};
+    }
+    WorldRecordingDevice device;
+    RenderState state{&device};
+    auto app      = std::make_shared<AppState>();
+    auto renderer = Renderer::create(app, render::Backend::OpenGL);
+    auto doc      = Doc::create(
+        renderer, &device, glm::mat4{1},
+        gleditor::MemoryTextSource("origin destination", "saved-visit"));
+    state.docs.push_back(doc);
+    std::optional<Extent> focused;
+    navigation.setDocumentEntryHandler(
+        [&](std::size_t, Extent range, RenderState &) { focused = range; });
+    navigation.advanceFrame(state);
+    const auto current     = navigation.currentVisit();
+    const auto visits      = navigation.walkEntries().size();
+    const auto activityOps = session.activityForNavigation()->opCount();
+    const auto operations  = store.opCount();
+    ASSERT_FALSE(doc->anchorFor(0));
+    const auto stale = navigation.execute(nav::ActivityForward{*current});
+    ASSERT_FALSE(stale);
+    EXPECT_EQ(stale.error(), NavigationError::NoPreviousVisit);
+    EXPECT_FALSE(navigation.entryPending());
+    EXPECT_EQ(navigation.currentVisit(), current);
+    ASSERT_TRUE(navigation.execute(command));
+    ASSERT_TRUE(navigation.entryPending());
+    EXPECT_FALSE(focused);
+    EXPECT_EQ(navigation.currentVisit(), current);
+    EXPECT_EQ(session.activityForNavigation()->opCount(), activityOps);
+    ASSERT_TRUE(navigation.execute(nav::CancelEntry{}));
+    EXPECT_FALSE(navigation.entryPending());
+    EXPECT_EQ(navigation.currentVisit(), current);
+    ASSERT_TRUE(navigation.execute(command));
+    ASSERT_TRUE(navigation.entryPending());
+    doc->makePages();
+    std::ignore = doc->buildPendingPages(state);
+    navigation.advanceFrame(state);
+    EXPECT_FALSE(navigation.entryPending());
+    EXPECT_EQ(navigation.currentVisit(), expected);
+    EXPECT_EQ(focused, (kind == 1 ? Extent{7, 18} : Extent{0, 6}));
+    EXPECT_EQ(navigation.walkEntries().size(), visits);
+    EXPECT_EQ(store.opCount(), operations);
+    const auto restoredOps = session.activityForNavigation()->opCount();
+    navigation.advanceFrame(state);
+    EXPECT_EQ(session.activityForNavigation()->opCount(), restoredOps);
+  }
+}

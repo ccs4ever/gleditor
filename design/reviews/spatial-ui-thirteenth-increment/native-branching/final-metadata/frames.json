@@ -1,0 +1,102 @@
+[
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/final-phase5/raw/00-before-explicit-enter.ppm",
+    "sha256": "5773a1f9005adc3037a828f8d0d31829d0e0113a2c08671e038a04a2c0ee2236",
+    "png": "frames/00-before-explicit-enter.png",
+    "rgb_sha256": "eacf24e363140199c89e8a9d0449a3abbb028a224faac631a042c3a54f40522c",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/final-phase5/raw/01-after-explicit-enter.ppm",
+    "sha256": "6bfc67407d5c43cba0c7f0d42f1859f18df82f48740e8a30ea794b1eed205ca2",
+    "png": "frames/01-after-explicit-enter.png",
+    "rgb_sha256": "94acb060d3d0bcef136e70cdff2b3a434feb6331c69fde69e308510ef36b4f21",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/final-phase5/raw/02-walks-current.ppm",
+    "sha256": "6ea20dfecf7901885f8d842b5f8b4fecd07daff2d412c736d213d7543de94840",
+    "png": "frames/02-walks-current.png",
+    "rgb_sha256": "ccf744ee36753bdbc11e63f4481a4d9ad2e490a547b338f045b8329673b0028c",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/final-phase5/raw/03-reference-visit5.ppm",
+    "sha256": "5ac65578d55219002971f73d25bb3c5a82f6268f5dc10f85052b9f86b431e471",
+    "png": "frames/03-reference-visit5.png",
+    "rgb_sha256": "a35ad3f87d5a7290416d0cceba032f6a69ff7550a5568f6f213aa4c852aed30d",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/final-phase5/raw/04-annotate-visit4.ppm",
+    "sha256": "bc0b412241d87c36d4b6c77e522ca2bd723404b45e505ab21843827ae38c53a3",
+    "png": "frames/04-annotate-visit4.png",
+    "rgb_sha256": "114bcdeedd8dc16eab465436a4d51628b77aeef895f8485a451ef9460b36ee4e",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/final-phase5/raw/05-after-metadata.ppm",
+    "sha256": "6bfc67407d5c43cba0c7f0d42f1859f18df82f48740e8a30ea794b1eed205ca2",
+    "png": "frames/05-after-metadata.png",
+    "rgb_sha256": "94acb060d3d0bcef136e70cdff2b3a434feb6331c69fde69e308510ef36b4f21",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/final-phase5/raw/06-back-to-parent.ppm",
+    "sha256": "6bfc67407d5c43cba0c7f0d42f1859f18df82f48740e8a30ea794b1eed205ca2",
+    "png": "frames/06-back-to-parent.png",
+    "rgb_sha256": "94acb060d3d0bcef136e70cdff2b3a434feb6331c69fde69e308510ef36b4f21",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/final-phase5/raw/07-forward-choices.ppm",
+    "sha256": "aa7421763105b5e318aa90c50589695752d53be26d51bb1b1ad5707ca091122c",
+    "png": "frames/07-forward-choices.png",
+    "rgb_sha256": "a03780f1756e8a2e2d1df33d7d7f16ff319a79aff7962360ebc5565023d82604",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/final-phase5/raw/08-forward-third-child.ppm",
+    "sha256": "6bfc67407d5c43cba0c7f0d42f1859f18df82f48740e8a30ea794b1eed205ca2",
+    "png": "frames/08-forward-third-child.png",
+    "rgb_sha256": "94acb060d3d0bcef136e70cdff2b3a434feb6331c69fde69e308510ef36b4f21",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/final-phase5/raw/09-walks-final.ppm",
+    "sha256": "bc0b412241d87c36d4b6c77e522ca2bd723404b45e505ab21843827ae38c53a3",
+    "png": "frames/09-walks-final.png",
+    "rgb_sha256": "114bcdeedd8dc16eab465436a4d51628b77aeef895f8485a451ef9460b36ee4e",
+    "size": [
+      1440,
+      1000
+    ]
+  }
+]

@@ -1,0 +1,42 @@
+[
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/final-phase6/raw/00-reopened-current6.ppm",
+    "sha256": "5773a1f9005adc3037a828f8d0d31829d0e0113a2c08671e038a04a2c0ee2236",
+    "png": "frames/00-reopened-current6.png",
+    "rgb_sha256": "eacf24e363140199c89e8a9d0449a3abbb028a224faac631a042c3a54f40522c",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/final-phase6/raw/01-walks-restored-metadata.ppm",
+    "sha256": "6ea20dfecf7901885f8d842b5f8b4fecd07daff2d412c736d213d7543de94840",
+    "png": "frames/01-walks-restored-metadata.png",
+    "rgb_sha256": "ccf744ee36753bdbc11e63f4481a4d9ad2e490a547b338f045b8329673b0028c",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/final-phase6/raw/02-preview4-restored-note.ppm",
+    "sha256": "4335b2eadb171468b18143a4334d76413259545affceaac8e552dcf1ddd3699a",
+    "png": "frames/02-preview4-restored-note.png",
+    "rgb_sha256": "1e55748536a735ee26304309e844b15a8a5de8803082bf8472d1428ffae850a7",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/final-phase6/raw/03-retained-futures-after-restart.ppm",
+    "sha256": "aa7421763105b5e318aa90c50589695752d53be26d51bb1b1ad5707ca091122c",
+    "png": "frames/03-retained-futures-after-restart.png",
+    "rgb_sha256": "a03780f1756e8a2e2d1df33d7d7f16ff319a79aff7962360ebc5565023d82604",
+    "size": [
+      1440,
+      1000
+    ]
+  }
+]

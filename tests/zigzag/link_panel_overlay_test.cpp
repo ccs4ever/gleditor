@@ -1274,3 +1274,69 @@ TEST_F(LinkPanelOverlayTest,
     return highlight.cell == cell && highlight.chosen;
   }));
 }
+
+TEST_F(LinkPanelOverlayTest,
+       SavedVisitWithoutALinkShowsPendingTargetAndAccessibleCancel) {
+  const auto &view     = session.views().front();
+  const auto version   = view.version;
+  const auto authority = session.store().documentId();
+  navigation.recordSourceArrival(
+      xanadu::DocumentSite{authority, version, {0, 4}});
+  const auto saved = navigation.currentVisit();
+  ASSERT_TRUE(saved);
+  navigation.recordSourceArrival(
+      xanadu::DocumentSite{authority, version, {5, 10}});
+  ASSERT_TRUE(navigation.execute(nav::Dismiss{}));
+  navigation.setFocusDocument([](std::size_t, xanadu::Extent) {});
+  auto app      = std::make_shared<AppState>();
+  auto renderer = Renderer::create(app, render::Backend::OpenGL);
+  auto doc =
+      Doc::create(renderer, &device, glm::mat4{1},
+                  gleditor::MemoryTextSource("Left right", "saved-visit"));
+  state.docs.push_back(doc);
+  navigation.advanceFrame(state);
+  const auto current     = navigation.currentVisit();
+  const auto visits      = navigation.walkEntries().size();
+  const auto operations  = session.store().opCount();
+  const auto activityOps = session.activityForNavigation()->opCount();
+  ASSERT_TRUE(navigation.execute(nav::EnterVisit{*saved}));
+  ASSERT_TRUE(navigation.entryPending());
+  ASSERT_FALSE(navigation.selection());
+  auto chrome = draw();
+  draw(chrome);
+  const auto presentation = overlay.presentation();
+  ASSERT_TRUE(presentation);
+  EXPECT_TRUE(
+      std::ranges::any_of(presentation->visuals, [](const auto &visual) {
+        return visual.text == "Saved visit restoration";
+      }));
+  EXPECT_TRUE(
+      std::ranges::any_of(presentation->visuals, [&](const auto &visual) {
+        return visual.text.contains(version.str()) &&
+               visual.text.contains("0–4");
+      }));
+  EXPECT_FALSE(
+      std::ranges::any_of(presentation->visuals, [](const auto &visual) {
+        return visual.text == "Inspect members" ||
+               visual.text == "Fold investigation";
+      }));
+  EXPECT_TRUE(
+      std::ranges::any_of(presentation->visuals, [&](const auto &visual) {
+        return visual.text.contains(authority.str());
+      }));
+  const auto cancel = captured("Cancel");
+  ASSERT_TRUE(cancel.overlayWidgetId);
+  EXPECT_TRUE(overlay.performAction(
+      gleditor::a11y::Ids::of(27, *cancel.overlayWidgetId),
+      gleditor::a11y::Action::Click, {}));
+  draw(chrome);
+  EXPECT_FALSE(navigation.entryPending());
+  gleditor::a11y::Tree hidden;
+  gleditor::a11y::Builder into(hidden, 27);
+  overlay.describe(into);
+  EXPECT_TRUE(hidden.empty());
+  EXPECT_EQ(navigation.currentVisit(), current);
+  EXPECT_EQ(navigation.walkEntries().size(), visits);
+  EXPECT_EQ(session.store().opCount(), operations);
+  EXPECT_EQ(session.activityForNavigation()->opCount(), activityOps);
+}

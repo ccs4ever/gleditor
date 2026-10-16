@@ -1,0 +1,598 @@
+diff --git a/apps/common/ui/walks.cpp b/apps/common/ui/walks.cpp
+index 0c5ec17b..793dd722 100644
+--- a/apps/common/ui/walks.cpp
++++ b/apps/common/ui/walks.cpp
+@@ -7,6 +7,7 @@
+ namespace xanadu {
+ 
+ void openWalksForm(gleditor::Form &form, std::vector<WalkEntry> entries,
++                   const std::optional<VisitId> current,
+                    const std::optional<VisitId> selected,
+                    std::function<std::string(const OccurrenceSite &)> describe,
+                    WalksAccepted accepted, std::string notice) {
+@@ -31,10 +32,12 @@ void openWalksForm(gleditor::Form &form, std::vector<WalkEntry> entries,
+     caption += "visit " + std::to_string(entry.visit.id.value);
+     if (entry.visit.parent)
+       caption += " from " + std::to_string(entry.visit.parent->value);
++    if (current == entry.visit.id) caption += " (current)";
+     if (entry.referenced) caption += " (referenced)";
+     caption += ": " + describe(entry.visit.target);
+     visit.options.push_back(std::move(caption));
+     std::string detail = describe(entry.visit.target);
++    if (current == entry.visit.id) detail += "; current reading place";
+     if (entry.referenced) detail += "; saved reference";
+     for (const auto &annotation : entry.annotations)
+       detail += "; Annotation: " + annotation;
+@@ -50,6 +53,9 @@ void openWalksForm(gleditor::Form &form, std::vector<WalkEntry> entries,
+                  ? "No saved visits yet. Close Walks to continue reading."
+                  : "Preview keeps your reading place. Enter restores a saved "
+                    "visit. References and annotations stay in your activity.";
++  notice = (current ? "Current visit " + std::to_string(current->value)
++                    : "No current visit") +
++           ". " + notice;
+   if (!ordered.empty()) {
+     const auto &picked = ordered[visit.chosen];
+     notice += " Selected visit " + std::to_string(picked.visit.id.value) +
+diff --git a/apps/common/ui/walks.hpp b/apps/common/ui/walks.hpp
+index 6a11a181..3d71f380 100644
+--- a/apps/common/ui/walks.hpp
++++ b/apps/common/ui/walks.hpp
+@@ -21,8 +21,10 @@ struct WalksAction {
+ using WalksAccepted = std::function<void(WalksAction)>;
+ 
+ /// The snapshot and callback keep this presentation independent of thread and
+-/// navigation ownership. The host dispatches only Enter to the navigator.
++/// navigation ownership. Current is the reading place; selected is only the
++/// form cursor. The host dispatches only Enter to the navigator.
+ void openWalksForm(gleditor::Form &form, std::vector<WalkEntry> entries,
++                   std::optional<VisitId> current,
+                    std::optional<VisitId> selected,
+                    std::function<std::string(const OccurrenceSite &)> describe,
+                    WalksAccepted accepted, std::string notice = {});
+diff --git a/apps/common/ui/xanadoc/link_context.cpp b/apps/common/ui/xanadoc/link_context.cpp
+index 32c30a73..f7f539f8 100644
+--- a/apps/common/ui/xanadoc/link_context.cpp
++++ b/apps/common/ui/xanadoc/link_context.cpp
+@@ -299,7 +299,8 @@ LinkContext::execute(const xanadu::NavigationCommand &command) {
+       target = visit->target;
+   } else if (const auto *forward =
+                  std::get_if<nav::ActivityForward>(&command)) {
+-    if (const auto visit = activity.find(forward->child))
++    if (const auto visit = activity.find(forward->child);
++        visit && visit->parent == navigator.currentVisit())
+       target = visit->target;
+   } else if (std::holds_alternative<nav::ActivityBack>(command)) {
+     if (const auto current = navigator.currentVisit())
+@@ -362,39 +363,24 @@ LinkContext::execute(const xanadu::NavigationCommand &command) {
+       return std::unexpected(NavigationError::MemberNotInView);
+     }
+   }
+-  if (selected && selected->occurrences && renderState_) {
+-    auto side           = selected->active;
+-    auto cursor         = selected->cursor(side);
+-    const auto *at      = std::get_if<nav::EnterAt>(&command);
+-    const bool entering = std::holds_alternative<nav::Enter>(command) ||
+-                          (at && at->key == selected->key);
+-    if (at && at->key == selected->key) {
+-      side              = at->side;
+-      cursor.member     = at->member;
+-      cursor.occurrence = at->occurrence;
+-    }
+-    if (entering && cursor.member && cursor.occurrence &&
+-        *cursor.member < selected->occurrences->members(side).size()) {
+-      const auto &member = selected->occurrences->members(side)[*cursor.member];
+-      if (*cursor.occurrence < member.occurrences.size()) {
+-        const auto *site = std::get_if<DocumentSite>(
+-            &member.occurrences[*cursor.occurrence].site);
+-        const auto view = site ? viewIndexOf(*site) : std::nullopt;
+-        if (view && *view < renderState_->docs.size() &&
+-            renderState_->docs[*view]) {
+-          auto &doc = *renderState_->docs[*view];
+-          const std::array offsets{site->range.start,
+-                                   site->range.end > site->range.start
+-                                       ? site->range.end - 1
+-                                       : site->range.start};
+-          if (!doc.anchorFor(offsets[0]) || !doc.anchorFor(offsets[1])) {
+-            doc.setPriorityOffsets(offsets);
+-            pendingEntry =
+-                PendingEntry{command, session.generation(), *view, *site};
+-            ++changes;
+-            return NavigationEffect{};
+-          }
+-        }
++  if (target && renderState_) {
++    const auto *site = std::get_if<DocumentSite>(&*target);
++    const auto view  = site ? viewIndexOf(*site) : std::nullopt;
++    if (view && *view < renderState_->docs.size() &&
++        renderState_->docs[*view]) {
++      auto &doc = *renderState_->docs[*view];
++      const std::array offsets{site->range.start,
++                               site->range.end > site->range.start
++                                   ? site->range.end - 1
++                                   : site->range.start};
++      // Restoring a visit must not publish its current pointer before its
++      // exact passage can be framed, just as endpoint entry must wait.
++      if (!doc.anchorFor(offsets[0]) || !doc.anchorFor(offsets[1])) {
++        doc.setPriorityOffsets(offsets);
++        pendingEntry =
++            PendingEntry{command, session.generation(), *view, *site};
++        ++changes;
++        return NavigationEffect{};
+       }
+     }
+   }
+diff --git a/apps/common/ui/xanadoc/link_context.hpp b/apps/common/ui/xanadoc/link_context.hpp
+index fdb04df1..e4c86a8c 100644
+--- a/apps/common/ui/xanadoc/link_context.hpp
++++ b/apps/common/ui/xanadoc/link_context.hpp
+@@ -151,6 +151,9 @@ public:
+ 
+   /// Revisit a pending entry only after its exact local page geometry exists.
+   void advanceFrame(RenderState &state);
++  [[nodiscard]] std::optional<DocumentSite> pendingTarget() const {
++    return pendingEntry ? std::optional{pendingEntry->site} : std::nullopt;
++  }
+   [[nodiscard]] bool entryPending() const noexcept {
+     return pendingEntry.has_value();
+   }
+diff --git a/apps/common/ui/xanadoc/link_panel_overlay.cpp b/apps/common/ui/xanadoc/link_panel_overlay.cpp
+index 46f49d48..ceb17a10 100644
+--- a/apps/common/ui/xanadoc/link_panel_overlay.cpp
++++ b/apps/common/ui/xanadoc/link_panel_overlay.cpp
+@@ -342,7 +342,7 @@ void LinkPanelOverlay::appendInvestigation(std::vector<PanelLine> &lines) {
+ 
+ void LinkPanelOverlay::rebuildPanel(gleditor::FrameContext &ctx) {
+   const auto selected = context.selection();
+-  if (!selected) {
++  if (!selected && !context.entryPending() && context.entryStatus().empty()) {
+     panel.setVisible(false);
+     dockLink.reset();
+     controlsCollapsed     = false;
+@@ -353,16 +353,29 @@ void LinkPanelOverlay::rebuildPanel(gleditor::FrameContext &ctx) {
+     return;
+   }
+   const auto origin = context.originSite();
+-  auto lines =
+-      xanadu::linkPanelLines(*selected, origin, context.reading(),
+-                             [this](const xanadu::OccurrenceSite &site) {
+-                               return context.describe(site);
+-                             });
+-  buttons = xanadu::linkPanelButtons(*selected, origin.has_value());
+-  if (investigationExpanded) {
+-    appendInvestigation(lines);
+-    auto members = linkMemberButtons(*selected);
+-    buttons.insert(buttons.end(), members.begin(), members.end());
++  std::vector<PanelLine> lines;
++  buttons.clear();
++  if (selected) {
++    lines = xanadu::linkPanelLines(
++        *selected, origin, context.reading(),
++        [this](const auto &site) { return context.describe(site); });
++    buttons = xanadu::linkPanelButtons(*selected, origin.has_value());
++    if (investigationExpanded) {
++      appendInvestigation(lines);
++      auto members = linkMemberButtons(*selected);
++      buttons.insert(buttons.end(), members.begin(), members.end());
++    }
++  } else {
++    dockLink.reset();
++    controlsCollapsed     = false;
++    investigationExpanded = false;
++    lines.push_back({.text = "Saved visit restoration"});
++    if (const auto target = context.pendingTarget()) {
++      lines.push_back({.text = "Store " + target->store.str()});
++      lines.push_back(
++          {.text = std::format("State {} · bytes {}–{}", target->version.str(),
++                               target->range.start, target->range.end)});
++    }
+   }
+   if (!context.entryStatus().empty()) {
+     lines.push_back(
+@@ -400,7 +413,7 @@ void LinkPanelOverlay::rebuildPanel(gleditor::FrameContext &ctx) {
+     pageIds             = std::pair{previous, next};
+   }
+   auto ids = buttonIds;
+-  ids.push_back(*toggleId);
++  if (selected) ids.push_back(*toggleId);
+   std::optional<gleditor::ui::Rect> anchor;
+   if (panelAnchors) {
+     const auto &points = *panelAnchors;
+@@ -414,7 +427,10 @@ void LinkPanelOverlay::rebuildPanel(gleditor::FrameContext &ctx) {
+           lines, buttons, ids, builtMetrics, ctx.theme, config, anchor,
+           measurements, std::nullopt,
+           std::span(protectedContent).first(protectedContentCount),
+-          investigationExpanded ? "Fold investigation" : "Inspect members"));
++          selected ? std::optional<std::string_view>{investigationExpanded
++                                                         ? "Fold investigation"
++                                                         : "Inspect members"}
++                   : std::nullopt));
+   next->investigationToggle = next->toggleControls;
+   next->toggleControls.reset();
+   if (investigationExpanded) {
+@@ -452,8 +468,8 @@ void LinkPanelOverlay::rebuildPanel(gleditor::FrameContext &ctx) {
+   const auto viewport = std::pair{ctx.screenWidth, ctx.screenHeight};
+   if (dockViewport != viewport) dockLink.reset();
+   // Scrolling must not remove the reader's explicit Read/Controls toggle.
+-  if ((!investigationExpanded && dockLink == selected->key) ||
+-      !next->safePlacement || !next->completeContent) {
++  if (selected && ((!investigationExpanded && dockLink == selected->key) ||
++                   !next->safePlacement || !next->completeContent)) {
+     dockViewport = viewport;
+     if (dockLink != selected->key) {
+       controlsCollapsed = true;
+diff --git a/apps/xuzz/xuzz_app.cpp b/apps/xuzz/xuzz_app.cpp
+index 3857921d..d2bc0fdd 100644
+--- a/apps/xuzz/xuzz_app.cpp
++++ b/apps/xuzz/xuzz_app.cpp
+@@ -3198,6 +3198,7 @@ int XuzzApp::run(const int argc, char **argv) {
+                                 walksState](RenderState &) {
+           xanadu::openWalksForm(
+               publishForm, linkContext.walkEntries(),
++              linkContext.currentVisit(),
+               walksState->first ? walksState->first
+                                 : linkContext.currentVisit(),
+               [&linkContext](const xanadu::OccurrenceSite &site) {
+diff --git a/tests/xuzz/link_navigation_test.cpp b/tests/xuzz/link_navigation_test.cpp
+index d4c55aad..c98e8844 100644
+--- a/tests/xuzz/link_navigation_test.cpp
++++ b/tests/xuzz/link_navigation_test.cpp
+@@ -881,3 +881,101 @@ TEST(LinkNavigationTest,
+   EXPECT_FALSE(resumed.selection());
+   EXPECT_EQ(h.log.size(), before);
+ }
++
++TEST(LinkNavigationTest,
++     PersistentSiblingRestorationKeepsBothPinsAndOriginAfterReordering) {
++  Harness h;
++  const auto base =
++      std::filesystem::temp_directory_path() /
++      ("xuzz-sibling-restore-" +
++       std::to_string(
++           std::chrono::steady_clock::now().time_since_epoch().count()));
++  xanadu::UserPermascroll::Config config;
++  config.storageDir    = base / "permascroll";
++  auto scroll          = std::make_shared<xanadu::UserPermascroll>(config);
++  const auto directory = base / "activity";
++  VisitId root, first, second;
++  const auto sourceOps  = h.f.store->opCount();
++  const auto checkpoint = h.inHead(11, 11);
++  {
++    xanadu::Store store(scroll);
++    xanadu::StoreActivityLog log(&store, directory);
++    xanadu::LinkNavigator navigation(log);
++    const auto run = [&](const auto &command) {
++      auto result = navigation.dispatch(command);
++      if (result && result->resolve)
++        EXPECT_TRUE(navigation.supply(result->resolve->generation,
++                                      h.resolve(result->resolve->key)));
++      return result;
++    };
++    root = navigation.recordArrival(h.inHead(0, 5));
++    navigation.checkpointOrigin(checkpoint);
++    ASSERT_TRUE(run(nav::SelectLink{h.link()}));
++    ASSERT_TRUE(run(nav::SelectOccurrence{h.link(), LinkSide::Left, 0, 0}));
++    ASSERT_TRUE(
++        run(nav::SelectOccurrence{h.link(), LinkSide::Right, kThree, 0}));
++    const auto entered = run(nav::Enter{});
++    ASSERT_TRUE(entered && entered->visit);
++    first = *entered->visit;
++    ASSERT_TRUE(run(nav::ActivityBack{}));
++    ASSERT_TRUE(run(nav::SelectOccurrence{h.link(), LinkSide::Left, 1, 0}));
++    ASSERT_TRUE(
++        run(nav::SelectOccurrence{h.link(), LinkSide::Right, kThree, 1}));
++    const auto branched = run(nav::Enter{});
++    ASSERT_TRUE(branched && branched->visit);
++    second = *branched->visit;
++    ASSERT_EQ(log.children(root), (std::vector<VisitId>{first, second}));
++  }
++  {
++    xanadu::Store store(scroll);
++    store.load(directory.string());
++    xanadu::StoreActivityLog log(&store, directory);
++    xanadu::LinkNavigator navigation(log);
++    const auto run = [&](const auto &command) {
++      auto result = navigation.dispatch(command);
++      if (result && result->resolve) {
++        auto resolved = h.resolve(result->resolve->key);
++        EXPECT_TRUE(resolved);
++        if (resolved) {
++          for (auto *members : {&resolved->left, &resolved->right})
++            for (auto &member : *members)
++              std::ranges::reverse(member.occurrences);
++          EXPECT_TRUE(navigation.supply(result->resolve->generation,
++                                        std::move(resolved)));
++        }
++      }
++      return result;
++    };
++    ASSERT_EQ(navigation.currentVisit(), second);
++    const auto visits = log.walkEntries().size();
++    ASSERT_TRUE(run(nav::ActivityBack{}));
++    for (const auto child : {first, second}) {
++      const auto saved = log.find(child);
++      ASSERT_TRUE(saved && saved->link);
++      const auto restored = run(nav::ActivityForward{child});
++      ASSERT_TRUE(restored && restored->focus);
++      EXPECT_EQ(restored->focus, std::optional{saved->target});
++      EXPECT_EQ(navigation.currentVisit(), child);
++      ASSERT_TRUE(navigation.selection());
++      const auto context = xanadu::selectionContext(*navigation.selection());
++      EXPECT_EQ(context.leftPin, saved->link->leftPin);
++      EXPECT_EQ(context.rightPin, saved->link->rightPin);
++      EXPECT_EQ(context.origin, root);
++      EXPECT_EQ(context.originCheckpoint,
++                std::optional<xanadu::OccurrenceSite>{checkpoint});
++      EXPECT_TRUE(log.children(child).empty());
++      const auto sibling = child == first ? second : first;
++      EXPECT_FALSE(run(nav::ActivityForward{sibling}));
++      EXPECT_EQ(navigation.currentVisit(), child);
++      const auto origin = run(nav::ReturnToOrigin{});
++      ASSERT_TRUE(origin);
++      EXPECT_EQ(origin->focus,
++                std::optional<xanadu::OccurrenceSite>{checkpoint});
++      EXPECT_EQ(navigation.currentVisit(), root);
++    }
++    EXPECT_EQ(log.children(root), (std::vector<VisitId>{first, second}));
++    EXPECT_EQ(log.walkEntries().size(), visits);
++    EXPECT_EQ(h.f.store->opCount(), sourceOps);
++  }
++  std::filesystem::remove_all(base);
++}
+diff --git a/tests/zigzag/link_panel_overlay_test.cpp b/tests/zigzag/link_panel_overlay_test.cpp
+index becefb34..2fd24b71 100644
+--- a/tests/zigzag/link_panel_overlay_test.cpp
++++ b/tests/zigzag/link_panel_overlay_test.cpp
+@@ -1274,3 +1274,69 @@ TEST_F(LinkPanelOverlayTest,
+     return highlight.cell == cell && highlight.chosen;
+   }));
+ }
++
++TEST_F(LinkPanelOverlayTest,
++       SavedVisitWithoutALinkShowsPendingTargetAndAccessibleCancel) {
++  const auto &view     = session.views().front();
++  const auto version   = view.version;
++  const auto authority = session.store().documentId();
++  navigation.recordSourceArrival(
++      xanadu::DocumentSite{authority, version, {0, 4}});
++  const auto saved = navigation.currentVisit();
++  ASSERT_TRUE(saved);
++  navigation.recordSourceArrival(
++      xanadu::DocumentSite{authority, version, {5, 10}});
++  ASSERT_TRUE(navigation.execute(nav::Dismiss{}));
++  navigation.setFocusDocument([](std::size_t, xanadu::Extent) {});
++  auto app      = std::make_shared<AppState>();
++  auto renderer = Renderer::create(app, render::Backend::OpenGL);
++  auto doc =
++      Doc::create(renderer, &device, glm::mat4{1},
++                  gleditor::MemoryTextSource("Left right", "saved-visit"));
++  state.docs.push_back(doc);
++  navigation.advanceFrame(state);
++  const auto current     = navigation.currentVisit();
++  const auto visits      = navigation.walkEntries().size();
++  const auto operations  = session.store().opCount();
++  const auto activityOps = session.activityForNavigation()->opCount();
++  ASSERT_TRUE(navigation.execute(nav::EnterVisit{*saved}));
++  ASSERT_TRUE(navigation.entryPending());
++  ASSERT_FALSE(navigation.selection());
++  auto chrome = draw();
++  draw(chrome);
++  const auto presentation = overlay.presentation();
++  ASSERT_TRUE(presentation);
++  EXPECT_TRUE(
++      std::ranges::any_of(presentation->visuals, [](const auto &visual) {
++        return visual.text == "Saved visit restoration";
++      }));
++  EXPECT_TRUE(
++      std::ranges::any_of(presentation->visuals, [&](const auto &visual) {
++        return visual.text.contains(version.str()) &&
++               visual.text.contains("0–4");
++      }));
++  EXPECT_FALSE(
++      std::ranges::any_of(presentation->visuals, [](const auto &visual) {
++        return visual.text == "Inspect members" ||
++               visual.text == "Fold investigation";
++      }));
++  EXPECT_TRUE(
++      std::ranges::any_of(presentation->visuals, [&](const auto &visual) {
++        return visual.text.contains(authority.str());
++      }));
++  const auto cancel = captured("Cancel");
++  ASSERT_TRUE(cancel.overlayWidgetId);
++  EXPECT_TRUE(overlay.performAction(
++      gleditor::a11y::Ids::of(27, *cancel.overlayWidgetId),
++      gleditor::a11y::Action::Click, {}));
++  draw(chrome);
++  EXPECT_FALSE(navigation.entryPending());
++  gleditor::a11y::Tree hidden;
++  gleditor::a11y::Builder into(hidden, 27);
++  overlay.describe(into);
++  EXPECT_TRUE(hidden.empty());
++  EXPECT_EQ(navigation.currentVisit(), current);
++  EXPECT_EQ(navigation.walkEntries().size(), visits);
++  EXPECT_EQ(session.store().opCount(), operations);
++  EXPECT_EQ(session.activityForNavigation()->opCount(), activityOps);
++}
+diff --git a/tests/zigzag/reader_link_packages_ui_test.cpp b/tests/zigzag/reader_link_packages_ui_test.cpp
+index 9a68f7ab..cc729ba6 100644
+--- a/tests/zigzag/reader_link_packages_ui_test.cpp
++++ b/tests/zigzag/reader_link_packages_ui_test.cpp
+@@ -684,3 +684,90 @@ TEST_F(ReaderPackageUiTest, RestoredClosedPlaceNeverEntersAnotherOpenVersion) {
+   EXPECT_EQ(resumed.walkEntries().size(), visits + 1);
+   EXPECT_EQ(store.opCount(), operations);
+ }
++
++TEST_F(ReaderPackageUiTest, SavedVisitRestorationWaitsForExactPageAnchors) {
++  for (int kind = 0; kind < 4; ++kind) {
++    SCOPED_TRACE(kind);
++    auto perma = std::make_shared<UserPermascroll>();
++    Session session((root / ("restore-" + std::to_string(kind))).string(),
++                    perma);
++    auto &store       = session.store();
++    const auto text   = store.insert({}, 0, "origin destination");
++    const auto pieces = store.rebuild(text);
++    const auto head =
++        store.addLink(text, Link{.left  = pieces.spansFor(0, 6),
++                                 .right = pieces.spansFor(7, 11)});
++    session.viewOpened(head);
++    const LinkKey key{store.documentId(), store.links().begin()->first};
++    LinkContext navigation(session);
++    navigation.setFocusDocument([](std::size_t, Extent) {});
++    navigation.setCaretQuery([] {
++      return std::optional{LinkContext::CaretPosition{
++          .view = 0, .offset = 0, .selection = Extent{0, 6}}};
++    });
++    navigation.recordSourceArrival(
++        DocumentSite{store.documentId(), head, {0, 6}});
++    const auto origin = navigation.currentVisit();
++    ASSERT_TRUE(origin);
++    ASSERT_TRUE(navigation.execute(nav::SelectLink{.key = key}));
++    ASSERT_TRUE(navigation.execute(nav::SelectOccurrence{
++        .key = key, .side = LinkSide::Right, .member = 0, .occurrence = 0}));
++    ASSERT_TRUE(navigation.execute(nav::Enter{}));
++    const auto destination = navigation.currentVisit();
++    ASSERT_TRUE(destination && destination != origin);
++    NavigationCommand command = nav::ActivityBack{};
++    auto expected             = origin;
++    if (kind == 1) {
++      ASSERT_TRUE(navigation.execute(nav::ActivityBack{}));
++      command  = nav::ActivityForward{*destination};
++      expected = destination;
++    } else if (kind == 2) {
++      command = nav::EnterVisit{*origin};
++    } else if (kind == 3) {
++      command = nav::ReturnToOrigin{};
++    }
++    WorldRecordingDevice device;
++    RenderState state{&device};
++    auto app      = std::make_shared<AppState>();
++    auto renderer = Renderer::create(app, render::Backend::OpenGL);
++    auto doc      = Doc::create(
++        renderer, &device, glm::mat4{1},
++        gleditor::MemoryTextSource("origin destination", "saved-visit"));
++    state.docs.push_back(doc);
++    std::optional<Extent> focused;
++    navigation.setDocumentEntryHandler(
++        [&](std::size_t, Extent range, RenderState &) { focused = range; });
++    navigation.advanceFrame(state);
++    const auto current     = navigation.currentVisit();
++    const auto visits      = navigation.walkEntries().size();
++    const auto activityOps = session.activityForNavigation()->opCount();
++    const auto operations  = store.opCount();
++    ASSERT_FALSE(doc->anchorFor(0));
++    const auto stale = navigation.execute(nav::ActivityForward{*current});
++    ASSERT_FALSE(stale);
++    EXPECT_EQ(stale.error(), NavigationError::NoPreviousVisit);
++    EXPECT_FALSE(navigation.entryPending());
++    EXPECT_EQ(navigation.currentVisit(), current);
++    ASSERT_TRUE(navigation.execute(command));
++    ASSERT_TRUE(navigation.entryPending());
++    EXPECT_FALSE(focused);
++    EXPECT_EQ(navigation.currentVisit(), current);
++    EXPECT_EQ(session.activityForNavigation()->opCount(), activityOps);
++    ASSERT_TRUE(navigation.execute(nav::CancelEntry{}));
++    EXPECT_FALSE(navigation.entryPending());
++    EXPECT_EQ(navigation.currentVisit(), current);
++    ASSERT_TRUE(navigation.execute(command));
++    ASSERT_TRUE(navigation.entryPending());
++    doc->makePages();
++    std::ignore = doc->buildPendingPages(state);
++    navigation.advanceFrame(state);
++    EXPECT_FALSE(navigation.entryPending());
++    EXPECT_EQ(navigation.currentVisit(), expected);
++    EXPECT_EQ(focused, (kind == 1 ? Extent{7, 18} : Extent{0, 6}));
++    EXPECT_EQ(navigation.walkEntries().size(), visits);
++    EXPECT_EQ(store.opCount(), operations);
++    const auto restoredOps = session.activityForNavigation()->opCount();
++    navigation.advanceFrame(state);
++    EXPECT_EQ(session.activityForNavigation()->opCount(), restoredOps);
++  }
++}
+diff --git a/tests/zigzag/walks_form_test.cpp b/tests/zigzag/walks_form_test.cpp
+index 03b3a3b2..2d50df16 100644
+--- a/tests/zigzag/walks_form_test.cpp
++++ b/tests/zigzag/walks_form_test.cpp
+@@ -30,7 +30,7 @@ TEST(WalksFormTest, KeyboardPreviewChoosesEitherSavedFutureWithoutEntering) {
+   gleditor::Form form;
+   std::vector<xanadu::WalksAction> actions;
+   xanadu::openWalksForm(
+-      form, entries(), xanadu::VisitId{1}, describe,
++      form, entries(), xanadu::VisitId{2}, xanadu::VisitId{1}, describe,
+       [&](auto action) { actions.push_back(std::move(action)); });
+   const auto fields = form.current();
+   ASSERT_EQ(fields.size(), 3U);
+@@ -47,7 +47,7 @@ TEST(WalksFormTest, KeyboardPreviewChoosesEitherSavedFutureWithoutEntering) {
+   EXPECT_EQ(actions.front().kind, xanadu::WalksActionKind::Preview);
+   EXPECT_EQ(actions.front().visit, xanadu::VisitId{3});
+   xanadu::openWalksForm(
+-      form, entries(), xanadu::VisitId{2}, describe,
++      form, entries(), xanadu::VisitId{2}, xanadu::VisitId{2}, describe,
+       [&](auto action) { actions.push_back(std::move(action)); });
+   form.keyPressed(gleditor::Key::Tab, gleditor::KeyMods::None);
+   form.keyPressed(gleditor::Key::Tab, gleditor::KeyMods::None);
+@@ -61,7 +61,8 @@ TEST(WalksFormTest, AccessibilityFieldsPreserveTargetAndAnnotationIdentity) {
+   using gleditor::a11y::Action;
+   gleditor::Form form;
+   std::optional<xanadu::WalksAction> chosen;
+-  xanadu::openWalksForm(form, entries(), xanadu::VisitId{1}, describe,
++  xanadu::openWalksForm(form, entries(), xanadu::VisitId{2}, xanadu::VisitId{1},
++                        describe,
+                         [&](auto action) { chosen = std::move(action); });
+   gleditor::a11y::Tree tree;
+   gleditor::a11y::Builder into(tree, 16);
+@@ -83,10 +84,55 @@ TEST(WalksFormTest, AccessibilityFieldsPreserveTargetAndAnnotationIdentity) {
+ TEST(WalksFormTest, EmptyWalkCannotInventAVisit) {
+   gleditor::Form form;
+   int accepted{};
+-  xanadu::openWalksForm(form, {}, std::nullopt, describe,
++  xanadu::openWalksForm(form, {}, std::nullopt, std::nullopt, describe,
+                         [&](auto) { ++accepted; });
+   form.keyPressed(gleditor::Key::Tab, gleditor::KeyMods::None);
+   form.keyPressed(gleditor::Key::Tab, gleditor::KeyMods::None);
+   form.keyPressed(gleditor::Key::Return, gleditor::KeyMods::None);
+   EXPECT_EQ(accepted, 0);
+ }
++
++TEST(WalksFormTest, PreviewAndCurrentStayDistinctAcrossFormReopening) {
++  gleditor::Form form;
++  std::optional<xanadu::WalksAction> accepted;
++  const auto open = [&](std::optional<xanadu::VisitId> current,
++                        std::optional<xanadu::VisitId> selected) {
++    xanadu::openWalksForm(
++        form, entries(), current, selected, describe,
++        [&](auto action) { accepted = std::move(action); },
++        "Saved preview excerpt");
++  };
++  const auto notice = [&] {
++    gleditor::a11y::Tree tree;
++    gleditor::a11y::Builder into(tree, 16);
++    form.describe(into);
++    return tree.find(into.id(2))->value;
++  };
++  open(xanadu::VisitId{3}, xanadu::VisitId{2});
++  EXPECT_TRUE(notice().starts_with("Current visit 3. "));
++  EXPECT_TRUE(notice().contains("Selected visit 2: cell 8"));
++  auto fields = form.current();
++  EXPECT_EQ(fields[0].chosen, 1U);
++  EXPECT_FALSE(fields[0].options[1].contains("(current)"));
++  EXPECT_TRUE(fields[0].options[2].contains("(current)"));
++  EXPECT_TRUE(
++      fields[0].optionDescriptions[2].contains("current reading place"));
++  form.keyPressed(gleditor::Key::Tab, gleditor::KeyMods::None);
++  form.keyPressed(gleditor::Key::Tab, gleditor::KeyMods::None);
++  form.keyPressed(gleditor::Key::Return, gleditor::KeyMods::None);
++  ASSERT_TRUE(accepted);
++  EXPECT_EQ(accepted->kind, xanadu::WalksActionKind::Preview);
++  EXPECT_EQ(accepted->visit, xanadu::VisitId{2});
++  open(xanadu::VisitId{3}, accepted->visit);
++  EXPECT_TRUE(notice().starts_with("Current visit 3. "));
++  EXPECT_TRUE(form.current()[0].options[2].contains("(current)"));
++  open(xanadu::VisitId{2}, accepted->visit);
++  EXPECT_TRUE(notice().starts_with("Current visit 2. "));
++  EXPECT_TRUE(notice().contains("Selected visit 2: cell 8"));
++  EXPECT_TRUE(form.current()[0].options[1].contains("(current)"));
++  EXPECT_FALSE(form.current()[0].options[2].contains("(current)"));
++  open(std::nullopt, xanadu::VisitId{2});
++  EXPECT_TRUE(notice().starts_with("No current visit. "));
++  for (const auto &option : form.current()[0].options)
++    EXPECT_FALSE(option.contains("(current)"));
++}

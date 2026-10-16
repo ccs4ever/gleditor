@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+set -euo pipefail
+root=/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-thirteenth
+run=$root/fivevisit-baseline; bin=$root/frozen
+export SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1
+export XDG_DATA_HOME=$run/data XDG_CONFIG_HOME=$run/config XDG_CACHE_HOME=$run/cache
+export PATH=/tmp/spatial-xvfb/usr/bin:$PATH
+passage=$'Harbor left passage.\nMeadow second passage.\nRight one.\nRight two.\nRight three.\n'
+app=("$bin/xuzz" --backend opengl --resize 1440,1000 --profile
+  --chord Ctrl+N --type "$passage" --select 0,20 --chord Ctrl+T --chord Ctrl+2
+  --select 0,20 --chord 'Ctrl+Alt+[' --select 21,43 --chord 'Ctrl+Alt+['
+  --select 44,54 --chord 'Ctrl+Alt+]' --select 55,65 --chord 'Ctrl+Alt+]' --select 66,78 --chord 'Ctrl+Alt+]'
+  --chord 'Ctrl+Alt+L' --select 0,20 --chord 'Alt+Shift+N'
+  --chord 'Alt+Shift+J' --chord 'Alt+Shift+L' --chord 'Alt+Shift+L'
+  --chord 'Alt+Shift+X' --chord 'Alt+Shift+J' --chord 'Alt+Shift+J' --chord 'Alt+Shift+X'
+  --chord 'Alt+Shift+Return' --dump-a11y --capture "$run/raw/01-visit2-b1.ppm" --wait-ms 4000
+  --chord 'Alt+Shift+X' --chord 'Alt+Shift+Return' --dump-a11y --capture "$run/raw/02-visit3-child2.ppm" --wait-ms 4000
+  --chord 'Alt+Shift+B' --dump-a11y --capture "$run/raw/03-back-visit2.ppm" --wait-ms 3000
+  --chord 'Alt+Shift+X' --chord 'Alt+Shift+H' --chord 'Alt+Shift+Return' --dump-a11y --capture "$run/raw/04-visit4-child2.ppm" --wait-ms 4000
+  --chord 'Alt+Shift+X' --chord 'Alt+Shift+J' --chord 'Alt+Shift+Return' --dump-a11y --capture "$run/raw/05-visit5-child4.ppm" --wait-ms 4000
+  --chord 'Alt+Shift+B' --dump-a11y --capture "$run/raw/06-back-visit4.ppm" --wait-ms 3000
+  --chord 'Alt+Shift+B' --dump-a11y --capture "$run/raw/07-back-visit2.ppm" --wait-ms 3000
+  --chord 'Alt+Shift+B' --dump-a11y --capture "$run/raw/08-back-root.ppm" --wait-ms 3000
+  --chord 'Alt+Shift+Y' --dump-a11y --capture "$run/raw/09-forward-visit2.ppm" --wait-ms 3000
+  --chord 'Alt+Shift+Y' --key space --key down --key enter --key enter --dump-a11y --capture "$run/raw/10-forward-visit3.ppm" --wait-ms 4000
+  --chord 'Alt+Shift+Y' --dump-a11y --capture "$run/raw/11-no-forward-at-leaf3.ppm" --wait-ms 2000
+  --chord 'Alt+Shift+B' --dump-a11y --capture "$run/raw/12-back-visit2-again.ppm" --wait-ms 3000
+  --chord 'Alt+Shift+Y' --key space --key down --key enter --key enter --dump-a11y --capture "$run/raw/13-forward-sibling-visit4.ppm" --wait-ms 4000
+  --chord 'Alt+Shift+B' --chord 'Alt+Shift+Y' --dump-a11y --capture "$run/raw/14-forward-visit3-again.ppm" --wait-ms 4000
+  --chord 'Ctrl+Alt+W' --dump-a11y --capture "$run/raw/15-walks-current3.ppm" --wait-ms 3000
+  --key enter --key down --key down --key enter --key tab --key tab --key enter
+  --dump-a11y --capture "$run/raw/16-walks-preview5-current3.ppm" --wait-ms 4000
+  --key escape --dump-a11y --capture "$run/raw/17-current3-after-preview.ppm" --wait-ms 2000
+  --chord Ctrl+Q)
+printf '%q ' "${app[@]}" > "$run/evidence/argv.txt"; printf '\n' >> "$run/evidence/argv.txt"
+sha256sum "$bin"/{xuzz,libgleditor.so.0,xudu-dump} > "$run/evidence/binary-hashes-before.txt"
+LD_LIBRARY_PATH="$bin${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" SPDLOG_LEVEL='xuzz.keymap=debug' timeout --signal=TERM --kill-after=5s 300s xvfb-run -a -s '-noreset -screen 0 1600x1200x24' "${app[@]}" > "$run/evidence/session.log" 2>&1 & pid=$!
+snapshot() {
+ local step=$1 target="$run/evidence/checkpoints/$1" rootstores="$run/data/xudu/xanadocs"
+ mkdir -p "$target"; mapfile -t stores < <(find "$rootstores" -mindepth 1 -maxdepth 1 -type d ! -name default 2>/dev/null | sort)
+ { printf 'count=%s\n' "${#stores[@]}"; for i in "${!stores[@]}"; do printf '%s=%s\n' "$i" "${stores[$i]}"; "$bin/xudu-dump" --section=ops --permascroll="$run/data/xuzz/permascroll/default" "${stores[$i]}" > "$target/source-$i.ops.txt" 2>&1 || true; done; } > "$target/profile-stores.txt"
+ "$bin/xudu-dump" --section=ops --permascroll="$run/data/xuzz/permascroll/default" "$run/data/xudu/activity" > "$target/activity.ops.txt" 2>&1 || true
+ sha256sum "$target"/*.txt > "$target/SHA256SUMS"
+}
+for step in 01-visit2-b1 02-visit3-child2 03-back-visit2 04-visit4-child2 05-visit5-child4 06-back-visit4 07-back-visit2 08-back-root 09-forward-visit2 10-forward-visit3 11-no-forward-at-leaf3 12-back-visit2-again 13-forward-sibling-visit4 14-forward-visit3-again 15-walks-current3 16-walks-preview5-current3 17-current3-after-preview; do
+ f="$run/raw/$step.ppm"; ready=false
+ for _ in $(seq 1 120); do [[ -s "$f" && $(stat -c %s "$f") -eq 4320017 ]] && { ready=true; break; }; kill -0 "$pid" 2>/dev/null || break; sleep .5; done
+ if [[ $ready == true ]]; then snapshot "$step"; else printf missing-or-incomplete > "$run/evidence/$step.missing"; fi
+done
+status=0; wait "$pid" || status=$?; printf '%s\n' "$status" > "$run/evidence/exit.txt"
+sha256sum "$bin"/{xuzz,libgleditor.so.0,xudu-dump} > "$run/evidence/binary-hashes-after.txt"

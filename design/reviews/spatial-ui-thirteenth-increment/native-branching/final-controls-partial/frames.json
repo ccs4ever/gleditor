@@ -1,0 +1,62 @@
+[
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/final-phase4/raw/00-current6-after-retry.ppm",
+    "sha256": "09515f90087ac2c01367e05bd46079258ccafca018dba120d17916038ca7d6ed",
+    "png": "frames/00-current6-after-retry.png",
+    "rgb_sha256": "6617bf2ed4c55a29f416ab3986ebc1ef4a42a5effe88836397e8b41904170efa",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/final-phase4/raw/01-walks-current6.ppm",
+    "sha256": "3bba9d5bc4d869a1deabecf7ec2dc6b922e8d3d7d49d39a59808d6b881579ca5",
+    "png": "frames/01-walks-current6.png",
+    "rgb_sha256": "7d553d5fb4ff287f75cb474fe6788e1643f63238c56e17a63ef0c2fe112386b6",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/final-phase4/raw/02-preview5-current6.ppm",
+    "sha256": "11e498ce53e1462df683f437f00583aba4f37fa47b76a12109258c4dafc27a39",
+    "png": "frames/02-preview5-current6.png",
+    "rgb_sha256": "83c30884d46c8fb44439177900e3701db89ea93a0ec6d2fce5f12acb860f9810",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/final-phase4/raw/03-current6-after-preview.ppm",
+    "sha256": "09515f90087ac2c01367e05bd46079258ccafca018dba120d17916038ca7d6ed",
+    "png": "frames/03-current6-after-preview.png",
+    "rgb_sha256": "6617bf2ed4c55a29f416ab3986ebc1ef4a42a5effe88836397e8b41904170efa",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/final-phase4/raw/04-back-from6.ppm",
+    "sha256": "6bfc67407d5c43cba0c7f0d42f1859f18df82f48740e8a30ea794b1eed205ca2",
+    "png": "frames/04-back-from6.png",
+    "rgb_sha256": "94acb060d3d0bcef136e70cdff2b3a434feb6331c69fde69e308510ef36b4f21",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/final-phase4/raw/05-forward-to6.ppm",
+    "sha256": "aa7421763105b5e318aa90c50589695752d53be26d51bb1b1ad5707ca091122c",
+    "png": "frames/05-forward-to6.png",
+    "rgb_sha256": "a03780f1756e8a2e2d1df33d7d7f16ff319a79aff7962360ebc5565023d82604",
+    "size": [
+      1440,
+      1000
+    ]
+  }
+]

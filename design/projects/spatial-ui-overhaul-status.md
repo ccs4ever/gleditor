@@ -7,6 +7,34 @@ session.
 
 ## Current checkpoint
 
+Thirteenth checkpoint (2026-10-15), based on `3cb0634d`: Walks now receives the current visit
+separately from its selected preview. Its notice starts with the current visit ID and that row has a
+textual current marker. Preview does not change the reading place. Back, Forward, Enter Visit and
+Origin share Enter's existing exact-page readiness path: they wait for both passage anchors before
+publishing the restored current pointer. Cancel, a new source arrival and view-generation changes
+retain their cancellation semantics. A stale/non-child Forward is refused before waiting.
+
+Pending restoration without a selected Link uses the existing retained panel, naming the exact
+store, state and byte range with a visible/accessibility Cancel action. It adds no Inspector toggle,
+service, camera, action or setting. The real-Doc regression fails before the fix and checks all four
+restore commands, cancellation/build/retry, unchanged visits and source operations. A separate
+owning regression closes/reloads the real activity store, restores both sibling children after
+reordering occurrences, preserves both pins and frozen Origin, and refuses a sibling as a child.
+
+Canonical GNU Make and fresh complete UI 241/241 and Xuzz 107/107 pass. Library/shared-library
+binaries remain unchanged, permitting reuse of 799/799 and mip/cache 53/53 evidence. Strict core
+GL/GLES/Vulkan passes unchanged criteria; configured one/four-thread frames match without actual
+split recording. Broad E2E and optimized performance are not accepted. Native five-visit branching,
+current/preview and exact closed-target recovery phases retain their separate executable hashes; see
+the [thirteenth checkpoint](../reviews/spatial-ui-thirteenth-increment/README.md).
+
+The read-only publication/pin-lifecycle audit is now recorded before D2. Immutable carriers and
+signature/payload gates exist. Received-package verification does not establish enrollment; reader
+retain/enable/emphasis controls are incomplete, and disabling a selected package currently dismisses
+its pinned Link. Fix and validate these lifecycle contracts before D2 enumeration. This checkpoint
+does not establish full J24/J25, native AT-SPI, complete 16+16 journeys, exact cell/history coverage
+or optimized budgets.
+
 Twelfth checkpoint (2026-10-15), based on `c5f21617`: both chosen sides now persist exact
 member-span and occurrence pins. Restore rebases view-local ordinals by exact identity and retains
 known closed places without substituting a current document or cell. A native baseline reproduction
@@ -484,17 +512,22 @@ reviews pass.
 
 ## Exact next task
 
-Continue J25 branching Back/Return and each retained forward child through actual controls, with
-source/activity snapshots before and after same-profile restart. Exact member/occurrence pins now
-survive changed view membership; verify both sides and origin while restoring unavailable targets,
-then reopen the exact versions and retry without adding restore visits. Check missing-link/member
-presentation and explicit replacement against the persisted pin contracts. Old v2 activity is
-preserved unsupported; do not regenerate it or introduce a compatibility shim.
+Continue the remaining J25 and exact cell/history variants through actual controls; preserve the
+five-visit graph, each forward child, exact side pins and frozen Origin. Native Reference and UTF-8
+Annotation are now verified without adding visits, and final saved-child restoration preserves all
+three futures. Native phase boundaries and binary hashes in the thirteenth archive distinguish
+intermediate from final runs. Naturally timed pending-page interruption and no-Link pending visual
+captures remain separate from the owning real-Doc/accessibility tests. Complete cell/history
+endpoints and media-position restoration remain open. Older v2 activity remains preserved
+unsupported; do not add a compatibility shim.
 
-The twelfth review establishes bounded closed-target restart/refusal/reopen/retry, not complete
-J24/J25 acceptance. Exercise naturally pending page cancellation where native timing permits; retain
-the owning source-arrival regression as integration evidence. Continue exact cell/history endpoints.
-Publication/pin-lifecycle audit still precedes D2 history enumeration.
+Then implement the publication/pin-lifecycle audit findings before D2: disabling a package must
+retain its selected immutable Link with an explicit disabled-drawing explanation; retain, enable and
+emphasis need separate governed persisted choices and actual reader controls. Validate restart,
+explicit replacement/dismissal, no visited-source operations, no preview visits, and unknown
+identity versus invalid signature/payload versus unavailable content. Reuse existing publication,
+ReaderLinkPackages, preferences and UI seams; do not invent missing services or a second view
+architecture. The audit is a requirement map, not a native lifecycle acceptance.
 
 The tenth review records bounded unavailable/Cancel/retry evidence. The ninth numeric audit resolves
 the earlier Origin/Back missing-panel discrepancy; confirm future visual findings with decoded

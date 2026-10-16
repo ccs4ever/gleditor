@@ -3198,6 +3198,7 @@ int XuzzApp::run(const int argc, char **argv) {
                                 walksState](RenderState &) {
           xanadu::openWalksForm(
               publishForm, linkContext.walkEntries(),
+              linkContext.currentVisit(),
               walksState->first ? walksState->first
                                 : linkContext.currentVisit(),
               [&linkContext](const xanadu::OccurrenceSite &site) {

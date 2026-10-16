@@ -1,0 +1,107 @@
+op 1  produces=1 parent=0 branch=0 kind=structure flags=0x8 at=0 len=0 to=0 src=0 srcAt=0 srcLen=0 scroll=0 span=[55396,55400) link=0 value=0  [make slice] text="main"
+op 2  produces=2 parent=1 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[55400,55404) link=0 value=0  [make cell ctx=1] text="home"
+op 3  produces=3 parent=2 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[55404,55410) link=0 value=0  [make cell ctx=1] text="d.dims"
+op 4  produces=4 parent=3 branch=0 kind=structure flags=0x1 at=0 len=0 to=3 src=2 srcAt=1 srcLen=0 scroll=0 span=[0,0) link=3 value=0  [setLink posward dim=3 -> 3 cell@2 ctx=1]
+op 5  produces=5 parent=4 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[55410,55427) link=0 value=0  [make cell ctx=1] text="d.activity-visits"
+op 6  produces=6 parent=5 branch=0 kind=structure flags=0x1 at=0 len=0 to=5 src=3 srcAt=1 srcLen=0 scroll=0 span=[0,0) link=3 value=0  [setLink posward dim=3 -> 5 cell@3 ctx=1]
+op 7  produces=7 parent=6 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[55427,55484) link=0 value=0  [make cell ctx=1] text="visit3 0 doc f3bdcba7b71c990f3340b992365c9e66 0 "...
+op 8  produces=8 parent=7 branch=0 kind=structure flags=0x1 at=0 len=0 to=7 src=2 srcAt=2 srcLen=0 scroll=0 span=[0,0) link=5 value=0  [setLink posward dim=5 -> 7 cell@2 ctx=2]
+op 9  produces=9 parent=8 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[55484,55502) link=0 value=0  [make cell ctx=1] text="d.activity-current"
+op 10  produces=10 parent=9 branch=0 kind=structure flags=0x1 at=0 len=0 to=9 src=5 srcAt=1 srcLen=0 scroll=0 span=[0,0) link=3 value=0  [setLink posward dim=3 -> 9 cell@5 ctx=1]
+op 11  produces=11 parent=10 branch=0 kind=structure flags=0x30 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[55502,55503) link=0 value=1  [make cell int64 ctx=1] text="1"
+op 12  produces=12 parent=11 branch=0 kind=structure flags=0x1 at=0 len=0 to=11 src=8 srcAt=8 srcLen=0 scroll=0 span=[0,0) link=9 value=0  [setLink posward dim=9 -> 11 cell@8 ctx=8]
+op 13  produces=13 parent=12 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[55682,55965) link=0 value=0  [make cell ctx=1] text="visit3 1 doc 59550220a3f2d618620e97b833fc5029 b1"...
+op 14  produces=14 parent=13 branch=0 kind=structure flags=0x1 at=0 len=0 to=13 src=7 srcAt=7 srcLen=0 scroll=0 span=[0,0) link=5 value=0  [setLink posward dim=5 -> 13 cell@7 ctx=7]
+op 15  produces=15 parent=14 branch=0 kind=structure flags=0x30 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[55965,55966) link=0 value=2  [make cell int64 ctx=1] text="2"
+op 16  produces=16 parent=15 branch=0 kind=structure flags=0x1 at=0 len=0 to=15 src=11 srcAt=11 srcLen=0 scroll=0 span=[0,0) link=9 value=0  [setLink posward dim=9 -> 15 cell@11 ctx=11]
+op 17  produces=17 parent=16 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[55966,56251) link=0 value=0  [make cell ctx=1] text="visit3 2 doc 59550220a3f2d618620e97b833fc5029 a3"...
+op 18  produces=18 parent=17 branch=0 kind=structure flags=0x1 at=0 len=0 to=17 src=13 srcAt=13 srcLen=0 scroll=0 span=[0,0) link=5 value=0  [setLink posward dim=5 -> 17 cell@13 ctx=13]
+op 19  produces=19 parent=18 branch=0 kind=structure flags=0x30 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[56251,56252) link=0 value=3  [make cell int64 ctx=1] text="3"
+op 20  produces=20 parent=19 branch=0 kind=structure flags=0x1 at=0 len=0 to=19 src=15 srcAt=15 srcLen=0 scroll=0 span=[0,0) link=9 value=0  [setLink posward dim=9 -> 19 cell@15 ctx=15]
+op 21  produces=21 parent=20 branch=0 kind=structure flags=0x30 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[56252,56253) link=0 value=2  [make cell int64 ctx=1] text="2"
+op 22  produces=22 parent=21 branch=0 kind=structure flags=0x1 at=0 len=0 to=21 src=19 srcAt=19 srcLen=0 scroll=0 span=[0,0) link=9 value=0  [setLink posward dim=9 -> 21 cell@19 ctx=19]
+op 23  produces=23 parent=22 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[56253,56538) link=0 value=0  [make cell ctx=1] text="visit3 2 doc 59550220a3f2d618620e97b833fc5029 a3"...
+op 24  produces=24 parent=23 branch=0 kind=structure flags=0x1 at=0 len=0 to=23 src=17 srcAt=17 srcLen=0 scroll=0 span=[0,0) link=5 value=0  [setLink posward dim=5 -> 23 cell@17 ctx=17]
+op 25  produces=25 parent=24 branch=0 kind=structure flags=0x30 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[56538,56539) link=0 value=4  [make cell int64 ctx=1] text="4"
+op 26  produces=26 parent=25 branch=0 kind=structure flags=0x1 at=0 len=0 to=25 src=21 srcAt=21 srcLen=0 scroll=0 span=[0,0) link=9 value=0  [setLink posward dim=9 -> 25 cell@21 ctx=21]
+op 27  produces=27 parent=26 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[56539,56826) link=0 value=0  [make cell ctx=1] text="visit3 4 doc 59550220a3f2d618620e97b833fc5029 a3"...
+op 28  produces=28 parent=27 branch=0 kind=structure flags=0x1 at=0 len=0 to=27 src=23 srcAt=23 srcLen=0 scroll=0 span=[0,0) link=5 value=0  [setLink posward dim=5 -> 27 cell@23 ctx=23]
+op 29  produces=29 parent=28 branch=0 kind=structure flags=0x30 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[56826,56827) link=0 value=5  [make cell int64 ctx=1] text="5"
+op 30  produces=30 parent=29 branch=0 kind=structure flags=0x1 at=0 len=0 to=29 src=25 srcAt=25 srcLen=0 scroll=0 span=[0,0) link=9 value=0  [setLink posward dim=9 -> 29 cell@25 ctx=25]
+op 31  produces=31 parent=30 branch=0 kind=structure flags=0x30 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[56827,56828) link=0 value=4  [make cell int64 ctx=1] text="4"
+op 32  produces=32 parent=31 branch=0 kind=structure flags=0x1 at=0 len=0 to=31 src=29 srcAt=29 srcLen=0 scroll=0 span=[0,0) link=9 value=0  [setLink posward dim=9 -> 31 cell@29 ctx=29]
+op 33  produces=33 parent=32 branch=0 kind=structure flags=0x30 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[56828,56829) link=0 value=2  [make cell int64 ctx=1] text="2"
+op 34  produces=34 parent=33 branch=0 kind=structure flags=0x1 at=0 len=0 to=33 src=31 srcAt=31 srcLen=0 scroll=0 span=[0,0) link=9 value=0  [setLink posward dim=9 -> 33 cell@31 ctx=31]
+op 35  produces=35 parent=34 branch=0 kind=structure flags=0x30 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[56829,56830) link=0 value=1  [make cell int64 ctx=1] text="1"
+op 36  produces=36 parent=35 branch=0 kind=structure flags=0x1 at=0 len=0 to=35 src=33 srcAt=33 srcLen=0 scroll=0 span=[0,0) link=9 value=0  [setLink posward dim=9 -> 35 cell@33 ctx=33]
+op 37  produces=37 parent=36 branch=0 kind=structure flags=0x30 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[56830,56831) link=0 value=2  [make cell int64 ctx=1] text="2"
+op 38  produces=38 parent=37 branch=0 kind=structure flags=0x1 at=0 len=0 to=37 src=35 srcAt=35 srcLen=0 scroll=0 span=[0,0) link=9 value=0  [setLink posward dim=9 -> 37 cell@35 ctx=35]
+op 39  produces=39 parent=38 branch=0 kind=structure flags=0x30 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[56831,56832) link=0 value=3  [make cell int64 ctx=1] text="3"
+op 40  produces=40 parent=39 branch=0 kind=structure flags=0x1 at=0 len=0 to=39 src=37 srcAt=37 srcLen=0 scroll=0 span=[0,0) link=9 value=0  [setLink posward dim=9 -> 39 cell@37 ctx=37]
+op 41  produces=41 parent=40 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[56832,56840) link=0 value=0  [make cell ctx=1] text="d.places"
+op 42  produces=42 parent=41 branch=0 kind=structure flags=0x1 at=0 len=0 to=41 src=9 srcAt=1 srcLen=0 scroll=0 span=[0,0) link=3 value=0  [setLink posward dim=3 -> 41 cell@9 ctx=1]
+op 43  produces=43 parent=42 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[56840,56851) link=0 value=0  [make cell ctx=1] text="d.documents"
+op 44  produces=44 parent=43 branch=0 kind=structure flags=0x1 at=0 len=0 to=43 src=41 srcAt=1 srcLen=0 scroll=0 span=[0,0) link=3 value=0  [setLink posward dim=3 -> 43 cell@41 ctx=1]
+op 45  produces=45 parent=44 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[56851,56860) link=0 value=0  [make cell ctx=1] text="d.version"
+op 46  produces=46 parent=45 branch=0 kind=structure flags=0x1 at=0 len=0 to=45 src=43 srcAt=1 srcLen=0 scroll=0 span=[0,0) link=3 value=0  [setLink posward dim=3 -> 45 cell@43 ctx=1]
+op 47  produces=47 parent=46 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[56860,56867) link=0 value=0  [make cell ctx=1] text="d.caret"
+op 48  produces=48 parent=47 branch=0 kind=structure flags=0x1 at=0 len=0 to=47 src=45 srcAt=1 srcLen=0 scroll=0 span=[0,0) link=3 value=0  [setLink posward dim=3 -> 47 cell@45 ctx=1]
+op 49  produces=49 parent=48 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[56867,56875) link=0 value=0  [make cell ctx=1] text="d.anchor"
+op 50  produces=50 parent=49 branch=0 kind=structure flags=0x1 at=0 len=0 to=49 src=47 srcAt=1 srcLen=0 scroll=0 span=[0,0) link=3 value=0  [setLink posward dim=3 -> 49 cell@47 ctx=1]
+op 51  produces=51 parent=50 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[56875,56883) link=0 value=0  [make cell ctx=1] text="d.camera"
+op 52  produces=52 parent=51 branch=0 kind=structure flags=0x1 at=0 len=0 to=51 src=49 srcAt=1 srcLen=0 scroll=0 span=[0,0) link=3 value=0  [setLink posward dim=3 -> 51 cell@49 ctx=1]
+op 53  produces=53 parent=52 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[56883,56891) link=0 value=0  [make cell ctx=1] text="d.zigzag"
+op 54  produces=54 parent=53 branch=0 kind=structure flags=0x1 at=0 len=0 to=53 src=51 srcAt=1 srcLen=0 scroll=0 span=[0,0) link=3 value=0  [setLink posward dim=3 -> 53 cell@51 ctx=1]
+op 55  produces=55 parent=54 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[56891,56899) link=0 value=0  [make cell ctx=1] text="d.active"
+op 56  produces=56 parent=55 branch=0 kind=structure flags=0x1 at=0 len=0 to=55 src=53 srcAt=1 srcLen=0 scroll=0 span=[0,0) link=3 value=0  [setLink posward dim=3 -> 55 cell@53 ctx=1]
+op 57  produces=57 parent=56 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[56899,56904) link=0 value=0  [make cell ctx=1] text="place"
+op 58  produces=58 parent=57 branch=0 kind=structure flags=0x1 at=0 len=0 to=57 src=12 srcAt=12 srcLen=0 scroll=0 span=[0,0) link=41 value=0  [setLink posward dim=41 -> 57 cell@12 ctx=12]
+op 59  produces=59 parent=58 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[56904,57036) link=0 value=0  [make cell ctx=1] text="/data/git/gleditor-restore/.worktrees/spatial-ui"...
+op 60  produces=60 parent=59 branch=0 kind=structure flags=0x1 at=0 len=0 to=59 src=57 srcAt=57 srcLen=0 scroll=0 span=[0,0) link=43 value=0  [setLink posward dim=43 -> 59 cell@57 ctx=57]
+op 61  produces=61 parent=60 branch=0 kind=structure flags=0x30 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[57036,57037) link=0 value=0  [make cell int64 ctx=1] text="0"
+op 62  produces=62 parent=61 branch=0 kind=structure flags=0x1 at=0 len=0 to=61 src=59 srcAt=59 srcLen=0 scroll=0 span=[0,0) link=45 value=0  [setLink posward dim=45 -> 61 cell@59 ctx=59]
+op 63  produces=63 parent=62 branch=0 kind=structure flags=0x30 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[57037,57038) link=0 value=0  [make cell int64 ctx=1] text="0"
+op 64  produces=64 parent=63 branch=0 kind=structure flags=0x1 at=0 len=0 to=63 src=62 srcAt=62 srcLen=0 scroll=0 span=[0,0) link=47 value=0  [setLink posward dim=47 -> 63 cell@62 ctx=62]
+op 65  produces=65 parent=64 branch=0 kind=structure flags=0x30 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[57038,57039) link=0 value=0  [make cell int64 ctx=1] text="0"
+op 66  produces=66 parent=65 branch=0 kind=structure flags=0x1 at=0 len=0 to=65 src=64 srcAt=64 srcLen=0 scroll=0 span=[0,0) link=49 value=0  [setLink posward dim=49 -> 65 cell@64 ctx=64]
+op 67  produces=67 parent=66 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[57039,57188) link=0 value=0  [make cell ctx=1] text="/data/git/gleditor-restore/.worktrees/spatial-ui"...
+op 68  produces=68 parent=67 branch=0 kind=structure flags=0x1 at=0 len=0 to=67 src=66 srcAt=66 srcLen=0 scroll=0 span=[0,0) link=43 value=0  [setLink posward dim=43 -> 67 cell@66 ctx=66]
+op 69  produces=69 parent=68 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[57188,57191) link=0 value=0  [make cell ctx=1] text="a34"
+op 70  produces=70 parent=69 branch=0 kind=structure flags=0x1 at=0 len=0 to=69 src=67 srcAt=67 srcLen=0 scroll=0 span=[0,0) link=45 value=0  [setLink posward dim=45 -> 69 cell@67 ctx=67]
+op 71  produces=71 parent=70 branch=0 kind=structure flags=0x30 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[57191,57193) link=0 value=65  [make cell int64 ctx=1] text="65"
+op 72  produces=72 parent=71 branch=0 kind=structure flags=0x1 at=0 len=0 to=71 src=70 srcAt=70 srcLen=0 scroll=0 span=[0,0) link=47 value=0  [setLink posward dim=47 -> 71 cell@70 ctx=70]
+op 73  produces=73 parent=72 branch=0 kind=structure flags=0x30 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[57193,57195) link=0 value=55  [make cell int64 ctx=1] text="55"
+op 74  produces=74 parent=73 branch=0 kind=structure flags=0x1 at=0 len=0 to=73 src=72 srcAt=72 srcLen=0 scroll=0 span=[0,0) link=49 value=0  [setLink posward dim=49 -> 73 cell@72 ctx=72]
+op 75  produces=75 parent=74 branch=0 kind=structure flags=0x1 at=0 len=0 to=67 src=60 srcAt=60 srcLen=0 scroll=0 span=[0,0) link=55 value=0  [setLink posward dim=55 -> 67 cell@60 ctx=60]
+op 76  produces=76 parent=75 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[57195,57344) link=0 value=0  [make cell ctx=1] text="/data/git/gleditor-restore/.worktrees/spatial-ui"...
+op 77  produces=77 parent=76 branch=0 kind=structure flags=0x1 at=0 len=0 to=76 src=74 srcAt=74 srcLen=0 scroll=0 span=[0,0) link=43 value=0  [setLink posward dim=43 -> 76 cell@74 ctx=74]
+op 78  produces=78 parent=77 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[57344,57346) link=0 value=0  [make cell ctx=1] text="b1"
+op 79  produces=79 parent=78 branch=0 kind=structure flags=0x1 at=0 len=0 to=78 src=76 srcAt=76 srcLen=0 scroll=0 span=[0,0) link=45 value=0  [setLink posward dim=45 -> 78 cell@76 ctx=76]
+op 80  produces=80 parent=79 branch=0 kind=structure flags=0x30 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[57346,57347) link=0 value=0  [make cell int64 ctx=1] text="0"
+op 81  produces=81 parent=80 branch=0 kind=structure flags=0x1 at=0 len=0 to=80 src=79 srcAt=79 srcLen=0 scroll=0 span=[0,0) link=47 value=0  [setLink posward dim=47 -> 80 cell@79 ctx=79]
+op 82  produces=82 parent=81 branch=0 kind=structure flags=0x30 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[57347,57348) link=0 value=0  [make cell int64 ctx=1] text="0"
+op 83  produces=83 parent=82 branch=0 kind=structure flags=0x1 at=0 len=0 to=82 src=81 srcAt=81 srcLen=0 scroll=0 span=[0,0) link=49 value=0  [setLink posward dim=49 -> 82 cell@81 ctx=81]
+op 84  produces=84 parent=83 branch=0 kind=structure flags=0x10 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[57348,57366) link=0 value=4638645457277419520  [make cell double ctx=1] text="127.11666870117188"
+op 85  produces=85 parent=84 branch=0 kind=structure flags=0x1 at=0 len=0 to=84 src=75 srcAt=75 srcLen=0 scroll=0 span=[0,0) link=51 value=0  [setLink posward dim=51 -> 84 cell@75 ctx=75]
+op 86  produces=86 parent=85 branch=0 kind=structure flags=0x10 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[57366,57383) link=0 value=4618347591086637056  [make cell double ctx=1] text="5.916665077209473"
+op 87  produces=87 parent=86 branch=0 kind=structure flags=0x1 at=0 len=0 to=86 src=84 srcAt=84 srcLen=0 scroll=0 span=[0,0) link=51 value=0  [setLink posward dim=51 -> 86 cell@84 ctx=84]
+op 88  produces=88 parent=87 branch=0 kind=structure flags=0x10 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[57383,57399) link=0 value=4652786383696429056  [make cell double ctx=1] text="1153.14111328125"
+op 89  produces=89 parent=88 branch=0 kind=structure flags=0x1 at=0 len=0 to=88 src=86 srcAt=86 srcLen=0 scroll=0 span=[0,0) link=51 value=0  [setLink posward dim=51 -> 88 cell@86 ctx=86]
+op 90  produces=90 parent=89 branch=0 kind=structure flags=0x10 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[57399,57400) link=0 value=4617315517961601024  [make cell double ctx=1] text="5"
+op 91  produces=91 parent=90 branch=0 kind=structure flags=0x1 at=0 len=0 to=90 src=88 srcAt=88 srcLen=0 scroll=0 span=[0,0) link=51 value=0  [setLink posward dim=51 -> 90 cell@88 ctx=88]
+op 92  produces=92 parent=91 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[57400,57549) link=0 value=0  [make cell ctx=1] text="/data/git/gleditor-restore/.worktrees/spatial-ui"...
+op 93  produces=93 parent=92 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[57549,57552) link=0 value=0  [make cell ctx=1] text="a34"
+op 94  produces=94 parent=93 branch=0 kind=structure flags=0x30 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[57552,57553) link=0 value=5  [make cell int64 ctx=1] text="5"
+op 95  produces=95 parent=94 branch=0 kind=structure flags=0x1 at=0 len=0 to=92 src=85 srcAt=85 srcLen=0 scroll=0 span=[0,0) link=53 value=0  [setLink posward dim=53 -> 92 cell@85 ctx=85]
+op 96  produces=96 parent=95 branch=0 kind=structure flags=0x1 at=0 len=0 to=93 src=92 srcAt=92 srcLen=0 scroll=0 span=[0,0) link=53 value=0  [setLink posward dim=53 -> 93 cell@92 ctx=92]
+op 97  produces=97 parent=96 branch=0 kind=structure flags=0x1 at=0 len=0 to=94 src=93 srcAt=93 srcLen=0 scroll=0 span=[0,0) link=53 value=0  [setLink posward dim=53 -> 94 cell@93 ctx=93]
+op 98  produces=98 parent=97 branch=0 kind=structure flags=0x20 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[57553,57558) link=0 value=0  [make cell bool ctx=1] text="false"
+op 99  produces=99 parent=98 branch=0 kind=structure flags=0x1 at=0 len=0 to=98 src=94 srcAt=94 srcLen=0 scroll=0 span=[0,0) link=53 value=0  [setLink posward dim=53 -> 98 cell@94 ctx=94]
+op 100  produces=100 parent=99 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[57558,57569) link=0 value=0  [make cell ctx=1] text="d.selection"
+op 101  produces=101 parent=100 branch=0 kind=structure flags=0x1 at=0 len=0 to=100 src=55 srcAt=1 srcLen=0 scroll=0 span=[0,0) link=3 value=0  [setLink posward dim=3 -> 100 cell@55 ctx=1]
+op 102  produces=102 parent=101 branch=0 kind=structure flags=0x0 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[57569,57803) link=0 value=0  [make cell ctx=1] text="selection3 59550220a3f2d618620e97b833fc5029 22 1"...
+op 103  produces=103 parent=102 branch=0 kind=structure flags=0x1 at=0 len=0 to=102 src=95 srcAt=95 srcLen=0 scroll=0 span=[0,0) link=100 value=0  [setLink posward dim=100 -> 102 cell@95 ctx=95]
+op 104  produces=104 parent=103 branch=0 kind=structure flags=0x30 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[57803,57804) link=0 value=2  [make cell int64 ctx=1] text="2"
+op 105  produces=105 parent=104 branch=0 kind=structure flags=0x1 at=0 len=0 to=104 src=39 srcAt=39 srcLen=0 scroll=0 span=[0,0) link=9 value=0  [setLink posward dim=9 -> 104 cell@39 ctx=39]
+op 106  produces=106 parent=105 branch=0 kind=structure flags=0x30 at=0 len=0 to=0 src=1 srcAt=0 srcLen=0 scroll=0 span=[57804,57805) link=0 value=4  [make cell int64 ctx=1] text="4"
+op 107  produces=107 parent=106 branch=0 kind=structure flags=0x1 at=0 len=0 to=106 src=104 srcAt=104 srcLen=0 scroll=0 span=[0,0) link=9 value=0  [setLink posward dim=9 -> 106 cell@104 ctx=104]

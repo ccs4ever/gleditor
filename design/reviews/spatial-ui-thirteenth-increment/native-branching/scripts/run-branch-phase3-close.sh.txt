@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+root=/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-thirteenth
+run=$root/native; bin=$root/frozen
+export SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1
+export XDG_DATA_HOME=$run/data XDG_CONFIG_HOME=$run/config XDG_CACHE_HOME=$run/cache
+export PATH=/tmp/spatial-xvfb/usr/bin:$PATH
+app=("$bin/xuzz" --backend opengl --resize 1440,1000 --profile
+  --dump-a11y --capture "$run/raw/27-before-close-b.ppm" --wait-ms 3000
+  --chord 'Alt+Shift+X' --dump-a11y --capture "$run/raw/28-left-pin-active.ppm" --wait-ms 3000
+  --click-label 'Close Untitled · b' --dump-a11y --capture "$run/raw/29-b-closed-before-exit.ppm" --wait-ms 5000
+  --chord Ctrl+Q)
+printf '%q ' "${app[@]}" > "$run/evidence/phase3-close-argv.txt"; printf '\n' >> "$run/evidence/phase3-close-argv.txt"
+sha256sum "$bin"/{xuzz,libgleditor.so.0,xudu-dump} > "$run/evidence/binary-hashes-before-phase3.txt"
+LD_LIBRARY_PATH="$bin${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" SPDLOG_LEVEL='xuzz.keymap=debug' timeout --signal=TERM --kill-after=5s 180s xvfb-run -a -s '-noreset -screen 0 1600x1200x24' "${app[@]}" > "$run/evidence/phase3-close.log" 2>&1 & pid=$!
+for step in 27-before-close-b 28-left-pin-active 29-b-closed-before-exit; do
+ f="$run/raw/$step.ppm"; ready=false
+ for _ in $(seq 1 120); do [[ -s "$f" && $(stat -c %s "$f") -eq 4320017 ]] && { ready=true; break; }; kill -0 "$pid" 2>/dev/null || break; sleep .5; done
+ if [[ $ready == true ]]; then
+  target="$run/evidence/checkpoints/$step"; mkdir -p "$target"; mapfile -t stores < <(find "$run/data/xudu/xanadocs" -mindepth 1 -maxdepth 1 -type d ! -name default 2>/dev/null | sort)
+  { printf 'count=%s\n' "${#stores[@]}"; for i in "${!stores[@]}"; do printf '%s=%s\n' "$i" "${stores[$i]}"; "$bin/xudu-dump" --section=ops --permascroll="$run/data/xuzz/permascroll/default" "${stores[$i]}" > "$target/source-$i.ops.txt" 2>&1 || true; done; } > "$target/profile-stores.txt"
+  "$bin/xudu-dump" --section=ops --permascroll="$run/data/xuzz/permascroll/default" "$run/data/xudu/activity" > "$target/activity.ops.txt" 2>&1 || true
+  sha256sum "$target"/*.txt > "$target/SHA256SUMS"
+ else printf missing-or-incomplete > "$run/evidence/$step.missing"; fi
+done
+status=0; wait "$pid" || status=$?; printf '%s\n' "$status" > "$run/evidence/phase3-close-exit.txt"
+sha256sum "$bin"/{xuzz,libgleditor.so.0,xudu-dump} > "$run/evidence/binary-hashes-after-phase3.txt"

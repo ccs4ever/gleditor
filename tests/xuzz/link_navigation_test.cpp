@@ -881,3 +881,101 @@ TEST(LinkNavigationTest,
   EXPECT_FALSE(resumed.selection());
   EXPECT_EQ(h.log.size(), before);
 }
+
+TEST(LinkNavigationTest,
+     PersistentSiblingRestorationKeepsBothPinsAndOriginAfterReordering) {
+  Harness h;
+  const auto base =
+      std::filesystem::temp_directory_path() /
+      ("xuzz-sibling-restore-" +
+       std::to_string(
+           std::chrono::steady_clock::now().time_since_epoch().count()));
+  xanadu::UserPermascroll::Config config;
+  config.storageDir    = base / "permascroll";
+  auto scroll          = std::make_shared<xanadu::UserPermascroll>(config);
+  const auto directory = base / "activity";
+  VisitId root, first, second;
+  const auto sourceOps  = h.f.store->opCount();
+  const auto checkpoint = h.inHead(11, 11);
+  {
+    xanadu::Store store(scroll);
+    xanadu::StoreActivityLog log(&store, directory);
+    xanadu::LinkNavigator navigation(log);
+    const auto run = [&](const auto &command) {
+      auto result = navigation.dispatch(command);
+      if (result && result->resolve)
+        EXPECT_TRUE(navigation.supply(result->resolve->generation,
+                                      h.resolve(result->resolve->key)));
+      return result;
+    };
+    root = navigation.recordArrival(h.inHead(0, 5));
+    navigation.checkpointOrigin(checkpoint);
+    ASSERT_TRUE(run(nav::SelectLink{h.link()}));
+    ASSERT_TRUE(run(nav::SelectOccurrence{h.link(), LinkSide::Left, 0, 0}));
+    ASSERT_TRUE(
+        run(nav::SelectOccurrence{h.link(), LinkSide::Right, kThree, 0}));
+    const auto entered = run(nav::Enter{});
+    ASSERT_TRUE(entered && entered->visit);
+    first = *entered->visit;
+    ASSERT_TRUE(run(nav::ActivityBack{}));
+    ASSERT_TRUE(run(nav::SelectOccurrence{h.link(), LinkSide::Left, 1, 0}));
+    ASSERT_TRUE(
+        run(nav::SelectOccurrence{h.link(), LinkSide::Right, kThree, 1}));
+    const auto branched = run(nav::Enter{});
+    ASSERT_TRUE(branched && branched->visit);
+    second = *branched->visit;
+    ASSERT_EQ(log.children(root), (std::vector<VisitId>{first, second}));
+  }
+  {
+    xanadu::Store store(scroll);
+    store.load(directory.string());
+    xanadu::StoreActivityLog log(&store, directory);
+    xanadu::LinkNavigator navigation(log);
+    const auto run = [&](const auto &command) {
+      auto result = navigation.dispatch(command);
+      if (result && result->resolve) {
+        auto resolved = h.resolve(result->resolve->key);
+        EXPECT_TRUE(resolved);
+        if (resolved) {
+          for (auto *members : {&resolved->left, &resolved->right})
+            for (auto &member : *members)
+              std::ranges::reverse(member.occurrences);
+          EXPECT_TRUE(navigation.supply(result->resolve->generation,
+                                        std::move(resolved)));
+        }
+      }
+      return result;
+    };
+    ASSERT_EQ(navigation.currentVisit(), second);
+    const auto visits = log.walkEntries().size();
+    ASSERT_TRUE(run(nav::ActivityBack{}));
+    for (const auto child : {first, second}) {
+      const auto saved = log.find(child);
+      ASSERT_TRUE(saved && saved->link);
+      const auto restored = run(nav::ActivityForward{child});
+      ASSERT_TRUE(restored && restored->focus);
+      EXPECT_EQ(restored->focus, std::optional{saved->target});
+      EXPECT_EQ(navigation.currentVisit(), child);
+      ASSERT_TRUE(navigation.selection());
+      const auto context = xanadu::selectionContext(*navigation.selection());
+      EXPECT_EQ(context.leftPin, saved->link->leftPin);
+      EXPECT_EQ(context.rightPin, saved->link->rightPin);
+      EXPECT_EQ(context.origin, root);
+      EXPECT_EQ(context.originCheckpoint,
+                std::optional<xanadu::OccurrenceSite>{checkpoint});
+      EXPECT_TRUE(log.children(child).empty());
+      const auto sibling = child == first ? second : first;
+      EXPECT_FALSE(run(nav::ActivityForward{sibling}));
+      EXPECT_EQ(navigation.currentVisit(), child);
+      const auto origin = run(nav::ReturnToOrigin{});
+      ASSERT_TRUE(origin);
+      EXPECT_EQ(origin->focus,
+                std::optional<xanadu::OccurrenceSite>{checkpoint});
+      EXPECT_EQ(navigation.currentVisit(), root);
+    }
+    EXPECT_EQ(log.children(root), (std::vector<VisitId>{first, second}));
+    EXPECT_EQ(log.walkEntries().size(), visits);
+    EXPECT_EQ(h.f.store->opCount(), sourceOps);
+  }
+  std::filesystem::remove_all(base);
+}

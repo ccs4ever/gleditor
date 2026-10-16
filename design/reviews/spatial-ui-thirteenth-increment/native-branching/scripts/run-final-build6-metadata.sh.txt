@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -euo pipefail
+root=/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-thirteenth
+profile=$root/candidate-fivevisit
+run=$profile/final-phase5
+bin=$root/candidate-build6
+export SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1
+export XDG_DATA_HOME=$profile/data XDG_CONFIG_HOME=$profile/config XDG_CACHE_HOME=$profile/cache
+export PATH=/tmp/spatial-xvfb/usr/bin:$PATH
+app=("$bin/xuzz" --backend opengl --resize 1440,1000 --profile
+  --dump-a11y --capture "$run/raw/00-before-explicit-enter.ppm" --wait-ms 4000
+  --click-label Enter --dump-a11y --capture "$run/raw/01-after-explicit-enter.ppm" --wait-ms 4000
+  --chord 'Ctrl+Alt+W' --dump-a11y --capture "$run/raw/02-walks-current.ppm" --wait-ms 3000
+  --key enter --key up --key enter --key tab --key right --key right --key tab --key enter
+  --dump-a11y --capture "$run/raw/03-reference-visit5.ppm" --wait-ms 3000
+  --key enter --key up --key enter --key tab --key right --key right --key right --key tab --type 'J25 branch note café' --key enter
+  --dump-a11y --capture "$run/raw/04-annotate-visit4.ppm" --wait-ms 3000
+  --key escape --dump-a11y --capture "$run/raw/05-after-metadata.ppm" --wait-ms 3000
+  --chord 'Alt+Shift+B' --dump-a11y --capture "$run/raw/06-back-to-parent.ppm" --wait-ms 3000
+  --chord 'Alt+Shift+Y' --dump-a11y --capture "$run/raw/07-forward-choices.ppm" --wait-ms 3000
+  --key space --key down --key down --key enter --key enter
+  --dump-a11y --capture "$run/raw/08-forward-third-child.ppm" --wait-ms 3000
+  --chord 'Ctrl+Alt+W' --dump-a11y --capture "$run/raw/09-walks-final.ppm" --wait-ms 3000
+  --key escape --chord Ctrl+Q)
+printf '%q ' "${app[@]}" > "$run/evidence/argv-controls.txt"; printf '\n' >> "$run/evidence/argv-controls.txt"
+sha256sum "$bin"/{xuzz,libgleditor.so.0,xudu-dump} > "$run/evidence/binary-hashes-before-controls.txt"
+LD_LIBRARY_PATH="$bin${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" SPDLOG_LEVEL='xuzz.keymap=debug' timeout --signal=TERM --kill-after=5s 240s xvfb-run -a -s '-noreset -screen 0 1600x1200x24' "${app[@]}" > "$run/evidence/session-controls.log" 2>&1 & pid=$!
+snapshot() {
+ local step=$1 target="$run/evidence/checkpoints/$1" rootstores="$profile/data/xudu/xanadocs"
+ mkdir -p "$target"; mapfile -t stores < <(find "$rootstores" -mindepth 1 -maxdepth 1 -type d ! -name default 2>/dev/null | sort)
+ { printf 'count=%s\n' "${#stores[@]}"; for i in "${!stores[@]}"; do printf '%s=%s\n' "$i" "${stores[$i]}"; "$bin/xudu-dump" --section=ops --permascroll="$profile/data/xuzz/permascroll/default" "${stores[$i]}" > "$target/source-$i.ops.txt" 2>&1 || true; done; } > "$target/profile-stores.txt"
+ "$bin/xudu-dump" --section=ops --permascroll="$profile/data/xuzz/permascroll/default" "$profile/data/xudu/activity" > "$target/activity.ops.txt" 2>&1 || true
+ sha256sum "$target"/*.txt > "$target/SHA256SUMS"
+}
+for step in 00-before-explicit-enter 01-after-explicit-enter 02-walks-current 03-reference-visit5 04-annotate-visit4 05-after-metadata 06-back-to-parent 07-forward-choices 08-forward-third-child 09-walks-final; do
+ f="$run/raw/$step.ppm"; ready=false
+ for _ in $(seq 1 120); do [[ -s "$f" && $(stat -c %s "$f") -eq 4320017 ]] && { ready=true; break; }; kill -0 "$pid" 2>/dev/null || break; sleep .5; done
+ if [[ $ready == true ]]; then snapshot "$step"; else printf missing-or-incomplete > "$run/evidence/$step.missing"; fi
+done
+run_exit=0; wait "$pid" || run_exit=$?; printf '%s\n' "$run_exit" > "$run/evidence/controls-exit.txt"
+sha256sum "$bin"/{xuzz,libgleditor.so.0,xudu-dump} > "$run/evidence/binary-hashes-after-controls.txt"

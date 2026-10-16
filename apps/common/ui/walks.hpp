@@ -21,8 +21,10 @@ struct WalksAction {
 using WalksAccepted = std::function<void(WalksAction)>;
 
 /// The snapshot and callback keep this presentation independent of thread and
-/// navigation ownership. The host dispatches only Enter to the navigator.
+/// navigation ownership. Current is the reading place; selected is only the
+/// form cursor. The host dispatches only Enter to the navigator.
 void openWalksForm(gleditor::Form &form, std::vector<WalkEntry> entries,
+                   std::optional<VisitId> current,
                    std::optional<VisitId> selected,
                    std::function<std::string(const OccurrenceSite &)> describe,
                    WalksAccepted accepted, std::string notice = {});

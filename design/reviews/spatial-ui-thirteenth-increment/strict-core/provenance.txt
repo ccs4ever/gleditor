@@ -1,0 +1,12 @@
+Final strict core comparison exit0 after final pending-panel drawing change.
+Worktree cwd; command:
+SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1 \
+XDG_DATA_HOME=$PWD/build/validation-thirteenth/strict-final/data \
+XDG_CONFIG_HOME=$PWD/build/validation-thirteenth/strict-final/config \
+XDG_CACHE_HOME=$PWD/build/validation-thirteenth/strict-final/cache \
+OUT=$PWD/build/validation-thirteenth/strict-final/raw XUDU_TEST_BIN=/nonexistent \
+PATH=/tmp/spatial-xvfb/usr/bin:$PATH \
+xvfb-run -a -s '-noreset -screen 0 1024x768x24' ./tools/compare-backends.sh
+
+All3 backends ran. GL/GLES ordinary+overlay exact0; Vulkan0.5104%/0.5096% at unchanged1% andchannel tolerance1. Small sample does not split actualrecording; broadE2E excluded. All22 rawframes losslessly archived asPNG.
+Initial setup-error.log.gz failed before anybackend launch because root forgot to mkdir OUT; initial comparison thenpassed. Finalrun above used fresh roots afterdrawingchanges. No criteria or script modifications.

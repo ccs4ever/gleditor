@@ -1,0 +1,3 @@
+xuzz-during-relink.log.gz:105/107; the2 app-spawning tests hit executable Permission denied while root was relinking build/xuzz. Finalfresh stable suite107/107 passes. No product failure inferred.
+ui-before-action-id-fix.log.gz:240/241; new no-Linkpending panel supplied an extra toggle action ID despite drawing no toggle. Fixed by appending toggle ID only when selected; finalfullUI241/241 passes.
+The red-page-readiness log separately records the intentional pre-fix restoration regression. A test-only compile error (using scene.investigationToggle instead of public visuals) was corrected before any executable run. No product contract, assertion or threshold was weakened.

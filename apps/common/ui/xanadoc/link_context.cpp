@@ -299,7 +299,8 @@ LinkContext::execute(const xanadu::NavigationCommand &command) {
       target = visit->target;
   } else if (const auto *forward =
                  std::get_if<nav::ActivityForward>(&command)) {
-    if (const auto visit = activity.find(forward->child))
+    if (const auto visit = activity.find(forward->child);
+        visit && visit->parent == navigator.currentVisit())
       target = visit->target;
   } else if (std::holds_alternative<nav::ActivityBack>(command)) {
     if (const auto current = navigator.currentVisit())
@@ -362,39 +363,24 @@ LinkContext::execute(const xanadu::NavigationCommand &command) {
       return std::unexpected(NavigationError::MemberNotInView);
     }
   }
-  if (selected && selected->occurrences && renderState_) {
-    auto side           = selected->active;
-    auto cursor         = selected->cursor(side);
-    const auto *at      = std::get_if<nav::EnterAt>(&command);
-    const bool entering = std::holds_alternative<nav::Enter>(command) ||
-                          (at && at->key == selected->key);
-    if (at && at->key == selected->key) {
-      side              = at->side;
-      cursor.member     = at->member;
-      cursor.occurrence = at->occurrence;
-    }
-    if (entering && cursor.member && cursor.occurrence &&
-        *cursor.member < selected->occurrences->members(side).size()) {
-      const auto &member = selected->occurrences->members(side)[*cursor.member];
-      if (*cursor.occurrence < member.occurrences.size()) {
-        const auto *site = std::get_if<DocumentSite>(
-            &member.occurrences[*cursor.occurrence].site);
-        const auto view = site ? viewIndexOf(*site) : std::nullopt;
-        if (view && *view < renderState_->docs.size() &&
-            renderState_->docs[*view]) {
-          auto &doc = *renderState_->docs[*view];
-          const std::array offsets{site->range.start,
-                                   site->range.end > site->range.start
-                                       ? site->range.end - 1
-                                       : site->range.start};
-          if (!doc.anchorFor(offsets[0]) || !doc.anchorFor(offsets[1])) {
-            doc.setPriorityOffsets(offsets);
-            pendingEntry =
-                PendingEntry{command, session.generation(), *view, *site};
-            ++changes;
-            return NavigationEffect{};
-          }
-        }
+  if (target && renderState_) {
+    const auto *site = std::get_if<DocumentSite>(&*target);
+    const auto view  = site ? viewIndexOf(*site) : std::nullopt;
+    if (view && *view < renderState_->docs.size() &&
+        renderState_->docs[*view]) {
+      auto &doc = *renderState_->docs[*view];
+      const std::array offsets{site->range.start,
+                               site->range.end > site->range.start
+                                   ? site->range.end - 1
+                                   : site->range.start};
+      // Restoring a visit must not publish its current pointer before its
+      // exact passage can be framed, just as endpoint entry must wait.
+      if (!doc.anchorFor(offsets[0]) || !doc.anchorFor(offsets[1])) {
+        doc.setPriorityOffsets(offsets);
+        pendingEntry =
+            PendingEntry{command, session.generation(), *view, *site};
+        ++changes;
+        return NavigationEffect{};
       }
     }
   }

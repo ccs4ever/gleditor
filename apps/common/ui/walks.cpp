@@ -7,6 +7,7 @@
 namespace xanadu {
 
 void openWalksForm(gleditor::Form &form, std::vector<WalkEntry> entries,
+                   const std::optional<VisitId> current,
                    const std::optional<VisitId> selected,
                    std::function<std::string(const OccurrenceSite &)> describe,
                    WalksAccepted accepted, std::string notice) {
@@ -31,10 +32,12 @@ void openWalksForm(gleditor::Form &form, std::vector<WalkEntry> entries,
     caption += "visit " + std::to_string(entry.visit.id.value);
     if (entry.visit.parent)
       caption += " from " + std::to_string(entry.visit.parent->value);
+    if (current == entry.visit.id) caption += " (current)";
     if (entry.referenced) caption += " (referenced)";
     caption += ": " + describe(entry.visit.target);
     visit.options.push_back(std::move(caption));
     std::string detail = describe(entry.visit.target);
+    if (current == entry.visit.id) detail += "; current reading place";
     if (entry.referenced) detail += "; saved reference";
     for (const auto &annotation : entry.annotations)
       detail += "; Annotation: " + annotation;
@@ -50,6 +53,9 @@ void openWalksForm(gleditor::Form &form, std::vector<WalkEntry> entries,
                  ? "No saved visits yet. Close Walks to continue reading."
                  : "Preview keeps your reading place. Enter restores a saved "
                    "visit. References and annotations stay in your activity.";
+  notice = (current ? "Current visit " + std::to_string(current->value)
+                    : "No current visit") +
+           ". " + notice;
   if (!ordered.empty()) {
     const auto &picked = ordered[visit.chosen];
     notice += " Selected visit " + std::to_string(picked.visit.id.value) +

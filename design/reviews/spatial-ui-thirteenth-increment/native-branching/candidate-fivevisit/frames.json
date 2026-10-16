@@ -1,0 +1,242 @@
+[
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/raw/01-visit2-b1.ppm",
+    "sha256": "371449fe4734fa776c2c40b6205e9ffee1bf5efef9990db0d3adc21ff1257be0",
+    "png": "frames/01-visit2-b1.png",
+    "rgb_sha256": "7ee03adc61de689cd90b24a8f373867602fbf07d29968b33dbd9d5cdb833cc73",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/raw/02-visit3-child2.ppm",
+    "sha256": "6e066a47671c96bda04380d68ad48a65cd61ff007fc0769019f9fe05adab214f",
+    "png": "frames/02-visit3-child2.png",
+    "rgb_sha256": "ae4362b1ff55d36f29c290725dd1c9377a009a235059021afc213378112cb202",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/raw/03-back-visit2.ppm",
+    "sha256": "decdaec01306ac01dddd7c65b1f3cd591410877307948b8b8a47fedc2fe7b0e9",
+    "png": "frames/03-back-visit2.png",
+    "rgb_sha256": "80cc73dae0699026b39fd821cb010568ad5298fb5156d02c470845e79d9bc381",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/raw/04-visit4-child2.ppm",
+    "sha256": "4652a21be89f06c5126eecd3343157471752bde34ad5a4ddffc25a1e80e7e442",
+    "png": "frames/04-visit4-child2.png",
+    "rgb_sha256": "eaed6c972366924cb876d3fb173d9821edc15715fc3b1001f2409feb81c56a7e",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/raw/05-visit5-child4.ppm",
+    "sha256": "f40ca3d466bf5098518211e1f7336c30076f22e8ffeb3a2327089cab265e715b",
+    "png": "frames/05-visit5-child4.png",
+    "rgb_sha256": "3fd37ff9af115a8c69ae48a0f43bcb1c0bf6e877116758f1fda9321a03100ae6",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/raw/06-back-visit4.ppm",
+    "sha256": "7ca8325a50f60c47882cac944d29240c9168e49d1d1f1430a813cd9cb4bc8069",
+    "png": "frames/06-back-visit4.png",
+    "rgb_sha256": "26a84b99288148b21bcc9909055d68cbcc5ccc404ea21cdcb4cc6a1f392af679",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/raw/07-back-visit2.ppm",
+    "sha256": "2a2b407836bbadbf23111387ff405c52a1f4b658a45039bad6f2977e3be315f9",
+    "png": "frames/07-back-visit2.png",
+    "rgb_sha256": "3a5b7e3c09bcda58ac659a5b32dbb2bba3bc9b4848f6230bfa4dd77556a41953",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/raw/08-back-root.ppm",
+    "sha256": "25eb79c7c88a32978ad1a9ac2c73153c6585c9f9f074e59d58f2b13b464b4cd1",
+    "png": "frames/08-back-root.png",
+    "rgb_sha256": "c8fc720087b65f2fa1724631a9e218a4aa3369a631fab248198e81ed9dcc63d0",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/raw/09-forward-visit2.ppm",
+    "sha256": "3bfc0a41fb630cd8b1ef94738ebb0e689c0cec6c0c7bf1b81241e7332c660cc5",
+    "png": "frames/09-forward-visit2.png",
+    "rgb_sha256": "233d6c8de4c699da56ad5ace46dc8f2d99e8fc71fa7c62ecda12bd355c797a2e",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/raw/10-forward-visit3.ppm",
+    "sha256": "8b47073b4a73a2512c9e4738494994c7cf771d3fb0604c0489cbcab716707ecd",
+    "png": "frames/10-forward-visit3.png",
+    "rgb_sha256": "0ad5f04fae78cb6846357557385294e3e36adcf3678d7736a486cad3c54c4ffd",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/raw/11-no-forward-at-leaf3.ppm",
+    "sha256": "8b47073b4a73a2512c9e4738494994c7cf771d3fb0604c0489cbcab716707ecd",
+    "png": "frames/11-no-forward-at-leaf3.png",
+    "rgb_sha256": "0ad5f04fae78cb6846357557385294e3e36adcf3678d7736a486cad3c54c4ffd",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/raw/12-walks-current3.ppm",
+    "sha256": "42561cfae425954c40f0115d8739382fde5a41b770ca2a0fcc4e439029de2de5",
+    "png": "frames/12-walks-current3.png",
+    "rgb_sha256": "ae55779abbc4a6e874a6d0151e436c25f8f665a7e3dea99128bce809467751eb",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/raw/13-walks-preview5-current3.ppm",
+    "sha256": "675568bdf4de857b9027f254d89c1f3a120721c91e632f09d5642e8589bf94ef",
+    "png": "frames/13-walks-preview5-current3.png",
+    "rgb_sha256": "0af3f4f48d08f496308597b79b990f2d143b099906f6f58a709113b279e10c14",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/raw/14-current3-after-preview.ppm",
+    "sha256": "8b47073b4a73a2512c9e4738494994c7cf771d3fb0604c0489cbcab716707ecd",
+    "png": "frames/14-current3-after-preview.png",
+    "rgb_sha256": "0ad5f04fae78cb6846357557385294e3e36adcf3678d7736a486cad3c54c4ffd",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/raw/15-restart-current3.ppm",
+    "sha256": "d5da6816798f8a41365c1fd5371dc654cbe49e4ef0d21ae87c994df2299cc24c",
+    "png": "frames/15-restart-current3.png",
+    "rgb_sha256": "4b6a7fb93069768806cf2da6af7f2ef9a3da8b3af6b3acad70b9332ae15dfe59",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/raw/16-restart-walks-current3.ppm",
+    "sha256": "42561cfae425954c40f0115d8739382fde5a41b770ca2a0fcc4e439029de2de5",
+    "png": "frames/16-restart-walks-current3.png",
+    "rgb_sha256": "ae55779abbc4a6e874a6d0151e436c25f8f665a7e3dea99128bce809467751eb",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/raw/17-restart-preview5-current3.ppm",
+    "sha256": "675568bdf4de857b9027f254d89c1f3a120721c91e632f09d5642e8589bf94ef",
+    "png": "frames/17-restart-preview5-current3.png",
+    "rgb_sha256": "0af3f4f48d08f496308597b79b990f2d143b099906f6f58a709113b279e10c14",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/raw/18-current3-after-restart-preview.ppm",
+    "sha256": "d5da6816798f8a41365c1fd5371dc654cbe49e4ef0d21ae87c994df2299cc24c",
+    "png": "frames/18-current3-after-restart-preview.png",
+    "rgb_sha256": "4b6a7fb93069768806cf2da6af7f2ef9a3da8b3af6b3acad70b9332ae15dfe59",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/raw/19-restart-no-forward-at-leaf3.ppm",
+    "sha256": "d5da6816798f8a41365c1fd5371dc654cbe49e4ef0d21ae87c994df2299cc24c",
+    "png": "frames/19-restart-no-forward-at-leaf3.png",
+    "rgb_sha256": "4b6a7fb93069768806cf2da6af7f2ef9a3da8b3af6b3acad70b9332ae15dfe59",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/raw/20-restart-back-visit2.ppm",
+    "sha256": "0f5040806f06819d801dd6e9e0ab473dcf05e01484a70acdaf89f7d91a25317b",
+    "png": "frames/20-restart-back-visit2.png",
+    "rgb_sha256": "3ebe7c9e7c8c20f1b1c80197997042819802330e3df0be8a5d4a6b3b2af03fcc",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/raw/21-restart-forward-sibling4.ppm",
+    "sha256": "2042fa6b63a5cf9fde2684e0a279cf4b47feaa5ef9f99088425b9ba0d2255a16",
+    "png": "frames/21-restart-forward-sibling4.png",
+    "rgb_sha256": "339386cf34d8c9ab8dad2027b13e0fdcd392b460c2f191d63608fd02c0bd4071",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/raw/22-restart-forward-visit3.ppm",
+    "sha256": "c9d6d31efb34c515267c9e970d5a7dee36f24ed1d8313ddc973afbad7447c53c",
+    "png": "frames/22-restart-forward-visit3.png",
+    "rgb_sha256": "6fb1ee8066bec937c9a3e24e67dd6d9ea5f23e593355e98a084977f090745b3f",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/raw/23-left-pin-active-before-close.ppm",
+    "sha256": "637ff6b769a6b25b4d08f0683983ea34b74c1af17d42a4c0130fae1bde70efbd",
+    "png": "frames/23-left-pin-active-before-close.png",
+    "rgb_sha256": "6256209df313867dc38e296830993e0c8c711cd25ef083087762919009d6f55a",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/raw/24-b1-closed.ppm",
+    "sha256": "3243769f5c5ba2e2aaf681dac422467d65b40af5e7bd3bc20ae8490118f5c679",
+    "png": "frames/24-b1-closed.png",
+    "rgb_sha256": "554516ec09c9697d2776dfbb1b8ed06125e1e0074cd4ee6cb6feb72c956d3634",
+    "size": [
+      1440,
+      1000
+    ]
+  }
+]

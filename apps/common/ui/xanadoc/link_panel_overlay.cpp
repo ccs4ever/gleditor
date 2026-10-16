@@ -342,7 +342,7 @@ void LinkPanelOverlay::appendInvestigation(std::vector<PanelLine> &lines) {
 
 void LinkPanelOverlay::rebuildPanel(gleditor::FrameContext &ctx) {
   const auto selected = context.selection();
-  if (!selected) {
+  if (!selected && !context.entryPending() && context.entryStatus().empty()) {
     panel.setVisible(false);
     dockLink.reset();
     controlsCollapsed     = false;
@@ -353,16 +353,29 @@ void LinkPanelOverlay::rebuildPanel(gleditor::FrameContext &ctx) {
     return;
   }
   const auto origin = context.originSite();
-  auto lines =
-      xanadu::linkPanelLines(*selected, origin, context.reading(),
-                             [this](const xanadu::OccurrenceSite &site) {
-                               return context.describe(site);
-                             });
-  buttons = xanadu::linkPanelButtons(*selected, origin.has_value());
-  if (investigationExpanded) {
-    appendInvestigation(lines);
-    auto members = linkMemberButtons(*selected);
-    buttons.insert(buttons.end(), members.begin(), members.end());
+  std::vector<PanelLine> lines;
+  buttons.clear();
+  if (selected) {
+    lines = xanadu::linkPanelLines(
+        *selected, origin, context.reading(),
+        [this](const auto &site) { return context.describe(site); });
+    buttons = xanadu::linkPanelButtons(*selected, origin.has_value());
+    if (investigationExpanded) {
+      appendInvestigation(lines);
+      auto members = linkMemberButtons(*selected);
+      buttons.insert(buttons.end(), members.begin(), members.end());
+    }
+  } else {
+    dockLink.reset();
+    controlsCollapsed     = false;
+    investigationExpanded = false;
+    lines.push_back({.text = "Saved visit restoration"});
+    if (const auto target = context.pendingTarget()) {
+      lines.push_back({.text = "Store " + target->store.str()});
+      lines.push_back(
+          {.text = std::format("State {} · bytes {}–{}", target->version.str(),
+                               target->range.start, target->range.end)});
+    }
   }
   if (!context.entryStatus().empty()) {
     lines.push_back(
@@ -400,7 +413,7 @@ void LinkPanelOverlay::rebuildPanel(gleditor::FrameContext &ctx) {
     pageIds             = std::pair{previous, next};
   }
   auto ids = buttonIds;
-  ids.push_back(*toggleId);
+  if (selected) ids.push_back(*toggleId);
   std::optional<gleditor::ui::Rect> anchor;
   if (panelAnchors) {
     const auto &points = *panelAnchors;
@@ -414,7 +427,10 @@ void LinkPanelOverlay::rebuildPanel(gleditor::FrameContext &ctx) {
           lines, buttons, ids, builtMetrics, ctx.theme, config, anchor,
           measurements, std::nullopt,
           std::span(protectedContent).first(protectedContentCount),
-          investigationExpanded ? "Fold investigation" : "Inspect members"));
+          selected ? std::optional<std::string_view>{investigationExpanded
+                                                         ? "Fold investigation"
+                                                         : "Inspect members"}
+                   : std::nullopt));
   next->investigationToggle = next->toggleControls;
   next->toggleControls.reset();
   if (investigationExpanded) {
@@ -452,8 +468,8 @@ void LinkPanelOverlay::rebuildPanel(gleditor::FrameContext &ctx) {
   const auto viewport = std::pair{ctx.screenWidth, ctx.screenHeight};
   if (dockViewport != viewport) dockLink.reset();
   // Scrolling must not remove the reader's explicit Read/Controls toggle.
-  if ((!investigationExpanded && dockLink == selected->key) ||
-      !next->safePlacement || !next->completeContent) {
+  if (selected && ((!investigationExpanded && dockLink == selected->key) ||
+                   !next->safePlacement || !next->completeContent)) {
     dockViewport = viewport;
     if (dockLink != selected->key) {
       controlsCollapsed = true;

@@ -1,0 +1,32 @@
+{
+  "base_commit": "3cb0634d6789383c77282126b02345104c77be21",
+  "patch_sha256": "5713cbaa795aecb0c1c40970768bab43aaee0688e6123cea61e37bc0bb9930aa",
+  "source_sha256": {
+    "apps/common/ui/walks.cpp": "dfec1ff5932be28fe67b135e0be5f4eec02cb7413174e71219b3dfd3f72a1d1a",
+    "apps/common/ui/walks.hpp": "33ebd22610a061cbf5bb7c4143b927397fefad78302da713192299ec6396128b",
+    "apps/common/ui/xanadoc/link_context.cpp": "a68a3ec6cb0cbfbae3b1183cbeaa4d75fd772abfe9369adefc46d72dcc5c63e5",
+    "apps/common/ui/xanadoc/link_context.hpp": "7260f6c289db20e12e90090d0d22034db4b11599c8a1430a83c35297088bdcce",
+    "apps/common/ui/xanadoc/link_panel_overlay.cpp": "d590877749fb6ad55c9b74e57a63e308fc6896c58780bcb6b1e7363c974da85d",
+    "apps/xuzz/xuzz_app.cpp": "552a4b835976f603686075277288a7cff5abaf6c4e21469d144f59eb55d91ee2",
+    "tests/xuzz/link_navigation_test.cpp": "445c24725565e6266d76b4e765aac4ec26af1a76605528f040fa898960d77eef",
+    "tests/zigzag/link_panel_overlay_test.cpp": "358d4129823ed3b79190d507a3d990be64b28eef465356e2dd8aa50d812b6709",
+    "tests/zigzag/reader_link_packages_ui_test.cpp": "550d4b745195a97a6d6428f6663d94912adacff586ea8a36ea8247fadf07fe92",
+    "tests/zigzag/walks_form_test.cpp": "20b175f8141e2cd101bae8d1c7d9c585a9406559517f8401eaa3f2a21fb48b73"
+  },
+  "binaries": {
+    "build/xuzz": "8aac731fa9166027b2a6bcb84c54555befccd412a30f193d1b5e06f716b09ef5",
+    "build/zigzag_test": "32b47881eda6ed8b39bbba8fc08b14b5bea01ff3522a5d1d097f2d6d59eac928",
+    "build/xuzz_test": "4ecc89b52d20e51afa18ede9ae62f9c2a9f1b14e2c95aeab54f118d25c6927be",
+    "build/libgleditor.so.0": "ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9",
+    "build/gleditor_test": "44562f4e4ea437f8f3c575a8005d5847367860f9b4d4714d2d1b6516cf014f8a",
+    "build/gleditor": "b2623116eb4d04057389736d9c8aa3de0d22154a7a39012d2e347a91bb2e7eb6",
+    "build/xudu_test": "aec7c8e1f7abff55a68fe9b60a063698184bb6d4d37efe599e87b3742b516de2"
+  },
+  "build_exit": 0,
+  "fresh_ui": 241,
+  "fresh_xuzz": 107,
+  "library_reused_after_hash_verification": 799,
+  "owning_cache_mip_reused": 53,
+  "optimized_performance_accepted": false,
+  "native_phase_note": "Pre-fix b5, intermediate4db, build5b4 and final8aac are separate actual executables; no byte-for-byte or ELF equivalence claim between these behavior changes."
+}

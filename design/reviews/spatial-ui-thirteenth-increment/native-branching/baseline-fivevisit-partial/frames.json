@@ -1,0 +1,172 @@
+[
+  {
+    "source": "build/validation-thirteenth/fivevisit-baseline/raw/01-visit2-b1.ppm",
+    "sha256": "362b6b56eea4ffc0e263bfc29cdc8e448684e006c3775579c9a9df0acb151eab",
+    "png": "frames/01-visit2-b1.png",
+    "rgb_sha256": "d3e095008778336479e335bfc06e6d8f905169ddfd67722e4e392fa544c1ac7c",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/fivevisit-baseline/raw/02-visit3-child2.ppm",
+    "sha256": "4470ff367be91dcb4f2d1f826d68556115cb1bc26355a154155133af3b75fe49",
+    "png": "frames/02-visit3-child2.png",
+    "rgb_sha256": "1d3dd9d40a84db0ec4bc03f463f7470044b2c2ff4fc1fa4e587847be9f21a4ce",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/fivevisit-baseline/raw/03-back-visit2.ppm",
+    "sha256": "0714d523de60d5ad9ea6501bfb08442ca4d17a188f674cb54e413a98b59e2a67",
+    "png": "frames/03-back-visit2.png",
+    "rgb_sha256": "52b546e9533e89e70067e1a5e529299401f2ce83c28fa20a12c7df0790d9d9d0",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/fivevisit-baseline/raw/04-visit4-child2.ppm",
+    "sha256": "0245f944058c4b8c6f1ec2efebfd94e4b8d56344bff13bc26320658658626c43",
+    "png": "frames/04-visit4-child2.png",
+    "rgb_sha256": "61f61617cc0868a71d32adbf399fa1c958c1d9c472a2d34a38fe8f4981a0670d",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/fivevisit-baseline/raw/05-visit5-child4.ppm",
+    "sha256": "564be8542bdabf05331dc349443fdff9d001d9e5bf7af52617278f09667fc9ce",
+    "png": "frames/05-visit5-child4.png",
+    "rgb_sha256": "8f933571966f6407d848db88cbab0455baf06074341a232dca2bae2e3660f1bd",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/fivevisit-baseline/raw/06-back-visit4.ppm",
+    "sha256": "f4fff6ab6d7e8acd16f47001382b21757197262dd9799af320226b1572e3517b",
+    "png": "frames/06-back-visit4.png",
+    "rgb_sha256": "7ef210aa06faa1cfaea359eb635d22618e3683b355bd162a2723ded38e613256",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/fivevisit-baseline/raw/07-back-visit2.ppm",
+    "sha256": "6fee20f0835cdc5b8a953ffbab7ecff6a6c05e8a00a4476a8afe385eb8d5aae5",
+    "png": "frames/07-back-visit2.png",
+    "rgb_sha256": "b6fc792f22549ce00feaacec5772de9f488b841babae8069eae0ade8dce0d5a4",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/fivevisit-baseline/raw/08-back-root.ppm",
+    "sha256": "23cecc4b5079d5bfbb111e909bef7e1d628d95c0033e1952a50666ceb2a8d7dd",
+    "png": "frames/08-back-root.png",
+    "rgb_sha256": "be59cde5b99d114879ac0345a5a9f70b6ef99db65c4db73279ef592bf7ebe46a",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/fivevisit-baseline/raw/09-forward-visit2.ppm",
+    "sha256": "0656b247d9f47fb5324d4081a53b7e3f1ceb10e253a51a0c176b8dc1d4845a91",
+    "png": "frames/09-forward-visit2.png",
+    "rgb_sha256": "a4f73dac81d74f0c2b622259f070008fa4142d75af990308a11b8740af40acd9",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/fivevisit-baseline/raw/10-forward-visit3.ppm",
+    "sha256": "f61566c115e722cb25ee5de336984b974dcdaea8a9ed7777d5fee4a304805a1e",
+    "png": "frames/10-forward-visit3.png",
+    "rgb_sha256": "d88165f3f44d88edf3308d8c4466cd95deb3b730f9f450637c0b3eb2563d6622",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/fivevisit-baseline/raw/11-no-forward-at-leaf3.ppm",
+    "sha256": "b2783927a16a4bf79b7968c219ebb7a22d525e073b27f0967f71caf45c64bbfc",
+    "png": "frames/11-no-forward-at-leaf3.png",
+    "rgb_sha256": "79016077e60c56cf572415d742c021c4c170e99e4afef0b7003b67d3bc6c4a7c",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/fivevisit-baseline/raw/12-back-visit2-again.ppm",
+    "sha256": "5b35e1ef05f3c5d28934aeea99b196f3b020c102cec0a34d8a62219a06257018",
+    "png": "frames/12-back-visit2-again.png",
+    "rgb_sha256": "096dc585bc0cd78b0371dd6db090e37303ad37011d4ad6b02d4f39bec8b8fb44",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/fivevisit-baseline/raw/13-forward-sibling-visit4.ppm",
+    "sha256": "6e94d48714ae6e95ced566cc1af25f70c4a564afdc53e7db340d8119033fefed",
+    "png": "frames/13-forward-sibling-visit4.png",
+    "rgb_sha256": "7024143af2cd816f683fff390388322b17cfb09906fc18ebdc31ffa26091e9f3",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/fivevisit-baseline/raw/14-forward-visit3-again.ppm",
+    "sha256": "c7994d8c47abc65544e9188c8ba178dc117e73aa1dfe726fb0c447051ae55a52",
+    "png": "frames/14-forward-visit3-again.png",
+    "rgb_sha256": "38999e0b8076f8d78c9785e9b02e36b982c529339c7081e28c3c5ed6b8a31481",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/fivevisit-baseline/raw/15-walks-current3.ppm",
+    "sha256": "44e0bdd05371c4eb199c57a19a6f9a22da8d4010f5200ab1a1208b6f3903ee43",
+    "png": "frames/15-walks-current3.png",
+    "rgb_sha256": "ff49cd3d4304a4ca556c4a4e7587bbfdf5687c043d42b60b4b7329b2cc8d6df2",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/fivevisit-baseline/raw/16-walks-preview5-current3.ppm",
+    "sha256": "f58ede229f2de2bea0d7d859aef0b612c2c9eb3a979ff07361ae44c9556aee91",
+    "png": "frames/16-walks-preview5-current3.png",
+    "rgb_sha256": "cc074a7016f07d28dc147d0c78d9d3fa53bd12b531ce252866ab7edb58625f2c",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/fivevisit-baseline/raw/17-current3-after-preview.ppm",
+    "sha256": "c7994d8c47abc65544e9188c8ba178dc117e73aa1dfe726fb0c447051ae55a52",
+    "png": "frames/17-current3-after-preview.png",
+    "rgb_sha256": "38999e0b8076f8d78c9785e9b02e36b982c529339c7081e28c3c5ed6b8a31481",
+    "size": [
+      1440,
+      1000
+    ]
+  }
+]

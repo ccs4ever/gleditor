@@ -151,6 +151,9 @@ public:
 
   /// Revisit a pending entry only after its exact local page geometry exists.
   void advanceFrame(RenderState &state);
+  [[nodiscard]] std::optional<DocumentSite> pendingTarget() const {
+    return pendingEntry ? std::optional{pendingEntry->site} : std::nullopt;
+  }
   [[nodiscard]] bool entryPending() const noexcept {
     return pendingEntry.has_value();
   }

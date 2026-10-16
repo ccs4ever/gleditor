@@ -30,7 +30,7 @@ TEST(WalksFormTest, KeyboardPreviewChoosesEitherSavedFutureWithoutEntering) {
   gleditor::Form form;
   std::vector<xanadu::WalksAction> actions;
   xanadu::openWalksForm(
-      form, entries(), xanadu::VisitId{1}, describe,
+      form, entries(), xanadu::VisitId{2}, xanadu::VisitId{1}, describe,
       [&](auto action) { actions.push_back(std::move(action)); });
   const auto fields = form.current();
   ASSERT_EQ(fields.size(), 3U);
@@ -47,7 +47,7 @@ TEST(WalksFormTest, KeyboardPreviewChoosesEitherSavedFutureWithoutEntering) {
   EXPECT_EQ(actions.front().kind, xanadu::WalksActionKind::Preview);
   EXPECT_EQ(actions.front().visit, xanadu::VisitId{3});
   xanadu::openWalksForm(
-      form, entries(), xanadu::VisitId{2}, describe,
+      form, entries(), xanadu::VisitId{2}, xanadu::VisitId{2}, describe,
       [&](auto action) { actions.push_back(std::move(action)); });
   form.keyPressed(gleditor::Key::Tab, gleditor::KeyMods::None);
   form.keyPressed(gleditor::Key::Tab, gleditor::KeyMods::None);
@@ -61,7 +61,8 @@ TEST(WalksFormTest, AccessibilityFieldsPreserveTargetAndAnnotationIdentity) {
   using gleditor::a11y::Action;
   gleditor::Form form;
   std::optional<xanadu::WalksAction> chosen;
-  xanadu::openWalksForm(form, entries(), xanadu::VisitId{1}, describe,
+  xanadu::openWalksForm(form, entries(), xanadu::VisitId{2}, xanadu::VisitId{1},
+                        describe,
                         [&](auto action) { chosen = std::move(action); });
   gleditor::a11y::Tree tree;
   gleditor::a11y::Builder into(tree, 16);
@@ -83,10 +84,55 @@ TEST(WalksFormTest, AccessibilityFieldsPreserveTargetAndAnnotationIdentity) {
 TEST(WalksFormTest, EmptyWalkCannotInventAVisit) {
   gleditor::Form form;
   int accepted{};
-  xanadu::openWalksForm(form, {}, std::nullopt, describe,
+  xanadu::openWalksForm(form, {}, std::nullopt, std::nullopt, describe,
                         [&](auto) { ++accepted; });
   form.keyPressed(gleditor::Key::Tab, gleditor::KeyMods::None);
   form.keyPressed(gleditor::Key::Tab, gleditor::KeyMods::None);
   form.keyPressed(gleditor::Key::Return, gleditor::KeyMods::None);
   EXPECT_EQ(accepted, 0);
+}
+
+TEST(WalksFormTest, PreviewAndCurrentStayDistinctAcrossFormReopening) {
+  gleditor::Form form;
+  std::optional<xanadu::WalksAction> accepted;
+  const auto open = [&](std::optional<xanadu::VisitId> current,
+                        std::optional<xanadu::VisitId> selected) {
+    xanadu::openWalksForm(
+        form, entries(), current, selected, describe,
+        [&](auto action) { accepted = std::move(action); },
+        "Saved preview excerpt");
+  };
+  const auto notice = [&] {
+    gleditor::a11y::Tree tree;
+    gleditor::a11y::Builder into(tree, 16);
+    form.describe(into);
+    return tree.find(into.id(2))->value;
+  };
+  open(xanadu::VisitId{3}, xanadu::VisitId{2});
+  EXPECT_TRUE(notice().starts_with("Current visit 3. "));
+  EXPECT_TRUE(notice().contains("Selected visit 2: cell 8"));
+  auto fields = form.current();
+  EXPECT_EQ(fields[0].chosen, 1U);
+  EXPECT_FALSE(fields[0].options[1].contains("(current)"));
+  EXPECT_TRUE(fields[0].options[2].contains("(current)"));
+  EXPECT_TRUE(
+      fields[0].optionDescriptions[2].contains("current reading place"));
+  form.keyPressed(gleditor::Key::Tab, gleditor::KeyMods::None);
+  form.keyPressed(gleditor::Key::Tab, gleditor::KeyMods::None);
+  form.keyPressed(gleditor::Key::Return, gleditor::KeyMods::None);
+  ASSERT_TRUE(accepted);
+  EXPECT_EQ(accepted->kind, xanadu::WalksActionKind::Preview);
+  EXPECT_EQ(accepted->visit, xanadu::VisitId{2});
+  open(xanadu::VisitId{3}, accepted->visit);
+  EXPECT_TRUE(notice().starts_with("Current visit 3. "));
+  EXPECT_TRUE(form.current()[0].options[2].contains("(current)"));
+  open(xanadu::VisitId{2}, accepted->visit);
+  EXPECT_TRUE(notice().starts_with("Current visit 2. "));
+  EXPECT_TRUE(notice().contains("Selected visit 2: cell 8"));
+  EXPECT_TRUE(form.current()[0].options[1].contains("(current)"));
+  EXPECT_FALSE(form.current()[0].options[2].contains("(current)"));
+  open(std::nullopt, xanadu::VisitId{2});
+  EXPECT_TRUE(notice().starts_with("No current visit. "));
+  for (const auto &option : form.current()[0].options)
+    EXPECT_FALSE(option.contains("(current)"));
 }

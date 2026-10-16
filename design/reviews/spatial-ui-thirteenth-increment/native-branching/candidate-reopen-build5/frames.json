@@ -1,0 +1,82 @@
+[
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/final-phase3/raw/00-after-restart-b1-closed.ppm",
+    "sha256": "4c5db62fae7e65b8f356552f09d1b3299200f6bc6dfc7746a6ae66412d9c761a",
+    "png": "frames/00-after-restart-b1-closed.png",
+    "rgb_sha256": "821caf65f78d62909f88fd290ad5f534339c557629ec4c371df5e825bc1dd381",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/final-phase3/raw/01-inspector-page1.ppm",
+    "sha256": "9e15819795ce58a58cc7e4d54452669fe97024201d19780216bd950776dc6508",
+    "png": "frames/01-inspector-page1.png",
+    "rgb_sha256": "29bde88fea384ee11a8da7f130d4dbc175e7cf580d883eac39c12f3eb336434e",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/final-phase3/raw/02-inspector-page2.ppm",
+    "sha256": "8231317dd777c0f042c027fa3e58c919798e237fc6e72cdb3e843f31144cf525",
+    "png": "frames/02-inspector-page2.png",
+    "rgb_sha256": "3383ff2b0d860e9a581b434a7c30e7f5bc11933d1708d2de23a22894a7f57cc7",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/final-phase3/raw/03-enter-refused.ppm",
+    "sha256": "f385c648ebd62105da5d20160c8669c767782efe0f7489e6474dcf6e5066d667",
+    "png": "frames/03-enter-refused.png",
+    "rgb_sha256": "637b0630c15ad3b0cbd70db0cb061db29928d4156f50d9201f657b5a67a434e6",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/final-phase3/raw/04-cancelled.ppm",
+    "sha256": "8231317dd777c0f042c027fa3e58c919798e237fc6e72cdb3e843f31144cf525",
+    "png": "frames/04-cancelled.png",
+    "rgb_sha256": "3383ff2b0d860e9a581b434a7c30e7f5bc11933d1708d2de23a22894a7f57cc7",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/final-phase3/raw/05-hypertime-map.ppm",
+    "sha256": "c1caf6987f323cb72a102e22bbaa90f30856ca5fb5130b66c9fdc188b8c1d293",
+    "png": "frames/05-hypertime-map.png",
+    "rgb_sha256": "c3744c4db0c0075d6042258027bd30ee65f9eae3fc56dade8e75adb434fe39e2",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/final-phase3/raw/06-reopened-b1.ppm",
+    "sha256": "155131a043a60afd0773dc16780635f01cab5a247e61ecf08ed2fede96b07e96",
+    "png": "frames/06-reopened-b1.png",
+    "rgb_sha256": "858da0074513d7bebfc533fbac70bc8d9746995ec6071532bd1e7f5550b90828",
+    "size": [
+      1440,
+      1000
+    ]
+  },
+  {
+    "source": "build/validation-thirteenth/candidate-fivevisit/final-phase3/raw/07-retry-enter-b1.ppm",
+    "sha256": "155131a043a60afd0773dc16780635f01cab5a247e61ecf08ed2fede96b07e96",
+    "png": "frames/07-retry-enter-b1.png",
+    "rgb_sha256": "858da0074513d7bebfc533fbac70bc8d9746995ec6071532bd1e7f5550b90828",
+    "size": [
+      1440,
+      1000
+    ]
+  }
+]

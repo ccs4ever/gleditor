@@ -1,0 +1,130 @@
+{
+  "canonical_build_exit": 0,
+  "fresh_ui": {
+    "passed": 241,
+    "total": 241,
+    "exit": 0
+  },
+  "fresh_xuzz": {
+    "passed": 107,
+    "total": 107,
+    "exit": 0
+  },
+  "format_check_exit": 0,
+  "lint_exit": 0,
+  "text_policy_exit": 0,
+  "diff_check_exit": 0,
+  "red_page_readiness_exit": 1,
+  "reused_after_hash_verification": {
+    "library": 799,
+    "owning_cache_mip": 53
+  },
+  "strict_core": {
+    "exit": 0,
+    "backends": [
+      "OpenGL",
+      "OpenGL ES",
+      "Vulkan"
+    ],
+    "GL_GLES_ordinary_overlay_differing_pixels": 0,
+    "Vulkan_ordinary_percent": 0.5104,
+    "Vulkan_overlay_percent": 0.5096,
+    "unchanged_limit_percent": 1,
+    "channel_tolerance": 1,
+    "split_recording_exercised": false,
+    "broad_E2E_accepted": false
+  },
+  "native": {
+    "five_visit_graph": [
+      [
+        1,
+        null
+      ],
+      [
+        2,
+        1
+      ],
+      [
+        3,
+        2
+      ],
+      [
+        4,
+        2
+      ],
+      [
+        5,
+        4
+      ]
+    ],
+    "final_added_visit": {
+      "id": 6,
+      "parent": 2,
+      "version": "b1",
+      "range": [
+        0,
+        20
+      ]
+    },
+    "final_phase5_current": [
+      2,
+      6,
+      6,
+      6,
+      6,
+      6,
+      2,
+      2,
+      6,
+      6
+    ],
+    "final_phase5_visits": [
+      5,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6
+    ],
+    "final_phase6_current": [
+      6,
+      6,
+      6,
+      2
+    ],
+    "final_phase6_visits": [
+      6,
+      6,
+      6,
+      6
+    ],
+    "reference": "visit5",
+    "annotation": {
+      "visit": 4,
+      "utf8": "J25 branch note café"
+    },
+    "authored_source_ops_sha256": "49a12edef0113d9b6f6b7a120c8f2f7cbf7dd1f6d865e8606dc7dfaac4a164d6",
+    "final_phase5_exit": 0,
+    "final_phase6_exit": 0,
+    "final_app_sha256": "8aac731fa9166027b2a6bcb84c54555befccd412a30f193d1b5e06f716b09ef5",
+    "intermediate_binary_results_separately_identified": true,
+    "historical_phase4_names_corrected": true,
+    "immediate_post_entry_black_frame_excluded_as_visual_proof": true,
+    "natural_pending_interruption_accepted": false
+  },
+  "independent_reviews": "Source and UX/visual reports retained; UX visual finalphase5, root verified phase6 decoded metadata",
+  "open": [
+    "package retain/enable/emphasis and disabled-but-pinned lifecycle",
+    "complete J24/J25 and J1-J32 acceptance",
+    "native no-Link pending visual capture and natural pending interruption",
+    "cell/history/media-position restoration",
+    "native AT-SPI",
+    "optimized performance",
+    "immediate entry black capture/transition visual scope"
+  ],
+  "manifest_note": "Nested snapshot checksums retain original absolute run paths; top inventory uses relative archive paths. The restoration-regression text is final test source, not a frozen pre-fix binary identity."
+}
