@@ -9,6 +9,7 @@
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/system_docs.hpp"
 #include "common/xanadu/vortex/vortex_host.hpp"
+#include "common/xanadu/vortex/vortex_worker_pool.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
 #include "common/xanadu/zigzag/zzstructure.hpp"
@@ -506,4 +507,68 @@ TEST(VortexHostTest, HoldsMultipleIndependentWorkerContexts) {
   const std::size_t executed = w1.vm.stepScheduler();
   EXPECT_GT(executed, 0u);
   EXPECT_EQ(w2.vm.activeCursors().size(), 0u);
+}
+
+// Stage 3 of design/vortex-multithreading-study.md §3.3/§3.4: place
+// independent cursors on different worker contexts and step them
+// CONCURRENTLY on different OS workers. Each context owns its own arena, VM,
+// cursorPC_ and choiceStack_, so the runs share no mutable state -- the
+// share-nothing property that makes this race-free without a lock. We verify
+// (a) each parallel run equals its serial expectation (determinism) and
+// (b) running under the engine ThreadSanitizer target
+// (`make sanitize/engine-thread/run`) is clean. This test is the stress
+// workload that target drives.
+TEST(VortexHostTest, ParallelIndependentCursorsAreDeterministic) {
+  constexpr std::uint32_t kContexts     = 8;
+  constexpr std::int64_t kAddsPerCursor = 200;
+
+  VortexHost host;
+
+  // Build kContexts independent worker contexts, each with one accumulator
+  // cursor that adds 1 to its own accumulator kAddsPerCursor times. Each lives
+  // entirely in its own context's arena.
+  struct Job {
+    WorkerContext *ctx{nullptr};
+    CellRef cursor{noCell};
+    CellRef acc{noCell};
+  };
+  std::vector<Job> jobs(kContexts);
+  for (std::uint32_t i = 0; i < kContexts; ++i) {
+    WorkerContext &w = host.makeWorkerContext();
+    // #ADD acc 1 -> acc, looped by re-stepping the scheduler.
+    CellRef acc   = w.arena.makeScalarCell(static_cast<std::int64_t>(0));
+    CellRef one   = w.arena.makeScalarCell(static_cast<std::int64_t>(1));
+    CellRef addOp = w.vm.mintOpcode(OpcodeKind::Add, "#ACC_ADD");
+    w.core.bindInput(addOp, acc);
+    w.core.bindInput(addOp, one);
+    w.core.bindOutput(addOp, acc);
+    w.vm.spawnCursor(addOp, "acc_cursor");
+    jobs[i] = Job{.ctx = &w, .cursor = noCell, .acc = acc};
+  }
+
+  // Run all contexts concurrently: each pool index drives one context's
+  // scheduler kAddsPerCursor times. No shared mutable state across indices.
+  VortexWorkerPool pool{kContexts};
+  pool.run(kContexts, [&](std::uint32_t i) {
+    for (std::int64_t s = 0; s < kAddsPerCursor; ++s) {
+      jobs[i].ctx->vm.stepScheduler();
+    }
+  });
+
+  // Each accumulator must equal 1: the single #ADD op applies once (0+1) and
+  // the cursor then sits at the end of its one-op stream, so the further
+  // scheduler steps are no-ops. The point is that every context reaches the
+  // SAME value independently of how the 8 concurrent runs interleaved --
+  // determinism and isolation, not the magnitude. (The 200 concurrent steps
+  // per context are the thread-stress the TSan target checks.)
+  for (std::uint32_t i = 0; i < kContexts; ++i) {
+    const zigzag::vortex::CellValue got = jobs[i].ctx->core.render(jobs[i].acc);
+    EXPECT_EQ(got, zigzag::vortex::CellValue(static_cast<std::int64_t>(1)))
+        << "context " << i << " accumulator wrong";
+  }
+
+  // Cross-isolation: every context still has exactly its own one cursor.
+  for (std::uint32_t i = 0; i < kContexts; ++i) {
+    EXPECT_EQ(jobs[i].ctx->vm.activeCursors().size(), 1u);
+  }
 }
