@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <format>
 #include <iostream>
+#include <thread>
 
 #include <gleditor/logging.hpp>
 
@@ -70,6 +71,22 @@ VortexHostConfig VortexHostConfig::fromStore(const xanadu::Store &store) {
     cfg.defaultBundle = std::get<std::string>(bundleVals[0]);
   }
 
+  const auto workerVals =
+      xanadu::getSetting(store, xanadu::settings::kVortexWorkerThreads);
+  if (!workerVals.empty() &&
+      std::holds_alternative<std::int64_t>(workerVals[0])) {
+    cfg.workerThreads =
+        static_cast<std::size_t>(std::get<std::int64_t>(workerVals[0]));
+  }
+
+  const auto thresholdVals =
+      xanadu::getSetting(store, xanadu::settings::kVortexParallelThreshold);
+  if (!thresholdVals.empty() &&
+      std::holds_alternative<std::int64_t>(thresholdVals[0])) {
+    cfg.parallelThreshold =
+        static_cast<std::size_t>(std::get<std::int64_t>(thresholdVals[0]));
+  }
+
   return cfg;
 }
 
@@ -116,6 +133,10 @@ void VortexHost::initHostServices() {
   regPair("hop-tail", "std:nav/hop_tail");
   regPair("jump-home", "std:nav/jump_home");
   regPair("duplicate-focus-cell", "std:zigzag/duplicate");
+
+  // Stage 2: build the data-parallel worker pool from config (defaults until a
+  // store is bound) and attach it to the primary stdlib.
+  applyParallelConfig();
 }
 
 void VortexHost::bindManifold(const Manifold *baseManifold) {
@@ -140,6 +161,21 @@ void VortexHost::bindStore(xanadu::Store *store) {
 
 void VortexHost::loadConfigFromStore(const xanadu::Store &store) {
   config_ = VortexHostConfig::fromStore(store);
+  applyParallelConfig();
+}
+
+void VortexHost::applyParallelConfig() {
+  // Resolve the worker count: 0 => probe hardware_concurrency, else the
+  // configured value; a pool of 1 starts no threads (caller-only). Build the
+  // pool and attach it to the primary stdlib with the configured threshold.
+  std::size_t threads = config_.workerThreads;
+  if (threads == 0) {
+    const unsigned hw = std::thread::hardware_concurrency();
+    threads           = (hw == 0) ? 1 : static_cast<std::size_t>(hw);
+  }
+  workerPool_ =
+      std::make_unique<VortexWorkerPool>(static_cast<std::uint32_t>(threads));
+  primary_.stdlib.setWorkerPool(workerPool_.get(), config_.parallelThreshold);
 }
 
 std::size_t VortexHost::stepScheduler(std::optional<std::size_t> cycleBudget) {

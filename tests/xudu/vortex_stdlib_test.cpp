@@ -12,6 +12,7 @@
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_stdlib.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
+#include "common/xanadu/vortex/vortex_worker_pool.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 #include "common/xanadu/zigzag/zzstructure.hpp"
 
@@ -576,6 +577,82 @@ TEST(VortexStdLibTest, XuduModuleRegistrationAndActions) {
   auto saveRes = h.stdlib.call("std:xudu/save", {});
   ASSERT_EQ(saveRes.size(), 1u);
   EXPECT_FALSE(saveRes.empty());
+}
+
+// Stage 2 of design/vortex-multithreading-study.md §6.2: data-parallel
+// map/filter/fold must be bit-identical to the serial result across any worker
+// count, and fold must fix a left-to-right chunk-index combine order so a
+// non-commutative combiner matches the serial left fold. We attach pools of
+// 1, 2, 4, 8 with a threshold of 1 (so parallelism actually engages on a small
+// list) and assert every result equals the serial baseline.
+TEST(VortexStdLibTest, DataParallelMapFilterFoldIsDeterministic) {
+  // Build the serial baseline with no pool attached.
+  auto buildList = [](TestHarness &h, DimRef dim) {
+    std::vector<CellValue> nums;
+    for (int i = 1; i <= 50; ++i) {
+      nums.push_back(static_cast<std::int64_t>(i));
+    }
+    return h.stdlib.createList(nums, dim);
+  };
+
+  auto squareFn = [](const CellValue &v) -> CellValue {
+    const std::int64_t x = std::get<std::int64_t>(v);
+    return x * x;
+  };
+  auto evenPred = [](const CellValue &v) -> bool {
+    return std::get<std::int64_t>(v) % 2 == 0;
+  };
+  // A deliberately NON-COMMUTATIVE combiner: ordered string concatenation.
+  // "a"+"b" != "b"+"a", so a wrong combine order would be caught.
+  auto concatFn = [](const CellValue &acc, const CellValue &cur) -> CellValue {
+    return std::get<std::string>(acc) +
+           std::to_string(std::get<std::int64_t>(cur)) + ",";
+  };
+
+  // Serial baseline.
+  std::vector<CellValue> baselineMap;
+  std::vector<CellValue> baselineFilter;
+  CellValue baselineFold;
+  {
+    TestHarness h;
+    const DimRef inDim  = h.arena.makeCell("d.in");
+    const DimRef outDim = h.arena.makeCell("d.out");
+    const DimRef fltDim = h.arena.makeCell("d.flt");
+    CellRef list        = buildList(h, inDim);
+    CellRef mapped      = h.stdlib.map(list, inDim, outDim, squareFn);
+    baselineMap         = h.stdlib.listToVector(mapped, outDim);
+    CellRef filtered    = h.stdlib.filter(mapped, outDim, fltDim, evenPred);
+    baselineFilter      = h.stdlib.listToVector(filtered, fltDim);
+    baselineFold =
+        h.stdlib.fold(list, inDim, CellValue(std::string("start:")), concatFn);
+  }
+  ASSERT_EQ(baselineMap.size(), 50u);
+  ASSERT_FALSE(baselineFilter.empty());
+
+  for (std::uint32_t threads : {1u, 2u, 4u, 8u}) {
+    TestHarness h;
+    VortexWorkerPool pool{threads};
+    h.stdlib.setWorkerPool(&pool, /*threshold=*/1);
+
+    const DimRef inDim  = h.arena.makeCell("d.in");
+    const DimRef outDim = h.arena.makeCell("d.out");
+    const DimRef fltDim = h.arena.makeCell("d.flt");
+    CellRef list        = buildList(h, inDim);
+
+    CellRef mapped = h.stdlib.map(list, inDim, outDim, squareFn);
+    auto gotMap    = h.stdlib.listToVector(mapped, outDim);
+    EXPECT_EQ(gotMap, baselineMap) << "map differs at threads=" << threads;
+
+    CellRef filtered = h.stdlib.filter(mapped, outDim, fltDim, evenPred);
+    auto gotFilter   = h.stdlib.listToVector(filtered, fltDim);
+    EXPECT_EQ(gotFilter, baselineFilter)
+        << "filter differs at threads=" << threads;
+
+    CellValue gotFold =
+        h.stdlib.fold(list, inDim, CellValue(std::string("start:")), concatFn);
+    EXPECT_EQ(gotFold, baselineFold)
+        << "non-commutative fold differs at threads=" << threads;
+  }
 }
 
 } // namespace

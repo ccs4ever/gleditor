@@ -43,6 +43,8 @@ class Store;
 
 namespace zigzag::vortex {
 
+class VortexWorkerPool;
+
 struct LogicSolution {
   std::vector<std::pair<CellRef, CellRef>> bindings;
   std::unordered_map<CellRef, CellRef> varMap;
@@ -121,6 +123,21 @@ public:
 
   CellRef zip(CellRef headA, CellRef headB, DimRef dimA, DimRef dimB,
               DimRef outDim);
+
+  // -- Stage 2: data-parallel execution hook ----------------------------------
+  /// Attach a worker pool so map/filter/fold fan their per-element function
+  /// across workers when the input length reaches @p threshold. Both the pool
+  /// and threshold come from the host, which reads vortex.worker_threads and
+  /// vortex.parallel_threshold from system://settings (no magic numbers,
+  /// vortex-multithreading-study.md §3.2/§6.2). Null pool or a length below
+  /// the threshold runs serially, so the default is byte-identical to before.
+  /// Setter chains, as the engine's setters do.
+  VortexStdLib *setWorkerPool(VortexWorkerPool *pool,
+                              std::size_t threshold) noexcept {
+    workerPool_        = pool;
+    parallelThreshold_ = threshold;
+    return this;
+  }
 
   // -- Module 5: std:collections ----------------------------------------------
   CellRef createList(const std::vector<CellValue> &items, DimRef dim = noCell);
@@ -354,6 +371,10 @@ private:
   VortexCore &core_;
   VortexVM &vm_;
   const xanadu::Store *boundStore_{nullptr};
+
+  // Stage 2 data-parallel hook: borrowed, not owned. Null => serial.
+  VortexWorkerPool *workerPool_{nullptr};
+  std::size_t parallelThreshold_{1024};
 
   struct RoutineBinding {
     std::vector<CellRef> inputParams;

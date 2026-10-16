@@ -22,6 +22,7 @@
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_stdlib.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
+#include "common/xanadu/vortex/vortex_worker_pool.hpp"
 #include "common/xanadu/vortex/worker_context.hpp"
 #include "common/xanadu/vpl/vpl_engine.hpp"
 #include "common/xanadu/vprolog/compiler.hpp"
@@ -43,6 +44,12 @@ struct VortexHostConfig {
   std::string commandPromptHotkey{":"};
   std::string paletteHotkey{"F4"};
   std::string defaultBundle{"Execution"};
+  /// Worker thread count for data-parallel execution; 0 probes
+  /// std::thread::hardware_concurrency(), 1 is caller-only (no threads).
+  std::size_t workerThreads{0};
+  /// Minimum element count before map/filter/fold fans across workers;
+  /// smaller arrays run serially.
+  std::size_t parallelThreshold{1024};
 
   [[nodiscard]] static VortexHostConfig fromStore(const xanadu::Store &store);
 };
@@ -302,6 +309,12 @@ private:
   VortexHostConfig config_{};
   CellRef gcCursor_{noCell};
   std::size_t frameCount_{0};
+
+  // Stage 2: the host-owned data-parallel worker pool, (re)built from
+  // config_.workerThreads and attached to the primary stdlib. unique_ptr so a
+  // config change can replace it; the stdlib borrows a raw pointer.
+  std::unique_ptr<VortexWorkerPool> workerPool_;
+  void applyParallelConfig();
 
   std::unordered_map<std::string, CellRef> customActionRoutines_;
   std::unordered_map<std::string, std::string> macroRegistry_;

@@ -240,6 +240,10 @@ inline constexpr std::string_view kPublicationPollSeconds =
 inline constexpr std::string_view kThemeBackground = "theme.background";
 inline constexpr std::string_view kPagePaperColour = "page.paperColour";
 inline constexpr std::string_view kPageInkColour   = "page.inkColour";
+inline constexpr std::string_view kVortexWorkerThreads =
+    "vortex.worker_threads";
+inline constexpr std::string_view kVortexParallelThreshold =
+    "vortex.parallel_threshold";
 
 // UI
 inline constexpr std::string_view kTabBarVisible       = "tabBarVisible";

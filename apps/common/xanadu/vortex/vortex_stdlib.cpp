@@ -15,6 +15,7 @@
 
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/system_docs.hpp"
+#include "common/xanadu/vortex/vortex_worker_pool.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
 #include "common/xanadu/zigzag/vlog.hpp"
 
@@ -1106,8 +1107,8 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
           CellRef oDocCell    = core.arena().makeCell("store");
           std::string spanStr = "[" + std::to_string(cop->spanStart) + "," +
                                 std::to_string(cop->spanLength) + "]";
-          CellRef spanCell = core.arena().makeCell(spanStr);
-          CellRef tDocCell = core.arena().makeCell("active");
+          CellRef spanCell    = core.arena().makeCell(spanStr);
+          CellRef tDocCell    = core.arena().makeCell("active");
           if (stdlib.unify(goalArgs[0], oDocCell) &&
               stdlib.unify(goalArgs[1], spanCell) &&
               stdlib.unify(goalArgs[2], tDocCell)) {
@@ -1179,7 +1180,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
             core.arena().makeScalarCell(static_cast<std::int64_t>(c));
         std::string spanStr = "[" + std::to_string(sp.start) + "," +
                               std::to_string(sp.length) + "]";
-        CellRef spCell = core.arena().makeCell(spanStr);
+        CellRef spCell      = core.arena().makeCell(spanStr);
         if (stdlib.unify(goalArgs[0], cCell) &&
             stdlib.unify(goalArgs[1], spCell)) {
           bool keepGoing = solveQueryHelper(
@@ -2212,13 +2213,44 @@ CellRef VortexStdLib::createFormatCurrencyPipeline() {
 CellRef VortexStdLib::map(
     CellRef head, DimRef inDim, DimRef outDim,
     gleditor::cpp26::function_ref<CellValue(const CellValue &)> fn) {
-  return chainCells(core_.arena(),
-                    rank(core_.arena(), head, inDim) |
-                        std::views::transform([&](const CellRef cell) {
-                          return valueCell(fn(core_.render(cell)));
-                        }) |
-                        std::ranges::to<std::vector>(),
-                    outDim);
+  // Pre-render inputs serially (one arena read pass, single-threaded), then
+  // apply fn across workers over the pure value vector (no arena access during
+  // the parallel phase), then mint outputs serially in index order. The result
+  // is bit-identical to the serial path for any worker count, because fn is
+  // applied to the same value at the same index regardless of which worker
+  // runs it (vortex-multithreading-study.md §6.2). Arena mutation stays on the
+  // calling thread, so the single-arena model is never touched concurrently.
+  const auto inputs = rank(core_.arena(), head, inDim) |
+                      std::views::transform([this](const CellRef cell) {
+                        return core_.render(cell);
+                      }) |
+                      std::ranges::to<std::vector>();
+
+  std::vector<CellValue> results(inputs.size());
+  if (workerPool_ != nullptr && inputs.size() >= parallelThreshold_ &&
+      workerPool_->parallelism() > 1) {
+    const std::uint32_t chunks = workerPool_->parallelism();
+    const std::size_t chunkSize =
+        (inputs.size() + chunks - 1) / std::max<std::uint32_t>(chunks, 1);
+    workerPool_->run(chunks, [&](std::uint32_t c) {
+      const std::size_t begin = static_cast<std::size_t>(c) * chunkSize;
+      const std::size_t end   = std::min(begin + chunkSize, inputs.size());
+      for (std::size_t i = begin; i < end; ++i) {
+        results[i] = fn(inputs[i]);
+      }
+    });
+  } else {
+    for (std::size_t i = 0; i < inputs.size(); ++i) {
+      results[i] = fn(inputs[i]);
+    }
+  }
+
+  std::vector<CellRef> outCells;
+  outCells.reserve(results.size());
+  for (const auto &v : results) {
+    outCells.push_back(valueCell(v));
+  }
+  return chainCells(core_.arena(), outCells, outDim);
 }
 
 CellRef VortexStdLib::map(CellRef head, DimRef inDim, DimRef outDim,
@@ -2232,16 +2264,42 @@ CellRef VortexStdLib::map(CellRef head, DimRef inDim, DimRef outDim,
 CellRef VortexStdLib::filter(
     CellRef head, DimRef inDim, DimRef outDim,
     gleditor::cpp26::function_ref<bool(const CellValue &)> pred) {
-  // Rendered once into values first: pred may be a Vortex call, and a
-  // filter over a transform would render each kept cell twice.
-  const auto kept = rank(core_.arena(), head, inDim) |
-                    std::views::transform([this](const CellRef cell) {
-                      return core_.render(cell);
-                    }) |
-                    std::ranges::to<std::vector>() | std::views::filter(pred) |
-                    std::views::transform(
-                        [this](const CellValue &v) { return valueCell(v); }) |
-                    std::ranges::to<std::vector>();
+  // Rendered once into values first: pred may be a Vortex call, and a filter
+  // over a transform would render each kept cell twice. The predicate is then
+  // applied across workers over the pure value vector; the kept cells are
+  // minted serially in input order, so the result is bit-identical to serial
+  // for any worker count (vortex-multithreading-study.md §6.2).
+  const auto values = rank(core_.arena(), head, inDim) |
+                      std::views::transform([this](const CellRef cell) {
+                        return core_.render(cell);
+                      }) |
+                      std::ranges::to<std::vector>();
+
+  std::vector<char> keep(values.size());
+  if (workerPool_ != nullptr && values.size() >= parallelThreshold_ &&
+      workerPool_->parallelism() > 1) {
+    const std::uint32_t chunks = workerPool_->parallelism();
+    const std::size_t chunkSize =
+        (values.size() + chunks - 1) / std::max<std::uint32_t>(chunks, 1);
+    workerPool_->run(chunks, [&](std::uint32_t c) {
+      const std::size_t begin = static_cast<std::size_t>(c) * chunkSize;
+      const std::size_t end   = std::min(begin + chunkSize, values.size());
+      for (std::size_t i = begin; i < end; ++i) {
+        keep[i] = pred(values[i]) ? char{1} : char{0};
+      }
+    });
+  } else {
+    for (std::size_t i = 0; i < values.size(); ++i) {
+      keep[i] = pred(values[i]) ? char{1} : char{0};
+    }
+  }
+
+  std::vector<CellRef> kept;
+  for (std::size_t i = 0; i < values.size(); ++i) {
+    if (keep[i] != 0) {
+      kept.push_back(valueCell(values[i]));
+    }
+  }
   return chainCells(core_.arena(), kept, outDim);
 }
 
@@ -2259,6 +2317,18 @@ VortexStdLib::fold(CellRef head, DimRef inDim, CellValue initial,
                    gleditor::cpp26::function_ref<CellValue(const CellValue &,
                                                            const CellValue &)>
                        fn) {
+  // A general left fold is inherently sequential: its accumulator may have a
+  // different type than the elements (e.g. fold a list of ints into a string),
+  // and fn is applied strictly left-to-right, so there is no safe way to split
+  // it into independent per-chunk partials without assuming the combiner is a
+  // homogeneous monoid. The data-parallel win in VPL is in map/filter (one
+  // independent function per element); fold stays a serial left fold here, so
+  // it is bit-identical for every combiner, commutative or not
+  // (vortex-multithreading-study.md §6.2: the determinism guarantee is that a
+  // non-commutative combiner matches the serial fold -- which a serial fold
+  // satisfies by construction). The arena reads are the only part worth
+  // parallelising, and they are unsafe to run concurrently on one arena, so
+  // the render pass is serial too.
   return std::ranges::fold_left(
       rank(core_.arena(), head, inDim) |
           std::views::transform(
@@ -3861,8 +3931,8 @@ bool VortexStdLib::exportStandardLibraryToStore(
 }
 
 CellRef VortexStdLib::importModuleFromStore(const xanadu::Store &srcStore) {
-  auto ver         = srcStore.allVersions().empty() ? xanadu::MicroversionId{}
-                                                    : srcStore.primaryCurrentVersion();
+  auto ver = srcStore.allVersions().empty() ? xanadu::MicroversionId{}
+                                            : srcStore.primaryCurrentVersion();
   auto srcManifold = srcStore.rebuildManifold(ver);
   if (srcManifold.cellCount() == 0) {
     return noCell;
@@ -3952,9 +4022,9 @@ bool VortexStdLib::bridgeCellToDoc(xanadu::Store &store, CellRef cell,
     return false;
   }
   std::string text = core_.arena().textOf(cell);
-  auto parent      = store.allVersions().empty() ? xanadu::MicroversionId{}
-                                                 : store.primaryCurrentVersion();
-  auto newVer      = store.insert(parent, docOffset, text);
+  auto parent = store.allVersions().empty() ? xanadu::MicroversionId{}
+                                            : store.primaryCurrentVersion();
+  auto newVer = store.insert(parent, docOffset, text);
   store.repointCurrentVersion(newVer);
   return true;
 }
@@ -3962,8 +4032,8 @@ bool VortexStdLib::bridgeCellToDoc(xanadu::Store &store, CellRef cell,
 CellRef VortexStdLib::bridgeDocToCell(xanadu::Store &store,
                                       std::uint32_t docOffset,
                                       std::uint32_t length) {
-  auto ver            = store.allVersions().empty() ? xanadu::MicroversionId{}
-                                                    : store.primaryCurrentVersion();
+  auto ver = store.allVersions().empty() ? xanadu::MicroversionId{}
+                                         : store.primaryCurrentVersion();
   std::string docText = store.textOf(ver);
   if (docOffset >= docText.size()) {
     return core_.arena().makeCell("");
