@@ -1,6 +1,6 @@
 # vlace: A Purely Functional Language Over an Append-Only Manifold
 
-**Document Version:** 1.1 — A Typed Effect Boundary **Compilation Target:** Vortex Hyperstructural
+**Document Version:** 1.2 — The Xanadu Interface **Compilation Target:** Vortex Hyperstructural
 Runtime Core — `link` and `value`, and nothing else (§3) **Status:** specification only; nothing
 here is wired into the gleditor build. It rests on mechanisms that *are* built — the `ArenaManifold`
 and its `mark`/`release`/`promote` ([convergence](store-slice-convergence.md) step 21,
@@ -18,6 +18,12 @@ asks the C++ core for nothing those did not already pay for (§8).
 > promise; **records** (§5.7), **user modules** (§5.8), and a **numeric tower** (§4.6); and honest
 > statements of the soundness properties — the memo key (§6.3), let-generalization (§5.5),
 > promotion's non-confluence (§6.5), WHNF / blackholing / tail calls (§6.7). The appendix logs it.
+>
+> **v1.2** then turned to the Xanadu end, through the project's tripartite deep-reasoning dialectic:
+> §13 adds the `std:xanadu` package for direct cell and document manipulation — creating cells,
+> linking along dimensions, transclusion-as-value, bidirectional link following, rank walking, and
+> character-level provenance/transcopyright queries — with authoring confined to the pure arena and
+> `promote` as the one effect, and content resolution staged so a swarm fetch never blocks.
 
 vlace is a fourth front end onto the manifold that [Vortex](vortex-hyperstructural-runtime.md) runs,
 [VQL](vql-query-language.md) queries, and [VPL](vpl-array-language.md) indexes, and a sibling to the
@@ -101,6 +107,11 @@ ______________________________________________________________________
 - [10. What this buys that a conventional functional language does not have][toc-16]
 - [11. Breakages and costs](#11-breakages-and-costs)
 - [12. Reconciliation with the convergence](#12-reconciliation-with-the-convergence)
+- [13. The `std:xanadu` package: direct cell and document manipulation][toc-29]
+  - [13.1 Why authoring lowers to the arena, not the `Store`][toc-30]
+  - [13.2 The `std:xanadu` module](#132-the-stdxanadu-module)
+  - [13.3 Content resolution is staged: the `Resolved` type][toc-31]
+  - [13.4 Worked examples: Xanadu concepts in vlace](#134-worked-examples-xanadu-concepts-in-vlace)
 - [Appendix: Versioning and Change History](#appendix-versioning-and-change-history)
 
 ______________________________________________________________________
@@ -255,7 +266,10 @@ feature of the language. vlace is held to the same rule, with the sharpening tha
 `value()`'s write branch against anything but an arena cell — the write that lands on a persistent
 cell is the one thing a pure language forbids itself, and §2.2 is why it never needs to. A `value()`
 write in vlace always targets an `ArenaManifold` slot; the only persistent write in the whole
-language is `promote()` at the boundary (§6.5), and `promote()` is not an expression.
+language is `promote()` at the boundary (§6.5), and `promote()` is not an expression. This holds
+even for direct xanadoc/slice authoring: the `std:xanadu` verbs (§13) build in a pure `Arena` and
+the `Store`'s own parent-relative Structure methods (which append to the spool) are deliberately
+**not** reachable from vlace — authoring reaches the spool only through `promote`.
 
 > Every vlace construct lowers to `link`/`value` over an `ArenaManifold`, mints no `CompactOpNode`,
 > and is referentially transparent as a consequence. A construct that needs a persistent write mid-
@@ -698,6 +712,12 @@ system-xanadocs §3.3), but reading *a named microversion* is pure, because a fr
 exactly one value. So `read v` where `v : MicroversionId` is referentially transparent, and the
 non-transparent part is quarantined in `IO`. `save` performs `promote()`.
 
+`read`/`save` are the *thin* edge — a whole document in, a value out. Directly **authoring**
+xanadocs and slices — creating cells, linking along dimensions, transcluding spans, following links,
+walking ranks, querying provenance — is the richer `std:xanadu` interface of §13, which builds in a
+pure `Arena` and crosses to the spool only through `promote` (§13.1); `save` is its convenience
+form.
+
 **Promotion (`promote()`, convergence V3, built).** `save` compacts the value's reachable subgraph
 into the persistent `Manifold`, writing one run of operations and rewriting ephemeral scratch spans
 into real permascroll addresses (vicon §9.3, Vlog §5.5). Two properties v1.0 got wrong and v1.1
@@ -879,6 +899,14 @@ exports it (§7.1–§7.3) or the prelude ADT it belongs to. Signatures use the 
 The §9 examples draw only on this table. Where 1.0 used undefined names (`addWord`, `sortByValue`),
 §9 now spells them from these primitives (`insertWith`, a `foldr` with a comparator) so the examples
 honour §3's rule that every construct is defined.
+
+The Xanadu authoring surface is **not** in the prelude: it is imported with `import "std:xanadu"`
+(§13.2), which brings in its verbs and the ADTs `CellRef`, `DimRef`, `VSpan`, `Link`, `Manifold`,
+`Arena`, `Mark`, `GlobalSpan`, `data Dir = Pos | Neg`,
+`data DiffKind = Universal | Shared | Unique | Deleted`, and
+`data Resolved a = Pending | Local a | Remote Handle`. Keeping it behind an explicit import mirrors
+Haskell's non-prelude modules and signals that a program touching the docuverse is doing something a
+pure numeric program is not.
 
 ______________________________________________________________________
 
@@ -1272,6 +1300,223 @@ the two were the same structure all along.
 
 ______________________________________________________________________
 
+## 13. The `std:xanadu` package: direct cell and document manipulation
+
+§§1–12 establish vlace as a functional language that *happens* to run on the manifold. This section
+answers the Xanadu question directly: can a vlace program **author** xanadocs and slices — create
+cells, set links along named dimensions, transclude spans, follow links both ways, walk ranks, query
+provenance — or is it only a read-only pipe? The answer is that it authors through a `std:xanadu`
+module, and the shape of that module is forced by one fact about the engine that it would be a
+betrayal to get wrong.
+
+### 13.1 Why authoring lowers to the arena, not the `Store`
+
+A Xanadu purist's first instinct is to expose the `Store` Structure API — `Store::makeCell`,
+`Store::setLink`, `Store::spliceCellSpan`, `Store::makeDimension` (store.hpp) — as vlace
+constructors. That instinct is right about *what* to expose and wrong about *where it lives*. Every
+one of those methods has the shape
+
+```cpp
+MicroversionId Store::makeCell(const MicroversionId &parent, …);   // store.hpp:466
+MicroversionId Store::setLink (const MicroversionId &parent, …);   // store.hpp:544
+```
+
+— parent-relative, and **each appends a `CompactOpNode` to the persistent spool**. Lowering a pure
+vlace constructor onto one would write to disk mid-evaluation, the exact referential-transparency
+failure §2 exists to prevent, and would mint hypertime a navigation never asked for (R8).
+
+The engine already provides the pure home the instinct wanted: the **`ArenaManifold` write path**
+(`arena_manifold.hpp`). `makeCell`, `makeCell(PrimediaSpan)`, `makeCell(string_view)`,
+`makeScalarCell`, `ensureDimension`, `setContent`, `link`, `insertIntoRank`, `intern` all mint
+**arena** cells carrying `ephemeralBit`, copy-on-write over a base `Manifold`, touching no spool;
+`mark()` "reads seven lengths and allocates nothing," and the single crossing to persistence is the
+free function
+
+```cpp
+std::optional<Promoted> promote(Store&, MicroversionId parent,
+                                const ArenaManifold &from, CellRef root,
+                                PromotionBudget);                  // arena_manifold.hpp:758
+```
+
+So **authoring in vlace is arena construction, and persisting is `promote`.** This vindicates the
+purist (an immutable permascroll address is the most referentially transparent thing there is — a
+`VSpan` is a *name*, never bytes) and the systems constraint (fetch and promotion are confined to a
+typed edge) at once, because the pure/effect line the rest of the document draws falls exactly where
+the engine already drew it: arena is pure, `promote` is the one authoring effect. Reading a frozen
+`MicroversionId` (§6.5's `read`) is the pure *input*; `std:xanadu` is the pure *authoring*;
+`promote` is the *output*. Nelson's permanence and vlace's purity are the same requirement — content
+that never mutates, addressed by where it is — seen from two sides.
+
+### 13.2 The `std:xanadu` module
+
+`std:xanadu` is a module on `d.stdlib` (§7.1), imported with `import "std:xanadu"`. Its types are
+prelude ADTs (added to §7.4): `CellRef`, `DimRef`, `VSpan` (a permascroll span — a *name*, not
+bytes), `Link`, `Manifold` (a frozen replay product), `Arena` (a mutable-in-the-arena CoW view),
+`Mark`, `GlobalSpan`, `data Dir = Pos | Neg`,
+`data DiffKind = Universal | Shared | Unique | Deleted`, and
+`data Resolved a = Pending | Local a | Remote Handle` (§13.3). Each verb below cites the C++ symbol
+it lowers to and whether it is pure (reads a frozen manifold or builds arena structure) or `IO`
+(async content resolution or promotion).
+
+| name              | signature                                                             | pure / IO           | lowers to                                       |
+| ----------------- | --------------------------------------------------------------------- | ------------------- | ----------------------------------------------- |
+| `rebuildManifold` | `MicroversionId -> Manifold`                                          | pure                | `Store::rebuildManifold` (frozen by value)      |
+| `arena`           | `Manifold -> Arena`                                                   | pure                | `ArenaManifold(const Manifold*)` CoW view       |
+| `base`            | `Arena -> Manifold`                                                   | pure                | the arena's base manifold                       |
+| `home`            | `Manifold -> CellRef`                                                 | pure                | `Manifold::home` (d.doc)                        |
+| `cells`           | `Manifold -> List CellRef`                                            | pure                | `Manifold::cells`                               |
+| `dimensionNamed`  | `String -> Manifold -> Option DimRef`                                 | pure                | `Manifold::dimensionNamed` (d.dims)             |
+| `linked`          | `CellRef -> DimRef -> Dir -> Manifold -> Option CellRef`              | pure, O(1)          | `Manifold::linked`                              |
+| `cloneMaster`     | `CellRef -> DimRef -> Manifold -> Option CellRef`                     | pure                | `Manifold::cloneMaster` (d.clone)               |
+| `contentOf`       | `CellRef -> Manifold -> List VSpan`                                   | pure                | `Manifold::contentOf` (addresses only)          |
+| `historyOf`       | `CellRef -> Manifold -> List OpIndex`                                 | pure                | `Manifold::historyOf` (R7 chain)                |
+| `occurrences`     | `VSpan -> Manifold -> Stream Extent`                                  | pure, O(log N + K)  | `Spanfilade::occurrencesOf`                     |
+| `follow`          | `VSpan -> Manifold -> Stream (Link, Endset)`                          | pure discovery      | `Spanfilade::occurrencesOf` + `Manifold::links` |
+| `diffVersions`    | `List MicroversionId -> Stream (VSpan, DiffKind, Int)`                | pure, paged         | `Store::diffVersions`                           |
+| `globalise`       | `VSpan -> Manifold -> GlobalSpan`                                     | pure                | `publication::globalise`                        |
+| `makeText`        | `String -> Arena -> (CellRef, Arena)`                                 | pure                | `ArenaManifold::makeCell(string_view)`          |
+| `makeScalar`      | `Scalar -> Arena -> (CellRef, Arena)`                                 | pure                | `ArenaManifold::makeScalarCell` (R6 bits)       |
+| `makeDim`         | `String -> Arena -> (DimRef, Arena)`                                  | pure                | `ArenaManifold::ensureDimension` (d.dims)       |
+| `setLink`         | `CellRef -> DimRef -> Dir -> CellRef -> Arena -> Result Arena`        | pure                | `ArenaManifold::link` (both ends)               |
+| `spliceSpan`      | `CellRef -> List VSpan -> Arena -> Result Arena`                      | pure                | `ArenaManifold::setContent` (transclude)        |
+| `insertInRank`    | `CellRef -> CellRef -> DimRef -> Dir -> Arena -> Arena`               | pure                | `ArenaManifold::insertIntoRank`                 |
+| `mark`            | `Arena -> (Mark, Arena)`                                              | pure                | `ArenaManifold::mark`                           |
+| `release`         | `Mark -> Arena -> Arena`                                              | pure                | `ArenaManifold::release`                        |
+| `walk`            | `CellRef -> DimRef -> Dir -> Int -> Arena -> Stream CellRef`          | pure, step-budgeted | `ArenaManifold::materializeFrontier`            |
+| `resolve`         | `VSpan -> IO (Resolved Bytes)`                                        | **IO**              | async `SpanReader` over `managed_torrent`       |
+| `textOf`          | `CellRef -> Manifold -> Resolved String`                              | staged              | `Manifold::textOf` behind `Resolved`            |
+| `localise`        | `GlobalSpan -> IO (Option VSpan)`                                     | **IO**              | `publication::localise`                         |
+| `promote`         | `MicroversionId -> CellRef -> Arena -> IO (Result Overflow Promoted)` | **IO**              | `promote(Store&, parent, arena, root, …)`       |
+| `projectXanadoc`  | `MicroversionId -> Manifold`                                          | pure                | `projectXuduToZigzag(…, &provenance)`           |
+| `storeToSlice`    | `Manifold -> Slice`                                                   | pure                | `storeToSlice`                                  |
+
+Three shapes the engine forces, each a correction a naive binding would get wrong:
+
+- **`follow` does not lower to `Store::linksTouching`.** That method is a linear `views::filter`
+  over every link (store.hpp), $O(n)$. Bidirectional link following lowers to the Spanfilade's
+  $O(\log N + K)$ interval stabbing (`Spanfilade::occurrencesOf`), yielding a $K$-bounded stream —
+  the difference between a Xanadu that scales and one that does not.
+- **`promote` returns `Result Overflow Promoted`, never a bare value.** The C++ returns `nullopt` on
+  a `PromotionBudget` overflow or a bad root; vlace makes that a typed `Err Overflow` rather than a
+  silent nothing, honouring §6.6's error model.
+- **`promote` must preserve `d.clone` sharing** (§6.5): a promoted subgraph that transcludes shared
+  spans emits them once and links both roots, so a transclusion stays $O(1)$ in new ops rather than
+  copying the quoted content — which is just absolute-transclusion-no-duplication restated as a
+  promotion requirement.
+
+### 13.3 Content resolution is staged: the `Resolved` type
+
+A `VSpan` is a permanent address; the *bytes* it names may live in another store or on the
+BitTorrent swarm, and fetching them can block or fail. A pure vlace function may freely build, pass,
+transclude, and address `VSpan`s — none of that touches bytes — but the moment a program wants the
+*characters*, it crosses into `IO` and into the possibility of a missing seeder. `std:xanadu` makes
+that crossing a type, not a hidden stall:
+
+```ocaml
+data Resolved a = Pending | Local a | Remote Handle ;
+resolve :: VSpan -> IO (Resolved Bytes)      -- async; never blocks the evaluation thread
+textOf  :: CellRef -> Manifold -> Resolved String
+```
+
+`textOf` of a cell whose content is a local scratch span returns `Local s` immediately; of a remote
+span it returns `Pending`/`Remote h` and the program stages the fetch through `resolve` in `IO`,
+exactly as the engine's `SpanReader` runs off the evaluation thread (graceful degradation: a missing
+seeder is a `Pending` the UI can show as "fetching…", never a frozen frame). This is the Xanadu-end
+analogue of §6.5's `read`/`currentVersion` split: *addressing* is pure, *materializing bytes* is
+`IO`, and the type says which.
+
+### 13.4 Worked examples: Xanadu concepts in vlace
+
+Each example illustrates one Xanadu concept and uses only the §5.1 grammar, the §7.4 prelude, and
+the §13.2 module. Authoring threads an `Arena`; `setLink`/`spliceSpan` return `Result` and sequence
+with `>>=`/`bindResult`; `textOf` returns `Resolved`; `follow`/`walk` yield bounded streams;
+`promote` returns `Result Overflow Promoted`.
+
+```ocaml
+import "std:xanadu" ;
+
+-- 1. Create a cell and link it onto the document rank (pure arena authoring)
+addLine = fn text => fn after => fn a0 =>
+  let (c, a1) = makeText text a0
+  in  case dimensionNamed "d.doc" (base a1) of
+        None      => Err UnknownDimension ;
+        Some dDoc => bindResult (setLink after dDoc Pos c a1)
+                                (fn a2 => Ok (c, a2)) ;
+
+-- 2. Set a link along the version rank. Links are bidirectional by construction:
+--    after this, linked edition d.version Neg = Some cell, with no second write.
+designate = fn cell => fn edition => fn a =>
+  case dimensionNamed "d.version" (base a) of
+    None      => Err UnknownDimension ;
+    Some dVer => setLink cell dVer Pos edition a ;
+
+-- 3. Transclusion as a value: only VSpans move, never bytes (zero copy-paste).
+quoteInto = fn srcM => fn srcCell => fn dstCell => fn a =>
+  spliceSpan dstCell (contentOf srcCell srcM) a ;   -- shared permascroll addresses
+
+-- 4. Follow a link both ways, staging the far endset's content asynchronously.
+bothEnds = fn vs => fn m =>
+  forEach (follow vs m) (fn (lnk, otherEndset) =>
+    resolve (firstSpan otherEndset) >>= fn r =>
+      case r of
+        Local txt => putStrLn txt ;
+        Pending   => putStrLn "(fetching citation…)" ;
+        Remote _  => putStrLn "(citation lives on the swarm)") ;
+
+-- 5. Walk a rank, step-budgeted and lazy (honest about U1: O(1) per step, bounded).
+docText = fn m =>
+  case dimensionNamed "d.doc" m of
+    None      => [] ;
+    Some dDoc => mapStream (fn c => textOf c m)
+                           (walk (home m) dDoc Pos 100 (arena m)) ;
+
+-- 6. Provenance / transcopyright: character-level Identity-Gold, streamed and paged.
+royalties = fn m =>
+  mapStream (fn (span, kind, sharing) =>
+               case kind of
+                 Universal => (span, feeFor sharing span) ;   -- cited everywhere
+                 Shared    => (span, feeFor sharing span) ;    -- cited by `sharing` docs
+                 _         => (span, 0))                       -- Unique / Deleted: no fee
+            (diffVersions [versionOf m]) ;
+
+-- 7. xuzz intertwingularity: one value is both FP data AND addressable ZigZag
+--    structure with provenance, promoted to a xanadoc version that is also a slice.
+relate = fn aName => fn bName =>
+  currentVersion aName >>= fn ra =>
+    case ra of
+      Err e  => putStrLn (format "cannot open: {}" [show e]) ;
+      Ok va  =>
+        let m          = projectXanadoc va ;        -- projected WITH per-cell provenance
+            (dRel, a1) = makeDim "d.relates" (arena m) ;
+            self       = home m
+        in  case cells m of
+              []        => putStrLn "empty document" ;
+              (other:_) =>
+                bindResult (setLink self dRel Pos other a1) (fn a2 =>
+                  promote va self a2 >>= fn rp =>
+                    case rp of
+                      Ok (Promoted ver _) => putStrLn (show ver) ;  -- a xanadoc version AND a slice
+                      Err Overflow        => putStrLn "subgraph exceeds promotion budget") ;
+```
+
+Example 1 is cell creation; 2 is a dimension link, and its one-sidedness in the source is the point
+— a Xanadu link is intrinsically bidirectional, so `setLink` writes both ends and `linked … Neg`
+reads the reverse with no extra operation (`ArenaManifold::link` sets the reciprocal, as
+`applyStructure` does). Example 3 is absolute transclusion: `contentOf` yields `VSpan` *names* and
+`spliceSpan` shares them, so the quoted content is never duplicated. Example 4 follows a link from
+both ends and stages the far content through `Resolved`, so a citation on a missing seeder degrades
+to "fetching…" rather than blocking. Example 5 walks the document rank with a step budget, honest
+that random access is U1 (§11). Example 6 is a transcopyright query over character-level
+Identity-Gold provenance (`Store::diffVersions`), streamed so it does not materialize an
+$O(\text{cells} \times
+\text{quotations})$ cross-product. Example 7 realizes xuzz intertwingularity end to end: a projected
+xanadoc carries provenance per cell (`projectXuduToZigzag` with its provenance sink), a cross-link
+is authored in the arena, and `promote` mints it as real Structure operations — so the result is
+addressable as both a xanadoc version and a ZigZag slice, which is the convergence invariant the
+skill demands a proposal honour on both halves at once.
+
+______________________________________________________________________
+
 ## Appendix: Versioning and Change History
 
 The rule is the one its siblings use:
@@ -1287,7 +1532,8 @@ Editorial changes that alter no normative text bump neither.
 | version | commit | date       | change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | ------- | ------ | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1.0     | —      | 2026-10-15 | Initial specification: purity as the arena regime (§2), values as cells and ADTs as Vlog terms (§4), the ML-shaped grammar (§5), call-by-need via thunks and the §6 memoization island (§6), the `std:fun` package (§7).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| 1.1     | *this* | 2026-10-15 | A typed effect boundary. Added `IO` monad with `read`/`save` typed as effects (§6.5); `Option`/`Result` prelude and the runtime error model (§6.6); operator grammar + fixity table and the `List` ADT (§5.1); production→lowering table (§5.6); records (§5.7); user modules/`import` (§5.8); numeric tower, `Bool`, `Char`, literals (§4.6); the prelude listing (§7.4); WHNF per cell kind, three-state blackholing, proper tail calls (§6.7). Corrected claims: identity-keyed memo with CSE non-normative and the persistent regime conceded intensional (§6.3, §10); normative HM with the let-generalization rule stated and the dynamic mode removed from conformance (§5.5); WHNF-forcing destructuring with non-linear patterns rejected and guards added (§5.4); promotion required to preserve `d.clone` sharing and stated non-confluent, RT scoped to the pure fragment (§6.5, §2.2). Doc hygiene: keyword list and `CompileError` message formats (§5.1, §8.3), §2 normative lead bullets, jargon glossed. |
+| 1.1     | —      | 2026-10-15 | A typed effect boundary. Added `IO` monad with `read`/`save` typed as effects (§6.5); `Option`/`Result` prelude and the runtime error model (§6.6); operator grammar + fixity table and the `List` ADT (§5.1); production→lowering table (§5.6); records (§5.7); user modules/`import` (§5.8); numeric tower, `Bool`, `Char`, literals (§4.6); the prelude listing (§7.4); WHNF per cell kind, three-state blackholing, proper tail calls (§6.7). Corrected claims: identity-keyed memo with CSE non-normative and the persistent regime conceded intensional (§6.3, §10); normative HM with the let-generalization rule stated and the dynamic mode removed from conformance (§5.5); WHNF-forcing destructuring with non-linear patterns rejected and guards added (§5.4); promotion required to preserve `d.clone` sharing and stated non-confluent, RT scoped to the pure fragment (§6.5, §2.2). Doc hygiene: keyword list and `CompileError` message formats (§5.1, §8.3), §2 normative lead bullets, jargon glossed. |
+| 1.2     | *this* | 2026-10-15 | The Xanadu interface. Added §13 `std:xanadu` for direct cell and document manipulation: authoring lowers to the pure `ArenaManifold` write path (not the IO `Store` Structure verbs), with `promote` the sole authoring effect (§13.1); a module table of pure addressing/authoring verbs and IO content-resolution verbs grounded in real `store.hpp`/`manifold.hpp`/`arena_manifold.hpp`/`zz_xudu_projector.hpp`/`spanfilade.hpp` symbols (§13.2); staged content resolution via `data Resolved` so a swarm fetch never blocks the evaluation thread (§13.3); and seven worked examples illustrating cell creation, bidirectional dimension links, transclusion-as-value, async link following, rank walking, character-level transcopyright/provenance queries, and xuzz intertwingularity (§13.4). Reconciling notes in §3, §6.5, §7.4. Outcome of a Xanadu-deep-reasoning tripartite dialectic (Purist/Realist/Codebase-Expert).                                                                                     |
 
 [toc-01]: #2-purity-over-an-append-only-store-the-reconciliation-that-comes-first
 [toc-02]: #21-the-spool-is-an-immutable-value-evaluation-is-a-pure-function
@@ -1317,3 +1563,6 @@ Editorial changes that alter no normative text bump neither.
 [toc-26]: #57-records-named-fields-and-functional-update
 [toc-27]: #58-modules-user-facing-import-and-qualified-names
 [toc-28]: #74-the-prelude-names-in-scope-in-a-fresh-program
+[toc-29]: #13-the-stdxanadu-package-direct-cell-and-document-manipulation
+[toc-30]: #131-why-authoring-lowers-to-the-arena-not-the-store
+[toc-31]: #133-content-resolution-is-staged-the-resolved-type
