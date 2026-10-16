@@ -432,12 +432,16 @@ datarootdir ?= $(prefix)/share
 datadir ?= $(datarootdir)
 mandir ?= $(datarootdir)/man
 appdir := $(datadir)/gleditor
-ifdef DEBUG
+# Sanitizer flag sets are defined unconditionally so both the stock
+# sanitize/* targets and the Stage 0 engine-and-test sanitizer targets
+# (vortex-multithreading-study.md §3.6) can reference them. They are inert
+# unless a sanitize target adds them to CXXFLAGS/LDFLAGS.
 SANITIZE_ADDR_OPTS := -fsanitize=address,undefined,integer -fno-omit-frame-pointer -fsanitize-address-use-after-return=runtime \
 	         -fsanitize-address-use-after-scope
 SANITIZE_THR_OPTS := -fsanitize=thread,undefined,integer -fno-omit-frame-pointer
 SANITIZE_MEM_OPTS := -fsanitize=memory,undefined,integer -fPIE -pie -fno-omit-frame-pointer \
 		     -fsanitize-memory-track-origins
+ifdef DEBUG
 DEBUG_OPTS := -g -gembed-source -fdebug-macro -O0
 PROFILE_OPTS := -fprofile-instr-generate -fcoverage-mapping -fcoverage-mcdc
 else
@@ -865,6 +869,37 @@ sanitize/memory: gleditor
 
 sanitize/memory/run: sanitize/memory
 	MSAN_OPTIONS=check_initialization_order=1:detect_leaks=1:strict_string_checks=1 $(OBJDIR)/gleditor
+
+# -- Stage 0 engine-and-test sanitizer targets --------------------------------
+# vortex-multithreading-study.md §3.6: the stock sanitize/address and
+# sanitize/thread targets build only `gleditor`, which by AGENTS.md design
+# links no Xanadu or Vortex code, so they instrument zero lines of the engine.
+# These targets apply the same SANITIZE_*_OPTS flag macros to the engine
+# objects and the xudu_test / zigzag_test binaries, which do exercise
+# vortex_vm, arena_manifold, vlog and the frontends. Use /run to build and
+# execute the engine suites under the sanitizer single-threaded.
+.PHONY: sanitize/engine-address sanitize/engine-address/run \
+        sanitize/engine-thread sanitize/engine-thread/run
+
+sanitize/engine-address: CXXFLAGS += $(SANITIZE_ADDR_OPTS)
+sanitize/engine-address: LDFLAGS += $(SANITIZE_ADDR_OPTS)
+sanitize/engine-address: xudu_test zigzag_test
+
+sanitize/engine-address/run: sanitize/engine-address
+	ASAN_OPTIONS=check_initialization_order=1:detect_leaks=1:strict_string_checks=1 \
+	  $(OBJDIR)/xudu_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
+	ASAN_OPTIONS=check_initialization_order=1:detect_leaks=1:strict_string_checks=1 \
+	  $(OBJDIR)/zigzag_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
+
+sanitize/engine-thread: CXXFLAGS += $(SANITIZE_THR_OPTS)
+sanitize/engine-thread: LDFLAGS += $(SANITIZE_THR_OPTS)
+sanitize/engine-thread: xudu_test zigzag_test
+
+sanitize/engine-thread/run: sanitize/engine-thread
+	TSAN_OPTIONS=second_deadlock_stack=1 \
+	  $(OBJDIR)/xudu_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
+	TSAN_OPTIONS=second_deadlock_stack=1 \
+	  $(OBJDIR)/zigzag_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
 
 
 .PHONY: gleditor_test xudu_test xuzz_test zigzag_test

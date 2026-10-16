@@ -4,11 +4,14 @@
  */
 #include "common/xanadu/vortex/vortex_vm.hpp"
 
+#include <chrono>
 #include <cmath>
 #include <iostream>
 #include <ranges>
 #include <string>
 #include <unordered_set>
+
+#include <gleditor/logging.hpp>
 
 #include "common/xanadu/zigzag/cell_views.hpp"
 #include "common/xanadu/zigzag/vlog.hpp"
@@ -1076,6 +1079,18 @@ ExecutionResult VortexVM::run(CellRef cursor, std::size_t maxCycles) {
 std::size_t VortexVM::stepScheduler() {
   std::size_t executed         = 0;
   std::vector<CellRef> cursors = activeCursors();
+
+  // Stage 0 instrumentation (vortex-multithreading-study.md §3.6): time one
+  // cooperative scheduler tick over all active cursors. Because every cursor
+  // steps serially over the one shared arena, this wall time grows linearly
+  // with the cursor count -- the measurement that proves the single arena is
+  // the serialization point. The guard skips the clock reads when the
+  // category is disabled, so an instrumented build pays nothing by default.
+  static const auto schedLogger = gleditor::logging::category("vortex.sched");
+  const bool trace              = schedLogger->should_log(spdlog::level::trace);
+  const auto tickStart = trace ? std::chrono::steady_clock::now()
+                               : std::chrono::steady_clock::time_point{};
+
   for (CellRef cursor : cursors) {
     CellRef op = getCursorOpcode(cursor);
     if (op != noCell) {
@@ -1085,6 +1100,18 @@ std::size_t VortexVM::stepScheduler() {
       }
     }
   }
+
+  if (trace) {
+    const auto elapsedNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                               std::chrono::steady_clock::now() - tickStart)
+                               .count();
+    schedLogger->trace(
+        "tick: cursors={} executed={} elapsed_ns={} ns_per_cursor={}",
+        cursors.size(), executed, elapsedNs,
+        cursors.empty() ? 0
+                        : elapsedNs / static_cast<long long>(cursors.size()));
+  }
+
   return executed;
 }
 
