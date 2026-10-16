@@ -442,6 +442,17 @@ Rules:
   inside Vortex. §4–§5 (arena, choice points, trail, `unify()`) are built; §6–§7 (clause selection
   and a solver written *in Vortex*) are not and are gated on U1. `vprolog` runs on the VM's C++
   logic opcodes instead.
+- [`vicon-goal-directed-language.md`](design/vicon-goal-directed-language.md) — vicon: an
+  Icon-shaped goal-directed language whose generators are Vlog's choice points. Specification only,
+  nothing built; it asks the C++ core for nothing (§8.1) because `#Choice`/`#Fail`/`#Cut` over the
+  `ArenaManifold` already exist, and all new standard-library code lives in a `std:goal` package
+  written in Vortex. The owed C++ is a front end only.
+- [`vlace-functional-language.md`](design/vlace-functional-language.md) — vlace: a text-based,
+  purely functional (ML/Haskell-shaped) language whose purity is R8's arena regime — evaluation
+  mints no operation, so referential transparency holds, and the append-only spool plus `d.clone`
+  are its persistent data structures. Specification only, nothing built; it asks the C++ core for
+  nothing (§8.1, not even a new dimension) and keeps new standard-library code in a `std:fun`
+  package written in Vortex. The owed C++ is a front end with a Hindley–Milner pass.
 - [`enfilade/`](design/enfilade/) — `enfilade-discussion.md` (the survey and the 4.96 ns breakeven),
   `enfilade-rank-indexing.md` (the U1 proposal; §3 says why crums are not cells), and one note per
   built enfilade (spanfilade, chronofilade, holefilade, layoutfilade, arrayfilade).

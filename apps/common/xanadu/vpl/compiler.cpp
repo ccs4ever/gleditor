@@ -589,13 +589,9 @@ CellRef VPLCompiler::compileVector(const VectorExpr &expr) {
 
   if (cells.empty()) return noCell;
 
-  // Chain vector cells along +d.step
-  for (std::size_t i = 0; i + 1 < cells.size(); ++i) {
-    if (cells[i] != noCell && cells[i + 1] != noCell) {
-      zigzag::expectWritten(
-          core_.arena().link(cells[i], core_.dims().step, false, cells[i + 1]));
-    }
-  }
+  // Chain vector cells along +d.step via the shared batch-link primitive.
+  zigzag::expectWritten(core_.arena().linkChain(
+      cells, core_.dims().step, zigzag::DimVector::POS));
 
   return cells.front();
 }

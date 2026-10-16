@@ -283,7 +283,10 @@ front end over Vortex/Vlog logic operations. Xuzz's cell view also has Vortex an
 can compose multiple stores in one ephemeral arena; this does not make persistent cross-store cell
 links automatic. The [Vortex](design/vortex-hyperstructural-runtime.md),
 [VQL](design/vql-query-language.md), [VPL](design/vpl-array-language.md), and
-[Vlog](design/vlog-logic-extension.md) notes document their models and remaining work.
+[Vlog](design/vlog-logic-extension.md) notes document their models and remaining work; the
+[vicon](design/vicon-goal-directed-language.md) note proposes an Icon-shaped goal-directed language
+over the same runtime, and the [vlace](design/vlace-functional-language.md) note proposes a
+text-based, purely functional one (both specification only, nothing built).
 
 ## ZigZag and Xuzz presentation
 
