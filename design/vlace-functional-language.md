@@ -112,6 +112,7 @@ ______________________________________________________________________
   - [13.2 The `std:xanadu` module](#132-the-stdxanadu-module)
   - [13.3 Content resolution is staged: the `Resolved` type][toc-31]
   - [13.4 Worked examples: Xanadu concepts in vlace](#134-worked-examples-xanadu-concepts-in-vlace)
+  - [13.5 Complex arrangements and heavy navigation derive over existing primitives][toc-32]
 - [Appendix: Versioning and Change History](#appendix-versioning-and-change-history)
 
 ______________________________________________________________________
@@ -901,12 +902,13 @@ The §9 examples draw only on this table. Where 1.0 used undefined names (`addWo
 honour §3's rule that every construct is defined.
 
 The Xanadu authoring surface is **not** in the prelude: it is imported with `import "std:xanadu"`
-(§13.2), which brings in its verbs and the ADTs `CellRef`, `DimRef`, `VSpan`, `Link`, `Manifold`,
-`Arena`, `Mark`, `GlobalSpan`, `data Dir = Pos | Neg`,
-`data DiffKind = Universal | Shared | Unique | Deleted`, and
-`data Resolved a = Pending | Local a | Remote Handle`. Keeping it behind an explicit import mirrors
-Haskell's non-prelude modules and signals that a program touching the docuverse is doing something a
-pure numeric program is not.
+(§13.2), a **shared Vortex stdlib module** (not a vlace artifact) whose verbs and types — `CellRef`,
+`DimRef`, `VSpan`, `Link`, `Manifold`, `Arena`, `Mark`, `GlobalSpan`, `Dir = Pos | Neg`,
+`DiffKind = Universal | Shared | Unique | Deleted`, `Resolved a = Pending | Local a | Remote Handle`
+— are the same ones VQL, VPL, vicon, and vprolog import. vlace does not *own* them; the import
+brings the shared module's names into scope. Keeping it behind an explicit import mirrors Haskell's
+non-prelude modules and signals that a program touching the docuverse is doing something a pure
+numeric program is not.
 
 ______________________________________________________________________
 
@@ -1349,14 +1351,20 @@ that never mutates, addressed by where it is — seen from two sides.
 
 ### 13.2 The `std:xanadu` module
 
-`std:xanadu` is a module on `d.stdlib` (§7.1), imported with `import "std:xanadu"`. Its types are
-prelude ADTs (added to §7.4): `CellRef`, `DimRef`, `VSpan` (a permascroll span — a *name*, not
-bytes), `Link`, `Manifold` (a frozen replay product), `Arena` (a mutable-in-the-arena CoW view),
-`Mark`, `GlobalSpan`, `data Dir = Pos | Neg`,
-`data DiffKind = Universal | Shared | Unique | Deleted`, and
-`data Resolved a = Pending | Local a | Remote Handle` (§13.3). Each verb below cites the C++ symbol
-it lowers to and whether it is pure (reads a frozen manifold or builds arena structure) or `IO`
-(async content resolution or promotion).
+`std:xanadu` is a **shared Vortex standard-library module** on the `d.stdlib` rank off `home`,
+beside the seven core modules, `std:logic` (Vlog §8.3), `std:goal` (vicon), and `std:fun` (§7) —
+anchored and resolved exactly as they are (Vortex §7.1), and **importable from any front end** (VQL,
+VPL, vicon, vprolog, and vlace alike), not a vlace artifact. vlace brings it in with
+`import "std:xanadu"`; a VQL query or a vprolog program imports the same module and the same verbs.
+Its types are engine/Vortex concepts, not vlace surface sugar — `CellRef`, `DimRef`, `VSpan` (a
+permascroll span: a *name*, not bytes), `Link`, `Manifold` (a frozen replay product), `Arena` (a
+mutable-in-the-arena CoW view), `Mark`, `GlobalSpan`, `Dir = Pos | Neg`,
+`DiffKind = Universal | Shared | Unique | Deleted`, `Resolved a = Pending | Local a | Remote Handle`
+(§13.3) — defined once (convergence R5–R8/R12 own the data model; this module owns the verb
+vocabulary) and brought into a vlace program's scope by the import rather than owned by vlace's
+prelude. The effect column reads in vlace's `IO` terms here; a front end with a different effect
+vocabulary (VQL's non-transparency note, vicon's edge) maps the same arena/read-only-vs-promotes/
+async classification into its own. Each verb cites the C++ symbol it lowers to.
 
 | name              | signature                                                             | pure / IO           | lowers to                                       |
 | ----------------- | --------------------------------------------------------------------- | ------------------- | ----------------------------------------------- |
@@ -1515,6 +1523,48 @@ is authored in the arena, and `promote` mints it as real Structure operations �
 addressable as both a xanadoc version and a ZigZag slice, which is the convergence invariant the
 skill demands a proposal honour on both halves at once.
 
+### 13.5 Complex arrangements and heavy navigation derive over existing primitives
+
+A power-user building many cells in multidimensional arrangements and navigating them heavily needs
+more than one-step `linked`/`walk`: a cursor, batch constructors, and an ergonomic way to thread the
+`Arena`. A purist insists those conveniences preserve bidirectionality, provenance, and true
+orthogonality. Both are satisfied **without new C++**, because the engine and the shared Vortex
+stdlib already carry the primitives; the ergonomics are *derived* code in the shared layer, and the
+spec records them so a front end reuses rather than re-implements them. The clean layering:
+
+- **C++ engine (reuse, do not re-implement).** `zigzag::RankView` (`cell_views.hpp`) is the lazy,
+  allocation-free, `std::ranges`-composable rank walk over either `Manifold` or `ArenaManifold` —
+  `walk` (§13.2) is a thin view over it, and a *cursor* is `{pos, across, down}` of two
+  `DirectedDim` whose `move`/`rotate`/`reverse` are pure `step`s over it, not a new type.
+  `ArenaManifold::link` / `Manifold::link` already write **both** reciprocal edges and evict the old
+  partner (as `applyStructure`'s `SetLink` does), so bidirectionality is an engine invariant a batch
+  builder inherits for free; `insertIntoRank`, `cloneMaster` (cycle-guarded), `cellsWithinRadius`,
+  and `dimensions` already exist and are exposed, not rebuilt.
+- **Shared Vortex stdlib (`std:xanadu` / `std:zigzag`, written in Vortex, reused by all front
+  ends).** Batch construction is `VortexStdLib::createList` / `createGrid` / `arrayIota` and
+  clone-rank extension is `zzLink` / `zzCloneToChain` (`vortex_stdlib.hpp`) — a true-orthogonal grid
+  is `createGrid rows cols dRow dCol`, *not* a hand-rolled 1-D chain, so the N·M·2 reciprocal-link
+  postcondition is asserted once in the shared layer. A `Cursor` record, `buildGrid` / `fillRank` /
+  `linkAll`, `resolveAll` (batched over `quotedContent`, keeping provenance), clone-member and
+  within-radius queries all live here as Vortex routines over the engine primitives, callable from
+  VQL/VPL/vicon/vprolog/vlace.
+- **vlace surface sugar (`std:fun`).** Only the genuinely notation-level conveniences are vlace's
+  own: an `Arena` state-monad with `do`-notation and `mapArena`/`foldArena`/`zipWithM` (which
+  **lower to** the shared rank-walk and `std:functional`'s `map`/`fold`, not a parallel combinator
+  set), and lenses over cell fields (which **compile to** `linked`/`link` + `contentOf`/`setContent`
+  reads and writes, never a parsed blob). These make the 1000-cell grid and the sweep-collect
+  traversal ergonomic without a mutable builder that would break referential transparency.
+
+The rule the dialogue converged on: **faithfulness is the cheapest derived code.** A cursor is
+Nelson's I-beam; a zipper over a rank is principled navigation; a batch link must still write both
+ends and carry provenance — and because the engine already enforces those, the ergonomic layer is
+pure Vortex over primitives that exist. The single genuine C++ gap is one shared `buildGrid` /
+batch-link home, so the per-element `arena().link(cells[i-1], axis, Pos, cells[i])` loops currently
+duplicated across the VPL and VQL front ends (`vpl/vpl_engine.cpp`, `vpl/compiler.cpp`,
+`vql/compiler.cpp`) have one place to live and inherit the reciprocal-edge and provenance guarantees
+a hand-rolled chain can silently break. None of this is vlace-specific: the shared verbs are the
+ones every front end calls.
+
 ______________________________________________________________________
 
 ## Appendix: Versioning and Change History
@@ -1529,11 +1579,11 @@ The rule is the one its siblings use:
 
 Editorial changes that alter no normative text bump neither.
 
-| version | commit | date       | change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| ------- | ------ | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1.0     | —      | 2026-10-15 | Initial specification: purity as the arena regime (§2), values as cells and ADTs as Vlog terms (§4), the ML-shaped grammar (§5), call-by-need via thunks and the §6 memoization island (§6), the `std:fun` package (§7).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| 1.1     | —      | 2026-10-15 | A typed effect boundary. Added `IO` monad with `read`/`save` typed as effects (§6.5); `Option`/`Result` prelude and the runtime error model (§6.6); operator grammar + fixity table and the `List` ADT (§5.1); production→lowering table (§5.6); records (§5.7); user modules/`import` (§5.8); numeric tower, `Bool`, `Char`, literals (§4.6); the prelude listing (§7.4); WHNF per cell kind, three-state blackholing, proper tail calls (§6.7). Corrected claims: identity-keyed memo with CSE non-normative and the persistent regime conceded intensional (§6.3, §10); normative HM with the let-generalization rule stated and the dynamic mode removed from conformance (§5.5); WHNF-forcing destructuring with non-linear patterns rejected and guards added (§5.4); promotion required to preserve `d.clone` sharing and stated non-confluent, RT scoped to the pure fragment (§6.5, §2.2). Doc hygiene: keyword list and `CompileError` message formats (§5.1, §8.3), §2 normative lead bullets, jargon glossed. |
-| 1.2     | *this* | 2026-10-15 | The Xanadu interface. Added §13 `std:xanadu` for direct cell and document manipulation: authoring lowers to the pure `ArenaManifold` write path (not the IO `Store` Structure verbs), with `promote` the sole authoring effect (§13.1); a module table of pure addressing/authoring verbs and IO content-resolution verbs grounded in real `store.hpp`/`manifold.hpp`/`arena_manifold.hpp`/`zz_xudu_projector.hpp`/`spanfilade.hpp` symbols (§13.2); staged content resolution via `data Resolved` so a swarm fetch never blocks the evaluation thread (§13.3); and seven worked examples illustrating cell creation, bidirectional dimension links, transclusion-as-value, async link following, rank walking, character-level transcopyright/provenance queries, and xuzz intertwingularity (§13.4). Reconciling notes in §3, §6.5, §7.4. Outcome of a Xanadu-deep-reasoning tripartite dialectic (Purist/Realist/Codebase-Expert).                                                                                     |
+| version | commit | date       | change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ------- | ------ | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1.0     | —      | 2026-10-15 | Initial specification: purity as the arena regime (§2), values as cells and ADTs as Vlog terms (§4), the ML-shaped grammar (§5), call-by-need via thunks and the §6 memoization island (§6), the `std:fun` package (§7).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| 1.1     | —      | 2026-10-15 | A typed effect boundary. Added `IO` monad with `read`/`save` typed as effects (§6.5); `Option`/`Result` prelude and the runtime error model (§6.6); operator grammar + fixity table and the `List` ADT (§5.1); production→lowering table (§5.6); records (§5.7); user modules/`import` (§5.8); numeric tower, `Bool`, `Char`, literals (§4.6); the prelude listing (§7.4); WHNF per cell kind, three-state blackholing, proper tail calls (§6.7). Corrected claims: identity-keyed memo with CSE non-normative and the persistent regime conceded intensional (§6.3, §10); normative HM with the let-generalization rule stated and the dynamic mode removed from conformance (§5.5); WHNF-forcing destructuring with non-linear patterns rejected and guards added (§5.4); promotion required to preserve `d.clone` sharing and stated non-confluent, RT scoped to the pure fragment (§6.5, §2.2). Doc hygiene: keyword list and `CompileError` message formats (§5.1, §8.3), §2 normative lead bullets, jargon glossed.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 1.2     | *this* | 2026-10-15 | The Xanadu interface. Added §13 `std:xanadu` for direct cell and document manipulation: authoring lowers to the pure `ArenaManifold` write path (not the IO `Store` Structure verbs), with `promote` the sole authoring effect (§13.1); a module table of pure addressing/authoring verbs and IO content-resolution verbs grounded in real `store.hpp`/`manifold.hpp`/`arena_manifold.hpp`/`zz_xudu_projector.hpp`/`spanfilade.hpp` symbols (§13.2); staged content resolution via `data Resolved` so a swarm fetch never blocks the evaluation thread (§13.3); and seven worked examples illustrating cell creation, bidirectional dimension links, transclusion-as-value, async link following, rank walking, character-level transcopyright/provenance queries, and xuzz intertwingularity (§13.4); and §13.5 reframing `std:xanadu` as a shareable Vortex module (importable by VQL/VPL/vicon/vprolog, not vlace-locked) and presenting complex-arrangement authoring and heavy navigation (cursor, grid, batch linking, lenses) as code derived over already-built engine (`cell_views::RankView`, `ArenaManifold::link`/`insertIntoRank`/`cloneMaster`/`cellsWithinRadius`) and shared stdlib (`VortexStdLib::createGrid`/`createList`/`zzCloneToChain`) primitives. Reconciling notes in §3, §6.5, §7.4. Outcome of two Xanadu-deep-reasoning passes: a Purist/Realist/Codebase-Expert dialectic, then a Purist-vs-power-user dialogue audited by a technical writer and a system architect for cross-language reuse. |
 
 [toc-01]: #2-purity-over-an-append-only-store-the-reconciliation-that-comes-first
 [toc-02]: #21-the-spool-is-an-immutable-value-evaluation-is-a-pure-function
@@ -1566,3 +1616,4 @@ Editorial changes that alter no normative text bump neither.
 [toc-29]: #13-the-stdxanadu-package-direct-cell-and-document-manipulation
 [toc-30]: #131-why-authoring-lowers-to-the-arena-not-the-store
 [toc-31]: #133-content-resolution-is-staged-the-resolved-type
+[toc-32]: #135-complex-arrangements-and-heavy-navigation-derive-over-existing-primitives
