@@ -87,6 +87,9 @@ private:
   void freeVars(const TyPtr &t, std::vector<int> &out);
 
   std::expected<TyPtr, TypeError> infer(const ExprNode &e, const EnvPtr &env);
+  std::expected<TyPtr, TypeError> inferRecordUpdate(const ERecordUpdate &ru,
+                                                    const EnvPtr &env,
+                                                    SourceLocation loc);
   std::expected<TyPtr, TypeError>
   inferPattern(const PatternNode &p, const EnvPtr &env, TyPtr expected,
                std::unordered_map<std::string, Scheme> &binds);
@@ -110,6 +113,12 @@ private:
   std::unordered_map<std::string, std::vector<std::string>> dataCtors_;
   // Constructor name -> owning data type name.
   std::unordered_map<std::string, std::string> ctorData_;
+  // Record field accessor name -> its scheme (forall params. C -> fieldType),
+  // so `x p` type-checks as an application of the accessor (§5.7).
+  std::unordered_map<std::string, Scheme> fieldAccessors_;
+  // Record constructor name -> ordered field names (for ERecordUpdate field
+  // name resolution against the ctor's argument types).
+  std::unordered_map<std::string, std::vector<std::string>> recordFields_;
 };
 
 } // namespace xanadu::vlace

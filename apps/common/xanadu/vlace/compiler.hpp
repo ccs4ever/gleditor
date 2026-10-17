@@ -123,6 +123,15 @@ private:
   std::expected<ValuePtr, EvalError> apply(const ValuePtr &fn, ValuePtr arg,
                                            SourceLocation loc);
 
+  // Evaluate a record construction / functional update (§5.7). The record
+  // subexpr forces to a Ctor; named fields are placed by the ctor's field-name
+  // list (ctorFields_), replacing positional args by name. A bare constructor
+  // subexpr yields a fresh fully-applied Ctor; an existing record is copied so
+  // the original is left unchanged (sharing the untouched fields).
+  std::expected<ValuePtr, EvalError> evalRecordUpdate(const ERecordUpdate &ru,
+                                                      const EnvPtr &env,
+                                                      SourceLocation loc);
+
   // Arithmetic / comparison performed via the VM's opcodes over scalar cells.
   std::expected<ValuePtr, EvalError> numericOp(std::string_view op,
                                                const ValuePtr &lhs,
@@ -153,6 +162,14 @@ private:
   EnvPtr globals_{std::make_shared<Env>()};
   // Constructor name -> arity. Nil/Cons and True/False are pre-registered.
   std::unordered_map<std::string, std::size_t> ctorArity_;
+  // Record constructor name -> ordered field names, in Inputs-Wing order
+  // (§5.7). Populated by registerData() for record ctors; drives named-field
+  // placement in ERecordUpdate and record construction.
+  std::unordered_map<std::string, std::vector<std::string>> ctorFields_;
+  // Field name -> the record constructor it belongs to. A field name is a
+  // top-level accessor function C -> fieldType (§5.7); eval of EVar/EApp
+  // special-cases a known accessor applied to a Ctor to return that arg.
+  std::unordered_map<std::string, std::string> fieldAccessor_;
 };
 
 } // namespace xanadu::vlace

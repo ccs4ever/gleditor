@@ -301,7 +301,95 @@ void Compiler::registerData(const DataDecl &dd) {
   for (const auto &c : dd.ctors) {
     const std::size_t arity = c.isRecord ? c.fields.size() : c.argTypes.size();
     ctorArity_[c.name]      = arity;
+    if (c.isRecord) {
+      // Record a record ctor's ordered field names (§5.7) so named-field
+      // placement in construction / functional update can map a field name to
+      // its Inputs-Wing position, and so each field name becomes a top-level
+      // accessor function C -> fieldType.
+      std::vector<std::string> names;
+      names.reserve(c.fields.size());
+      for (const auto &f : c.fields) {
+        names.push_back(f.first);
+        fieldAccessor_[f.first] = c.name;
+      }
+      ctorFields_[c.name] = std::move(names);
+    }
   }
+}
+
+std::expected<ValuePtr, EvalError>
+Compiler::evalRecordUpdate(const ERecordUpdate &ru, const EnvPtr &env,
+                           SourceLocation loc) {
+  // The record subexpr is either a bare constructor (construction
+  // `C { f = e, ... }`, parsed as an update over `ECtor C`) or an existing
+  // record value (functional update `r { f = e }`). In both cases we end with
+  // a Ctor value whose field args are placed by name.
+  const bool bareCtor = std::holds_alternative<ECtor>(ru.record->node);
+  std::string tag;
+  std::vector<ValuePtr> args;
+  if (bareCtor) {
+    tag                 = std::get<ECtor>(ru.record->node).name;
+    const auto arityIt  = ctorArity_.find(tag);
+    const std::size_t n = arityIt == ctorArity_.end() ? 0 : arityIt->second;
+    // Start from all-unset slots; named fields fill them below. A field left
+    // unnamed in a construction is a program error, surfaced as a missing
+    // slot after the loop.
+    args.assign(n, nullptr);
+  } else {
+    auto rE = eval(*ru.record, env);
+    if (!rE) return rE;
+    auto rF = force(*rE);
+    if (!rF) return rF;
+    const ValuePtr rec = *rF;
+    if (!rec || rec->kind != Value::Kind::Ctor) {
+      return fail(CompileError::TypeMismatch,
+                  "record update applied to a non-record value", loc);
+    }
+    tag  = rec->tag;
+    args = rec->args; // copy; the original is left unchanged (§5.7)
+  }
+
+  const auto fieldsIt = ctorFields_.find(tag);
+  if (fieldsIt == ctorFields_.end()) {
+    return fail(CompileError::TypeMismatch,
+                "'" + tag + "' is not a record constructor", loc);
+  }
+  const std::vector<std::string> &fieldNames = fieldsIt->second;
+  if (args.size() < fieldNames.size()) {
+    args.resize(fieldNames.size(), nullptr);
+  }
+
+  for (const auto &[name, expr] : ru.fields) {
+    std::size_t idx = fieldNames.size();
+    for (std::size_t k = 0; k < fieldNames.size(); ++k) {
+      if (fieldNames[k] == name) {
+        idx = k;
+        break;
+      }
+    }
+    if (idx == fieldNames.size()) {
+      return fail(CompileError::UnboundIdentifier,
+                  "record '" + tag + "' has no field '" + name + "'", loc);
+    }
+    // Fields stay lazy, like constructor arguments (§4.2): a thunk of the
+    // field expression in the current environment.
+    args[idx] = makeThunk(expr.get(), env);
+  }
+
+  if (bareCtor) {
+    for (std::size_t k = 0; k < args.size(); ++k) {
+      if (!args[k]) {
+        return fail(CompileError::NonExhaustiveMatch,
+                    "record construction of '" + tag + "' leaves field '" +
+                        fieldNames[k] + "' unset",
+                    loc);
+      }
+    }
+  }
+
+  auto v       = makeCtor(tag, std::move(args));
+  v->ctorArity = v->args.size();
+  return v;
 }
 
 std::expected<bool, EvalError>
@@ -568,6 +656,36 @@ std::expected<ValuePtr, EvalError> Compiler::eval(const ExprNode &e,
           v->clo      = clo;
           return v;
         } else if constexpr (std::is_same_v<T, EApp>) {
+          // A record field accessor `fieldName record` (§5.7): if the callee
+          // is a bare field name that is not shadowed by a binding, force the
+          // argument to its record Ctor and return the named field's arg.
+          if (std::holds_alternative<EVar>(node.fn->node)) {
+            const std::string &fn = std::get<EVar>(node.fn->node).name;
+            if (!lookup(env, fn)) {
+              const auto accIt = fieldAccessor_.find(fn);
+              if (accIt != fieldAccessor_.end()) {
+                auto aE = eval(*node.arg, env);
+                if (!aE) return aE;
+                auto aF = force(*aE);
+                if (!aF) return aF;
+                const ValuePtr rec = *aF;
+                if (!rec || rec->kind != Value::Kind::Ctor ||
+                    rec->tag != accIt->second) {
+                  return fail(CompileError::TypeMismatch,
+                              "field accessor '" + fn + "' applied to a non-" +
+                                  accIt->second + " value",
+                              e.loc);
+                }
+                const auto &names = ctorFields_[accIt->second];
+                for (std::size_t k = 0;
+                     k < names.size() && k < rec->args.size(); ++k) {
+                  if (names[k] == fn) return rec->args[k];
+                }
+                return fail(CompileError::UnboundIdentifier,
+                            "record has no field '" + fn + "'", e.loc);
+              }
+            }
+          }
           auto fn = eval(*node.fn, env);
           if (!fn) return fn;
           // The argument is passed lazily as a thunk (call-by-need, §6.1).
@@ -611,6 +729,8 @@ std::expected<ValuePtr, EvalError> Compiler::eval(const ExprNode &e,
           auto v       = makeCtor("Tuple", std::move(args));
           v->ctorArity = node.elems.size();
           return v;
+        } else if constexpr (std::is_same_v<T, ERecordUpdate>) {
+          return evalRecordUpdate(node, env, e.loc);
         } else {
           return fail(CompileError::UnexpectedToken,
                       "this expression form arrives in a later stage", e.loc);

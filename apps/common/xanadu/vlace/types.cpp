@@ -281,6 +281,20 @@ void TypeChecker::registerData(const DataDecl &dd) {
       ty = tyFun(*it, ty);
     }
     ctors_[c.name] = Scheme{.vars = schemeVars, .body = ty};
+    if (c.isRecord) {
+      // Each field name is a top-level accessor function C -> fieldType, and
+      // the ctor's field names/types drive ERecordUpdate checking (§5.7). The
+      // accessor shares the data type's quantified params so it is polymorphic
+      // where the data type is.
+      std::vector<std::string> fieldNames;
+      fieldNames.reserve(c.fields.size());
+      for (std::size_t k = 0; k < c.fields.size(); ++k) {
+        fieldNames.push_back(c.fields[k].first);
+        fieldAccessors_[c.fields[k].first] =
+            Scheme{.vars = schemeVars, .body = tyFun(resultTy, argTys[k])};
+      }
+      recordFields_[c.name] = std::move(fieldNames);
+    }
   }
   dataCtors_[dd.name] = names;
 }
@@ -362,6 +376,89 @@ TypeChecker::inferPattern(const PatternNode &p, const EnvPtr &env,
       p.node);
 }
 
+std::expected<TyPtr, TypeError>
+TypeChecker::inferRecordUpdate(const ERecordUpdate &ru, const EnvPtr &env,
+                               SourceLocation loc) {
+  // Determine the record constructor: a bare constructor subexpr is record
+  // construction `C { ... }`; otherwise it is a functional update over an
+  // existing record value, whose constructor is read from its data type.
+  std::string ctorName;
+  const bool bareCtor = std::holds_alternative<ECtor>(ru.record->node);
+  TyPtr recordTy;
+  if (bareCtor) {
+    ctorName = std::get<ECtor>(ru.record->node).name;
+  } else {
+    auto rTy = infer(*ru.record, env);
+    if (!rTy) return rTy;
+    recordTy = prune(*rTy);
+    // The record's data type names its (single) record constructor.
+    if (recordTy->kind != Ty::Kind::Con) {
+      return terr(CompileError::TypeMismatch,
+                  "record update applied to a non-record value", loc);
+    }
+    const auto dcIt = dataCtors_.find(recordTy->con);
+    if (dcIt == dataCtors_.end() || dcIt->second.empty()) {
+      return terr(CompileError::TypeMismatch,
+                  "'" + recordTy->con + "' is not a record type", loc);
+    }
+    ctorName = dcIt->second.front();
+  }
+
+  const auto fieldsIt = recordFields_.find(ctorName);
+  if (fieldsIt == recordFields_.end()) {
+    return terr(CompileError::TypeMismatch,
+                "'" + ctorName + "' is not a record constructor", loc);
+  }
+  const std::vector<std::string> &fieldNames = fieldsIt->second;
+
+  // Instantiate the ctor scheme fresh: fieldTy1 -> ... -> fieldTyN -> result.
+  const auto ctIt = ctors_.find(ctorName);
+  if (ctIt == ctors_.end()) {
+    return terr(CompileError::UnboundIdentifier,
+                "unknown record constructor '" + ctorName + "'", loc);
+  }
+  TyPtr walk = instantiate(ctIt->second);
+  std::vector<TyPtr> fieldTys;
+  fieldTys.reserve(fieldNames.size());
+  for (std::size_t k = 0; k < fieldNames.size(); ++k) {
+    TyPtr pruned = prune(walk);
+    if (pruned->kind != Ty::Kind::Con || pruned->con != "->") {
+      return terr(CompileError::TypeMismatch,
+                  "record constructor '" + ctorName + "' has fewer fields",
+                  loc);
+    }
+    fieldTys.push_back(pruned->args[0]);
+    walk = pruned->args[1];
+  }
+  const TyPtr resultTy = prune(walk); // the data type, after peeling fields
+
+  if (!bareCtor) {
+    auto u = unify(recordTy, resultTy, loc);
+    if (!u) return std::unexpected(u.error());
+  }
+
+  // Each named field's expression must have that field's type.
+  for (const auto &[name, expr] : ru.fields) {
+    std::size_t idx = fieldNames.size();
+    for (std::size_t k = 0; k < fieldNames.size(); ++k) {
+      if (fieldNames[k] == name) {
+        idx = k;
+        break;
+      }
+    }
+    if (idx == fieldNames.size()) {
+      return terr(CompileError::UnboundIdentifier,
+                  "record '" + ctorName + "' has no field '" + name + "'", loc);
+    }
+    auto fTy = infer(*expr, env);
+    if (!fTy) return fTy;
+    auto u = unify(*fTy, fieldTys[idx], expr->loc);
+    if (!u) return std::unexpected(u.error());
+  }
+
+  return resultTy;
+}
+
 std::expected<TyPtr, TypeError> TypeChecker::infer(const ExprNode &e,
                                                    const EnvPtr &env) {
   auto lookup = [&](const std::string &name) -> const Scheme * {
@@ -392,6 +489,10 @@ std::expected<TyPtr, TypeError> TypeChecker::infer(const ExprNode &e,
             return instantiate(*s);
           }
           if (const auto it = ctors_.find(node.name); it != ctors_.end()) {
+            return instantiate(it->second);
+          }
+          if (const auto it = fieldAccessors_.find(node.name);
+              it != fieldAccessors_.end()) {
             return instantiate(it->second);
           }
           return terr(CompileError::UnboundIdentifier,
@@ -549,6 +650,8 @@ std::expected<TyPtr, TypeError> TypeChecker::infer(const ExprNode &e,
           }
           (void)hasCatchAll;
           return resultTy;
+        } else if constexpr (std::is_same_v<T, ERecordUpdate>) {
+          return inferRecordUpdate(node, env, e.loc);
         } else {
           return terr(CompileError::TypeMismatch,
                       "this expression form is not yet typed", e.loc);
