@@ -142,6 +142,15 @@ TypeChecker::TypeChecker() {
       Scheme{.vars = {}, .body = tyFun(tyCell, tyFun(tyDim, tyOption(tyCell)))};
   builtins_["promote"] =
       Scheme{.vars = {}, .body = tyFun(tyCell, tyIO(tyInt()))};
+  // openLens :: String -> IO Cell  (§7.4): project a source, return its root.
+  builtins_["openLens"] =
+      Scheme{.vars = {}, .body = tyFun(tyStr(), tyIO(tyCell))};
+  // childrenAll :: Cell -> List Cell  -- a cell's contained children (§7.4).
+  builtins_["childrenAll"] =
+      Scheme{.vars = {}, .body = tyFun(tyCell, tyList(tyCell))};
+  // words :: String -> List String  -- whitespace tokenization (§7.4).
+  builtins_["words"] =
+      Scheme{.vars = {}, .body = tyFun(tyStr(), tyList(tyStr()))};
 }
 
 TyPtr TypeChecker::tycon(std::string name, std::vector<TyPtr> args) {

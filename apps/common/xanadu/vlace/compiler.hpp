@@ -29,8 +29,11 @@
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
 
-namespace xanadu::vlace {
+namespace zigzag {
+class ProjectionSession;
+} // namespace zigzag
 
+namespace xanadu::vlace {
 /// A runtime value. Stage 3: a scalar (int/float/string/bool) or a closure.
 /// Later stages add constructed values (ADTs), thunks, and lists.
 struct Value;
@@ -210,6 +213,9 @@ private:
   // top-level accessor function C -> fieldType (§5.7); eval of EVar/EApp
   // special-cases a known accessor applied to a Ctor to return that arg.
   std::unordered_map<std::string, std::string> fieldAccessor_;
+  // Projection sessions opened by `openLens` (§7.4). Held so the projected
+  // cells (and their arena) outlive the evaluation that reads them.
+  std::vector<std::shared_ptr<zigzag::ProjectionSession>> sessions_;
 };
 
 } // namespace xanadu::vlace

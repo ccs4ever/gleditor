@@ -29,13 +29,29 @@ std::string readFile(const std::string &path) {
   return ss.str();
 }
 
-// Runs a single source string once. Prints the rendered value on success,
-// the formatted error on failure. Returns the process exit code.
+// Runs a single source string once. If the program's type is an IO action, it
+// is PERFORMED at the boundary (console wired to stdin/stdout) and the final
+// wrapped value is printed; otherwise the pure value is rendered. Returns the
+// process exit code.
 int runOnce(Driver &driver, const std::string &source) {
   auto result = driver.run(source);
   if (!result) {
     std::cerr << Driver::formatError(result.error()) << "\n";
     return 1;
+  }
+  // An IO-typed program is a description; perform it (§6.5). The type is
+  // "IO ..." when type-checking ran; when it is off, fall back to detecting the
+  // rendered description's IO. prefix.
+  const bool isIO =
+      result->type.rfind("IO ", 0) == 0 || result->type == "IO" ||
+      (result->type.empty() && result->value.rfind("IO.", 0) == 0);
+  if (isIO) {
+    auto done = driver.runIO(source, std::cin, std::cout);
+    if (!done) {
+      std::cerr << Driver::formatError(done.error()) << "\n";
+      return 1;
+    }
+    return 0;
   }
   std::cout << result->value << "\n";
   return 0;

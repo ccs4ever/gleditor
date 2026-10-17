@@ -10,6 +10,9 @@
 #include <ostream>
 #include <utility>
 
+#include "common/xanadu/zigzag/filesystem_lens.hpp"
+#include "common/xanadu/zigzag/projection_session.hpp"
+
 namespace xanadu::vlace {
 
 using zigzag::CellRef;
@@ -987,6 +990,96 @@ void Compiler::installXanadu() {
                    return some;
                  });
 
+  // childrenAll :: Cell -> List Cell  -- the contained children of a cell: its
+  // d.contains first child, then every d.seq sibling after it. One native
+  // because it walks two ranks; a program folds over the resulting list. (The
+  // rank model is one posward neighbour per dim, so children are the first
+  // child plus the sibling chain, §7.4.)
+  globals_->vars["childrenAll"] = makeNative(
+      "childrenAll", 1,
+      [wrapCell](Compiler &c, std::vector<ValuePtr> &args)
+          -> std::expected<ValuePtr, EvalError> {
+        auto cv = c.force(args[0]);
+        if (!cv) return cv;
+        auto parent = refOfWrapped(*cv, "Cell");
+        if (!parent)
+          return fail(CompileError::TypeMismatch,
+                      "childrenAll: argument is not a Cell", {});
+        auto &arena      = c.core().arena();
+        DimRef dContains = c.core().findOrMintDimension(std::string(
+            zigzag::genericDimName(zigzag::GenericDim::Containment)));
+        DimRef dSeq      = c.core().findOrMintDimension(
+            std::string(zigzag::genericDimName(zigzag::GenericDim::Sequence)));
+        std::vector<zigzag::CellRef> kids;
+        auto first = arena.linked(*parent, dContains, zigzag::Posward);
+        for (auto cur = first; cur.has_value();
+             cur      = arena.linked(*cur, dSeq, zigzag::Posward)) {
+          kids.push_back(*cur);
+          if (kids.size() > 1'000'000) break; // guard a cyclic rank
+        }
+        // Build a vlace list [c0, c1, ...] from the back (Nil then Cons).
+        auto nil       = makeCtor("Nil", {});
+        nil->ctorArity = 0;
+        ValuePtr acc   = nil;
+        for (auto it = kids.rbegin(); it != kids.rend(); ++it) {
+          std::vector<ValuePtr> consArgs;
+          consArgs.push_back(wrapCell(*it));
+          consArgs.push_back(acc);
+          auto cons       = makeCtor("Cons", std::move(consArgs));
+          cons->ctorArity = 2;
+          acc             = cons;
+        }
+        return acc;
+      });
+
+  // words :: String -> List String  -- split on ASCII whitespace, dropping
+  // empties. The one tokenization primitive the prelude cannot derive because
+  // vlace has no char-level string access (§7.4). Lowercases nothing; a program
+  // composes it with other string ops.
+  globals_->vars["words"] = makeNative(
+      "words", 1,
+      [](Compiler &c,
+         std::vector<ValuePtr> &args) -> std::expected<ValuePtr, EvalError> {
+        auto sv = c.force(args[0]);
+        if (!sv) return sv;
+        if ((*sv)->kind != Value::Kind::Str)
+          return fail(CompileError::TypeMismatch,
+                      "words: argument is not a String", {});
+        const std::string &s = (*sv)->s;
+        std::vector<std::string> toks;
+        std::string cur;
+        auto isWs = [](char ch) {
+          return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' ||
+                 ch == '\f' || ch == '\v';
+        };
+        for (char ch : s) {
+          if (isWs(ch)) {
+            if (!cur.empty()) {
+              toks.push_back(cur);
+              cur.clear();
+            }
+          } else {
+            cur.push_back(ch);
+          }
+        }
+        if (!cur.empty()) toks.push_back(cur);
+        auto nil       = makeCtor("Nil", {});
+        nil->ctorArity = 0;
+        ValuePtr acc   = nil;
+        for (auto it = toks.rbegin(); it != toks.rend(); ++it) {
+          auto strv  = std::make_shared<Value>();
+          strv->kind = Value::Kind::Str;
+          strv->s    = *it;
+          std::vector<ValuePtr> consArgs;
+          consArgs.push_back(strv);
+          consArgs.push_back(acc);
+          auto cons       = makeCtor("Cons", std::move(consArgs));
+          cons->ctorArity = 2;
+          acc             = cons;
+        }
+        return acc;
+      });
+
   // promote :: Cell -> IO Int  -- THE authoring effect (§13.1): an IO
   // description that, run at the boundary, crosses the pure arena to
   // persistence. A driverless (no-Store) run reports the reachable subgraph
@@ -996,6 +1089,16 @@ void Compiler::installXanadu() {
     auto v                    = makeCtor("IO.Promote", {});
     v->ctorArity              = 1;
     globals_->vars["promote"] = v;
+  }
+
+  // openLens :: String -> IO Cell  -- project an external source (a directory
+  // path) through its lens into THIS evaluator's arena, returning the root
+  // cell (§7.4). An IO effect because it reads the external world; performed by
+  // runIO, which builds the lens + session and keeps the session alive.
+  {
+    auto v                     = makeCtor("IO.OpenLens", {});
+    v->ctorArity               = 1;
+    globals_->vars["openLens"] = v;
   }
 }
 
@@ -1075,6 +1178,39 @@ Compiler::runIO(const ValuePtr &action, std::istream &in, std::ostream &out) {
     (void)v->args; // the root cell; a store-backed run walks from it
     const auto n = static_cast<std::int64_t>(core_.arena().cells().size());
     return makeInt(n);
+  }
+  if (tag == "IO.OpenLens") {
+    // Project an external source into this evaluator's arena and return the
+    // root cell (§7.4). The path is the forced string argument. Currently the
+    // only lens is the FilesystemLens (a directory path); a URI scheme could
+    // dispatch others. The session is retained so the projection outlives the
+    // program that reads it.
+    auto pE = force(v->args.at(0));
+    if (!pE) return pE;
+    if ((*pE)->kind != Value::Kind::Str) {
+      return fail(CompileError::TypeMismatch,
+                  "openLens: argument is not a String", {});
+    }
+    auto session = std::make_shared<zigzag::ProjectionSession>(
+        std::make_unique<zigzag::FilesystemLens>((*pE)->s), core_);
+    sessions_.push_back(session);
+    if (session->roots().empty()) {
+      // An unreadable / empty source: None would be more honest, but openLens
+      // is typed IO Cell; return a bare cell so a program can detect emptiness
+      // via cellText == "". A richer IO (Option Cell) is a later refinement.
+      auto inner      = std::make_shared<Value>();
+      inner->kind     = Value::Kind::Int;
+      inner->i        = 0;
+      auto cell       = makeCtor("Cell", {inner});
+      cell->ctorArity = 1;
+      return cell;
+    }
+    auto inner      = std::make_shared<Value>();
+    inner->kind     = Value::Kind::Int;
+    inner->i        = static_cast<std::int64_t>(session->roots().front());
+    auto cell       = makeCtor("Cell", {inner});
+    cell->ctorArity = 1;
+    return cell;
   }
   if (tag == "IO.Then") {
     // Perform the first action for its effect, discard its value, run second.
