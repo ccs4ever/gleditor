@@ -18,6 +18,8 @@
 #define COMMON_XANADU_VLACE_COMPILER_HPP
 
 #include <expected>
+#include <functional>
+#include <iosfwd>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -47,6 +49,12 @@ struct Closure {
 
 struct Thunk; ///< a suspended computation (laziness, §6.2)
 
+class Compiler;
+/// A built-in C++ function body: receives the compiler (for arena access) and
+/// the collected argument values, returns a value or an error (§13).
+using NativeFn = std::function<std::expected<ValuePtr, struct EvalError>(
+    Compiler &, std::vector<ValuePtr> &)>;
+
 struct Value {
   // Exactly one of these is active, chosen by `kind`.
   enum class Kind : std::uint8_t {
@@ -55,8 +63,9 @@ struct Value {
     Str,
     Bool,
     Closure,
-    Ctor,  ///< a constructed ADT value: tag + argument values (§4.2)
-    Thunk, ///< an unforced suspended computation (§6.2)
+    Ctor,   ///< a constructed ADT value: tag + argument values (§4.2)
+    Thunk,  ///< an unforced suspended computation (§6.2)
+    Native, ///< a built-in C++ function (std:xanadu arena verbs, §13)
   } kind{Kind::Int};
   std::int64_t i{0};
   double f{0.0};
@@ -69,6 +78,13 @@ struct Value {
   std::size_t ctorArity{0}; ///< total arity; args.size() < ctorArity == partial
   // Thunk payload.
   std::shared_ptr<Thunk> thunk;
+  // Native payload: a C++ built-in collecting `nativeArity` arguments, then
+  // invoking `native` with the Compiler and the collected (unforced) args. Used
+  // for the std:xanadu arena-authoring verbs (§13); partial application
+  // accumulates into `args` exactly as a Ctor does.
+  std::size_t nativeArity{0};
+  std::string nativeName; ///< for diagnostics
+  std::shared_ptr<NativeFn> native;
 };
 
 /// A suspended computation forced at most once, memoized in place (§6.2/§6.3).
@@ -105,6 +121,24 @@ public:
   /// trailing expression (or return a unit-ish Int 0 when there is none).
   [[nodiscard]] std::expected<ValuePtr, EvalError>
   evaluateProgram(const Program &prog);
+
+  /// Install the built-in value bindings a fresh program expects without an
+  /// explicit import: the typed IO primitives (pure/bind/then/putStr/putStrLn/
+  /// getLine, §6.5) and the Option/Result constructors (§6.6). Called by
+  /// evaluateProgram; idempotent. IO primitives are description-builders
+  /// (tagged Ctor values) performed only by runIO at the boundary -- building
+  /// one writes nothing, so the pure fragment stays referentially transparent.
+  void installBuiltins();
+
+  /// Perform an IO action at the program boundary (§6.5/§8.2). `action` is the
+  /// value produced by evaluating an `IO a` program; runIO interprets its
+  /// description tree (IO.Pure/PutStr/PutStrLn/GetLine/Bind/Then and any
+  /// std:xanadu effect node) performing real console/authoring effects, and
+  /// returns the final wrapped value `a`. `in`/`out` are the console streams
+  /// (injected so tests can drive them). Only runIO performs effects; render()
+  /// and evaluate() never do.
+  std::expected<ValuePtr, EvalError> runIO(const ValuePtr &action,
+                                           std::istream &in, std::ostream &out);
 
   /// Render a value to the text a REPL prints (shallow; does not force).
   [[nodiscard]] static std::string show(const ValuePtr &v);
@@ -153,6 +187,12 @@ private:
   // Register a data declaration's constructors (name -> arity) so ECtor /
   // application can build constructed values and matching can check arity.
   void registerData(const DataDecl &dd);
+
+  // Install the std:xanadu arena-authoring verbs (§13) as native built-ins:
+  // makeText/makeDim/dimensionNamed/setLink/cellText/linked (pure arena verbs)
+  // and `promote` (the one authoring effect, an IO description). Called by
+  // installBuiltins.
+  void installXanadu();
 
   // Build an unforced thunk value from an expression + environment.
   ValuePtr makeThunk(const ExprNode *body, const EnvPtr &env);

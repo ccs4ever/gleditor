@@ -5,6 +5,9 @@
 #include "common/xanadu/vlace/compiler.hpp"
 
 #include <format>
+#include <istream>
+#include <optional>
+#include <ostream>
 #include <utility>
 
 namespace xanadu::vlace {
@@ -88,6 +91,9 @@ std::string Compiler::show(const ValuePtr &v) {
     return v->tag.empty() ? "<ctor>" : v->tag;
   case Value::Kind::Thunk:
     return "<thunk>";
+  case Value::Kind::Native:
+    return v->nativeName.empty() ? "<native>"
+                                 : "<native " + v->nativeName + ">";
   }
   return "<?>";
 }
@@ -110,6 +116,9 @@ std::string Compiler::render(const ValuePtr &vIn, int depthBudget) {
     return "<function>";
   case Value::Kind::Thunk:
     return "<thunk>"; // force() above should have resolved it
+  case Value::Kind::Native:
+    return v->nativeName.empty() ? "<native>"
+                                 : "<native " + v->nativeName + ">";
   case Value::Kind::Ctor:
     break;
   }
@@ -490,6 +499,20 @@ Compiler::evalBinOp(const EBinOp &op, const EnvPtr &env, SourceLocation loc) {
     return apply(*fn, *arg, loc);
   }
 
+  // Monadic sequencing (§6.5): >>= is bind, >> is then. Both build an IO
+  // *description* (a tagged Ctor), performing nothing here -- runIO performs it
+  // at the boundary. The operands are evaluated to WHNF IO values eagerly (an
+  // IO value is a constructor cell), but their effects do not run.
+  if (op.op == ">>=" || op.op == ">>") {
+    auto lE = eval(*op.lhs, env);
+    if (!lE) return lE;
+    auto rE = eval(*op.rhs, env);
+    if (!rE) return rE;
+    auto v       = makeCtor(op.op == ">>=" ? "IO.Bind" : "IO.Then", {*lE, *rE});
+    v->ctorArity = 2;
+    return v;
+  }
+
   // Cons (:) builds a lazy list cell: the head is evaluated to a thunk and the
   // tail is a thunk, so `n : from (n+1)` makes one Cons and suspends the rest
   // (§9.2 infinite streams).
@@ -549,6 +572,15 @@ Compiler::apply(const ValuePtr &fnRaw, ValuePtr arg, SourceLocation loc) {
     auto nv = std::make_shared<Value>(*fn);
     nv->args.push_back(std::move(arg));
     return nv;
+  }
+
+  // Applying a native built-in accumulates an argument; when saturated it
+  // invokes the C++ body with the collected args (§13 std:xanadu verbs).
+  if (fn && fn->kind == Value::Kind::Native) {
+    auto nv = std::make_shared<Value>(*fn);
+    nv->args.push_back(std::move(arg));
+    if (nv->args.size() < nv->nativeArity) return nv; // still partial
+    return (*nv->native)(*this, nv->args);
   }
 
   if (!fn || fn->kind != Value::Kind::Closure) {
@@ -745,6 +777,10 @@ std::expected<ValuePtr, EvalError> Compiler::evaluate(const Expr &expr) {
 
 std::expected<ValuePtr, EvalError>
 Compiler::evaluateProgram(const Program &prog) {
+  // Install the typed-IO primitives and Option/Result constructors into the
+  // global environment before user declarations, so a program may reference
+  // pure/bind/putStr/... and None/Some/Err/Ok without an explicit import.
+  installBuiltins();
   // First register all data declarations so constructors resolve regardless of
   // declaration order, then bind top-level value declarations into globals
   // (letrec-style: define the name before evaluating, so functions recurse).
@@ -778,6 +814,284 @@ Compiler::evaluateProgram(const Program &prog) {
     return eval(*prog.result.value(), globals_);
   }
   return makeInt(0);
+}
+
+namespace {
+// Build a native built-in value of the given arity.
+ValuePtr makeNative(std::string name, std::size_t arity, NativeFn fn) {
+  auto v         = std::make_shared<Value>();
+  v->kind        = Value::Kind::Native;
+  v->nativeName  = std::move(name);
+  v->nativeArity = arity;
+  v->native      = std::make_shared<NativeFn>(std::move(fn));
+  return v;
+}
+// Unwrap a `Cell n` / `Dim n` tagged Ctor to its numeric ref.
+std::optional<std::uint32_t> refOfWrapped(const ValuePtr &v,
+                                          std::string_view tag) {
+  if (!v || v->kind != Value::Kind::Ctor || v->tag != tag ||
+      v->args.size() != 1)
+    return std::nullopt;
+  const ValuePtr &inner = v->args[0];
+  if (!inner || inner->kind != Value::Kind::Int) return std::nullopt;
+  return static_cast<std::uint32_t>(inner->i);
+}
+} // namespace
+
+void Compiler::installXanadu() {
+  using zigzag::CellRef;
+  using zigzag::DimRef;
+  // A CellRef/DimRef is surfaced to vlace as a `Cell n` / `Dim n` value so the
+  // type system (and pattern matching) keep them distinct from a bare Int.
+  auto wrapCell = [](CellRef r) {
+    auto inner   = std::make_shared<Value>();
+    inner->kind  = Value::Kind::Int;
+    inner->i     = static_cast<std::int64_t>(r);
+    auto v       = makeCtor("Cell", {inner});
+    v->ctorArity = 1;
+    return v;
+  };
+  auto wrapDim = [](DimRef r) {
+    auto inner   = std::make_shared<Value>();
+    inner->kind  = Value::Kind::Int;
+    inner->i     = static_cast<std::int64_t>(r);
+    auto v       = makeCtor("Dim", {inner});
+    v->ctorArity = 1;
+    return v;
+  };
+  ctorArity_["Cell"] = 1;
+  ctorArity_["Dim"]  = 1;
+
+  // makeText :: String -> Cell  -- mint an arena text cell (pure authoring:
+  // builds in the ephemeral arena, mints no persistent op, §13.1).
+  globals_->vars["makeText"] =
+      makeNative("makeText", 1,
+                 [wrapCell](Compiler &c, std::vector<ValuePtr> &args)
+                     -> std::expected<ValuePtr, EvalError> {
+                   auto s = c.force(args[0]);
+                   if (!s) return s;
+                   if ((*s)->kind != Value::Kind::Str)
+                     return fail(CompileError::TypeMismatch,
+                                 "makeText: argument is not a String", {});
+                   CellRef ref = c.core().arena().makeCell((*s)->s);
+                   return wrapCell(ref);
+                 });
+
+  // makeDim :: String -> Dim  -- ensure a named dimension (idempotent).
+  globals_->vars["makeDim"] =
+      makeNative("makeDim", 1,
+                 [wrapDim](Compiler &c, std::vector<ValuePtr> &args)
+                     -> std::expected<ValuePtr, EvalError> {
+                   auto s = c.force(args[0]);
+                   if (!s) return s;
+                   if ((*s)->kind != Value::Kind::Str)
+                     return fail(CompileError::TypeMismatch,
+                                 "makeDim: argument is not a String", {});
+                   DimRef d = c.core().arena().ensureDimension((*s)->s);
+                   return wrapDim(d);
+                 });
+
+  // dimensionNamed :: String -> Option Dim  -- look up an existing dimension.
+  globals_->vars["dimensionNamed"] = makeNative(
+      "dimensionNamed", 1,
+      [wrapDim](Compiler &c, std::vector<ValuePtr> &args)
+          -> std::expected<ValuePtr, EvalError> {
+        auto s = c.force(args[0]);
+        if (!s) return s;
+        if ((*s)->kind != Value::Kind::Str)
+          return fail(CompileError::TypeMismatch,
+                      "dimensionNamed: argument is not a String", {});
+        DimRef d = c.core().arena().ensureDimension((*s)->s);
+        // ensureDimension always yields a dim; treat noCell as absence.
+        if (d == zigzag::noCell) {
+          auto none       = makeCtor("None", {});
+          none->ctorArity = 0;
+          return none;
+        }
+        auto some       = makeCtor("Some", {wrapDim(d)});
+        some->ctorArity = 1;
+        return some;
+      });
+
+  // setLink :: Cell -> Dim -> Cell -> Unit  -- link `from` posward along `dim`
+  // to `to`. The engine writes BOTH reciprocal edges (bidirectional by
+  // construction, §13.4 example 2), so no second write is needed.
+  globals_->vars["setLink"] = makeNative(
+      "setLink", 3,
+      [](Compiler &c,
+         std::vector<ValuePtr> &args) -> std::expected<ValuePtr, EvalError> {
+        auto fromV = c.force(args[0]);
+        if (!fromV) return fromV;
+        auto dimV = c.force(args[1]);
+        if (!dimV) return dimV;
+        auto toV = c.force(args[2]);
+        if (!toV) return toV;
+        auto from = refOfWrapped(*fromV, "Cell");
+        auto dim  = refOfWrapped(*dimV, "Dim");
+        auto to   = refOfWrapped(*toV, "Cell");
+        if (!from || !dim || !to)
+          return fail(CompileError::TypeMismatch,
+                      "setLink: expects (Cell) (Dim) (Cell)", {});
+        auto lr = c.core().arena().link(*from, *dim, zigzag::Posward,
+                                        std::optional<CellRef>(*to));
+        if (!lr)
+          return fail(CompileError::TypeMismatch,
+                      "setLink: arena refused the link", {});
+        auto u       = makeCtor("Unit", {});
+        u->ctorArity = 0;
+        return u;
+      });
+
+  // cellText :: Cell -> String  -- read a cell's content as text (a read of a
+  // frozen arena cell is pure, §13.3; local scratch content resolves at once).
+  globals_->vars["cellText"] = makeNative(
+      "cellText", 1,
+      [](Compiler &c,
+         std::vector<ValuePtr> &args) -> std::expected<ValuePtr, EvalError> {
+        auto cv = c.force(args[0]);
+        if (!cv) return cv;
+        auto ref = refOfWrapped(*cv, "Cell");
+        if (!ref)
+          return fail(CompileError::TypeMismatch,
+                      "cellText: argument is not a Cell", {});
+        auto out  = std::make_shared<Value>();
+        out->kind = Value::Kind::Str;
+        out->s    = c.core().arena().textOf(*ref);
+        return out;
+      });
+
+  // linked :: Cell -> Dim -> Option Cell  -- the posward neighbour on `dim`,
+  // the one-step read that `walk` and navigation build on (§13.4 example 5).
+  globals_->vars["linked"] =
+      makeNative("linked", 2,
+                 [wrapCell](Compiler &c, std::vector<ValuePtr> &args)
+                     -> std::expected<ValuePtr, EvalError> {
+                   auto fromV = c.force(args[0]);
+                   if (!fromV) return fromV;
+                   auto dimV = c.force(args[1]);
+                   if (!dimV) return dimV;
+                   auto from = refOfWrapped(*fromV, "Cell");
+                   auto dim  = refOfWrapped(*dimV, "Dim");
+                   if (!from || !dim)
+                     return fail(CompileError::TypeMismatch,
+                                 "linked: expects (Cell) (Dim)", {});
+                   auto nb =
+                       c.core().arena().linked(*from, *dim, zigzag::Posward);
+                   if (!nb.has_value()) {
+                     auto none       = makeCtor("None", {});
+                     none->ctorArity = 0;
+                     return none;
+                   }
+                   auto some       = makeCtor("Some", {wrapCell(*nb)});
+                   some->ctorArity = 1;
+                   return some;
+                 });
+
+  // promote :: Cell -> IO Int  -- THE authoring effect (§13.1): an IO
+  // description that, run at the boundary, crosses the pure arena to
+  // persistence. A driverless (no-Store) run reports the reachable subgraph
+  // size (the op count a real promote would write) rather than performing a
+  // store write; a Store-backed runner performs the real zigzag::promote.
+  {
+    auto v                    = makeCtor("IO.Promote", {});
+    v->ctorArity              = 1;
+    globals_->vars["promote"] = v;
+  }
+}
+
+void Compiler::installBuiltins() {
+  // IO primitives are description-builders: a tagged Ctor whose arity is the
+  // number of arguments it collects via apply() saturation (§4.2). Building
+  // one performs no effect; runIO interprets the resulting tree at the
+  // boundary (§6.5). A fresh Ctor with the given tag + arity, args empty.
+  auto prim = [](const std::string &tag, std::size_t arity) {
+    auto v       = makeCtor(tag, {});
+    v->ctorArity = arity;
+    return v;
+  };
+  // pure :: a -> IO a ; bind (>>=) :: IO a -> (a -> IO b) -> IO b ;
+  // then (>>) :: IO a -> IO b -> IO b .
+  globals_->vars["pure"]     = prim("IO.Pure", 1);
+  globals_->vars["bind"]     = prim("IO.Bind", 2);
+  globals_->vars["then"]     = prim("IO.Then", 2);
+  globals_->vars["putStr"]   = prim("IO.PutStr", 1);
+  globals_->vars["putStrLn"] = prim("IO.PutStrLn", 1);
+  globals_->vars["getLine"]  = prim("IO.GetLine", 0); // arity 0 => a value
+  // Option / Result (§6.6). None/Ok etc. are ordinary ADT constructors; expose
+  // them as (possibly partial) Ctor values so a program need not `data`-declare
+  // them. ctorArity_ entries let pattern matching check arity.
+  globals_->vars["None"] = prim("None", 0);
+  globals_->vars["Some"] = prim("Some", 1);
+  globals_->vars["Err"]  = prim("Err", 1);
+  globals_->vars["Ok"]   = prim("Ok", 1);
+  ctorArity_["None"]     = 0;
+  ctorArity_["Some"]     = 1;
+  ctorArity_["Err"]      = 1;
+  ctorArity_["Ok"]       = 1;
+
+  installXanadu();
+}
+
+std::expected<ValuePtr, EvalError>
+Compiler::runIO(const ValuePtr &action, std::istream &in, std::ostream &out) {
+  // Interpret the IO description tree, performing effects left to right. The
+  // result of running an action is its "wrapped" value a (what `pure a`
+  // carries); bind threads it into the continuation. This is the one place
+  // effects happen (§6.5); everything upstream only built the description.
+  auto cur = force(action);
+  if (!cur) return cur;
+  ValuePtr v = *cur;
+  if (!v || v->kind != Value::Kind::Ctor) {
+    return fail(CompileError::TypeMismatch,
+                "runIO: not an IO action (did the program return an IO value?)",
+                {});
+  }
+  const std::string &tag = v->tag;
+  if (tag == "IO.Pure") {
+    return v->args.empty() ? makeCtor("Unit", {}) : v->args[0];
+  }
+  if (tag == "IO.PutStr" || tag == "IO.PutStrLn") {
+    auto sE = force(v->args.at(0));
+    if (!sE) return sE;
+    if ((*sE)->kind != Value::Kind::Str) {
+      return fail(CompileError::TypeMismatch,
+                  "putStr: argument is not a String", {});
+    }
+    out << (*sE)->s;
+    if (tag == "IO.PutStrLn") out << '\n';
+    return makeCtor("Unit", {});
+  }
+  if (tag == "IO.GetLine") {
+    std::string line;
+    std::getline(in, line);
+    return makeStr(std::move(line));
+  }
+  if (tag == "IO.Promote") {
+    // THE authoring effect (§13.1). Without a backing Store (the driver's REPL
+    // arena is store-less), performing it cannot write the spool; it reports
+    // the op count a real promote would emit -- the number of arena cells
+    // currently minted -- as a faithful dry-run. A Store-backed embedder
+    // overrides this to call zigzag::promote and return the new version.
+    (void)v->args; // the root cell; a store-backed run walks from it
+    const auto n = static_cast<std::int64_t>(core_.arena().cells().size());
+    return makeInt(n);
+  }
+  if (tag == "IO.Then") {
+    // Perform the first action for its effect, discard its value, run second.
+    auto first = runIO(v->args.at(0), in, out);
+    if (!first) return first;
+    return runIO(v->args.at(1), in, out);
+  }
+  if (tag == "IO.Bind") {
+    // Perform the first action, feed its value to the continuation, run that.
+    auto first = runIO(v->args.at(0), in, out);
+    if (!first) return first;
+    auto next = apply(v->args.at(1), *first, {});
+    if (!next) return next;
+    return runIO(*next, in, out);
+  }
+  return fail(CompileError::TypeMismatch,
+              std::string("runIO: unknown IO node '") + tag + "'", {});
 }
 
 } // namespace xanadu::vlace

@@ -50,6 +50,98 @@ TypeChecker::TypeChecker() {
   ctorData_["True"]  = "Bool";
   ctors_["False"]    = Scheme{.vars = {}, .body = tyBool()};
   ctors_["True"]     = Scheme{.vars = {}, .body = tyBool()};
+
+  // Option a = None | Some a   (§6.6 recoverable absence)
+  {
+    const int o          = nextVar_++;
+    auto ov              = std::make_shared<Ty>();
+    ov->kind             = Ty::Kind::Var;
+    ov->varId            = o;
+    dataCtors_["Option"] = {"None", "Some"};
+    ctorData_["None"]    = "Option";
+    ctorData_["Some"]    = "Option";
+    ctors_["None"]       = Scheme{.vars = {o}, .body = tyOption(ov)};
+    ctors_["Some"]       = Scheme{.vars = {o}, .body = tyFun(ov, tyOption(ov))};
+  }
+  // Result e a = Err e | Ok a   (§6.6 recoverable failure)
+  {
+    const int ev         = nextVar_++;
+    const int av         = nextVar_++;
+    auto evt             = std::make_shared<Ty>();
+    evt->kind            = Ty::Kind::Var;
+    evt->varId           = ev;
+    auto avt             = std::make_shared<Ty>();
+    avt->kind            = Ty::Kind::Var;
+    avt->varId           = av;
+    dataCtors_["Result"] = {"Err", "Ok"};
+    ctorData_["Err"]     = "Result";
+    ctorData_["Ok"]      = "Result";
+    ctors_["Err"] =
+        Scheme{.vars = {ev, av}, .body = tyFun(evt, tyResult(evt, avt))};
+    ctors_["Ok"] =
+        Scheme{.vars = {ev, av}, .body = tyFun(avt, tyResult(evt, avt))};
+  }
+
+  // Typed IO primitives (§6.5), as value-level builtins:
+  //   pure     :: a -> IO a
+  //   bind     :: IO a -> (a -> IO b) -> IO b
+  //   then     :: IO a -> IO b -> IO b
+  //   putStr   :: String -> IO Unit
+  //   putStrLn :: String -> IO Unit
+  //   getLine  :: IO String
+  {
+    const int a       = nextVar_++;
+    auto av           = std::make_shared<Ty>();
+    av->kind          = Ty::Kind::Var;
+    av->varId         = a;
+    builtins_["pure"] = Scheme{.vars = {a}, .body = tyFun(av, tyIO(av))};
+  }
+  {
+    const int a = nextVar_++;
+    const int b = nextVar_++;
+    auto av     = std::make_shared<Ty>();
+    av->kind    = Ty::Kind::Var;
+    av->varId   = a;
+    auto bv     = std::make_shared<Ty>();
+    bv->kind    = Ty::Kind::Var;
+    bv->varId   = b;
+    // IO a -> (a -> IO b) -> IO b
+    builtins_["bind"] =
+        Scheme{.vars = {a, b},
+               .body = tyFun(tyIO(av), tyFun(tyFun(av, tyIO(bv)), tyIO(bv)))};
+    // IO a -> IO b -> IO b
+    builtins_["then"] = Scheme{
+        .vars = {a, b}, .body = tyFun(tyIO(av), tyFun(tyIO(bv), tyIO(bv)))};
+  }
+  builtins_["putStr"] =
+      Scheme{.vars = {}, .body = tyFun(tyStr(), tyIO(tyUnit()))};
+  builtins_["putStrLn"] =
+      Scheme{.vars = {}, .body = tyFun(tyStr(), tyIO(tyUnit()))};
+  builtins_["getLine"] = Scheme{.vars = {}, .body = tyIO(tyStr())};
+
+  // std:xanadu authoring verbs (§13). Cell and Dim are opaque reference types;
+  // Unit is the result of a side-effecting-looking arena write (still pure --
+  // it builds in the arena, mints no op). promote is the one effect: IO Int.
+  //   makeText       :: String -> Cell
+  //   makeDim        :: String -> Dim
+  //   dimensionNamed :: String -> Option Dim
+  //   setLink        :: Cell -> Dim -> Cell -> Unit
+  //   cellText       :: Cell -> String
+  //   linked         :: Cell -> Dim -> Option Cell
+  //   promote        :: Cell -> IO Int
+  const auto tyCell     = tycon("Cell");
+  const auto tyDim      = tycon("Dim");
+  builtins_["makeText"] = Scheme{.vars = {}, .body = tyFun(tyStr(), tyCell)};
+  builtins_["makeDim"]  = Scheme{.vars = {}, .body = tyFun(tyStr(), tyDim)};
+  builtins_["dimensionNamed"] =
+      Scheme{.vars = {}, .body = tyFun(tyStr(), tyOption(tyDim))};
+  builtins_["setLink"] = Scheme{
+      .vars = {}, .body = tyFun(tyCell, tyFun(tyDim, tyFun(tyCell, tyUnit())))};
+  builtins_["cellText"] = Scheme{.vars = {}, .body = tyFun(tyCell, tyStr())};
+  builtins_["linked"] =
+      Scheme{.vars = {}, .body = tyFun(tyCell, tyFun(tyDim, tyOption(tyCell)))};
+  builtins_["promote"] =
+      Scheme{.vars = {}, .body = tyFun(tyCell, tyIO(tyInt()))};
 }
 
 TyPtr TypeChecker::tycon(std::string name, std::vector<TyPtr> args) {
@@ -70,6 +162,14 @@ TyPtr TypeChecker::tyFun(TyPtr from, TyPtr to) {
 TyPtr TypeChecker::tyList(TyPtr elem) {
   return tycon("List", {std::move(elem)});
 }
+TyPtr TypeChecker::tyIO(TyPtr inner) { return tycon("IO", {std::move(inner)}); }
+TyPtr TypeChecker::tyOption(TyPtr inner) {
+  return tycon("Option", {std::move(inner)});
+}
+TyPtr TypeChecker::tyResult(TyPtr err, TyPtr ok) {
+  return tycon("Result", {std::move(err), std::move(ok)});
+}
+TyPtr TypeChecker::tyUnit() { return tycon("Unit"); }
 
 TyPtr TypeChecker::freshVar() {
   auto t   = std::make_shared<Ty>();
@@ -495,6 +595,10 @@ std::expected<TyPtr, TypeError> TypeChecker::infer(const ExprNode &e,
               it != fieldAccessors_.end()) {
             return instantiate(it->second);
           }
+          if (const auto it = builtins_.find(node.name);
+              it != builtins_.end()) {
+            return instantiate(it->second);
+          }
           return terr(CompileError::UnboundIdentifier,
                       "unbound identifier '" + node.name + "'", e.loc);
         } else if constexpr (std::is_same_v<T, ECtor>) {
@@ -597,6 +701,26 @@ std::expected<TyPtr, TypeError> TypeChecker::infer(const ExprNode &e,
           if (!l) return l;
           auto r = infer(*node.rhs, env);
           if (!r) return r;
+          if (op == ">>=") {
+            // IO a >>= (a -> IO b) : IO b
+            TyPtr a = freshVar();
+            TyPtr b = freshVar();
+            auto ul = unify(*l, tyIO(a), e.loc);
+            if (!ul) return std::unexpected(ul.error());
+            auto ur = unify(*r, tyFun(a, tyIO(b)), e.loc);
+            if (!ur) return std::unexpected(ur.error());
+            return tyIO(b);
+          }
+          if (op == ">>") {
+            // IO a >> IO b : IO b
+            TyPtr a = freshVar();
+            TyPtr b = freshVar();
+            auto ul = unify(*l, tyIO(a), e.loc);
+            if (!ul) return std::unexpected(ul.error());
+            auto ur = unify(*r, tyIO(b), e.loc);
+            if (!ur) return std::unexpected(ur.error());
+            return tyIO(b);
+          }
           if (op == "&&" || op == "||") {
             auto u1 = unify(*l, tyBool(), e.loc);
             if (!u1) return std::unexpected(u1.error());

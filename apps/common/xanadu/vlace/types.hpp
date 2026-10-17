@@ -104,6 +104,10 @@ private:
   TyPtr tyChar();
   TyPtr tyFun(TyPtr from, TyPtr to);
   TyPtr tyList(TyPtr elem);
+  TyPtr tyIO(TyPtr inner);             ///< IO a
+  TyPtr tyOption(TyPtr inner);         ///< Option a
+  TyPtr tyResult(TyPtr err, TyPtr ok); ///< Result e a
+  TyPtr tyUnit();                      ///< Unit (the () type)
 
   int nextVar_{0};
   EnvPtr globals_{std::make_shared<TypeEnv>()};
@@ -119,6 +123,11 @@ private:
   // Record constructor name -> ordered field names (for ERecordUpdate field
   // name resolution against the ctor's argument types).
   std::unordered_map<std::string, std::vector<std::string>> recordFields_;
+  // Built-in value identifiers (not constructors): the typed IO primitives
+  // pure/bind/then/putStr/putStrLn/getLine (§6.5). Looked up for an EVar after
+  // the lexical env and before failing, so a program references them without
+  // import but a user binding of the same name shadows them.
+  std::unordered_map<std::string, Scheme> builtins_;
 };
 
 } // namespace xanadu::vlace
