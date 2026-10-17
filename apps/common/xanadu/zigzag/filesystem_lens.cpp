@@ -11,7 +11,6 @@
 #include <format>
 #include <system_error>
 #include <unordered_map>
-#include <unordered_set>
 
 #include "common/xanadu/magic_mime.hpp"
 
@@ -59,7 +58,7 @@ void FilesystemLens::walk() {
     e.order  = order;
     e.size   = static_cast<std::int64_t>(st.st_size);
     e.mtime  = static_cast<std::int64_t>(st.st_mtime);
-    e.perm   = static_cast<std::int64_t>(st.st_mode & 07777);
+    e.perm   = static_cast<std::int64_t>(st.st_mode & 07777U);
     if (S_ISDIR(st.st_mode)) {
       e.role = "dir";
       e.mime = "inode/directory";
@@ -93,7 +92,7 @@ void FilesystemLens::walk() {
   // Iterative DFS so a deep tree does not blow the stack. Each frame expands a
   // directory's sorted children.
   std::vector<Frame> stack;
-  stack.push_back({root_, entries_.front().key});
+  stack.push_back({.path = root_, .parentKey = entries_.front().key});
   while (!stack.empty()) {
     Frame f = std::move(stack.back());
     stack.pop_back();
@@ -119,7 +118,8 @@ void FilesystemLens::walk() {
       std::filesystem::path childPath = child;
       std::string role                = e->role;
       entries_.push_back(std::move(*e));
-      if (role == "dir") stack.push_back({childPath, childKey});
+      if (role == "dir")
+        stack.push_back({.path = childPath, .parentKey = childKey});
     }
   }
 }

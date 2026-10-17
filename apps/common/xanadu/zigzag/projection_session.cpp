@@ -73,7 +73,8 @@ void ProjectionSession::project() {
     for (const auto &[rank, value] : node.attributes) {
       DimRef dim   = core_.findOrMintDimension(rank);
       CellRef attr = arena.makeCell(std::string_view{value});
-      (void)arena.link(cell, dim, Posward, std::optional<CellRef>(attr));
+      zigzag::expectWritten(
+          arena.link(cell, dim, Posward, std::optional<CellRef>(attr)));
     }
   });
 
@@ -88,7 +89,7 @@ void ProjectionSession::project() {
     const auto to   = cellFor(edge.to);
     if (!from || !to) return; // an edge naming an unprojected node is skipped
     DimRef dim = core_.findOrMintDimension(edge.dimension);
-    (void)arena.link(*from, dim, edge.dir, std::optional<CellRef>(*to));
+    zigzag::expectWritten(arena.link(*from, dim, edge.dir, to));
     const bool structural =
         edge.dimension == genericDimName(GenericDim::Containment) ||
         edge.dimension == genericDimName(GenericDim::Sequence);
