@@ -42,8 +42,14 @@ cell changed) lets a ZigZag gesture become a `rename(2)` / `chmod(2)` / `utime(2
 
 The goal: factor the *source-specific* half of the projector behind a `ProjectionLens` trait so that
 
-1. the existing xanadoc projector is re-expressed as `XanadocLens` with **zero behaviour change**
-   (every checked-in fixture round-trips identically, `xudu-dump --section=ops` byte-identical);
+1. the existing xanadoc projector is **re-expressed as `XanadocLens` on the lens primitives** — not
+   necessarily byte-for-byte identical to today's output, because nothing is in production and the
+   convergence lets a shape change (bump the version, write the new shape, delete the old reader).
+   The bar is *semantic equivalence or improvement*: every checked-in fixture still round-trips
+   through `project → unproject` with the same meaning, verified by `xudu-dump --section=ops` diffed
+   for meaning rather than bytes ([`store-slice-convergence.md`](store-slice-convergence.md) §9,
+   "diff meaning, not bytes"), and the lens model is expected to *fix* several of today's losses
+   (§9), not preserve them;
 1. a new `FilesystemLens` projects a directory tree with metadata and unprojects edits to real
    filesystem operations;
 1. the hard problem — a filesystem has no append-only ops index, so a `CellRef` cannot be its stable
@@ -140,6 +146,11 @@ intrinsic: `sliceToStore()` maps each DTO `CellID` to the `CellRef` of the opera
 not survive — the cell's identity becomes its name in hypertime (R4, R7). This is the single most
 important fact for the generalized lens: **the engine side owns identity as an ops index; the source
 side's own identity is a separate space the lens must map.**
+
+These losses (first-span truncation, id renumbering, dropped presentation metadata) describe
+*today's* projector, not a constraint the lens inherits. Nothing is in production, so `XanadocLens`
+is free to improve on them rather than reproduce them; §9.2 says which it fixes and how, and the
+regression bar becomes meaning-equivalence rather than byte-equality (§9.3).
 
 ### 2.5 Where projection reads and where it writes
 
@@ -534,28 +545,31 @@ rather than needing a rule at each call site.
 
 ### 6.2 Fidelity table
 
-| aspect                          | project (source → cells) | unproject (cells → source)     | faithful?                                         |
-| ------------------------------- | ------------------------ | ------------------------------ | ------------------------------------------------- |
-| xanadoc paragraph in one piece  | one cell, one span       | content restated               | faithful                                          |
-| xanadoc paragraph across pieces | first part only          | first part only                | **lossy** (one span per cell; §2.3)               |
-| xanadoc cell id                 | → ops index              | ops index as DTO id            | **lossy on id**, faithful on structure            |
-| xanadoc presentation metadata   | DTO carries it           | not reconstructed              | **lossy** (`storeToSlice` emits none)             |
-| fs file name                    | `d.name` / content cell  | `rename(2)`                    | faithful (inode key preserved)                    |
-| fs file content                 | addressed span / scalar  | write via `applyContentChange` | faithful if lens re-reads/writes bytes            |
-| fs size / mtime                 | scalar cell on rank      | `utime(2)` / derived           | mtime faithful; size is **derived**, not settable |
-| fs permissions                  | scalar cell `d.perm`     | `chmod(2)`                     | faithful                                          |
-| fs move between dirs            | `d.contains` edge        | `rename(2)` across parents     | faithful (inode key preserved)                    |
-| fs cross-device move            | `d.contains` edge        | copy+delete, key rebound       | faithful on identity, **new inode**               |
-| fs on no-inode mount            | path-hash key            | rename = delete+create         | **lossy on identity** (§5.2)                      |
-| fs symlink target               | `d.ref` edge             | `symlink(2)`                   | faithful                                          |
-| fs hardlink (2 names)           | one cell, two `d.name`   | two paths, one inode           | faithful                                          |
+| aspect                          | project (source → cells)                     | unproject (cells → source)     | faithful?                                         |
+| ------------------------------- | -------------------------------------------- | ------------------------------ | ------------------------------------------------- |
+| xanadoc paragraph in one piece  | one cell, one span                           | content restated               | faithful                                          |
+| xanadoc paragraph across pieces | legacy: first part only; lens: full span run | full span run                  | **fixed by `XanadocLens`** (§9.2; U3.4)           |
+| xanadoc cell id                 | ops index (legacy) / `d.extkey` (lens)       | stable key under lens          | **fixed by `XanadocLens`** (§9.2)                 |
+| xanadoc presentation metadata   | legacy drops it; lens: attribute ranks       | round-tripped on ranks         | **fixed by `XanadocLens`** (§9.2, R13)            |
+| fs file name                    | `d.name` / content cell                      | `rename(2)`                    | faithful (inode key preserved)                    |
+| fs file content                 | addressed span / scalar                      | write via `applyContentChange` | faithful if lens re-reads/writes bytes            |
+| fs size / mtime                 | scalar cell on rank                          | `utime(2)` / derived           | mtime faithful; size is **derived**, not settable |
+| fs permissions                  | scalar cell `d.perm`                         | `chmod(2)`                     | faithful                                          |
+| fs move between dirs            | `d.contains` edge                            | `rename(2)` across parents     | faithful (inode key preserved)                    |
+| fs cross-device move            | `d.contains` edge                            | copy+delete, key rebound       | faithful on identity, **new inode**               |
+| fs on no-inode mount            | path-hash key                                | rename = delete+create         | **lossy on identity** (§5.2)                      |
+| fs symlink target               | `d.ref` edge                                 | `symlink(2)`                   | faithful                                          |
+| fs hardlink (2 names)           | one cell, two `d.name`                       | two paths, one inode           | faithful                                          |
 
 **Faithful** means a project-then-unproject with no edit changes the source not at all, and an edit
-unprojects to exactly the operation the user intended. **Lossy** entries are the honest limits: the
-single-span-per-cell truncation is the convergence's own U3 limit
-([`store-slice-convergence.md`](store-slice-convergence.md) U3), the presentation-metadata loss is
-`storeToSlice`'s (§2.3), and the no-inode identity loss is the price of a filesystem that does not
-expose stable identity.
+unprojects to exactly the operation the user intended. The three **fixed by `XanadocLens`** entries
+are losses the *legacy* DTO projector carried as compromises and the lens removes (§9.2): the
+single-span truncation goes away once a node carries its whole span run (U3.4's `CompactBinaryV4`
+removes the one-span-per-op limit, [`store-slice-convergence.md`](store-slice-convergence.md) U3),
+presentation metadata rides attribute ranks (R13), and cell id is stabilized by `d.extkey`. The
+genuinely remaining limits are source-side, not projector-side: a file's **size is derived** (§6.3)
+and a **no-inode mount** cannot offer stable identity (§5.2) — neither is something a better
+projector can fix.
 
 ### 6.3 What size being derived means
 
@@ -662,8 +676,10 @@ ______________________________________________________________________
 1. **`filesystem_lens.{hpp,cpp}`** — the only source-specific new file: the `stat`-based key scheme,
    the sorted tree walk, and the `apply*()` lowerings to `rename`/`chmod`/`utime`/`mkdir`/`unlink`.
    This is the only file that includes `<sys/stat.h>`.
-1. **`XanadocLens`** — a thin re-expression of the existing projector behind the trait (§9), adding
-   no behaviour.
+1. **`XanadocLens`** — the xanadoc source re-expressed on the lens primitives (§9). Free to drop
+   today's paragraph-splitting heuristics and single-span truncation where the lens model does
+   better; the only hard requirement is that a projected fixture still means the same thing after a
+   round trip.
 
 ### 8.2 Reused engine primitives (everything load-bearing)
 
@@ -698,34 +714,75 @@ primitives.** The lens is a refactor plus one new source, not new engine machine
 
 ______________________________________________________________________
 
-## 9. Mapping the Existing Projector onto the Lens with Zero Behaviour Change
+## 9. Mapping the Existing Projector onto the Lens — and Improving It
 
-`XanadocLens` wraps the existing functions rather than reimplementing them, so the characterization
-tests (`tests/zigzag/test_xudu_convergence.cpp`) and `xudu-dump --section=ops` stay byte-identical:
+Nothing is in production, so `XanadocLens` is not held to byte-for-byte parity with today's
+`projectXuduToZigzag` output. It is re-expressed on the lens primitives, and that re-expression is
+the occasion to *fix* losses the current projector carries as deliberate compromises. The bar is
+meaning: a fixture projected through `XanadocLens`, then unprojected, is the same document — not the
+same byte sequence of operations.
+
+### 9.1 What stays the same
 
 - `dimensions()` returns `d.doc`→`Sequence`, `d.transclude`→(custom), `d.link`→`Reference`,
-  `d.version`→(custom), `d.clone`→`Clone`, plus `d.role`/`d.mime`/`d.media` — exactly the
+  `d.version`→(custom), `d.clone`→`Clone`, plus `d.role`/`d.mime`/`d.media` — the
   `XuduProjectorOptions` set
-  ([`zz_xudu_projector.hpp`](apps/common/xanadu/zigzag/zz_xudu_projector.hpp)).
-- `forEachNode` / `forEachEdge` are driven by the *same* paragraph-splitting and span-overlap logic
-  `projectXuduToZigzag` already runs
-  ([`zz_xudu_projector.cpp:43`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp)); the lens simply
-  surfaces the cells and edges it already computes.
+  ([`zz_xudu_projector.hpp`](apps/common/xanadu/zigzag/zz_xudu_projector.hpp)), now declared through
+  the trait rather than a per-call options struct.
 - The `ExternalKey` for a xanadoc cell is the provenance triple the projector already tracks,
   `XuduProjectionProvenance`
   ([`zz_xudu_projector.hpp`](apps/common/xanadu/zigzag/zz_xudu_projector.hpp)):
-  `"xd:<documentId>:<version>:<span>"`. The identity map is then the generalization of
+  `"xd:<documentId>:<version>:<span>"`. The identity map generalizes
   `ProjectedXuduStore::sourceByProjectedCell`
   ([`zz_xudu_projector.hpp`](apps/common/xanadu/zigzag/zz_xudu_projector.hpp)).
-- The persistent path is still `sliceToStore()`
-  ([`zz_xudu_projector.cpp:548`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp)); `XanadocLens` is
-  the arena-side front, `sliceToStore()` the promote-equivalent, so the Structure operations minted
-  are the same ones in the same order (invariant 6).
+- Attribute metadata still rides on `d.role`/`d.mime`/`d.media` ranks
+  ([`zz_xudu_projector.cpp:37`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp)) — the mechanism
+  the filesystem lens reuses for `d.size`/`d.mtime`/`d.perm`.
 
-Because `XanadocLens` *calls* the existing code, "zero behaviour change" is verifiable by diffing
-`xudu-dump --section=ops` over every checked-in fixture before and after the refactor — the
-convergence's own regression method ([`store-slice-convergence.md`](store-slice-convergence.md) §9,
-"diff meaning, not bytes").
+### 9.2 What the lens model lets us improve (and should)
+
+The current projector's lossy entries (§2.3, §6.2) are not laws of the manifold; they are artefacts
+of a projector written before the lens model existed. Under `XanadocLens` each becomes a design
+choice to revisit:
+
+- **Multi-span cells instead of first-span truncation.** Today a paragraph straddling pieces is
+  addressed by its first part only, "a truncation, not a misdirection"
+  ([`zz_xudu_projector.cpp`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp), the
+  `split_by_paragraphs` branch) — the convergence's U3 single-span-per-cell limit. The lens's
+  `SourceNode::content` is already a `std::span<const PrimediaSpan>`, so a node may carry *all* its
+  spans; the only reason to flatten to one is the current `CompactOpNode` carrying one span per op,
+  which U3.4's `CompactBinaryV4` lifts. `XanadocLens` should emit the full span run and let
+  promotion emit a splice per span (as `promote()` already does for a multi-span arena cell,
+  [`arena_manifold.hpp`](apps/common/xanadu/zigzag/arena_manifold.hpp), the promote doc comment), so
+  a round trip stops losing the tail of a split paragraph.
+- **Presentation metadata preserved, not dropped.** `storeToSlice()` reconstructs no presentation
+  metadata (§2.3). Since metadata is just cells on a rank (R13), `XanadocLens` can carry role,
+  scene, and layout hints on their own attribute ranks (`d.role` already; add `d.scene`/`d.layout`
+  as the lens's declared dimensions) so the DTO round-trips them instead of discarding them.
+- **Provenance-stable cell identity across a re-projection.** The current id is a bare ops index
+  reassigned each `sliceToStore()` (§6.2, "lossy on id"). With the `ExternalKey` recorded on a
+  `d.extkey` rank (§5.3 (b)), the *same* xanadoc cell keeps the *same* external key across
+  re-projections, so an edit made in one session re-targets the right cell in the next — the same
+  mechanism that gives the filesystem lens inode stability.
+- **Drop the paragraph-splitting heuristic where structure is explicit.** The span-overlap and
+  paragraph-split heuristics exist because the DTO projector had only assembled text to work from. A
+  lens reading the store's own cell structure (the `sliceToStore`/`storeToSlice` path, not the
+  legacy DTO path) does not need to re-derive paragraphs by scanning text; it projects the cells the
+  store already has. `XanadocLens` should be built on the convergence translators
+  ([`zz_xudu_projector.cpp:548`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp),
+  [`:678`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp)), retiring the heuristic DTO projector
+  that step 20 of the convergence was already retiring.
+
+### 9.3 The regression that replaces "byte-identical"
+
+The honest check is a *meaning* round trip, which the convergence already prescribes
+([`store-slice-convergence.md`](store-slice-convergence.md) §9): for each checked-in fixture,
+project through `XanadocLens`, unproject, and assert `xudu-dump --section=ops` renders the same
+document text and the same links — not the same op bytes. Where `XanadocLens` deliberately improves
+on the old output (full spans, preserved metadata, stable ids), the fixture's *expected ops* are
+regenerated in the same commit (the standing rule for a shape change, [`AGENTS.md`](AGENTS.md),
+"regenerate every fixture in the same commit"), and the characterization test
+(`tests/zigzag/test_xudu_convergence.cpp`) asserts the richer invariant rather than the old bytes.
 
 ______________________________________________________________________
 
@@ -737,9 +794,13 @@ Each phase is one commit; after each, `make -j$(nproc)` builds and `make -j$(npr
    `projection_session.{hpp,cpp}` with the project loop, the identity map, and `promoteInto()`.
    Unit- test with a trivial in-memory lens (three nodes, two edges) asserting the identity map and
    a tight arena. No source-specific code yet.
-1. **`XanadocLens` over the existing projector.** Re-express the xanadoc path behind the trait,
-   calling `projectXuduToZigzag` / `sliceToStore` unchanged. Gate: `xudu-dump --section=ops` on
-   every fixture is byte-identical, and `tests/zigzag/test_xudu_convergence.cpp` passes unmodified.
+1. **`XanadocLens` on the convergence translators.** Re-express the xanadoc path behind the trait,
+   built on `sliceToStore`/`storeToSlice` (the cell-structure path), not the legacy
+   paragraph-splitting DTO projector. Gate: every fixture round-trips through `project → unproject`
+   with the same document text and links under `xudu-dump --section=ops` (meaning, not bytes). Where
+   this phase already improves output (full span runs, stable `d.extkey` ids), regenerate the
+   affected fixtures and update `tests/zigzag/test_xudu_convergence.cpp` to the richer invariant in
+   the same commit.
 1. **The dirty-cell diff and `commit()`.** Implement the COW-base diff via `holdsOwn()` and the
    classify/order/apply loop. Test with `XanadocLens`: a cell relinked in the arena unprojects to a
    `Store::setLink`, a content splice to `Store::spliceCell`, and a browse-only session produces an
