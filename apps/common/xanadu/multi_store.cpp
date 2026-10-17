@@ -346,6 +346,17 @@ DimRef MultiStoreCoordinator::resolveDimension(std::string_view name) {
   if (name == "d.stdlib") return sysDims.stdlib;
   if (name == "d.clause") return sysDims.clause;
 
+  // Canonical generic lens dimensions (design/anything-to-zigzag-lens.md
+  // §4.3.1): a projected source and a query over it must resolve the same rank
+  // by name. findOrMintDimension already does so within one core, but routing
+  // these through the privileged resolver keeps them consistent across stores
+  // and documents that they are the canonical cross-lens vocabulary. d.clone is
+  // already privileged above; the structural trio and d.mime are added here.
+  if (name == "d.contains" || name == "d.seq" || name == "d.ref" ||
+      name == "d.mime") {
+    return core_->findOrMintDimension(name);
+  }
+
   return core_->findOrMintDimension(name);
 }
 
