@@ -45,6 +45,8 @@ struct Closure {
   EnvPtr env; ///< captured defining environment
 };
 
+struct Thunk; ///< a suspended computation (laziness, §6.2)
+
 struct Value {
   // Exactly one of these is active, chosen by `kind`.
   enum class Kind : std::uint8_t {
@@ -52,13 +54,29 @@ struct Value {
     Float,
     Str,
     Bool,
-    Closure
+    Closure,
+    Ctor,  ///< a constructed ADT value: tag + argument values (§4.2)
+    Thunk, ///< an unforced suspended computation (§6.2)
   } kind{Kind::Int};
   std::int64_t i{0};
   double f{0.0};
   std::string s;
   bool b{false};
   std::shared_ptr<Closure> clo;
+  // Ctor payload.
+  std::string tag;            ///< constructor name, e.g. "Cons", "Leaf"
+  std::vector<ValuePtr> args; ///< constructor arguments (may be thunks)
+  std::size_t ctorArity{0}; ///< total arity; args.size() < ctorArity == partial
+  // Thunk payload.
+  std::shared_ptr<Thunk> thunk;
+};
+
+/// A suspended computation forced at most once, memoized in place (§6.2/§6.3).
+struct Thunk {
+  ExprNode const *body{nullptr}; ///< borrowed from the AST
+  EnvPtr env;
+  bool forced{false};
+  ValuePtr cached;
 };
 
 struct Env {
@@ -88,8 +106,13 @@ public:
   [[nodiscard]] std::expected<ValuePtr, EvalError>
   evaluateProgram(const Program &prog);
 
-  /// Render a value to the text a REPL prints.
+  /// Render a value to the text a REPL prints (shallow; does not force).
   [[nodiscard]] static std::string show(const ValuePtr &v);
+
+  /// Force a value fully and render it, including lazy lists as [a, b, c] and
+  /// constructed values as "Ctor arg arg". Bounded so a cyclic/infinite value
+  /// is truncated rather than looping (§6.7).
+  [[nodiscard]] std::string render(const ValuePtr &v, int depthBudget = 10000);
 
   [[nodiscard]] zigzag::vortex::VortexCore &core() noexcept { return core_; }
 
@@ -106,9 +129,30 @@ private:
                                                const ValuePtr &rhs,
                                                SourceLocation loc);
 
+  // Force a value to weak head normal form: if it is an unforced thunk, run
+  // its body once and memoize the result (§6.7). Returns the forced value.
+  std::expected<ValuePtr, EvalError> force(ValuePtr v);
+
+  // Try to match `pat` against `scrutinee`, binding pattern variables into
+  // `out`. Returns true on a match. Forces the scrutinee to WHNF as far as the
+  // pattern demands (§5.4). A failed match leaves `out` to be discarded by the
+  // caller.
+  std::expected<bool, EvalError>
+  matchPattern(const PatternNode &pat, const ValuePtr &scrutinee,
+               std::unordered_map<std::string, ValuePtr> &out);
+
+  // Register a data declaration's constructors (name -> arity) so ECtor /
+  // application can build constructed values and matching can check arity.
+  void registerData(const DataDecl &dd);
+
+  // Build an unforced thunk value from an expression + environment.
+  ValuePtr makeThunk(const ExprNode *body, const EnvPtr &env);
+
   zigzag::vortex::VortexCore &core_;
   zigzag::vortex::VortexVM &vm_;
   EnvPtr globals_{std::make_shared<Env>()};
+  // Constructor name -> arity. Nil/Cons and True/False are pre-registered.
+  std::unordered_map<std::string, std::size_t> ctorArity_;
 };
 
 } // namespace xanadu::vlace

@@ -178,6 +178,47 @@ bool valueDeclAhead(std::string_view source, std::size_t offset) {
     }
   }
 }
+
+// After a ';' inside a case, does another alternative follow -- i.e. a
+// `pattern [if guard] =>` whose `=>` appears at bracket depth 0 before the
+// next ';'? If not, the ';' separated the case from a following decl/expr and
+// the alt list is finished.
+bool altAhead(std::string_view source, std::size_t offset) {
+  Lexer scan(source.substr(offset));
+  int depth = 0;
+  for (;;) {
+    Token t = scan.nextToken();
+    switch (t.kind) {
+    case TokenKind::EndOfFile:
+    case TokenKind::Semicolon:
+      return false;
+    case TokenKind::OpenParen:
+    case TokenKind::OpenBracket:
+    case TokenKind::OpenBrace:
+      ++depth;
+      break;
+    case TokenKind::CloseParen:
+    case TokenKind::CloseBracket:
+    case TokenKind::CloseBrace:
+      if (depth == 0) return false; // closing bracket ends an enclosing form
+      --depth;
+      break;
+    case TokenKind::FatArrow:
+      if (depth == 0) return true;
+      break;
+    // A nested let/case/fn before any top-level => means this is not a bare alt
+    // head; bail so we do not misread it.
+    case TokenKind::KwLet:
+    case TokenKind::KwLetrec:
+    case TokenKind::KwCase:
+    case TokenKind::KwFn:
+    case TokenKind::KwIn:
+      return false;
+    default:
+      break;
+    }
+  }
+}
 } // namespace
 
 // -- Program and declarations ------------------------------------------------
@@ -784,13 +825,13 @@ std::expected<Expr, ParseError> Parser::parseCase() {
     if (!body) return std::unexpected(body.error());
     alt.body = std::move(*body);
     node.alts.push_back(std::move(alt));
-    if (!match(TokenKind::Semicolon)) break;
-    // A trailing ';' before something that cannot start an alt ends the case.
-    if (cur_.kind == TokenKind::EndOfFile || cur_.kind == TokenKind::KwIn ||
-        cur_.kind == TokenKind::CloseParen ||
-        cur_.kind == TokenKind::CloseBracket) {
+    if (cur_.kind != TokenKind::Semicolon) break;
+    // Peek past the ';': continue only if another `pattern => ...` alt follows.
+    // Otherwise the ';' separates the case from a following decl/expression.
+    if (!altAhead(lexer_.source(), next_.loc.offset)) {
       break;
     }
+    advance(); // consume the ';' now that we know an alt follows
   }
   return makeExpr(std::move(node), loc);
 }
