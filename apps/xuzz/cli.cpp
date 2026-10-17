@@ -144,6 +144,11 @@ void CliParser::buildParser(argparse::ArgumentParser &parser,
       .help("load a ZigZag slice or store path")
       .default_value(std::string{});
 
+  hiddenUnlessDetailed(parser.add_argument("--lens"))
+      .help("project a filesystem path through the FilesystemLens and show its "
+            "cells (use with --raster to print and exit)")
+      .default_value(std::string{});
+
   hiddenUnlessDetailed(parser.add_argument("--raster"))
       .help("print 1D/2D raster reading text of the slice to stdout and exit")
       .default_value(false)
@@ -324,6 +329,10 @@ std::optional<CliOptions> CliParser::parse(argparse::ArgumentParser &parser,
   if (const auto slicePath = parser.get<std::string>("--slice");
       !slicePath.empty()) {
     opts.slicePath = slicePath;
+  }
+  if (const auto lensPath = parser.get<std::string>("--lens");
+      !lensPath.empty()) {
+    opts.lensPath = lensPath;
   }
 
   opts.rasterMode = (parser["--raster"] == true);

@@ -54,6 +54,7 @@ struct CliOptions {
   ViewMode viewMode{ViewMode::Unified};
   std::string storePath{"xanadoc"};
   std::string slicePath;
+  std::string lensPath; ///< a filesystem path to project via FilesystemLens
   bool rasterMode{false};
   bool quiet{false};
   bool headless{false};

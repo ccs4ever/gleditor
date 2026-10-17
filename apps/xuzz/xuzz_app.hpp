@@ -23,6 +23,7 @@ public:
 private:
   int executeCheckAuthorship(const std::string &where);
   int executeRaster(const std::string &slicePath, const std::string &storePath);
+  int executeLensRaster(const std::string &lensPath);
 };
 
 } // namespace xuzz

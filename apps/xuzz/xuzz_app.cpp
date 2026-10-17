@@ -48,6 +48,10 @@
 #include "common/xanadu/torrent.hpp"
 #include "common/xanadu/user_permascroll.hpp"
 #include "common/xanadu/vortex/vortex_host.hpp"
+#include "common/xanadu/zigzag/arena_manifold.hpp"
+#include "common/xanadu/zigzag/filesystem_lens.hpp"
+#include "common/xanadu/zigzag/projection_lens.hpp"
+#include "common/xanadu/zigzag/projection_session.hpp"
 #include "common/xanadu/zigzag/zz_xudu_projector.hpp"
 #include "common/xanadu/zigzag/zzcore.hpp"
 
@@ -327,6 +331,56 @@ int XuzzApp::executeRaster(const std::string &slicePath,
   }
 }
 
+int XuzzApp::executeLensRaster(const std::string &lensPath) {
+  // Project a filesystem path through the FilesystemLens into an arena and
+  // print its cells, proving a projected non-Xanadu source is visible in xuzz.
+  if (lensPath.empty() || !fs::exists(lensPath)) {
+    std::cerr << "Error: --lens path does not exist: " << lensPath << "\n";
+    return 1;
+  }
+  try {
+    zigzag::ArenaManifold arena;
+    zigzag::vortex::VortexCore core(arena);
+    zigzag::ProjectionSession session(
+        std::make_unique<zigzag::FilesystemLens>(lensPath), core);
+
+    const auto dRole     = core.findOrMintDimension("d.role");
+    const auto dMime     = core.findOrMintDimension("d.mime");
+    const auto dContains = core.findOrMintDimension(
+        std::string(zigzag::genericDimName(zigzag::GenericDim::Containment)));
+    const auto dSeq = core.findOrMintDimension(
+        std::string(zigzag::genericDimName(zigzag::GenericDim::Sequence)));
+
+    auto attr = [&](zigzag::CellRef c, zigzag::DimRef d) -> std::string {
+      auto nb = arena.linked(c, d, zigzag::Posward);
+      return nb.has_value() ? arena.textOf(*nb) : std::string{};
+    };
+
+    std::cout << "lens: " << lensPath << " -> " << session.cellCount()
+              << " cells, " << session.roots().size() << " root(s)\n";
+
+    // Depth-first print of the projected tree: a cell, then its d.contains
+    // first child and the d.seq sibling chain, indented by depth.
+    auto printTree = [&](auto &&self, zigzag::CellRef cell, int depth) -> void {
+      std::string indent(static_cast<std::size_t>(depth) * 2, ' ');
+      std::cout << indent << arena.textOf(cell) << "  [" << attr(cell, dRole)
+                << ", " << attr(cell, dMime) << "]\n";
+      auto child = arena.linked(cell, dContains, zigzag::Posward);
+      for (auto cur = child; cur.has_value();
+           cur      = arena.linked(*cur, dSeq, zigzag::Posward)) {
+        self(self, *cur, depth + 1);
+      }
+    };
+    for (const auto root : session.roots()) {
+      printTree(printTree, root, 0);
+    }
+    return 0;
+  } catch (const std::exception &err) {
+    std::cerr << "Error during lens projection: " << err.what() << "\n";
+    return 1;
+  }
+}
+
 int XuzzApp::run(const int argc, char **argv) {
   const auto state    = std::make_shared<AppState>();
   const bool detailed = CliParser::wantsEveryOption(argc, argv);
@@ -352,6 +406,10 @@ int XuzzApp::run(const int argc, char **argv) {
 
   if (!opts.checkAuthorshipPath.empty()) {
     return executeCheckAuthorship(opts.checkAuthorshipPath);
+  }
+
+  if (!opts.lensPath.empty()) {
+    return executeLensRaster(opts.lensPath);
   }
 
   if (opts.rasterMode) {
@@ -789,9 +847,9 @@ int XuzzApp::run(const int argc, char **argv) {
       };
       const auto targetEdges = pageEdges(*focusedFrame);
       const auto sourceEdges = pageEdges(*companionFrame);
-      const auto gap         = focusedFrame->marginPx *
+      const auto gap = focusedFrame->marginPx *
                        glm::length(glm::vec3(focusedFrame->localToWorld[0]));
-      auto model = companion.modelMatrix();
+      auto model     = companion.modelMatrix();
       model[3].y += point->y - otherPoint->y;
       model[3].x += otherPoint->x >= point->x
                         ? targetEdges[1].x + gap - sourceEdges[0].x
@@ -1133,8 +1191,8 @@ int XuzzApp::run(const int argc, char **argv) {
       [&renderer, docSwitcher, &session,
        &zigzagStoreIndex]() -> std::optional<std::uint32_t> {
     const auto *caret = renderer->editCaret();
-    const auto index  = caret && caret->active() ? caret->documentIndex()
-                                                 : docSwitcher->activeDocIndex();
+    const auto index = caret && caret->active() ? caret->documentIndex()
+                                                : docSwitcher->activeDocIndex();
     if (index >= session->views().size() ||
         session->views()[index].storeIndex != zigzagStoreIndex) {
       return std::nullopt;
@@ -1391,7 +1449,7 @@ int XuzzApp::run(const int argc, char **argv) {
                                  ? *freshCell
                                  : changedCells.front();
     const bool focusSlice  = zigzagPresentation->presentationVisible() &&
-                            changedCell != zigzag::noCell;
+                             changedCell != zigzag::noCell;
 
     renderer->runWithState([&views, &renderer, viewIndex, changeAt, &bindZigzag,
                             zigzagPresentation, &state, &keyboardPane, &links,
@@ -1512,10 +1570,10 @@ int XuzzApp::run(const int argc, char **argv) {
                   [&session, &bindZigzag, &map, zigzagPresentation, target,
                    focus, index, parent, &pairedDocument,
                    note = answers.front().answer()](RenderState &rState) {
-                    auto &store         = session->store(index);
-                    auto head           = store.annotateVersion(parent, target,
-                                                                {.description = note});
-                    auto folded         = store.rebuildManifold(head);
+                    auto &store = session->store(index);
+                    auto head   = store.annotateVersion(parent, target,
+                                                        {.description = note});
+                    auto folded = store.rebuildManifold(head);
                     const auto targetOp = store.segmentedOps().indexOf(target);
                     const auto handle   = folded.findOpHandle(targetOp);
                     const auto dim      = folded.dimensionNamed("d.1", store);
@@ -1576,7 +1634,7 @@ int XuzzApp::run(const int argc, char **argv) {
     const auto &openView = session->views()[docIdx];
     const auto &st       = session->store(openView.storeIndex);
     const auto spans     = st.rebuild(openView.version, openView.focusedBirth)
-                           .spansFor(selStart, selEnd - selStart);
+                               .spansFor(selStart, selEnd - selStart);
     if (spans.empty()) {
       return false;
     }
@@ -2339,7 +2397,7 @@ int XuzzApp::run(const int argc, char **argv) {
              {},
              CaretMotion::DocumentEnd,
              "to the end of the document"},
-        };
+    };
     for (const auto &[move, select, motion, where] : motions) {
       app.commands().registerAction(
           std::string(move), std::string("move the caret ") + where,
@@ -2801,8 +2859,8 @@ int XuzzApp::run(const int argc, char **argv) {
     }
     const auto version = store.sliceGenesis(parent);
     const auto *caret  = renderer->editCaret();
-    const auto doc     = caret && caret->active() ? caret->documentIndex()
-                                                  : docSwitcher->activeDocIndex();
+    const auto doc = caret && caret->active() ? caret->documentIndex()
+                                              : docSwitcher->activeDocIndex();
     if (doc < session->views().size() &&
         session->views()[doc].storeIndex == storeIndex) {
       std::ignore = session->advanceViewAfterCommit(doc, parent, version);
@@ -3180,8 +3238,8 @@ int XuzzApp::run(const int argc, char **argv) {
     satelloidOverlay.setEndpointPreviewVisible(!zigzagHas);
     if (zigzagHas) {
       const auto *caret = renderer->editCaret();
-      const auto doc    = caret && caret->active() ? caret->documentIndex()
-                                                   : docSwitcher->activeDocIndex();
+      const auto doc = caret && caret->active() ? caret->documentIndex()
+                                                : docSwitcher->activeDocIndex();
       session->flushUncommitted(doc);
     }
     zigzagPresentation->setHasKeyboard(zigzagHas);
