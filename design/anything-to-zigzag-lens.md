@@ -26,6 +26,7 @@ into a ZigZag manifold, and back. That translator is hard-wired to xanadocs in t
   ([`zz_xudu_projector.hpp`](apps/common/xanadu/zigzag/zz_xudu_projector.hpp), the
   `XuduProjectorOptions` struct);
 - its *projection logic* is paragraph-splitting and span-overlap heuristics specific to concatext
+  (the assembled, transclusion-resolved document text)
   ([`zz_xudu_projector.cpp:43`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp),
   `projectXuduToZigzag`).
 
@@ -225,7 +226,8 @@ ______________________________________________________________________
 
 ## 4. The Proposed Interface: `ProjectionLens`
 
-The lens is a trait with two halves. The **project** half turns a source into arena cells; the
+The lens is a trait — here, a C++ abstract base class with two virtual halves, not a
+`std::is_*`-style type trait. The **project** half turns a source into arena cells; the
 **unproject/diff** half turns a changed arena into source operations. It owns one piece of state the
 engine deliberately does not: the mapping between the source's own stable keys and the manifold's
 `CellRef`s (§5).
@@ -244,9 +246,10 @@ crossing (invariant 5). A lens that wants persistence promotes; a lens that only
 namespace zigzag {
 
 /// A source node's own stable, lens-defined identity. Opaque to the engine.
-/// For a xanadoc this is a (documentId, MicroversionId, PrimediaSpan) triple;
-/// for a filesystem it is the inode-or-path key of §5. The lens is the only
-/// code that knows how to compute, compare, and persist one.
+/// For a xanadoc this encodes the (documentId, version, span) triple as
+/// "xd:<documentId>:<version>:<span>"; for a filesystem it is the inode-or-path
+/// key of §5 ("fs:<dev>:<ino>"). The lens is the only code that knows how to
+/// compute, compare, and persist one.
 using ExternalKey = std::string;   // canonical, stable, lens-owned encoding
 
 /// One generic dimension every lens speaks, named once so a visualizer and a
@@ -358,24 +361,64 @@ a `CellRef` keeps the lens on the source side of the boundary; the framework res
 
 ### 4.3 Generic vs source-specific dimensions
 
-| dimension      | generic? | xanadoc meaning               | filesystem meaning              |
-| -------------- | -------- | ----------------------------- | ------------------------------- |
-| `d.contains`   | generic  | document → paragraph          | directory → entry               |
-| `d.seq`        | generic  | reading order (`d.doc`)       | sibling order within a dir      |
-| `d.ref`        | generic  | xanalink (`d.link`)           | symlink / hardlink target       |
-| `d.clone`      | generic  | shared-span clone (`d.clone`) | identical-content files (dedup) |
-| `d.role`       | generic  | `role` attribute cell         | `file`/`dir`/`symlink` kind     |
-| `d.mime`       | generic  | MIME of media cell            | libmagic MIME of file           |
-| `d.transclude` | xanadoc  | overlapping primedia spans    | — (no analogue)                 |
-| `d.version`    | xanadoc  | microversion lineage          | — (no analogue)                 |
-| `d.size`       | fs       | —                             | file size in bytes (scalar)     |
-| `d.mtime`      | fs       | —                             | mtime (scalar / ISO-8601 cell)  |
-| `d.perm`       | fs       | —                             | mode bits (scalar)              |
+A query engine (VQL) and a logic runtime (Vlog) resolve a dimension by its **literal rank-name
+string** — there is no indirection layer that would let an enum tag stand in for a name
+(`MultiStoreCoordinator::resolveDimension` matches a fixed privileged set and otherwise calls
+`findOrMintDimension(name)`, [`multi_store.cpp:329`](apps/common/xanadu/multi_store.cpp)). So for
+"the same query traverses any lens" to be true, the generic names below are **the actual rank
+strings every lens mints**, not an enum decoration beside source-specific names. `GenericDim` is the
+C++-side token a lens maps a dimension onto; the string in the second column is what lands in the
+manifold and what a query names. A lens that minted its own private names instead (the old
+`d.doc`/`d.link`) would make a generic query silently mint a fresh empty dimension and return
+nothing — the single most dangerous failure mode, because it is not an error (§4.3.1).
 
-The four `GenericDim` values are the vocabulary a visualizer and a query can rely on across every
-lens. `d.role` / `d.mime` are generic *attribute ranks* already named in the engine
-([`zz_xudu_projector.cpp:37`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp)); the lens populates
-them through `SourceNode::attributes`. Everything else is declared per lens via `dimensions()`.
+"Generic" means one of two things, and the table's column covers both: a **`GenericDim` structural
+dimension** every lens maps onto (`d.contains`/`d.seq`/`d.ref`/`d.clone`), or a **conventionally
+named attribute rank** the framework recognizes (`d.role`/`d.mime`) that is not in the enum but is
+pinned by name across lenses.
+
+| dimension      | kind           | xanadoc meaning            | filesystem meaning              |
+| -------------- | -------------- | -------------------------- | ------------------------------- |
+| `d.contains`   | generic (enum) | document → paragraph       | directory → entry               |
+| `d.seq`        | generic (enum) | reading order              | sibling order within a dir      |
+| `d.ref`        | generic (enum) | xanalink                   | symlink / hardlink target       |
+| `d.clone`      | generic (enum) | shared-span clone          | identical-content files (dedup) |
+| `d.role`       | generic (attr) | `role` attribute cell      | `file`/`dir`/`symlink` kind     |
+| `d.mime`       | generic (attr) | MIME attribute cell        | libmagic MIME of file           |
+| `d.transclude` | xanadoc custom | overlapping primedia spans | — (no analogue)                 |
+| `d.version`    | xanadoc custom | microversion lineage       | — (no analogue)                 |
+| `d.size`       | fs custom      | —                          | file size in bytes (scalar)     |
+| `d.mtime`      | fs custom      | —                          | mtime (scalar / ISO-8601 cell)  |
+| `d.perm`       | fs custom      | —                          | mode bits (scalar)              |
+
+The four `GenericDim` values plus the two pinned attribute ranks are the vocabulary a visualizer and
+a query rely on across every lens; `d.role` / `d.mime` are the attribute ranks already named in the
+engine ([`zz_xudu_projector.cpp:37`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp)), populated
+through `SourceNode::attributes`. A source-specific concept with no generic analogue
+(`d.transclude`, `d.size`) is declared per lens via `dimensions()` under its own name and is simply
+not reachable by a generic cross-lens query — which is honest, not a failure.
+
+#### 4.3.1 Dimension-name resolution is the load-bearing contract
+
+Because VQL/Vlog bind dimensions by string, the generic-name rule is not a stylistic preference — it
+is the contract that makes the whole portability claim work, and it has two possible shapes:
+
+- **(a) Lenses mint the canonical generic strings (recommended).** `XanadocLens` mints `d.contains`
+  / `d.seq` / `d.ref` directly, not `d.doc` / `d.link`. Nothing is in production, so the xanadoc
+  projection is free to use the generic names (the convergence permits a shape change). A query over
+  any lens is then identical, with no engine change.
+- **(b) The engine gains an alias layer.** `resolveDimension` learns to map a canonical generic name
+  onto a lens's private name. This is more machinery, touches the query hot path, and must be
+  per-session (two lenses disagree on what `d.ref` aliases), so (a) is preferred. The design assumes
+  **(a)** everywhere below; §9 revises `XanadocLens` to mint the generic names, and the few
+  genuinely xanadoc-only ranks (`d.transclude`, `d.version`) keep their own names because no generic
+  analogue exists.
+
+The pinned attribute names (`d.role`, `d.mime`) must additionally be in the query engine's
+privileged set so a predicate like `[/d.mime = 'image/png']` resolves identically across sources;
+today only `d.role` and `d.clone` are privileged
+([`multi_store.cpp:333`](apps/common/xanadu/multi_store.cpp)), so adding `d.mime` (and the generic
+structural names) to that set is a prerequisite the plan carries (§10).
 
 ### 4.4 The framework: `ProjectionSession`
 
@@ -410,11 +453,16 @@ public:
   [[nodiscard]] std::vector<ChangeReport> commit();
 
   /// Persist the arena into a Store instead of (or as well as) back to the
-  /// source: the single promote() crossing (invariant 5). For a lens whose
-  /// source is itself a Store this is a no-op; for the filesystem lens this is
-  /// how a directory tree becomes a durable xanadoc slice.
+  /// source: the single promote() crossing (invariant 5). Takes a SET of roots,
+  /// not one: a directory tree has several top-level entries and a mixed-source
+  /// arena has disjoint identity islands, neither of which is single-rooted the
+  /// way promote(root) assumes. The session either synthesizes a genesis home
+  /// linking all roots under d.contains, or loops promote() threading the
+  /// version forward and reconciling the ref maps. It MUST deduplicate d.clone
+  /// members (see note below) so a shared subgraph costs O(log n) ops, not O(n).
   [[nodiscard]] std::optional<Promoted>
-  promoteInto(xanadu::Store &store, const MicroversionId &parent, CellRef root);
+  promoteInto(xanadu::Store &store, const MicroversionId &parent,
+              std::span<const CellRef> roots);
 
 private:
   std::unique_ptr<ProjectionLens> lens_;
@@ -449,7 +497,7 @@ The obvious key — the file's path — is wrong, because the headline unproject
 renamed would no longer resolve, and a second edit to the "same" node would mint a duplicate. The
 map must be keyed on something a rename does **not** change.
 
-### 5.2 The scheme: `(device, inode, generation)` with a path fallback
+### 5.2 The scheme: `(device, inode)` with a path fallback
 
 For a filesystem that exposes inodes (Linux/macOS/BSD), the stable key is the pair `st_dev` ×
 `st_ino` from `stat(2)`, which a rename and a move-within-a-filesystem preserve:
@@ -458,6 +506,9 @@ For a filesystem that exposes inodes (Linux/macOS/BSD), the stable key is the pa
 ExternalKey (filesystem) ::= "fs:" <st_dev> ":" <st_ino>              -- inode-stable
                            | "fsp:" <sha256(canonical_path)>          -- fallback, no inode
 ```
+
+(Here *canonical_path* is `std::filesystem::weakly_canonical` of the entry's path — a stable,
+symlink-resolved, lexically-normalized spelling.)
 
 - **Rename / move within a device.** `st_dev`/`st_ino` are unchanged, so the key is unchanged and
   the map needs no repair — only the *path attribute cell* (`d.name` / content) changes. This is why
@@ -478,7 +529,7 @@ ExternalKey (filesystem) ::= "fs:" <st_dev> ":" <st_ino>              -- inode-s
 
 The key is deliberately a `std::string` so one `ProjectionSession` can host **mixed** lenses in one
 arena via `d.stores` ([`arena_manifold.hpp`](apps/common/xanadu/zigzag/arena_manifold.hpp),
-`attach(Space)`): a xanadoc key (`"xd:<documentId>:<microversion>:<span>"`) and a filesystem key
+`attach(Space)`): a xanadoc key (`"xd:<documentId>:<version>:<span>"`) and a filesystem key
 (`"fs:<dev>:<ino>"`) never collide, so a directory and a xanadoc can be browsed in one space.
 
 ### 5.3 Mapping across the persistent crossing
@@ -490,6 +541,7 @@ the second is recommended:
 - **(a) Side table.** The framework writes a `key → GlobalOpRef` table beside the store. Simple, but
   it is a second artefact that can drift from the operations — exactly the smell R11/R13 removed for
   `Preflet` and the plaintext tables.
+
 - **(b) An attribute rank, `d.extkey`.** The external key is minted as an ordinary content cell on a
   `d.extkey` rank off each projected cell — identical to how `d.role`/`d.mime`/`d.media` carry
   attributes ([`zz_xudu_projector.cpp:37`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp)). The
@@ -497,6 +549,15 @@ the second is recommended:
   is read back by a walk of `d.extkey` — no side artefact. **(b) is the recommendation**, because it
   reuses the engine's own answer for metadata (R13) and keeps the mapping inside the one address
   space the convergence insists everything live in.
+
+  **Caveat (architect finding).** A `d.extkey` cell is a reachable neighbour, so `promote()` walks
+  and persists it — which means the key becomes an authored Structure op that enlarges a fixture's
+  op sequence and makes a *stale* key an authored operation rather than a rewritable side-table
+  entry. Two honest resolutions, decided per deployment: either `promote()` **skips** the `d.extkey`
+  rank the way it already skips `d.dims` (keeping the key out of the content hash and the publish
+  seal), or the key stays a framework **side table** (option (a)) for the publish path and only the
+  live-session map is in-arena. The doc's recommendation is (b)-with-skip; what it must stop
+  claiming is that the hypertime-cell option is cost-free (U-L5).
 
 ### 5.4 Why the map is the lens's, not the engine's
 
@@ -548,7 +609,7 @@ rather than needing a rule at each call site.
 | aspect                          | project (source → cells)                     | unproject (cells → source)     | faithful?                                         |
 | ------------------------------- | -------------------------------------------- | ------------------------------ | ------------------------------------------------- |
 | xanadoc paragraph in one piece  | one cell, one span                           | content restated               | faithful                                          |
-| xanadoc paragraph across pieces | legacy: first part only; lens: full span run | full span run                  | **fixed by `XanadocLens`** (§9.2; U3.4)           |
+| xanadoc paragraph across pieces | legacy: first part only; lens: full span run | full span run                  | **fixed by `XanadocLens`** (§9.2; Splice run)     |
 | xanadoc cell id                 | ops index (legacy) / `d.extkey` (lens)       | stable key under lens          | **fixed by `XanadocLens`** (§9.2)                 |
 | xanadoc presentation metadata   | legacy drops it; lens: attribute ranks       | round-tripped on ranks         | **fixed by `XanadocLens`** (§9.2, R13)            |
 | fs file name                    | `d.name` / content cell                      | `rename(2)`                    | faithful (inode key preserved)                    |
@@ -564,8 +625,9 @@ rather than needing a rule at each call site.
 **Faithful** means a project-then-unproject with no edit changes the source not at all, and an edit
 unprojects to exactly the operation the user intended. The three **fixed by `XanadocLens`** entries
 are losses the *legacy* DTO projector carried as compromises and the lens removes (§9.2): the
-single-span truncation goes away once a node carries its whole span run (U3.4's `CompactBinaryV4`
-removes the one-span-per-op limit, [`store-slice-convergence.md`](store-slice-convergence.md) U3),
+single-span truncation goes away once a node carries its whole span run (a cell's content is already
+a `Splice` run of spans, [`store.hpp:588`](apps/common/xanadu/store.hpp); the one-span-per-op limit
+just means a multi-span cell promotes as a splice per span, not that the cell cannot hold them),
 presentation metadata rides attribute ranks (R13), and cell id is stabilized by `d.extkey`. The
 genuinely remaining limits are source-side, not projector-side: a file's **size is derived** (§6.3)
 and a **no-inode mount** cannot offer stable identity (§5.2) — neither is something a better
@@ -579,6 +641,56 @@ projects it as a scalar cell for display and query, but `applyAttributeChange("d
 number is not what the gesture means. This is the same discipline as the engine refusing a
 signalling NaN at the API boundary ([`store.hpp`](apps/common/xanadu/store.hpp), `makeScalarCell`
 `@throws`): a derived attribute is read-only, and saying so loudly beats a silent wrong write.
+
+### 6.4 The per-cell diff is not enough: rank-level diffing and `applyReorder`
+
+A per-cell `holdsOwn()` comparison sees content, value bits, and each cell's `pos`/`neg` link along
+every dimension — enough for a content edit, a scalar change, a cleared span, or a single relink. It
+is **not** enough for the headline filesystem gesture, *reordering siblings within a rank*: moving
+one child reshapes the `pos`/`neg` of several cells, so a naive diff emits N uncoalescable
+`applyReparent` calls instead of one "the order is now X" operation, and a source whose order is a
+single column (a directory listing, a junction table's sort key) cannot faithfully receive N
+disconnected moves.
+
+So `commit()` diffs at **two granularities**: per-cell for content/attribute/value changes, and
+**per-rank** for structure. For each dimension a changed cell touches, it walks the rank in the base
+and in the arena and computes a sequence edit (LCS or a simpler insert/delete/move script), emitting
+one ordered operation per rank rather than per edge. The trait gains:
+
+```cpp
+/// The ordered children of `parent` along `dim` changed to `newOrder`
+/// (a reorder, an insert, or a removal within one rank). The lens lowers it to
+/// one source operation -- a directory re-sort, a reordered junction, a moved
+/// paragraph -- rather than receiving it as scattered per-cell reparents.
+[[nodiscard]] virtual std::expected<ExternalKey, std::string>
+applyReorder(const ExternalKey &parent, std::string_view dim,
+             std::span<const ExternalKey> newOrder) = 0;
+```
+
+`applyReparent` keeps its role for *cross-parent* moves (a child changes which container it is
+under); `applyReorder` handles *within-rank* order. The two are distinguished by whether the cell's
+containment parent changed, which the rank diff knows.
+
+### 6.5 `commit()` ordering is a topological sort, with a cycle policy
+
+"Creates → relinks → deletes" is too coarse: a child created under a just-created parent needs the
+parent minted first, and a `d.ref` cycle (two new symlinks pointing at each other) has no valid
+linear order. `commit()` therefore topologically sorts the create/reparent operations over the
+dependency DAG (an edge "A must exist before B" from each node to its container and to any node it
+is linked to at creation), applies in that order, and handles the two hard cases explicitly:
+
+- **Just-created parent.** `applyCreate` for a container completes before any `applyReparent` /
+  `applyReorder` that names it as parent — guaranteed by the topological order, since containment is
+  a DAG edge.
+- **Reference cycles.** A `d.ref` back-edge that would close a cycle is deferred to a second pass
+  after all endpoints exist (legal for symlinks, which may point anywhere; **refused** for
+  containment, which must stay acyclic — a directory cannot contain its ancestor). The cycle policy
+  is per-dimension-kind: `Reference` cycles are allowed and two-passed, `Containment` cycles are a
+  `std::unexpected`.
+
+Deletes run last, and a delete of a container must account for the source's own cascade (a
+`DROP TABLE`, an `rm -r`): see §8A (the schema/instance node-kind bullet), because a cascade deletes
+cells the per-cell diff never marked dirty.
 
 ______________________________________________________________________
 
@@ -652,14 +764,42 @@ the map. Nothing on disk is touched; the arena is a live view of the directory.
 
 ### 7.3 Persisting a directory as a slice
 
-`ProjectionSession::promoteInto(store, parent, root)` turns the browsed directory into a durable
+`ProjectionSession::promoteInto(store, parent, roots)` turns the browsed directory into a durable
 xanadoc slice: file bytes are imported into the permascroll
 ([`store_loader.hpp:45`](apps/common/xanadu/store_loader.hpp)), scratch renderings of scalars
 acquire addresses, and the arena cells become `CompactOpNode`s — the single `promote()` crossing
-(invariant 5). The `d.extkey` cells travel with them (§5.3 (b)), so re-opening the slice and
-re-projecting the live directory can reconcile the two by key. This is "intertwingularity" from
-[`vlace-functional-language.md` §13.4 example 7](vlace-functional-language.md): one value that is
-both a directory and an addressable ZigZag structure.
+(invariant 5), over the *set* of top-level entries (§4.4). The `d.extkey` cells travel with them
+(§5.3 (b), with the promote-skip caveat), so re-opening the slice and re-projecting the live
+directory can reconcile the two by key. This approaches the "intertwingularity" of
+[`vlace-functional-language.md` §13.4 example 7](vlace-functional-language.md) — one value that is
+both a directory and an addressable ZigZag structure — but note (§7.4) that example over-assumes a
+vlace surface the language does not yet have.
+
+### 7.4 The vlace surface: a lens entry point vlace does not have yet
+
+A vlace programmer who takes `vlace-functional-language.md` §13 literally ("compute over it in
+vlace") hits a wall the lens design is silent on: today vlace's `std:xanadu` natives
+(`makeText`/`makeDim`/`setLink`/`cellText`/`linked`/`promote`) can only build cells in the program's
+*own* arena and read one neighbour at a time. There is no verb to **open a projected source** — a
+program cannot obtain the root of a `FilesystemLens` projection at all, so the
+word-frequency-over-a-directory task is a non-starter at step one. The design genuinely omits this
+entry point. The smallest primitive that closes it:
+
+```ocaml
+openLens :: String -> IO Cell    -- project a source (by URI/path) via its lens,
+                                  -- returning the arena root CellRef; an IO effect
+                                  -- because it reads the external world.
+```
+
+`openLens "fs:/some/dir"` runs a `FilesystemLens` through a `ProjectionSession` *over the vlace
+evaluator's own arena* (§9A.2's project-into-bound-arena contract, so the result is visible to
+`linked`/`cellText`), and returns the root cell. With it, the histogram program is expressible using
+the rank walk and `cellText` vlace already has. **This is the one lens-design gap for vlace;** it is
+distinct from four *language* gaps that are not the lens's concern and are tracked against the vlace
+std library, not here: a multi-step rank walk (`childrenOf : Cell -> Dim -> List Cell`, derivable
+from `linked`), string tokenization (`words : String -> List String`), a `Map`/assoc type, and
+string ordering for sorting (today vlace compares strings only with `==`/`/=`). The lens must
+provide `openLens`; `std:fun` must grow the rest.
 
 ______________________________________________________________________
 
@@ -693,6 +833,14 @@ ______________________________________________________________________
   ([`arena_manifold.hpp`](apps/common/xanadu/zigzag/arena_manifold.hpp)).
 - **`promote()`** — the single persistence crossing
   ([`arena_manifold.hpp`](apps/common/xanadu/zigzag/arena_manifold.hpp), `promote` free function).
+  **Caveat (architect finding):** today `promote()` follows `d.clone` edges like any other link and
+  re-spools each reachable cell's content, so two clone members get *different* content addresses —
+  it does **not** deduplicate shared subgraphs. The design's O(log n) transclusion-sharing claim is
+  therefore a **requirement placed on promotion**, not a property it currently has: either the lens
+  emits clone members as a master plus content-free members mapped to the master's address (as the
+  xanadoc projector's empty-data clones already do,
+  [`zz_xudu_projector.cpp`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp), the `isUnchangedClone`
+  branch), or `promote()` learns to resolve `cloneMaster()` and reuse spans. Flagged in §11 (U-L4).
 - **The identity-and-boundary machinery** — `ephemeralBit`, `isEphemeral`, `applyStructure`'s
   `EphemeralTarget` refusal, `Store::setLink`'s throw
   ([`manifold.hpp`](apps/common/xanadu/zigzag/manifold.hpp),
@@ -714,6 +862,65 @@ primitives.** The lens is a refactor plus one new source, not new engine machine
 
 ______________________________________________________________________
 
+## 8A. Extending the Trait for Structured Sources
+
+A paper third lens — a live SQLite database (schema + rows) — stress-tested the trait against a
+source that is neither a tree of text nor a flat file set. It projects (reads) cleanly, but it
+exposed real gaps in the *unproject* (write) half, because the trait of §4.2 was shaped for
+single-object, single-op sources (a file, a paragraph). None of these block the two worked lenses;
+all of them are needed before the trait can safely *write back* to a structured store. They define
+"v2" of the interface.
+
+- **Edges must carry properties and order (HIGH).** `SourceEdge` is `{from, to, dimension, dir}`. A
+  foreign key *is* a labelled, actioned relationship (`ON DELETE CASCADE`, a constraint name); an
+  ordered many-to-many needs a per-edge sort key. Without a field for either, a lens must reify
+  every non-trivial edge as a phantom node — the awkward encoding that signals a missing hook. Add
+  `std::vector<std::pair<std::string,std::string>> properties;` and `std::uint64_t order{0};` to
+  `SourceEdge`, and an `applyEdgeChange(from, to, dim, properties)` method so an edge's own
+  attributes round-trip.
+- **Node kind: schema vs instance (HIGH).** A row is *contained by* a table and *conforms to* its
+  column schema — two relations the trait can only merge into one `d.contains`. Worse, deleting a
+  schema node (`DROP TABLE`) must cascade to every instance under it, but the per-cell diff (§6.1)
+  marks only the one shadowed cell dirty, so `commit()` under-reports the delete and the source's
+  own cascade silently diverges from the manifold. Add a `NodeKind { Schema, Instance }` (or an open
+  `std::string kind`) to `SourceNode`, and let the framework treat a declared `conformsTo` relation
+  as cascade-significant when classifying deletes.
+- **Content needs NULL and non-text/non-scalar (MEDIUM).** The `content` variant
+  `{string,double,bool,span}` cannot express SQL `NULL` (≠ `''` ≠ `0`), forcing a parallel
+  `d.nullflag` rank — the "meaning hidden beside the cell" anti-pattern. And a BLOB is none of the
+  variant's types; importing a 2 MB blob via `importFileStore` just to *view* it mutates the
+  author's permascroll for a read-only browse (violates R8's spirit). Add `std::monostate` (an
+  explicit `Null`) and a lazy `BlobRef{bytes-provider}` alternative the framework projects
+  by-reference without permascroll residency.
+- **Transaction / bulk / atomicity hook (HIGH).** `commit()` applies one cell at a time and the
+  per-change `ChangeReport` reports partial failure — the *wrong* contract for a transactional
+  source, which must roll back a half-applied batch, not report "cell 7 of 12 failed." A row
+  `INSERT` also needs all its value cells in one statement (a per-value apply risks a NOT NULL
+  violation on the first partial write). Add `beginBatch()` / `endBatch(ok)` brackets `commit()`
+  calls once around the whole dirty set, and a batched
+  `applyCreate(std::span<const SourceNode>, parent)` for cohesive multi-node creations.
+- **Multi-key rebind on cascade rename (MEDIUM).** A key that embeds a parent name
+  (`sql:row:<table>:…`) is invalidated for *every descendant* by one `ALTER TABLE RENAME`, but an
+  `apply*()` returns a single new key. Let the relevant methods return
+  `std::vector<std::pair<ExternalKey,ExternalKey>>` (old→new rebindings) so the framework repairs
+  the whole subtree.
+- **`rekey()` on wholesale source re-indexing (MEDIUM).** `VACUUM` renumbers rowids out from under a
+  PK-less table — the DB analogue of a device remount, but the *common* case, not an edge. Add an
+  optional `rekey()` / `onSourceReindexed()` callback the framework invokes to rebuild the identity
+  map wholesale instead of orphaning it.
+- **`applyReparent` must receive the dimension (MEDIUM).** A "reparent" along `d.contains` (move a
+  row to another table — no SQL verb) and along `d.ref` (re-point an FK — `UPDATE … SET fk=`) are
+  structurally identical but semantically distinct; the method currently drops the dimension and so
+  cannot tell them apart. Pass the dimension in.
+
+The through-line: the *read* spine (`dimensions`/`forEachNode`/`forEachEdge` + attribute ranks +
+string `ExternalKey` + the `holdsOwn` diff) genuinely generalizes; the *write* half needs these
+seven additions before a relational or otherwise structured source is safe. A lens that only
+projects (a read-only visualizer or query source) needs none of them, which is why the two worked
+lenses and the VQL/vprolog surface (§9A) do not wait on this section.
+
+______________________________________________________________________
+
 ## 9. Mapping the Existing Projector onto the Lens — and Improving It
 
 Nothing is in production, so `XanadocLens` is not held to byte-for-byte parity with today's
@@ -724,11 +931,10 @@ same byte sequence of operations.
 
 ### 9.1 What stays the same
 
-- `dimensions()` returns `d.doc`→`Sequence`, `d.transclude`→(custom), `d.link`→`Reference`,
-  `d.version`→(custom), `d.clone`→`Clone`, plus `d.role`/`d.mime`/`d.media` — the
-  `XuduProjectorOptions` set
-  ([`zz_xudu_projector.hpp`](apps/common/xanadu/zigzag/zz_xudu_projector.hpp)), now declared through
-  the trait rather than a per-call options struct.
+- The genuinely xanadoc-only ranks keep their own names because no generic analogue exists:
+  `d.transclude` (overlapping primedia spans) and `d.version` (microversion lineage), declared
+  through `dimensions()` as custom rather than a per-call `XuduProjectorOptions` struct
+  ([`zz_xudu_projector.hpp`](apps/common/xanadu/zigzag/zz_xudu_projector.hpp)).
 - The `ExternalKey` for a xanadoc cell is the provenance triple the projector already tracks,
   `XuduProjectionProvenance`
   ([`zz_xudu_projector.hpp`](apps/common/xanadu/zigzag/zz_xudu_projector.hpp)):
@@ -745,25 +951,40 @@ The current projector's lossy entries (§2.3, §6.2) are not laws of the manifol
 of a projector written before the lens model existed. Under `XanadocLens` each becomes a design
 choice to revisit:
 
+- **Mint the canonical generic rank names, not `d.doc`/`d.link`.** This is the change that makes the
+  portability promise real (§4.3.1): `XanadocLens` links reading flow on `d.seq`, document→paragraph
+  on `d.contains`, and xanalinks on `d.ref` — the same strings `FilesystemLens` mints — so one VQL
+  query or Prolog goal traverses either source (§9A). The old `d.doc`/`d.link` names were a pre-lens
+  private vocabulary; retiring them is permitted (nothing is in production) and is a prerequisite
+  for "traverse xanadocs as easily as slices." Only `d.transclude` and `d.version`, which have no
+  generic analogue, keep xanadoc-specific names.
+
 - **Multi-span cells instead of first-span truncation.** Today a paragraph straddling pieces is
   addressed by its first part only, "a truncation, not a misdirection"
   ([`zz_xudu_projector.cpp`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp), the
   `split_by_paragraphs` branch) — the convergence's U3 single-span-per-cell limit. The lens's
   `SourceNode::content` is already a `std::span<const PrimediaSpan>`, so a node may carry *all* its
-  spans; the only reason to flatten to one is the current `CompactOpNode` carrying one span per op,
-  which U3.4's `CompactBinaryV4` lifts. `XanadocLens` should emit the full span run and let
-  promotion emit a splice per span (as `promote()` already does for a multi-span arena cell,
-  [`arena_manifold.hpp`](apps/common/xanadu/zigzag/arena_manifold.hpp), the promote doc comment), so
-  a round trip stops losing the tail of a split paragraph.
+  spans. A cell's content is already modelled as a *run* of spans via `Splice` / `spliceCellSpan`
+  ([`store.hpp:588`](apps/common/xanadu/store.hpp)); the per-op limit is that one `CompactOpNode`
+  carries one span, so a multi-span cell promotes as a first span plus one splice per additional
+  span (as `promote()` already does for a multi-span arena cell,
+  [`arena_manifold.hpp`](apps/common/xanadu/zigzag/arena_manifold.hpp), the promote doc comment).
+  (`CompactBinaryV4` is only what lets those spliced edits round-trip on the *publish wire* — it
+  carries `at`/`length` for `Splice`, [`store-slice-convergence.md`](store-slice-convergence.md)
+  §U3.4 — not what lifts the per-op span count.) `XanadocLens` should emit the full span run so a
+  round trip stops losing the tail of a split paragraph.
+
 - **Presentation metadata preserved, not dropped.** `storeToSlice()` reconstructs no presentation
   metadata (§2.3). Since metadata is just cells on a rank (R13), `XanadocLens` can carry role,
   scene, and layout hints on their own attribute ranks (`d.role` already; add `d.scene`/`d.layout`
   as the lens's declared dimensions) so the DTO round-trips them instead of discarding them.
+
 - **Provenance-stable cell identity across a re-projection.** The current id is a bare ops index
   reassigned each `sliceToStore()` (§6.2, "lossy on id"). With the `ExternalKey` recorded on a
   `d.extkey` rank (§5.3 (b)), the *same* xanadoc cell keeps the *same* external key across
   re-projections, so an edit made in one session re-targets the right cell in the next — the same
   mechanism that gives the filesystem lens inode stability.
+
 - **Drop the paragraph-splitting heuristic where structure is explicit.** The span-overlap and
   paragraph-split heuristics exist because the DTO projector had only assembled text to work from. A
   lens reading the store's own cell structure (the `sliceToStore`/`storeToSlice` path, not the
@@ -786,35 +1007,145 @@ regenerated in the same commit (the standing rule for a shape change, [`AGENTS.m
 
 ______________________________________________________________________
 
+## 9A. The Query and Logic Surface (VQL, Vlog/vprolog, VPL)
+
+§1 claims the same VQL / VPL / Vlog runtime that works over a native slice works over a projected
+source. That is a design obligation, not a freebie, and the first draft left it unspecified. This
+section states what the lens must do so a query is genuinely source-agnostic, grounded in how those
+runtimes reach the manifold today.
+
+### 9A.1 VQL traverses by rank name, so canonical names are the whole game
+
+VQL lowers a path step to a literal dimension string and resolves it through
+`MultiStoreCoordinator::resolveDimension`
+([`multi_store.cpp:329`](apps/common/xanadu/multi_store.cpp)), which privileges a fixed set
+(`d.stores`, `d.role`, `d.clone`, …) and otherwise *mints* the named dimension
+([`vql_engine.cpp:294`](apps/common/xanadu/vql/vql_engine.cpp), `traverseDimension`). There is no
+enum, no alias: a query that names `d.contains` hits the `d.contains` rank or silently mints an
+empty one. So §4.3.1 option (a) — every lens mints the canonical generic names — is what lets
+
+```
+##/d.contains/d.seq            -- every child of every container, in order
+#cell/d.ref                    -- cross-references out of a cell
+[/d.role = 'dir']              -- restrict to directory cells
+```
+
+run **identically** over a projected directory and a projected xanadoc. The prerequisites: (1)
+`XanadocLens` mints `d.contains`/`d.seq`/`d.ref` (§9.2); (2) `d.mime` joins `d.role`/`d.clone` in
+the privileged set ([`multi_store.cpp:333`](apps/common/xanadu/multi_store.cpp)) so an attribute
+predicate resolves the same rank everywhere; (3) attribute values are read by stepping onto the
+attribute cell and reading its content (`/d.role` then `value()`), which already works because the
+lens attaches `d.role`/`d.mime` posward exactly as the projector does
+([`zz_xudu_projector.cpp:37`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp)). The DX hazard worth
+documenting: an unknown generic name is **not an error** — it mints an empty dimension and the query
+reads as "no data," so a lens that fails to mint a canonical name fails silently.
+
+### 9A.2 Vlog/vprolog needs the session to project into the bound core's arena
+
+vprolog's fact builtins enumerate the live arena: `cell_link(From,Dim,Dir,To)` and `cell_value/2`
+walk `core.arena()` cell by cell with the choice-point `mark()`/`release()` as the trail
+([`vortex_stdlib.cpp`](apps/common/xanadu/vortex/vortex_stdlib.cpp), `solveQueryHelper`). This is
+the uniform surface the task wants — but only if the projected cells live in **the arena the bound
+`VortexCore` queries**. The draft's `ProjectionSession` owns a private `ArenaManifold` (§4.4), so a
+goal would enumerate nothing. The contract this section adds:
+
+> **Project-into-bound-arena.** A `ProjectionSession` may be constructed over an existing
+> `VortexCore`'s arena (or `attach`ed into it,
+> [`arena_manifold.hpp`](apps/common/xanadu/zigzag/arena_manifold.hpp)), so projected cells are
+> visible to `cell_link`/`cell_value` enumeration and to VQL in the same `MultiStoreCoordinator`. A
+> session that owns a private arena is for a headless project→promote pipeline; a session for
+> querying shares the core's arena.
+
+With that, a Prolog goal is uniform across sources:
+
+```prolog
+cell_link(Dir, 'd.contains', pos, Child).      % children of a container
+cell_link(C, 'd.role', pos, V), cell_value(V, 'dir').  % C is a directory
+cell_link(A, 'd.ref', pos, B).                 % any cross-reference, any source
+```
+
+### 9A.3 Canonical derived predicates and `extkey/2`
+
+The two-goal join `cell_link(C,'d.role',pos,V), cell_value(V,Role)` is correct but verbose, and it
+binds an opaque numeric `CellRef` the querier cannot relate to the source. Two canonical additions,
+written once in the shared stdlib (Vortex §9), not per lens:
+
+- `role(C, R)` / `attribute(C, Rank, V)` — sugar over the attribute-rank join, so `role(C, 'dir')`
+  is a goal rather than a hand-rolled pattern.
+- `extkey(C, Key)` — expose the identity map (§5) as a fact, so a query can recover `"fs:8:1234"` or
+  `"xd:…"` from a bound cell. Without it, every answer names a cell by a number meaningless outside
+  the session. (When a projection is promoted, this reads the `d.extkey` rank of §5.3(b); for a live
+  session it reads `ProjectionSession::keyFor`.)
+
+### 9A.4 A test phase that proves it
+
+The plan (§10) gains a phase that, over one `ProjectionSession` sharing a core's arena, runs the
+*same* VQL query and the *same* Prolog goal against a `XanadocLens` projection and a
+`FilesystemLens` projection and asserts both return structurally analogous results — the concrete
+form of "traverse either as easily as a slice." Until that phase is green, §1's VQL/VPL/Vlog claim
+is aspirational.
+
+### 9A.5 What is explicitly out of scope
+
+VPL (array language) consumes the same rank traversal as VQL, so it inherits 9A.1 with no extra
+work; no VPL-specific design is needed. Mutation *through* a query (a VQL update that unprojects to
+a source op) is deferred — the query surface here is read/traverse; writes go through the arena-edit
+→ `commit()` path (§6), not through a query.
+
+______________________________________________________________________
+
 ## 10. Phased Implementation Plan
 
 Each phase is one commit; after each, `make -j$(nproc)` builds and `make -j$(nproc) test` passes.
 
 1. **The trait and the framework, no lens.** Add `projection_lens.hpp` and
-   `projection_session.{hpp,cpp}` with the project loop, the identity map, and `promoteInto()`.
-   Unit- test with a trivial in-memory lens (three nodes, two edges) asserting the identity map and
-   a tight arena. No source-specific code yet.
-1. **`XanadocLens` on the convergence translators.** Re-express the xanadoc path behind the trait,
-   built on `sliceToStore`/`storeToSlice` (the cell-structure path), not the legacy
-   paragraph-splitting DTO projector. Gate: every fixture round-trips through `project → unproject`
-   with the same document text and links under `xudu-dump --section=ops` (meaning, not bytes). Where
-   this phase already improves output (full span runs, stable `d.extkey` ids), regenerate the
-   affected fixtures and update `tests/zigzag/test_xudu_convergence.cpp` to the richer invariant in
-   the same commit.
-1. **The dirty-cell diff and `commit()`.** Implement the COW-base diff via `holdsOwn()` and the
-   classify/order/apply loop. Test with `XanadocLens`: a cell relinked in the arena unprojects to a
-   `Store::setLink`, a content splice to `Store::spliceCell`, and a browse-only session produces an
-   empty dirty set (R8).
+   `projection_session.{hpp,cpp}` with the project loop, the identity map, and `promoteInto()` over
+   a *set* of roots (§4.4). Unit-test with a trivial in-memory lens (three nodes, two edges)
+   asserting the identity map and a tight arena. No source-specific code yet.
+1. **Canonical dimension names in the resolver.** Add the generic structural names and `d.mime` to
+   the privileged set in `MultiStoreCoordinator::resolveDimension`
+   ([`multi_store.cpp:329`](apps/common/xanadu/multi_store.cpp)) so a generic query resolves the
+   same rank across sources and an unknown name is not silently minted empty (§4.3.1, §9A.1). Gate:
+   a query naming a canonical generic dimension resolves without minting.
+1. **`XanadocLens` on the convergence translators, minting generic names.** Re-express the xanadoc
+   path behind the trait, built on `sliceToStore`/`storeToSlice` (the cell-structure path), minting
+   `d.contains`/`d.seq`/`d.ref` instead of `d.doc`/`d.link` (§9.2). Gate: every fixture round-trips
+   through `project → unproject` with the same document text and links under
+   `xudu-dump --section=ops` (meaning, not bytes); regenerate the affected fixtures and update
+   `tests/zigzag/test_xudu_convergence.cpp` to the richer invariant in the same commit.
+1. **The dirty-cell + rank-level diff and topological `commit()`.** Implement the per-cell diff via
+   `holdsOwn()` *and* the per-rank sequence diff for reorders (§6.4, `applyReorder`), with
+   `commit()` as a topological sort over the create/reparent DAG and the per-dimension cycle policy
+   (§6.5). Test with `XanadocLens`: a relink unprojects to `Store::setLink`, a content splice to
+   `Store::spliceCell`, a sibling reorder to one `applyReorder`, and a browse-only session produces
+   an empty dirty set (R8).
+1. **The query/logic surface over a shared arena.** Wire `ProjectionSession` to project into a bound
+   `VortexCore`'s arena (§9A.2) and add the canonical `role/2`, `attribute/3`, and `extkey/2`
+   predicates to the shared stdlib (§9A.3). Gate: the *same* VQL query and the *same* Prolog goal
+   return structurally analogous results over a `XanadocLens` and a (next phase) `FilesystemLens`
+   projection (§9A.4).
 1. **`FilesystemLens` projection (read-only).** The `stat`-based key, the sorted tree walk, the
    attribute ranks. Test over a fixture directory: a known tree projects to a known cell count and
-   rank layout, deterministically (same tree → byte-identical arena).
+   rank layout, deterministically (same tree → byte-identical arena). Re-run the §9A.4 cross-lens
+   query test now that both lenses exist.
 1. **`FilesystemLens` unprojection.** The `apply*()` lowerings against a temp directory: rename,
-   move, chmod, utime, create, delete, and the refusal of a size change. Assert the inode key
-   survives a rename and is rebound on a cross-device move (simulated).
-1. **Persistent projection and `d.extkey`.** `promoteInto()` with file bytes imported via
-   `importFileStore`, scalars rendered, `d.extkey` minted; re-open and reconcile by key.
+   move, chmod, utime, create, delete, `applyReorder` of a directory listing, and the refusal of a
+   size change. Assert the inode key survives a rename and is rebound on a cross-device move
+   (simulated).
+1. **Persistent projection and `d.extkey`.** `promoteInto()` over the root set with file bytes
+   imported via `importFileStore`, scalars rendered, `d.extkey` minted (with the promote-skip of
+   §5.3(b)); re-open and reconcile by key. Verify `d.clone` members promote to *one* shared address
+   (U-L4), not re-minted content.
+1. **The vlace `openLens` entry point.** Add `openLens :: String -> IO Cell` to vlace's std:xanadu
+   (§7.4), projecting into the evaluator's arena, plus the std:fun gaps the histogram needs
+   (`words`, a rank-walk helper, string ordering). Gate: the word-frequency-over-a-directory program
+   runs.
 1. **Mixed-source session.** One `ProjectionSession` hosting a `XanadocLens` and a `FilesystemLens`
-   via `ArenaManifold::attach`, proving the string-keyed map keeps the two identity spaces disjoint.
+   via `ArenaManifold::attach`, proving the string-keyed map keeps the two identity spaces disjoint
+   and a single query spans both.
+1. **Trait v2 for structured sources (as needed).** The §8A additions (edge properties/order, node
+   kind, NULL/BlobRef content, `beginBatch`/`endBatch`, multi-key rebind, `rekey`, reparent
+   dimension), driven by a real structured lens (e.g. SQLite) rather than built speculatively.
 
 ______________________________________________________________________
 
@@ -832,3 +1163,41 @@ ______________________________________________________________________
   the right home for the trait, the session, and `XanadocLens`. `FilesystemLens` touches
   `<sys/stat.h>` only; it belongs there too (it draws nothing), but its platform specifics
   (`st_dev`/`st_ino` vs a Windows file id) want an abstraction the design leaves to implementation.
+- **U-L4. Clone dedup on promote.** `promote()` does not currently deduplicate `d.clone` subgraphs
+  (§8.2 caveat), so the O(log n) sharing the design wants is a requirement on the promotion pass,
+  not a property. Whether to fix it in `promote()` (resolve `cloneMaster`, reuse spans) or in each
+  lens (emit content-free clone members) is unresolved; the xanadoc projector's empty-data clones
+  argue for the lens, a general guarantee argues for `promote()`.
+- **U-L5. The cost of `d.extkey` in hypertime.** Recording the identity key as a `d.extkey` cell
+  (§5.3(b)) makes it a reachable, promotable, publishable operation — good for provenance, but it
+  enlarges fixture op-sequences and turns a stale key into an authored op. The resolution (promote
+  skips `d.extkey` like `d.dims`, or the key stays a side table for the publish path) is sketched,
+  not decided.
+- **U-L6. Durable identity for sources without one.** The inode scheme (and the no-inode fallback,
+  U-L1) assumes the source offers *some* stable anchor. A structured source may not: a SQLite table
+  with no primary key has only a `VACUUM`-renumbered rowid (§8A, the `rekey` bullet). The `rekey()`
+  hook lets the framework rebuild the map wholesale, but *when* to invoke it — polling `stat`,
+  watching for the source's own re-index event — is source-specific and unresolved.
+
+______________________________________________________________________
+
+## Change History
+
+- **rev 1.** Initial design: the `ProjectionLens` trait, `ProjectionSession`, the ExternalKey ↔
+  CellRef identity map, the COW-base dirty-cell diff, and the worked xanadoc + filesystem lenses.
+- **rev 2.** Dropped the "zero behaviour change" constraint on the xanadoc projector (nothing is in
+  production; the convergence permits a shape change). `XanadocLens` is free to improve rather than
+  preserve; the regression bar became meaning-equivalence, not byte parity.
+- **rev 3.** Folded six role-based critiques (technical writer, systems architect, custom-lens
+  implementer, VQL user, vprolog user, vlace user). Changes: corrected the `CompactBinaryV4`
+  mechanism (it carries `Splice` `at`/`length` on the wire; the span *run* model is what lifts
+  single-span truncation) and the stale `(generation)` key header; made the generic dimension names
+  the **canonical rank strings every lens mints** and reconciled §4.3/§7.1/§9.1 around that, since
+  VQL/Vlog resolve dimensions by literal string (§4.3.1); added §9A, the query/logic surface
+  (canonical-name traversal, the project-into-bound-arena contract for vprolog, `role/2`/`extkey/2`
+  predicates, a cross-lens test phase); tightened the unproject half (§6.4 rank-level diff +
+  `applyReorder`, §6.5 topological `commit()` with a cycle policy, multi-root `promoteInto`, the
+  `d.clone` dedup and `d.extkey` promote-cost caveats); added §8A, the trait-v2 extensions a
+  structured source needs (edge properties/order, node kind, NULL/BlobRef content, batch/transaction
+  hooks, multi-key rebind, `rekey`, reparent dimension); added §7.4, the `openLens` entry point
+  vlace lacks; and expanded the plan (§10) and open questions (§11, U-L4–U-L6) to match.
