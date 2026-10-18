@@ -141,7 +141,7 @@ TEST(TransportAndOrParallelTest, SpoolSliceBundleRejectsCorruptedBlake3Leaf) {
 
 // ============================================================================
 // Stage 2 Tests: QuicStreamFrame (libngtcp2 short header) +
-//                DirectChannelState (libzmq + libsodium + libblake3)
+//                DirectChannelState (libzmq + OpenSSL + libblake3)
 // ============================================================================
 
 TEST(TransportAndOrParallelTest, QuicStreamFrameNgtcp2ShortHeaderRoundTrip) {

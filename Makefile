@@ -282,7 +282,7 @@ TEST_PKGS := gmock_main
 # means, and the only safe answer refuses every peer, which is not a build
 # worth having. RNP rather than GnuPG's gpgme because it is a library first
 # and links the same way on every platform this ships to.
-XUDU_PKGS := libtorrent-rasterbar openssl lmdb libmagic sqlite3 spdlog libzstd libblake3 libzmq libsodium libngtcp2 libngtcp2_crypto_ossl
+XUDU_PKGS := libtorrent-rasterbar openssl lmdb libmagic sqlite3 spdlog libzstd libblake3 libzmq libngtcp2 libngtcp2_crypto_ossl
 ifneq (,$(filter-out $(NO_SDL_GOALS),$(or $(MAKECMDGOALS),all)))
 ifneq ($(shell pkg-config --exists libtorrent-rasterbar && echo 1),1)
 $(error libtorrent-rasterbar was not found by pkg-config. It is required: \

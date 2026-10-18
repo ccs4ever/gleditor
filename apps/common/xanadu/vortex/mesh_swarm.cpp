@@ -9,7 +9,7 @@
 #include <blake3.h>
 #include <ngtcp2/ngtcp2.h>
 #include <ngtcp2/ngtcp2_crypto_ossl.h>
-#include <sodium.h>
+#include <openssl/bn.h>
 #include <zmq.h>
 
 #include <gleditor/logging.hpp>
@@ -30,6 +30,41 @@ withIdentity(xanadu::SwarmContentSource::Options options,
                  &identity) {
   options.identityController = identity;
   return options;
+}
+
+// Birational Edwards->Montgomery curve map: u = (1 + y) / (1 - y) mod (2^255 -
+// 19)
+bool ed25519PkToCurve25519(std::span<std::uint8_t, 32> outU,
+                           std::span<const std::uint8_t, 32> inEdPk) {
+  std::array<std::uint8_t, 32> yBytes{};
+  std::memcpy(yBytes.data(), inEdPk.data(), 32);
+  yBytes[31] &= 0x7FU; // Mask off x sign bit
+
+  BN_CTX *ctx = BN_CTX_new();
+  if (!ctx) return false;
+  BN_CTX_start(ctx);
+  BIGNUM *p      = BN_CTX_get(ctx);
+  BIGNUM *y      = BN_CTX_get(ctx);
+  BIGNUM *one    = BN_CTX_get(ctx);
+  BIGNUM *num    = BN_CTX_get(ctx);
+  BIGNUM *den    = BN_CTX_get(ctx);
+  BIGNUM *denInv = BN_CTX_get(ctx);
+  BIGNUM *u      = BN_CTX_get(ctx);
+
+  bool ok = false;
+  if (u && BN_set_bit(p, 255) && BN_sub_word(p, 19) && BN_set_word(one, 1) &&
+      BN_lebin2bn(yBytes.data(), 32, y)) {
+    if (BN_mod_add(num, one, y, p, ctx) && BN_mod_sub(den, one, y, p, ctx) &&
+        BN_mod_inverse(denInv, den, p, ctx) &&
+        BN_mod_mul(u, num, denInv, p, ctx)) {
+      if (BN_bn2lebinpad(u, outU.data(), 32) == 32) {
+        ok = true;
+      }
+    }
+  }
+  BN_CTX_end(ctx);
+  BN_CTX_free(ctx);
+  return ok;
 }
 
 xanadu::identity::Hash32 computeDirectFrameDigest(
@@ -57,7 +92,6 @@ xanadu::identity::Hash32 computeDirectFrameDigest(
 
 bool ensureCryptoInitialized() {
   static const bool initialized = [] {
-    if (sodium_init() < 0) return false;
     if (ngtcp2_crypto_ossl_init() != 0) return false;
     return true;
   }();
@@ -374,8 +408,7 @@ bool MeshSwarmTransport::sendDirectFrame(
   if (!opts.localFingerprint || !opts.localDeviceKeys) return false;
 
   std::array<std::uint8_t, 32> x25519Pub{};
-  if (crypto_sign_ed25519_pk_to_curve25519(
-          x25519Pub.data(), opts.localDeviceKeys->publicKey.bytes.data()) != 0)
+  if (!ed25519PkToCurve25519(x25519Pub, opts.localDeviceKeys->publicKey.bytes))
     return false;
 
   std::uint64_t streamId = 0;
@@ -493,8 +526,7 @@ void MeshSwarmTransport::pollDirectChannel() {
       if (!delegated || *delegated != devKey) continue;
 
       std::array<std::uint8_t, 32> expectedX25519{};
-      if (crypto_sign_ed25519_pk_to_curve25519(expectedX25519.data(),
-                                               devKey.data()) != 0 ||
+      if (!ed25519PkToCurve25519(expectedX25519, devKey) ||
           expectedX25519 != x25519Key)
         continue;
 
