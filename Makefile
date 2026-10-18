@@ -927,11 +927,11 @@ xanadu_test: $(OBJDIR)/xanadu_test
 xudu_test: $(OBJDIR)/xudu_test
 $(OBJDIR)/xudu_test: $(OBJDIR)/xanadu_test
 	ln -sf xanadu_test $@
-$(OBJDIR)/xanadu_test: $(XUDU_TEST_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o
+$(OBJDIR)/xanadu_test: $(XUDU_TEST_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
 
 xuzz_test: $(OBJDIR)/xuzz_test
-$(OBJDIR)/xuzz_test: $(XUZZ_TEST_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o
+$(OBJDIR)/xuzz_test: $(XUZZ_TEST_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
 
 zigzag_test: $(OBJDIR)/zigzag_test

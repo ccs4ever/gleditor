@@ -441,6 +441,11 @@ public:
   /// cell needs minting or already has a name.
   [[nodiscard]] bool holdsOwn(CellRef ref) const noexcept;
 
+  /// Number of base cells shadowed in this arena.
+  [[nodiscard]] std::size_t shadowCount() const noexcept {
+    return shadowOrder_.size();
+  }
+
   // -- read path: the same questions Manifold answers ------------------------
 
   /// The dense id for @p ref, or nullopt. Arithmetic, not a lookup: an arena
