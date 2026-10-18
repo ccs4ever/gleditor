@@ -200,6 +200,10 @@ public:
   void inspectIndependentLinkKeys(const std::string &id, std::size_t link,
                                   std::size_t left, std::size_t right);
   void reviewIndependentLinks(const std::string &id, std::size_t selected = 0);
+  void
+  compareReaderLinkPackages(const std::string &id,
+                            std::optional<InfoHash> baseline = std::nullopt,
+                            std::string notice               = {});
   std::function<void(const LinkKey &)> selectIndependentLink;
   std::function<void()> packageVisibilityChanged;
   std::function<void()> sourceLeaving;

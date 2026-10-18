@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+base=$PWD/build/validation-sixteenth
+run=$base/native
+export SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1
+export XDG_DATA_HOME=$run/data XDG_CONFIG_HOME=$run/config XDG_CACHE_HOME=$run/cache
+export GNUPGHOME=$run/gpg
+export PATH=/tmp/spatial-xvfb/usr/bin:$PATH
+app=("$base/baseline/xuzz" --backend opengl --resize 1440,1000 --profile --wait-ms 5000
+
+ --chord 'Ctrl+Alt+Shift+L' --key right --key enter --wait-ms 1000
+ --key enter --wait-ms 1000 --key right --key enter --wait-ms 1000
+ --key right --key right --key right --key right --key right --key right --key enter
+ --dump-a11y --capture "$run/raw/20-baseline-old-disabled.ppm" --wait-ms 3000
+ --key right --key right --key right --key right --key right --key right --key enter
+ --dump-a11y --capture "$run/raw/21-baseline-superseded-enable-refused.ppm" --wait-ms 3000 --key escape
+ --chord Ctrl+Q)
+printf '%q ' "${app[@]}" > "$run/evidence/baseline-real-refusal-argv.txt"; printf '\n' >> "$run/evidence/baseline-real-refusal-argv.txt"
+LD_LIBRARY_PATH="$base/baseline${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" SPDLOG_LEVEL=xuzz.keymap=debug timeout --signal=TERM --kill-after=5s 300s xvfb-run -a -s '-noreset -screen 0 1600x1200x24' "${app[@]}" > "$run/evidence/baseline-real-refusal.log" 2>&1 & native_pid=$!
+snapshot() {
+ local step=$1 target="$run/evidence/checkpoints/$1"
+ mkdir -p "$target"
+ cp "$run/data/xudu/package-visibility" "$target/package-visibility.bencode.txt"
+ sha256sum "$run/data/xudu/package-visibility" > "$target/package-visibility.sha256"
+ mapfile -t stores < <(find "$run/data/xudu/xanadocs" -mindepth 1 -maxdepth 1 -type d ! -name default | sort)
+ for index in "${!stores[@]}"; do
+  "$base/baseline/xudu-dump" --section=ops --permascroll="$run/data/xuzz/permascroll/default" "${stores[$index]}" > "$target/source-$index.ops.txt"
+  sha256sum "${stores[$index]}/ops.nodes" "${stores[$index]}/store.tables" > "$target/source-$index.files.sha256"
+ done
+ "$base/baseline/xudu-dump" --section=ops --permascroll="$run/data/xuzz/permascroll/default" "$run/data/xudu/activity" > "$target/activity.ops.txt"
+}
+for step in 20-baseline-old-disabled 21-baseline-superseded-enable-refused; do
+ frame="$run/raw/$step.ppm"
+ ready=false
+ for _ in $(seq 1 160); do
+  [[ -s "$frame" && $(stat -c %s "$frame") -eq 4320017 ]] && { ready=true; break; }
+  kill -0 "$native_pid" 2>/dev/null || break
+  sleep .25
+ done
+ if [[ $ready == true ]]; then snapshot "$step"; else printf missing > "$run/evidence/$step.missing"; fi
+done
+run_exit=0; wait "$native_pid" || run_exit=$?
+printf '%s\n' "$run_exit" > "$run/evidence/baseline-real-refusal.exit"
+exit "$run_exit"

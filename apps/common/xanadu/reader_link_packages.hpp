@@ -37,6 +37,10 @@ public:
   setEnabled(const InfoHash &hash, bool enabled);
   [[nodiscard]] std::expected<ReaderLinkPackages *, std::string>
   setEnabled(const LinkKey &key, bool enabled);
+  [[nodiscard]] std::vector<InfoHash> editions(const InfoHash &candidate) const;
+  /// Change only the two explicit carriers; preserve retention and emphasis.
+  [[nodiscard]] std::expected<ReaderLinkPackages *, std::string>
+  switchEnabled(const InfoHash &from, const InfoHash &to);
   [[nodiscard]] bool enabled(const LinkKey &key) const;
   [[nodiscard]] std::optional<InfoHash> carrier(const LinkKey &key) const;
   /// Verified cached payload, independent of reader retention and drawing.

@@ -7,6 +7,27 @@ session.
 
 ## Current checkpoint
 
+Sixteenth checkpoint (2026-10-18), based on `49b82077`: package Review now compares exact
+same-curator/name immutable editions and explicitly switches their drawing with one atomic
+preference save. Both retention/emphasis choices and unrelated layers survive; the old selected
+Link, Left 2/Right 3 pins and Origin remain bound to the old carrier. Review of local superseded
+signed carriers now revalidates bytes and allows explicit enablement instead of rejecting solely on
+transfer phase. Received unavailable/failed and tampered candidates remain refused.
+
+GNU Make, final fresh UI 241/241, Xuzz 107/107 and package 11/11 pass. Byte-identical library/test
+binaries permit reuse of 799/799 and mip/cache 53/53 evidence. Strict GL/GLES/Vulkan comparisons
+pass unchanged criteria; actual split recording is unexercised. Native GL proves baseline refusal,
+candidate re-enable, exact #1→#2 drawing switch, unrelated same-title/different-name preservation,
+old-context restart and stale baseline-selector refusal. All source hashes and the single completed
+visit/current 1 remain unchanged. Misnamed attempts are explicitly corrected in the
+[sixteenth checkpoint](../reviews/spatial-ui-sixteenth-increment/README.md).
+
+Independent review exposed diagnostic-only stale-pair recovery and truncated trust text. The final
+compact form puts refusal/recovery below Action and adds curator key parts, refreshed pair identity
+and concise signature/enrollment/referenced-availability distinctions. Native
+enrollment/signature/content-availability variants remain next, before D2. Native GLES/Vulkan
+package visuals, AT-SPI, optimized performance and full journeys remain open.
+
 Fifteenth checkpoint (2026-10-16), based on `d41664a3`: reader package preferences now store
 retention, enabled drawing and normal/quiet emphasis independently by immutable carrier hash.
 Downloaded/verified bytes are a separate cache; inspection does not retain or enable a candidate.
@@ -566,23 +587,24 @@ reviews pass.
 
 ## Exact next task
 
-Continue the remaining J25 and exact cell/history variants through actual controls; preserve the
-five-visit graph, each forward child, exact side pins and frozen Origin. Native Reference and UTF-8
-Annotation are now verified without adding visits, and final saved-child restoration preserves all
-three futures. Native phase boundaries and binary hashes in the thirteenth archive distinguish
+Validate the sixteenth comparison’s trust/availability variants below before D2. Continue the
+remaining J25 and exact cell/history variants through actual controls; preserve the five-visit
+graph, each forward child, exact side pins and frozen Origin. Native Reference and UTF-8 Annotation
+are now verified without adding visits, and final saved-child restoration preserves all three
+futures. Native phase boundaries and binary hashes in the thirteenth archive distinguish
 intermediate from final runs. Naturally timed pending-page interruption and no-Link pending visual
 captures remain separate from the owning real-Doc/accessibility tests. Complete cell/history
 endpoints and media-position restoration remain open. Older v2 activity remains preserved
 unsupported; do not add a compatibility shim.
 
-Next reconcile the implemented reader Retain/Enable/Emphasis controls with the publication/pin
-lifecycle audit before D2. Validate carrier-specific replacement and same-title candidates, retained
-and removed inventory counts, unavailable payload and unknown identity versus invalid
-signature/payload versus unavailable referenced content. The fourteenth checkpoint proves the
-bounded disabled-pin route; the fifteenth adds independent preferences. Neither establishes full
-remote acquisition, curator enrollment or guaranteed missing-payload recovery. Reuse existing
-publication, ReaderLinkPackages, preferences and UI seams; do not invent missing services or a
-second view architecture.
+Continue the publication/pin-lifecycle audit before D2 after the sixteenth checkpoint’s explicit
+carrier comparison/switch prerequisite. Run actual native unknown-identity, invalid-signature and
+unavailable-referenced-content variants. Exact carrier switch/revert, same-title/different-name
+isolation and retained/removed inventory counts are bounded passes. Continue unavailable payload,
+curator enrollment and missing-payload recovery through existing services. Earlier checkpoints do
+not establish full remote acquisition or guaranteed recovery. Reuse existing publication,
+ReaderLinkPackages, preferences and UI seams; do not invent missing services or a second view
+architecture.
 
 The tenth review records bounded unavailable/Cancel/retry evidence. The ninth numeric audit resolves
 the earlier Origin/Back missing-panel discrepancy; confirm future visual findings with decoded

@@ -58,6 +58,11 @@ void stopCheck(std::stop_token stop) {
     throw std::runtime_error("Package transfer cancelled");
 }
 } // namespace
+bool canReviewLinkPackage(const LinkPackageStatus &status) noexcept {
+  return status.phase == Phase::Ready || status.phase == Phase::Published ||
+         (!status.received && (status.phase == Phase::Superseded ||
+                               status.phase == Phase::NeedsVerification));
+}
 std::string_view linkPackagePhaseName(Phase phase) {
   switch (phase) {
   case Phase::Queued:

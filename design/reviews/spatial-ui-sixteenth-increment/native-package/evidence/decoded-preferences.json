@@ -1,0 +1,807 @@
+[
+  {
+    "checkpoint": "10-retained-old",
+    "preference_sha256": "e8f18f504ab2d3c03969e8b347fee76101b20d3b870c357d520e0e4ed0ff0a99",
+    "preference": {
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "normal",
+        "enabled": 0,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "11-enabled-old",
+    "preference_sha256": "d3dcd906ca5c5d7184b5a909822a727eb0c4686ed4b31cadd31a90f7d064ab6f",
+    "preference": {
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "normal",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "12-quiet-old",
+    "preference_sha256": "455bcf72d1a115fbea2a78bdafc189ca3557a664f4396ce70960febadf8c3074",
+    "preference": {
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "13-selected-old",
+    "preference_sha256": "455bcf72d1a115fbea2a78bdafc189ca3557a664f4396ce70960febadf8c3074",
+    "preference": {
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "14-second-prepared",
+    "preference_sha256": "455bcf72d1a115fbea2a78bdafc189ca3557a664f4396ce70960febadf8c3074",
+    "preference": {
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "15-old-disabled",
+    "preference_sha256": "455bcf72d1a115fbea2a78bdafc189ca3557a664f4396ce70960febadf8c3074",
+    "preference": {
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "16-baseline-old-enable-refused",
+    "preference_sha256": "455bcf72d1a115fbea2a78bdafc189ca3557a664f4396ce70960febadf8c3074",
+    "preference": {
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "17-correct-name-old-selected",
+    "preference_sha256": "afecc8ca29b6849fe42bf4a15ce470a091b590fcc9574e6ecda8ba3cf0943c18",
+    "preference": {
+      "04c7483b1e7274664e72104dca5a1eb97919cee8": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      },
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "18-same-name-later-prepared",
+    "preference_sha256": "afecc8ca29b6849fe42bf4a15ce470a091b590fcc9574e6ecda8ba3cf0943c18",
+    "preference": {
+      "04c7483b1e7274664e72104dca5a1eb97919cee8": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      },
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "19-three-downloaded-carriers",
+    "preference_sha256": "afecc8ca29b6849fe42bf4a15ce470a091b590fcc9574e6ecda8ba3cf0943c18",
+    "preference": {
+      "04c7483b1e7274664e72104dca5a1eb97919cee8": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      },
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "20-baseline-old-disabled",
+    "preference_sha256": "060fb914742a4c4e1821b8025f01045546453ce7bb3cf2bbce0d2eb751f8410e",
+    "preference": {
+      "04c7483b1e7274664e72104dca5a1eb97919cee8": {
+        "emphasis": "normal",
+        "enabled": 1,
+        "retained": 1
+      },
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "21-baseline-superseded-enable-refused",
+    "preference_sha256": "afecc8ca29b6849fe42bf4a15ce470a091b590fcc9574e6ecda8ba3cf0943c18",
+    "preference": {
+      "04c7483b1e7274664e72104dca5a1eb97919cee8": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      },
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "22-candidate-old-enable",
+    "preference_sha256": "e4bc98e9c1597db302ce0e6eac9918e9f55a2b571f34fdf22b488b5b6976f3a0",
+    "preference": {
+      "04c7483b1e7274664e72104dca5a1eb97919cee8": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 1
+      },
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "23-compare-before-retention",
+    "preference_sha256": "e4bc98e9c1597db302ce0e6eac9918e9f55a2b571f34fdf22b488b5b6976f3a0",
+    "preference": {
+      "04c7483b1e7274664e72104dca5a1eb97919cee8": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 1
+      },
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "24-candidate-retained-disabled",
+    "preference_sha256": "7eb4d6bc4148734f78161cd5e71e4d70ed39bf13c1c88fc04b7b85fc770e23d5",
+    "preference": {
+      "04c7483b1e7274664e72104dca5a1eb97919cee8": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 1
+      },
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      },
+      "722911c0021f2b2352c5efc76c2d683088d6cbac": {
+        "emphasis": "normal",
+        "enabled": 0,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "25-explicit-drawing-switch",
+    "preference_sha256": "7eb4d6bc4148734f78161cd5e71e4d70ed39bf13c1c88fc04b7b85fc770e23d5",
+    "preference": {
+      "04c7483b1e7274664e72104dca5a1eb97919cee8": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 1
+      },
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      },
+      "722911c0021f2b2352c5efc76c2d683088d6cbac": {
+        "emphasis": "normal",
+        "enabled": 0,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "26-old-pinned-inspector",
+    "preference_sha256": "7eb4d6bc4148734f78161cd5e71e4d70ed39bf13c1c88fc04b7b85fc770e23d5",
+    "preference": {
+      "04c7483b1e7274664e72104dca5a1eb97919cee8": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 1
+      },
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      },
+      "722911c0021f2b2352c5efc76c2d683088d6cbac": {
+        "emphasis": "normal",
+        "enabled": 0,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "27-old-disabled",
+    "preference_sha256": "7eb4d6bc4148734f78161cd5e71e4d70ed39bf13c1c88fc04b7b85fc770e23d5",
+    "preference": {
+      "04c7483b1e7274664e72104dca5a1eb97919cee8": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 1
+      },
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      },
+      "722911c0021f2b2352c5efc76c2d683088d6cbac": {
+        "emphasis": "normal",
+        "enabled": 0,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "28-old-enable-refused",
+    "preference_sha256": "7eb4d6bc4148734f78161cd5e71e4d70ed39bf13c1c88fc04b7b85fc770e23d5",
+    "preference": {
+      "04c7483b1e7274664e72104dca5a1eb97919cee8": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 1
+      },
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      },
+      "722911c0021f2b2352c5efc76c2d683088d6cbac": {
+        "emphasis": "normal",
+        "enabled": 0,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "29-old-enable-success",
+    "preference_sha256": "be3c2cb11a5431e70b4c99b42504342fc986b4fd1bc4b2dcbdba8004d840cb95",
+    "preference": {
+      "04c7483b1e7274664e72104dca5a1eb97919cee8": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      },
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      },
+      "722911c0021f2b2352c5efc76c2d683088d6cbac": {
+        "emphasis": "normal",
+        "enabled": 0,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "30-pair-before-switch",
+    "preference_sha256": "be3c2cb11a5431e70b4c99b42504342fc986b4fd1bc4b2dcbdba8004d840cb95",
+    "preference": {
+      "04c7483b1e7274664e72104dca5a1eb97919cee8": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      },
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      },
+      "722911c0021f2b2352c5efc76c2d683088d6cbac": {
+        "emphasis": "normal",
+        "enabled": 0,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "31-pair-after-switch",
+    "preference_sha256": "42512caf2be86383d4c148c714d551c91b32228b15183466f023472f2bce3415",
+    "preference": {
+      "04c7483b1e7274664e72104dca5a1eb97919cee8": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 1
+      },
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      },
+      "722911c0021f2b2352c5efc76c2d683088d6cbac": {
+        "emphasis": "normal",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "32-old-context-after-switch",
+    "preference_sha256": "42512caf2be86383d4c148c714d551c91b32228b15183466f023472f2bce3415",
+    "preference": {
+      "04c7483b1e7274664e72104dca5a1eb97919cee8": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 1
+      },
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      },
+      "722911c0021f2b2352c5efc76c2d683088d6cbac": {
+        "emphasis": "normal",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "33-restarted-old-context",
+    "preference_sha256": "42512caf2be86383d4c148c714d551c91b32228b15183466f023472f2bce3415",
+    "preference": {
+      "04c7483b1e7274664e72104dca5a1eb97919cee8": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 1
+      },
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      },
+      "722911c0021f2b2352c5efc76c2d683088d6cbac": {
+        "emphasis": "normal",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "34-third-edition-ready",
+    "preference_sha256": "42512caf2be86383d4c148c714d551c91b32228b15183466f023472f2bce3415",
+    "preference": {
+      "04c7483b1e7274664e72104dca5a1eb97919cee8": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 1
+      },
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      },
+      "722911c0021f2b2352c5efc76c2d683088d6cbac": {
+        "emphasis": "normal",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "35-two-baselines",
+    "preference_sha256": "42512caf2be86383d4c148c714d551c91b32228b15183466f023472f2bce3415",
+    "preference": {
+      "04c7483b1e7274664e72104dca5a1eb97919cee8": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 1
+      },
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      },
+      "722911c0021f2b2352c5efc76c2d683088d6cbac": {
+        "emphasis": "normal",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "36-third-retained",
+    "preference_sha256": "37ff1e81ec961c07c063bc5e2a57d8a686c88d31b6784a6c51ee84b42d6f0c50",
+    "preference": {
+      "04c7483b1e7274664e72104dca5a1eb97919cee8": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 1
+      },
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      },
+      "722911c0021f2b2352c5efc76c2d683088d6cbac": {
+        "emphasis": "normal",
+        "enabled": 1,
+        "retained": 1
+      },
+      "f876ea31376a13935390edb1e0838e8ad2bca9f0": {
+        "emphasis": "normal",
+        "enabled": 0,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "37-stale-baseline-refused",
+    "preference_sha256": "37ff1e81ec961c07c063bc5e2a57d8a686c88d31b6784a6c51ee84b42d6f0c50",
+    "preference": {
+      "04c7483b1e7274664e72104dca5a1eb97919cee8": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 1
+      },
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      },
+      "722911c0021f2b2352c5efc76c2d683088d6cbac": {
+        "emphasis": "normal",
+        "enabled": 1,
+        "retained": 1
+      },
+      "f876ea31376a13935390edb1e0838e8ad2bca9f0": {
+        "emphasis": "normal",
+        "enabled": 0,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "38-reviewed-pair",
+    "preference_sha256": "37ff1e81ec961c07c063bc5e2a57d8a686c88d31b6784a6c51ee84b42d6f0c50",
+    "preference": {
+      "04c7483b1e7274664e72104dca5a1eb97919cee8": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 1
+      },
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      },
+      "722911c0021f2b2352c5efc76c2d683088d6cbac": {
+        "emphasis": "normal",
+        "enabled": 1,
+        "retained": 1
+      },
+      "f876ea31376a13935390edb1e0838e8ad2bca9f0": {
+        "emphasis": "normal",
+        "enabled": 0,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "39-visible-refusal",
+    "preference_sha256": "37ff1e81ec961c07c063bc5e2a57d8a686c88d31b6784a6c51ee84b42d6f0c50",
+    "preference": {
+      "04c7483b1e7274664e72104dca5a1eb97919cee8": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 1
+      },
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      },
+      "722911c0021f2b2352c5efc76c2d683088d6cbac": {
+        "emphasis": "normal",
+        "enabled": 1,
+        "retained": 1
+      },
+      "f876ea31376a13935390edb1e0838e8ad2bca9f0": {
+        "emphasis": "normal",
+        "enabled": 0,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "40-refreshed-enabled-pair",
+    "preference_sha256": "37ff1e81ec961c07c063bc5e2a57d8a686c88d31b6784a6c51ee84b42d6f0c50",
+    "preference": {
+      "04c7483b1e7274664e72104dca5a1eb97919cee8": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 1
+      },
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      },
+      "722911c0021f2b2352c5efc76c2d683088d6cbac": {
+        "emphasis": "normal",
+        "enabled": 1,
+        "retained": 1
+      },
+      "f876ea31376a13935390edb1e0838e8ad2bca9f0": {
+        "emphasis": "normal",
+        "enabled": 0,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "41-reviewed-explicit-switch",
+    "preference_sha256": "4e8fc57931207eefa48b61fc5a233f003ffd4f36636c0d655239a848bbfb618d",
+    "preference": {
+      "04c7483b1e7274664e72104dca5a1eb97919cee8": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 1
+      },
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      },
+      "722911c0021f2b2352c5efc76c2d683088d6cbac": {
+        "emphasis": "normal",
+        "enabled": 0,
+        "retained": 1
+      },
+      "f876ea31376a13935390edb1e0838e8ad2bca9f0": {
+        "emphasis": "normal",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "42-reviewed-old-context",
+    "preference_sha256": "4e8fc57931207eefa48b61fc5a233f003ffd4f36636c0d655239a848bbfb618d",
+    "preference": {
+      "04c7483b1e7274664e72104dca5a1eb97919cee8": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 1
+      },
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      },
+      "722911c0021f2b2352c5efc76c2d683088d6cbac": {
+        "emphasis": "normal",
+        "enabled": 0,
+        "retained": 1
+      },
+      "f876ea31376a13935390edb1e0838e8ad2bca9f0": {
+        "emphasis": "normal",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "43-reviewed-restart",
+    "preference_sha256": "4e8fc57931207eefa48b61fc5a233f003ffd4f36636c0d655239a848bbfb618d",
+    "preference": {
+      "04c7483b1e7274664e72104dca5a1eb97919cee8": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 1
+      },
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      },
+      "722911c0021f2b2352c5efc76c2d683088d6cbac": {
+        "emphasis": "normal",
+        "enabled": 0,
+        "retained": 1
+      },
+      "f876ea31376a13935390edb1e0838e8ad2bca9f0": {
+        "emphasis": "normal",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "44-compact-pair",
+    "preference_sha256": "4e8fc57931207eefa48b61fc5a233f003ffd4f36636c0d655239a848bbfb618d",
+    "preference": {
+      "04c7483b1e7274664e72104dca5a1eb97919cee8": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 1
+      },
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      },
+      "722911c0021f2b2352c5efc76c2d683088d6cbac": {
+        "emphasis": "normal",
+        "enabled": 0,
+        "retained": 1
+      },
+      "f876ea31376a13935390edb1e0838e8ad2bca9f0": {
+        "emphasis": "normal",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "45-visible-refusal",
+    "preference_sha256": "4e8fc57931207eefa48b61fc5a233f003ffd4f36636c0d655239a848bbfb618d",
+    "preference": {
+      "04c7483b1e7274664e72104dca5a1eb97919cee8": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 1
+      },
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      },
+      "722911c0021f2b2352c5efc76c2d683088d6cbac": {
+        "emphasis": "normal",
+        "enabled": 0,
+        "retained": 1
+      },
+      "f876ea31376a13935390edb1e0838e8ad2bca9f0": {
+        "emphasis": "normal",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "46-refreshed-enabled-pair",
+    "preference_sha256": "4e8fc57931207eefa48b61fc5a233f003ffd4f36636c0d655239a848bbfb618d",
+    "preference": {
+      "04c7483b1e7274664e72104dca5a1eb97919cee8": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 1
+      },
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      },
+      "722911c0021f2b2352c5efc76c2d683088d6cbac": {
+        "emphasis": "normal",
+        "enabled": 0,
+        "retained": 1
+      },
+      "f876ea31376a13935390edb1e0838e8ad2bca9f0": {
+        "emphasis": "normal",
+        "enabled": 1,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "47-explicit-switch-back",
+    "preference_sha256": "37ff1e81ec961c07c063bc5e2a57d8a686c88d31b6784a6c51ee84b42d6f0c50",
+    "preference": {
+      "04c7483b1e7274664e72104dca5a1eb97919cee8": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 1
+      },
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      },
+      "722911c0021f2b2352c5efc76c2d683088d6cbac": {
+        "emphasis": "normal",
+        "enabled": 1,
+        "retained": 1
+      },
+      "f876ea31376a13935390edb1e0838e8ad2bca9f0": {
+        "emphasis": "normal",
+        "enabled": 0,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "48-old-context",
+    "preference_sha256": "37ff1e81ec961c07c063bc5e2a57d8a686c88d31b6784a6c51ee84b42d6f0c50",
+    "preference": {
+      "04c7483b1e7274664e72104dca5a1eb97919cee8": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 1
+      },
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      },
+      "722911c0021f2b2352c5efc76c2d683088d6cbac": {
+        "emphasis": "normal",
+        "enabled": 1,
+        "retained": 1
+      },
+      "f876ea31376a13935390edb1e0838e8ad2bca9f0": {
+        "emphasis": "normal",
+        "enabled": 0,
+        "retained": 1
+      }
+    }
+  },
+  {
+    "checkpoint": "49-accepted-restart",
+    "preference_sha256": "37ff1e81ec961c07c063bc5e2a57d8a686c88d31b6784a6c51ee84b42d6f0c50",
+    "preference": {
+      "04c7483b1e7274664e72104dca5a1eb97919cee8": {
+        "emphasis": "quiet",
+        "enabled": 0,
+        "retained": 1
+      },
+      "28861784988338a27c410bb256e631a1a1f115af": {
+        "emphasis": "quiet",
+        "enabled": 1,
+        "retained": 1
+      },
+      "722911c0021f2b2352c5efc76c2d683088d6cbac": {
+        "emphasis": "normal",
+        "enabled": 1,
+        "retained": 1
+      },
+      "f876ea31376a13935390edb1e0838e8ad2bca9f0": {
+        "emphasis": "normal",
+        "enabled": 0,
+        "retained": 1
+      }
+    }
+  }
+]

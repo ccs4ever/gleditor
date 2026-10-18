@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+run=$PWD/build/validation-sixteenth/native
+chmod 700 "$run/gpg"
+cat > "$run/gpg/keygen.batch" <<'KEY'
+%no-protection
+Key-Type: eddsa
+Key-Curve: Ed25519
+Key-Usage: sign
+Name-Real: Spatial Curator Sixteenth
+Name-Email: spatial@example.invalid
+Expire-Date: 0
+%commit
+KEY
+GNUPGHOME=$run/gpg gpg --batch --generate-key "$run/gpg/keygen.batch" > "$run/evidence/gpg-keygen.log" 2>&1
+GNUPGHOME=$run/gpg gpg --list-secret-keys --with-colons > "$run/evidence/gpg-key-inventory.txt"

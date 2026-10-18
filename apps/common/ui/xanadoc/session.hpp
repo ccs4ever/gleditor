@@ -469,6 +469,10 @@ public:
     return this;
   }
   [[nodiscard]] std::expected<Session *, std::string>
+  cacheReaderLinkPackage(const LinkPackageStatus &package);
+  [[nodiscard]] std::expected<Session *, std::string>
+  switchLinkPackageEnabled(const InfoHash &from, const LinkPackageStatus &to);
+  [[nodiscard]] std::expected<Session *, std::string>
   setLinkPackageRetained(const LinkPackageStatus &package, bool retained);
   [[nodiscard]] std::expected<Session *, std::string>
   setLinkPackageRetained(const LinkKey &key, bool retained);

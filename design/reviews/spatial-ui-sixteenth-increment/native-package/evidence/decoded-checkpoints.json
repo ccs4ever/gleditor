@@ -1,0 +1,682 @@
+[
+  {
+    "checkpoint": "evidence/checkpoints/10-retained-old",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/11-enabled-old",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/12-quiet-old",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/13-selected-old",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/14-second-prepared",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/15-old-disabled",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/16-baseline-old-enable-refused",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/17-correct-name-old-selected",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/18-same-name-later-prepared",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/19-three-downloaded-carriers",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/20-baseline-old-disabled",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/21-baseline-superseded-enable-refused",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/22-candidate-old-enable",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/23-compare-before-retention",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/24-candidate-retained-disabled",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/25-explicit-drawing-switch",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/26-old-pinned-inspector",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/27-old-disabled",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/28-old-enable-refused",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/29-old-enable-success",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/30-pair-before-switch",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/31-pair-after-switch",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/32-old-context-after-switch",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/33-restarted-old-context",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/34-third-edition-ready",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/35-two-baselines",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/36-third-retained",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/37-stale-baseline-refused",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/38-reviewed-pair",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/39-visible-refusal",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/40-refreshed-enabled-pair",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/41-reviewed-explicit-switch",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/42-reviewed-old-context",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/43-reviewed-restart",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/44-compact-pair",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/45-visible-refusal",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/46-refreshed-enabled-pair",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/47-explicit-switch-back",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/48-old-context",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  },
+  {
+    "checkpoint": "evidence/checkpoints/49-accepted-restart",
+    "visit_count": 1,
+    "current": 1,
+    "visits": [
+      {
+        "id": 1,
+        "payload": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+        "parent": null
+      }
+    ],
+    "references": [],
+    "annotations": [],
+    "source_ops_sha256": {
+      "source-0.ops.txt": "493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01"
+    }
+  }
+]

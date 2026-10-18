@@ -158,6 +158,46 @@ ReaderLinkPackages::setEnabled(const InfoHash &hash, bool on) {
   next.at(hash).enabled = on;
   return save(std::move(next));
 }
+std::vector<InfoHash>
+ReaderLinkPackages::editions(const InfoHash &candidate) const {
+  const auto found = verified.find(candidate);
+  if (found == verified.end()) return {};
+  std::vector<InfoHash> result;
+  for (const auto &[hash, package] : verified)
+    if (hash != candidate && preference(hash).retained &&
+        package.curator == found->second.curator &&
+        package.salt == found->second.salt)
+      result.push_back(hash);
+  std::ranges::sort(result, [&](const auto &a, const auto &b) {
+    const auto left = verified.at(a).sequence, right = verified.at(b).sequence;
+    return left != right ? left > right : a < b;
+  });
+  return result;
+}
+std::expected<ReaderLinkPackages *, std::string>
+ReaderLinkPackages::switchEnabled(const InfoHash &from, const InfoHash &to) {
+  if (from == to)
+    return std::unexpected("Choose two distinct immutable carriers");
+  const auto baseline = verified.find(from), candidate = verified.find(to);
+  if (baseline == verified.end() || candidate == verified.end())
+    return std::unexpected("Both exact verified package payloads are required");
+  const auto &old = baseline->second, &next = candidate->second;
+  if (old.curator != next.curator || old.salt != next.salt)
+    return std::unexpected(
+        "These carriers have different curator or package names");
+  if (old.sequence == next.sequence)
+    return std::unexpected(
+        "Conflicting immutable carriers at the same sequence");
+  if (!preference(from).retained || !preference(to).retained)
+    return std::unexpected(
+        "Retain both exact carriers before switching drawing");
+  if (!enabled(from))
+    return std::unexpected("The chosen baseline is no longer enabled");
+  auto nextChoices             = choices;
+  nextChoices.at(from).enabled = false;
+  nextChoices.at(to).enabled   = true;
+  return save(std::move(nextChoices));
+}
 std::expected<ReaderLinkPackages *, std::string>
 ReaderLinkPackages::save(std::map<InfoHash, ReaderPackagePreference> next) try {
   if (next.size() > maximumChoices)

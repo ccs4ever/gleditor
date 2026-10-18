@@ -1,0 +1,1 @@
+/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-sixteenth/frozen-accepted/xuzz --backend opengl --resize 1440\,1000 --profile --wait-ms 5000 --dump-a11y --capture /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-sixteenth/native/raw/49-accepted-restart.ppm --wait-ms 3000 --chord Ctrl+Q 

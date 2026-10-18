@@ -27,6 +27,10 @@ struct LinkPackageStatus {
   bool announce{};
   std::string error;
 };
+/// Phase eligibility only: callers still verify signature and exact carrier
+/// bytes.
+[[nodiscard]] bool
+canReviewLinkPackage(const LinkPackageStatus &status) noexcept;
 class LinkPackageExchangeUnreadable : public std::runtime_error {
 public:
   using std::runtime_error::runtime_error;

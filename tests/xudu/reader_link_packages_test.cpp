@@ -151,6 +151,86 @@ TEST_F(ReaderLinkPackagesTest,
     EXPECT_EQ(std::string(std::istreambuf_iterator<char>(in), {}), bytes);
   }
 }
+TEST_F(ReaderLinkPackagesTest,
+       ExplicitEditionSwitchPreservesBothChoicesAndUnrelatedLayers) {
+  const auto path = root / "switch";
+  ReaderLinkPackages reader(path);
+  const auto next =
+      publishLinkPackage(keys, pkg.salt, pkg.title, 2, 2, {link}, pkg.scrolls);
+  const auto nextHash  = carrier(next);
+  const auto unrelated = publishLinkPackage(keys, "curations:other", pkg.title,
+                                            1, 1, {link}, pkg.scrolls);
+  const auto otherHash = carrier(unrelated);
+  for (const auto &[package, hash] :
+       std::vector<std::pair<LinkPackage, InfoHash>>{
+           {pkg, this->hash}, {next, nextHash}, {unrelated, otherHash}})
+    ASSERT_TRUE(reader.cacheVerified(package, hash));
+  ASSERT_TRUE(reader.setRetained(hash, true));
+  ASSERT_TRUE(reader.setEnabled(hash, true));
+  ASSERT_TRUE(reader.setEmphasis(hash, PackageEmphasis::Quiet));
+  ASSERT_TRUE(reader.setRetained(otherHash, true));
+  ASSERT_TRUE(reader.setEnabled(otherHash, true));
+  const auto oldChoice   = reader.preference(hash),
+             otherChoice = reader.preference(otherHash);
+  EXPECT_EQ(reader.editions(nextHash), std::vector<InfoHash>{hash});
+  EXPECT_FALSE(reader.switchEnabled(hash, nextHash));
+  EXPECT_EQ(reader.preference(hash), oldChoice);
+  ASSERT_TRUE(reader.setRetained(nextHash, true));
+  const auto nextChoice = reader.preference(nextHash);
+  ASSERT_TRUE(reader.switchEnabled(hash, nextHash));
+  EXPECT_EQ(reader.preference(hash),
+            (ReaderPackagePreference{true, false, PackageEmphasis::Quiet}));
+  EXPECT_EQ(reader.preference(nextHash),
+            (ReaderPackagePreference{true, true, PackageEmphasis::Normal}));
+  EXPECT_EQ(reader.preference(otherHash), otherChoice);
+  EXPECT_EQ(reader.verifiedPackage(ReaderLinkPackages::keyOf(hash, 0))->links,
+            pkg.links);
+  ReaderLinkPackages reopened(path);
+  EXPECT_EQ(reopened.preference(hash), reader.preference(hash));
+  EXPECT_EQ(reopened.preference(nextHash), reader.preference(nextHash));
+  EXPECT_FALSE(reopened.switchEnabled(nextHash, hash));
+  ASSERT_TRUE(reader.switchEnabled(nextHash, hash));
+  EXPECT_EQ(reader.preference(hash), oldChoice);
+  EXPECT_EQ(reader.preference(nextHash), nextChoice);
+  EXPECT_EQ(reader.preference(otherHash), otherChoice);
+  EXPECT_FALSE(reader.switchEnabled(hash, otherHash));
+  EXPECT_FALSE(reader.switchEnabled(hash, hash));
+  const auto conflict = publishLinkPackage(keys, pkg.salt, "Conflicting title",
+                                           1, 1, {link}, pkg.scrolls);
+  const auto conflictHash = carrier(conflict);
+  ASSERT_TRUE(reader.cacheVerified(conflict, conflictHash));
+  ASSERT_TRUE(reader.setRetained(conflictHash, true));
+  EXPECT_FALSE(reader.switchEnabled(hash, conflictHash));
+  EXPECT_EQ(reader.preference(hash), oldChoice);
+}
+TEST_F(ReaderLinkPackagesTest,
+       FailedEditionSwitchLeavesBothDurableChoicesUntouched) {
+  const auto path = root / "atomic";
+  ReaderLinkPackages reader(path);
+  const auto next =
+      publishLinkPackage(keys, pkg.salt, pkg.title, 2, 2, {link}, pkg.scrolls);
+  const auto nextHash = carrier(next);
+  ASSERT_TRUE(reader.cacheVerified(pkg, hash));
+  ASSERT_TRUE(reader.cacheVerified(next, nextHash));
+  ASSERT_TRUE(reader.setRetained(hash, true));
+  ASSERT_TRUE(reader.setRetained(nextHash, true));
+  ASSERT_TRUE(reader.setEnabled(hash, true));
+  const auto oldChoice  = reader.preference(hash),
+             nextChoice = reader.preference(nextHash);
+  std::ifstream before(path, std::ios::binary);
+  const std::string original{std::istreambuf_iterator<char>(before), {}};
+  const auto untouched = root / "untouched";
+  std::ofstream(untouched) << "unchanged";
+  std::filesystem::create_symlink(untouched, path.string() + ".partial");
+  EXPECT_FALSE(reader.switchEnabled(hash, nextHash));
+  EXPECT_EQ(reader.preference(hash), oldChoice);
+  EXPECT_EQ(reader.preference(nextHash), nextChoice);
+  std::ifstream after(path, std::ios::binary);
+  EXPECT_EQ(std::string(std::istreambuf_iterator<char>(after), {}), original);
+  std::ifstream sentinel(untouched);
+  EXPECT_EQ(std::string(std::istreambuf_iterator<char>(sentinel), {}),
+            "unchanged");
+}
 TEST_F(ReaderLinkPackagesTest, NativeLinksResolveAcrossIndependentScrollSlots) {
   auto perma = std::make_shared<UserPermascroll>();
   Store owner(perma), quoted(perma);

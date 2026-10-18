@@ -425,7 +425,7 @@ void LinkPanelOverlay::rebuildPanel(gleditor::FrameContext &ctx) {
   if (context.selectedPackageDisabled()) {
     lines.push_back(
         {.text = "Package drawing disabled · retain and enable to enter; "
-                 "pinned Link retained",
+                 "Link context kept",
          .tone = PanelLine::Tone::Muted});
     if (const auto carrier = context.selectedPackageCarrier();
         carrier && session.readerLinkPackages().preference(*carrier).retained)

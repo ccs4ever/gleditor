@@ -1,0 +1,142 @@
+{
+  "source_revision": "49b820774cd19ccca1978e6ccbe156682d857a46",
+  "strict_core": {
+    "exit": 0,
+    "backends": [
+      "OpenGL",
+      "OpenGL ES",
+      "Vulkan"
+    ],
+    "GL_GLES_ordinary_differing_pixels": 0,
+    "Vulkan_ordinary_percent": 0.5104,
+    "Vulkan_overlay_percent": 0.5096,
+    "actual_threaded_split_exercised": false,
+    "frames": 22,
+    "comparison_log_sha256": "25bd6bcbc63865cc9aae2f071ca038724feabc85569c123b53ce54ac99127891"
+  },
+  "attempts": {
+    "build-1": {
+      "log": "attempts/build-1.log.gz",
+      "log_sha256": "09028ec38b246f9ee00a635df3bc329c9814997f19aaf1e1a2ad0e0ed38b3f7b",
+      "exit": 0
+    },
+    "build-2": {
+      "log": "attempts/build-2.log.gz",
+      "log_sha256": "ad1f36644f436723975b5e08c51a1e0543e2927eb4d8231a365eafe6182ac8c9",
+      "exit": 0
+    },
+    "build-3-clipped-status": {
+      "log": "attempts/build-3-clipped-status.log.gz",
+      "log_sha256": "2d6ade7fd5a449ee2da3c3126abd9ffa145c39bca113e055dc9a66af03430a92",
+      "exit": 0
+    },
+    "build-4-final": {
+      "log": "attempts/build-4-final.log.gz",
+      "log_sha256": "ad1f36644f436723975b5e08c51a1e0543e2927eb4d8231a365eafe6182ac8c9",
+      "exit": 0
+    },
+    "ui-final": {
+      "log": "attempts/ui-final.log.gz",
+      "log_sha256": "162919ff8d46641c3794daa85516598a0510d8de300120238d785c619f84b540",
+      "exit": 0
+    },
+    "xuzz-final": {
+      "log": "attempts/xuzz-final.log.gz",
+      "log_sha256": "5f027a298d6d0bb324c71088d760dae1698cada212f378983233643cae24c71d",
+      "exit": 0
+    },
+    "reader-packages-final": {
+      "log": "attempts/reader-packages-final.log.gz",
+      "log_sha256": "371f4b8ac3badc86c3c11fbc08fe1efd9b0b57705cd819d13d71ba1e8f02203d",
+      "exit": 0
+    },
+    "strict-core-backends": {
+      "log": "attempts/strict-core-backends.log.gz",
+      "log_sha256": "25bd6bcbc63865cc9aae2f071ca038724feabc85569c123b53ce54ac99127891",
+      "exit": 0
+    },
+    "format": {
+      "log": "attempts/format.log.gz",
+      "log_sha256": "68b4bc0b2799192ab485285ef11c6a27fa1fd98bdd0c681b6edfef9f69ffcccd",
+      "exit": 0
+    },
+    "lint": {
+      "log": "attempts/lint.log.gz",
+      "log_sha256": "a2e5dc2b01365383f43864939ed7e5e61e3ebe314a255b4a75199254ac82dcb5",
+      "exit": 0
+    },
+    "text-policy": {
+      "log": "attempts/text-policy.log.gz",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "exit": 0
+    }
+  },
+  "hashes": {
+    "base_commit": "49b820774cd19ccca1978e6ccbe156682d857a46",
+    "product_patch_sha256": "8f1c71f6da049d957805998ce43f67f74447efb0fe154c69f78656bffcad6af2",
+    "test_patch_sha256": "dafed2d3507c948d7bf0bf14e65c672d5292406d2faecd2be4b47a2ba2eb0c0a",
+    "product_source_sha256": {
+      "apps/common/ui/xanadoc/link_panel_overlay.cpp": "d7005a773e2ebfccb84989f65b298236222121b0ee6d89c78d27b4253a63f838",
+      "apps/common/ui/xanadoc/session.cpp": "2d846c44995516cf64efaed20a81f98957ade7e11847c1b45d2694f6b3a861b4",
+      "apps/common/ui/xanadoc/session.hpp": "23000ef942690d14017ace7783336d2a526990d1a30283446f75cb40ed3a46ac",
+      "apps/common/ui/xanadoc/views.hpp": "cf383c4d5d85737725b9c8b0ecd7b59b8805e94538bc495b3b847664f0c1b2c8",
+      "apps/common/ui/xanadoc/views_publication_links.cpp": "a9582dc250b859c2a34965bf7e54570a73c1651233356806b3f2e5d9737735fd",
+      "apps/common/xanadu/link_package_exchange.cpp": "9e0a423a0c00332aa49f9b00d6e4b76498a7e7256c4b7220e35bcd3140a2bf7e",
+      "apps/common/xanadu/link_package_exchange.hpp": "5728666feaca7c5dd60bd809b594c9b64c13597435db1de07bcf0a18bac7bb7e",
+      "apps/common/xanadu/reader_link_packages.cpp": "64c0a322552d43752a58a56c7f98a2d36b9854f07a816b39d4a72ad720127027",
+      "apps/common/xanadu/reader_link_packages.hpp": "da41fb9bd410f9fd64520c31d32e1a055cc2c9525afa194aaf8b8e5e0e9ce22f"
+    },
+    "test_source_sha256": {
+      "tests/xudu/reader_link_packages_test.cpp": "393e4a5c016f3d80fe153e8da4abc1aaf8046125e0d92347894c18be0939e8d9",
+      "tests/zigzag/reader_link_packages_ui_test.cpp": "d74d0cca065429afc83d1bf2a1bee023c32cfd65299171d9625700766b1cc6ed"
+    },
+    "binary_sha256": {
+      "build/xuzz": "19792347b9f012782b71d4906fc61a35fd064e9c86dc5caee926e3bd11980310",
+      "build/gleditor": "f1d1f9e836b18dd67c1b79b884045db1e482f34d77b2bdef3371b2aa89928085",
+      "build/gleditor_test": "44562f4e4ea437f8f3c575a8005d5847367860f9b4d4714d2d1b6516cf014f8a",
+      "build/xudu-dump": "7031847f950135234935ae67d06c3e59da6a945bd95a5202f14591064f00947c",
+      "build/libgleditor.so.0": "ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9",
+      "build/zigzag_test": "6946df90f7488fff156496935b446da1cb594950b19985261cc3f6c98d09cd50",
+      "build/xuzz_test": "8e82d1883da4feb0c4282330bf10861eabbaac79641424edfc97f6e3653b8eec",
+      "build/xudu_test": "3b14616259485df294ea6855a4d5723af1f6d873a2f923c214e02fb5dab667be"
+    },
+    "frozen_final_hashes_file_sha256": "44d4ff56ea7287710d19a535e7462e293ffec9d510c704f218b2d1eb4ae6663f",
+    "frozen_final_engine_binaries": {
+      "libgleditor.so.0": "ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9",
+      "xudu-dump": "7031847f950135234935ae67d06c3e59da6a945bd95a5202f14591064f00947c"
+    },
+    "current_engine_binaries": {
+      "build/libgleditor.so.0": "ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9",
+      "build/xudu-dump": "7031847f950135234935ae67d06c3e59da6a945bd95a5202f14591064f00947c"
+    },
+    "engine_binary_matches_frozen_final": {
+      "build/libgleditor.so.0": true,
+      "build/xudu-dump": true
+    }
+  },
+  "test_results": {
+    "final_ui": {
+      "passed": 241,
+      "total": 241,
+      "exit": 0
+    },
+    "fresh_xuzz": {
+      "passed": 107,
+      "total": 107,
+      "exit": 0
+    },
+    "fresh_reader_packages": {
+      "passed": 11,
+      "total": 11,
+      "exit": 0
+    },
+    "library": "Reused 799/799 and mip/cache 53/53 only after byte-identical library and test hash checks; not new runs"
+  },
+  "excluded": [
+    "private GPG keys and profiles",
+    "XDG profiles and caches",
+    "permascroll or store binaries",
+    "application and test binaries",
+    "downloaded package payloads"
+  ]
+}

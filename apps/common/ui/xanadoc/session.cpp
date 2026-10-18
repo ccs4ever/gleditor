@@ -723,22 +723,40 @@ ReaderLinkPackages &Session::readerLinkPackages() {
   return *readerLinkPackages_;
 }
 std::expected<Session *, std::string>
-Session::setLinkPackageRetained(const LinkPackageStatus &package, bool on) try {
+Session::cacheReaderLinkPackage(const LinkPackageStatus &package) try {
+  if (!canReviewLinkPackage(package))
+    throw std::invalid_argument(
+        "Verified package endpoints are unavailable in this transfer state");
+  for (const auto &entry : stores)
+    if (entry.store && entry.store->documentId() ==
+                           ReaderLinkPackages::keyOf(package.hash, 0).authority)
+      throw std::invalid_argument(
+          "Package authority conflicts with an open store");
   auto &reader = readerLinkPackages();
-  if (on) {
-    if (package.phase != LinkPackagePhase::Ready &&
-        package.phase != LinkPackagePhase::Published)
-      throw std::invalid_argument("Verify the package before retaining it");
-    for (const auto &entry : stores)
-      if (entry.store &&
-          entry.store->documentId() ==
-              ReaderLinkPackages::keyOf(package.hash, 0).authority)
-        throw std::invalid_argument(
-            "Package authority conflicts with an open store");
-    if (auto result = reader.cacheVerified(package.package, package.hash);
-        !result)
-      throw std::invalid_argument(result.error());
-  }
+  const bool missing =
+      !reader.verifiedPackage(ReaderLinkPackages::keyOf(package.hash, 0));
+  if (auto result = reader.cacheVerified(package.package, package.hash);
+      !result)
+    throw std::invalid_argument(result.error());
+  if (missing) invalidate();
+  return this;
+} catch (const std::exception &error) {
+  return std::unexpected(std::string(error.what()));
+}
+std::expected<Session *, std::string>
+Session::switchLinkPackageEnabled(const InfoHash &from,
+                                  const LinkPackageStatus &to) {
+  if (auto result = cacheReaderLinkPackage(to); !result) return result;
+  if (auto result = readerLinkPackages().switchEnabled(from, to.hash); !result)
+    return std::unexpected(result.error());
+  invalidate();
+  return this;
+}
+std::expected<Session *, std::string>
+Session::setLinkPackageRetained(const LinkPackageStatus &package, bool on) try {
+  if (on)
+    if (auto result = cacheReaderLinkPackage(package); !result) return result;
+  auto &reader = readerLinkPackages();
   if (auto result = reader.setRetained(package.hash, on); !result)
     throw ReaderLinkPackagesUnreadable(result.error());
   invalidate();
@@ -768,21 +786,9 @@ Session::setLinkPackageEmphasis(const InfoHash &hash,
 }
 std::expected<Session *, std::string>
 Session::setLinkPackageEnabled(const LinkPackageStatus &package, bool on) try {
-  if (on && package.phase != LinkPackagePhase::Ready &&
-      package.phase != LinkPackagePhase::Published)
-    throw std::invalid_argument("Verify the package before enabling it");
+  if (on)
+    if (auto result = cacheReaderLinkPackage(package); !result) return result;
   auto &reader = readerLinkPackages();
-  if (on)
-    for (const auto &entry : stores)
-      if (entry.store &&
-          entry.store->documentId() ==
-              ReaderLinkPackages::keyOf(package.hash, 0).authority)
-        throw std::invalid_argument(
-            "Package authority conflicts with an open store");
-  if (on)
-    if (auto result = reader.cacheVerified(package.package, package.hash);
-        !result)
-      throw std::invalid_argument(result.error());
   if (auto result = reader.setEnabled(package.hash, on); !result)
     throw ReaderLinkPackagesUnreadable(result.error());
   invalidate();

@@ -420,7 +420,7 @@ void Views::linkPackageStatus(const std::string &id,
                     throw std::runtime_error(
                         "This package references the scroll, but not the "
                         "selected document's passages. Review it in the "
-                        "unfiltered retained-package list if desired.");
+                        "unfiltered downloaded-package list if desired.");
                   reviewIndependentLinks(id);
                   return;
                 }
@@ -449,11 +449,7 @@ void Views::reviewIndependentLinks(const std::string &id,
   renderer->runWithState([this, id, selected](RenderState &) {
     try {
       const auto status = session.linkPackageExchange().status(id);
-      if (status.phase != LinkPackagePhase::Ready &&
-          status.phase != LinkPackagePhase::Published &&
-          (status.received ||
-           (status.phase != LinkPackagePhase::Superseded &&
-            status.phase != LinkPackagePhase::NeedsVerification)))
+      if (!canReviewLinkPackage(status))
         throw std::runtime_error(
             "Wait for package verification before reviewing endpoints.");
       const auto &pkg = status.package;
@@ -465,8 +461,7 @@ void Views::reviewIndependentLinks(const std::string &id,
           actions({"Inspect selected link", "Open related publication",
                    "Back to status", "Close", "Inspect full scroll identities"},
                   {"inspect", "open", "back", "close", "keys"});
-      if (status.phase == LinkPackagePhase::Ready ||
-          status.phase == LinkPackagePhase::Published) {
+      if (canReviewLinkPackage(status)) {
         control.options.push_back(preference.retained ? "Remove from reader"
                                                       : "Retain in reader");
         control.optionValues.push_back("retain");
@@ -484,6 +479,8 @@ void Views::reviewIndependentLinks(const std::string &id,
         control.options.push_back("Select link for navigation");
         control.optionValues.push_back("navigate");
       }
+      control.options.push_back("Compare reader editions");
+      control.optionValues.push_back("compare");
       const auto index = std::min(selected, pkg.links.size() - 1);
       auto links       = choice("Link identity", {}, {});
       links.options.clear();
@@ -520,7 +517,8 @@ void Views::reviewIndependentLinks(const std::string &id,
                    ? "; emphasis quiet"
                    : "; emphasis normal") +
               "; carrier " + status.hash.hex() +
-              "; signature verified; enrollment unchecked.",
+              "; signature verified; enrollment unchecked. Cited publication "
+              "bytes are checked separately when opened.",
           {std::move(control), std::move(curator), std::move(links),
            endset("Left endset", pkg.links[index].left),
            endset("Right endset", pkg.links[index].right), std::move(pins)},
@@ -530,6 +528,10 @@ void Views::reviewIndependentLinks(const std::string &id,
               try {
                 const auto action = answers[0].answer();
                 if (action == "close") return;
+                if (action == "compare") {
+                  compareReaderLinkPackages(id);
+                  return;
+                }
                 if (action == "retain" || action == "emphasis") {
                   const auto status = session.linkPackageExchange().status(id);
                   const auto preference =
@@ -594,6 +596,137 @@ void Views::reviewIndependentLinks(const std::string &id,
     } catch (const std::exception &error) {
       state->showDialog(render::DiagnosticSeverity::Error,
                         "Package review unavailable", error.what());
+    }
+  });
+}
+void Views::compareReaderLinkPackages(const std::string &id,
+                                      std::optional<InfoHash> baseline,
+                                      std::string notice) {
+  renderer->runWithState([this, id, baseline, notice](RenderState &) {
+    try {
+      const auto status = session.linkPackageExchange().status(id);
+      if (auto result = session.cacheReaderLinkPackage(status); !result)
+        throw std::runtime_error(result.error());
+      auto &reader        = session.readerLinkPackages();
+      const auto editions = reader.editions(status.hash);
+      auto choices        = choice("Retained edition", {}, {});
+      choices.options.clear();
+      choices.optionValues.clear();
+      std::optional<InfoHash> shown;
+      for (const auto &hash : editions) {
+        const auto *package =
+            reader.verifiedPackage(ReaderLinkPackages::keyOf(hash, 0));
+        choices.options.push_back(package->title + " #" +
+                                  std::to_string(package->sequence));
+        choices.optionValues.push_back(hash.hex());
+        choices.optionDescriptions.push_back("Immutable carrier: " +
+                                             hash.hex());
+        if (baseline && hash == *baseline)
+          choices.chosen = choices.options.size() - 1;
+      }
+      if (!editions.empty())
+        shown = editions[choices.chosen];
+      else {
+        choices.options = {
+            "No other retained edition with this curator and name"};
+        choices.optionValues = {""};
+      }
+      const auto describe = [&](const InfoHash &hash) {
+        const auto *package =
+            reader.verifiedPackage(ReaderLinkPackages::keyOf(hash, 0));
+        const auto preference = reader.preference(hash);
+        std::size_t left = 0, right = 0;
+        for (const auto &link : package->links) {
+          left += link.left.size();
+          right += link.right.size();
+        }
+        return package->title + " #" + std::to_string(package->sequence) +
+               " · " + (preference.retained ? "retained" : "not retained") +
+               " / " + (preference.enabled ? "enabled" : "disabled") + " / " +
+               (preference.emphasis == PackageEmphasis::Quiet ? "quiet"
+                                                              : "normal") +
+               " · " + std::to_string(package->links.size()) + " links, L" +
+               std::to_string(left) + "/R" + std::to_string(right);
+      };
+      auto control = actions({"Refresh comparison", "Keep current drawing",
+                              "Back to candidate review"},
+                             {"refresh", "keep", "back"});
+      if (!reader.preference(status.hash).retained) {
+        control.options.push_back("Retain candidate without enabling");
+        control.optionValues.push_back("retain");
+      } else if (shown && reader.enabled(*shown)) {
+        control.options.push_back("Switch drawing to candidate");
+        control.optionValues.push_back("switch");
+      }
+      const auto note =
+          "Endpoints verified; curator unchecked; cited bytes checked when "
+          "opened. "
+          "Candidate " +
+          describe(status.hash) +
+          (shown ? ". Baseline " + describe(*shown)
+                 : ". No verified retained baseline is available") +
+          ". Switching keeps the old pinned Link.";
+      form.open(
+          "Compare reader package editions", note,
+          {std::move(control),
+           choice("Comparison status",
+                  {notice.empty() ? "Review pair before switching" : notice}),
+           std::move(choices),
+           choice("Baseline immutable carrier",
+                  {shown ? shown->hex() : "Unavailable"}),
+           choice("Candidate immutable carrier", {status.hash.hex()}),
+           choice("Curator package name", {status.package.salt}),
+           keyParts("Curator key", status.package.curator.hex())},
+          [this, id, shown, candidate = status.hash](const auto &answers) {
+            renderer->runWithState([this, id, shown, candidate,
+                                    answers](RenderState &) {
+              try {
+                const auto action = answers[0].answer();
+                if (action == "keep") return;
+                if (action == "back") {
+                  reviewIndependentLinks(id);
+                  return;
+                }
+                const auto chosen =
+                    answers[2].answer().empty()
+                        ? std::nullopt
+                        : std::optional{InfoHash::fromHex(answers[2].answer())};
+                if (action == "refresh") {
+                  compareReaderLinkPackages(id, chosen);
+                  return;
+                }
+                const auto status = session.linkPackageExchange().status(id);
+                if (status.hash != candidate)
+                  throw std::runtime_error(
+                      "Candidate immutable carrier changed; reopen comparison");
+                if (action == "retain") {
+                  if (auto result =
+                          session.setLinkPackageRetained(status, true);
+                      !result)
+                    throw std::runtime_error(result.error());
+                } else if (action == "switch") {
+                  if (!shown || chosen != shown) {
+                    compareReaderLinkPackages(id, chosen,
+                                              "Switch refused. Pair refreshed; "
+                                              "review before switching.");
+                    return;
+                  }
+                  if (auto result =
+                          session.switchLinkPackageEnabled(*shown, status);
+                      !result)
+                    throw std::runtime_error(result.error());
+                }
+                if (packageVisibilityChanged) packageVisibilityChanged();
+                compareReaderLinkPackages(id, chosen);
+              } catch (const std::exception &error) {
+                state->showDialog(render::DiagnosticSeverity::Error,
+                                  "Reader edition unavailable", error.what());
+              }
+            });
+          });
+    } catch (const std::exception &error) {
+      state->showDialog(render::DiagnosticSeverity::Error,
+                        "Reader edition comparison unavailable", error.what());
     }
   });
 }

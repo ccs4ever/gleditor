@@ -1,0 +1,25 @@
+Increment: sixteenth native initial package baseline (#1, stop at verified review)
+Run root: build/validation-sixteenth/native
+Code under test: immutable fifteenth-increment frozen-final baseline
+Binary: build/validation-fifteenth/frozen-final/xuzz
+Binary SHA-256: d791c7ac9b97ade8572aa67c2949735fd4c03ce75780c90829a05ed9cd4e6b5a
+Library: build/validation-fifteenth/frozen-final/libgleditor.so.0
+Library SHA-256: ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9
+Dumper: build/validation-fifteenth/frozen-final/xudu-dump
+Dumper SHA-256: 7031847f950135234935ae67d06c3e59da6a945bd95a5202f14591064f00947c
+Backend and geometry: native OpenGL, 1440x1000, Xvfb 1600x1200 -noreset, software GL
+Environment: SDL_VIDEODRIVER=offscreen, SDL_AUDIODRIVER=dummy, LIBGL_ALWAYS_SOFTWARE=1; XDG_DATA_HOME, XDG_CONFIG_HOME, XDG_CACHE_HOME, GNUPGHOME each point under this isolated native run
+Source document store: build/validation-sixteenth/native/data/xudu/xanadocs/untitled-20261018-154726
+Source public citation shown by app: document #2 / a34
+Signed package title: Spatial review
+Initial typed package-name intent: curations:links
+Actual name in carrier 28861784988338a27c410bb256e631a1a1f115af: curations:linkscurations:links (the initial script typed the value into a nonempty default field, concatenating it). This is a misnamed negative-control artifact, not the controlled exact-name baseline.
+Controlled exact-name baseline #1 carrier: 04c7483b1e7274664e72104dca5a1eb97919cee8
+Controlled exact-name candidate #2 carrier: 722911c0021f2b2352c5efc76c2d683088d6cbac
+The initial carrier 28861784988338a27c410bb256e631a1a1f115af is a separate, already-enabled package and remains a negative control.
+Initial misnamed package request SHA-256: see artifact-hashes.txt
+Readiness: after a fresh process startup wait of 5000 ms, Ctrl+Alt+Shift+L, Right, Enter, wait 1000 ms, Enter, wait 1000 ms, Right, Enter; actual status says “Signed endpoints ready to review”. Review panel says signature verified and showed the curator fingerprint, link identity, left and right endsets, and cited publication. No retain, enable, quiet, cursor, lifecycle, announce or mock-network action was taken.
+Key fingerprint: see gpg-key-inventory.txt; generated fresh with Ed25519 and spatial@example.invalid in this run's GNUPGHOME.
+Raw PPM frames 00–04, 07–09, argv files, and complete application logs are retained alongside this record. These frames document the misnamed initial attempt and its later local review only. No key material is copied into evidence.
+
+Correction: this record previously stated that the initial carrier had package name curations:links. That was incorrect: the actual carrier had the concatenated name above. The exact-name same-curator pair and later state transitions are recorded in checkpoints 17–37 and native-persistence-review.md. Frame phases: 00–21 and 27–28 used the immutable baseline xuzz d791c7ac9b97ade8572aa67c2949735fd4c03ce75780c90829a05ed9cd4e6b5a; 22–26 and 29–37 used candidate xuzz 31fb47dbbc267d88298c2b0b44122ea4a6bf9118a1728270d4683cb0796531df.

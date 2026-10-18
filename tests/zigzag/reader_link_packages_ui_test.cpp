@@ -124,6 +124,52 @@ TEST_F(ReaderPackageUiTest,
   session.views().push_back(view);
   const auto pinned       = selectionContext(*navigation.selection());
   const auto currentVisit = navigation.currentVisit();
+  auto replacement        = authored;
+  replacement.left        = {{global, 6, 3}};
+  replacement.right       = {{global, 24, 3}};
+  const auto newer        = publishLinkPackage(keys, pkg.salt, pkg.title, 2, 2,
+                                               {replacement}, pkg.scrolls);
+  const auto newerHash =
+      makeTorrent(
+          std::vector<TorrentContent>{
+              {.path = "links.xanalinks", .data = encodeLinkPackage(newer)}},
+          "link-package")
+          .hash;
+  LinkPackageStatus candidate{
+      .phase = LinkPackagePhase::Ready, .package = newer, .hash = newerHash};
+  ASSERT_TRUE(session.cacheReaderLinkPackage(candidate));
+  EXPECT_FALSE(session.readerLinkPackages().preference(newerHash).retained);
+  EXPECT_FALSE(session.switchLinkPackageEnabled(hash, candidate));
+  ASSERT_TRUE(session.setLinkPackageRetained(candidate, true));
+  ASSERT_TRUE(
+      session.setLinkPackageEmphasis(newerHash, PackageEmphasis::Quiet));
+  ASSERT_TRUE(session.switchLinkPackageEnabled(hash, candidate));
+  navigation.packageVisibilityChanged();
+  EXPECT_EQ(selectionContext(*navigation.selection()), pinned);
+  ASSERT_TRUE(navigation.selection()->occurrences);
+  EXPECT_EQ(navigation.selection()->occurrences->left.size(), 2U);
+  EXPECT_EQ(navigation.selection()->occurrences->right.size(), 3U);
+  EXPECT_TRUE(navigation.selectedPackageDisabled());
+  EXPECT_FALSE(navigation.execute(nav::Enter{}));
+  EXPECT_EQ(navigation.currentVisit(), currentVisit);
+  EXPECT_EQ(session.activityForNavigation()->opCount(), activityOps);
+  auto older  = status;
+  older.phase = LinkPackagePhase::Superseded;
+  EXPECT_TRUE(canReviewLinkPackage(older));
+  ASSERT_TRUE(session.switchLinkPackageEnabled(newerHash, older));
+  navigation.packageVisibilityChanged();
+  EXPECT_FALSE(navigation.selectedPackageDisabled());
+  EXPECT_EQ(selectionContext(*navigation.selection()), pinned);
+  EXPECT_FALSE(session.readerLinkPackages().enabled(newerHash));
+  auto unavailable  = candidate;
+  unavailable.phase = LinkPackagePhase::Failed;
+  EXPECT_FALSE(session.switchLinkPackageEnabled(hash, unavailable));
+  auto invalid = candidate;
+  invalid.package.title += " tampered";
+  EXPECT_FALSE(session.switchLinkPackageEnabled(hash, invalid));
+  EXPECT_TRUE(session.readerLinkPackages().enabled(hash));
+  EXPECT_EQ(session.activityForNavigation()->opCount(), activityOps);
+  EXPECT_EQ(store.opCount(), oldOps);
   // Queue the accessible action while enabled, then disable before delivery.
   ASSERT_TRUE(
       beams.performAction(renderId + 1, gleditor::a11y::Action::Click, {}));
