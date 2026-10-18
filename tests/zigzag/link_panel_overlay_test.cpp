@@ -532,10 +532,10 @@ TEST_F(LinkPanelOverlayTest, PreviewEdgesKeepLinkHueExactRangesAndActiveSide) {
       nav::SelectOccurrence{key, xanadu::LinkSide::Left, 0, 0}));
   ASSERT_TRUE(navigation.execute(
       nav::SelectOccurrence{key, xanadu::LinkSide::Right, 0, 0}));
-  auto app           = std::make_shared<AppState>();
-  auto renderer      = Renderer::create(app, render::Backend::OpenGL);
-  auto doc           = Doc::create(renderer, &device, glm::mat4(1.F),
-                                   gleditor::MemoryTextSource("Left right", "edge-test"));
+  auto app      = std::make_shared<AppState>();
+  auto renderer = Renderer::create(app, render::Backend::OpenGL);
+  auto doc = Doc::create(renderer, &device, glm::mat4(1.F),
+                         gleditor::MemoryTextSource("Left right", "edge-test"));
   const auto collect = [&] {
     std::vector<gleditor::SpanStyle> styles;
     overlay.decorate(*doc, styles);

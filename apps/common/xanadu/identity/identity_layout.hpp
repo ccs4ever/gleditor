@@ -244,7 +244,7 @@ struct Signature64 {
 /// BEP 10 Extension Message Identifiers
 enum class MessageType : std::uint8_t {
   // 0x01 - 0x0F: Identity Lookup & Peer Challenge (Extension
-  // "xudu_identity_lookup")
+  // "xanadu_identity_lookup")
   IdentityQuery             = 0x01,
   IdentityResponse          = 0x02,
   PeerAuthChallenge         = 0x03,
@@ -252,22 +252,35 @@ enum class MessageType : std::uint8_t {
   ConnectionDenial          = 0x05,
   DeviceRevocationBroadcast = 0x06,
 
-  // 0x10 - 0x1F: Oracle Consensus & Voting (Extension "xudu_oracle_vote")
+  // 0x10 - 0x1F: Oracle Consensus & Voting (Extension "xanadu_oracle_vote")
   OracleVoteBroadcast     = 0x10,
   OracleConsensusQuery    = 0x11,
   OracleConsensusResponse = 0x12,
 
-  // 0x20 - 0x2F: Oracle Email Verification (Extension "xudu_oracle_verify")
+  // 0x20 - 0x2F: Oracle Email Verification (Extension "xanadu_oracle_verify")
   EmailVerifyRequest      = 0x20,
   EmailVerifyChallengeAck = 0x21,
   EmailVerifyAttestation  = 0x22,
 
   // 0x30 - 0x3F: Transcopyright Micropayments & Key Delivery (Extension
-  // "xudu_transcopyright")
+  // "xanadu_transcopyright")
   TcInvoiceQuery    = 0x30,
   TcInvoiceResponse = 0x31,
   TcSettleRequest   = 0x32,
-  TcKeyDelivery     = 0x33
+  TcKeyDelivery     = 0x33,
+
+  ActorSpawn           = 0x40,
+  ActorSpawnAck        = 0x41,
+  ActorSend            = 0x42,
+  ActorMonitor         = 0x43,
+  ActorDown            = 0x44,
+  ActorAck             = 0x45,
+  ActorDeliverValue    = 0x46,
+  ActorDeliverWriteSet = 0x47,
+  ActorCreditUpdate    = 0x48,
+  ActorLeaseHeartbeat  = 0x49,
+  ActorCutPrune        = 0x4A,
+  ActorSparkSteal      = 0x4B
 };
 
 /// Serialization and Deserialization Errors
@@ -280,7 +293,40 @@ enum class SerializationError : std::uint8_t {
   PayloadOverflow,
   InvalidHexFormat,
   StringLengthExceeded,
-  TrailingData
+  TrailingData,
+  InvalidActorMessage,
+  InvalidActorPid,
+  InvalidInfoHash,
+  UnknownMessageType
+};
+
+/// A process address survives transport without exporting an arena CellRef.
+struct ActorPid {
+  std::string node;
+  std::string cursor;
+  std::uint64_t epoch{};
+  std::uint64_t spawnSequence{};
+
+  [[nodiscard]] bool isValid() const noexcept;
+  bool operator==(const ActorPid &) const = default;
+};
+
+/// Control envelope. Bulk data is always named by infoHash, never inlined.
+struct ActorMessage {
+  MessageType type{MessageType::ActorSend};
+  std::string requestId;
+  std::optional<ActorPid> source;
+  std::optional<ActorPid> target;
+  std::string programRef;
+  std::string hashcashStamp;
+  std::string capability;
+  std::string value;
+  std::string infoHash;
+  std::string reason;
+  std::uint64_t sequence{};
+
+  [[nodiscard]] bool isValid() const noexcept;
+  bool operator==(const ActorMessage &) const = default;
 };
 
 inline constexpr std::uint8_t kDefaultHashcashDifficulty = 20;

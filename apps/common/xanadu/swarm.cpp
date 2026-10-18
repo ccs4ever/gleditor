@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "author_catalog.hpp"
+#include "identity/identity_network_controller.hpp"
 #include "link_package.hpp"
 #include <libtorrent/alert_types.hpp>
 #include <libtorrent/bdecode.hpp>
@@ -159,6 +160,7 @@ struct Swarm {
   std::chrono::steady_clock::time_point created{
       std::chrono::steady_clock::now()};
   std::chrono::steady_clock::time_point lastDhtQuery{};
+  std::chrono::steady_clock::time_point lastPeerConnect{};
   bool flushing{};
   bool filesFlushed{};
 };
@@ -171,8 +173,8 @@ struct PendingName {
   std::optional<MutablePointer> best;
 };
 
-class XuduPeerPlugin;
-class XuduTorrentPlugin;
+class XanaduPeerPlugin;
+class XanaduTorrentPlugin;
 
 struct SwarmContentSource::Impl {
   SwarmContentSource::Options options;
@@ -205,7 +207,7 @@ struct SwarmContentSource::Impl {
   /// Mutex protecting scrollSealedHandlers and pendingScrollSealed.
   std::mutex scrollSealedMutex;
   /// Active torrent plugins keyed by info hash.
-  std::map<InfoHash, std::shared_ptr<XuduTorrentPlugin>> torrentPlugins;
+  std::map<InfoHash, std::shared_ptr<XanaduTorrentPlugin>> torrentPlugins;
   /// Mutex protecting torrentPlugins.
   std::mutex pluginsMutex;
   std::set<InfoHash> publicationTopics;
@@ -248,18 +250,28 @@ struct SwarmContentSource::Impl {
                   options.restrictDhtToDistinctNetworks);
     pack.set_bool(lt::settings_pack::allow_multiple_connections_per_ip,
                   options.allowManyConnectionsPerAddress);
+    // Identity and actor frames remain useful after payload/metadata demand
+    // ends, including on payload-free topic rendezvous connections.
+    if (options.identityController)
+      pack.set_bool(lt::settings_pack::close_redundant_connections, false);
+    // Simultaneous open ("duplicate peer-id") or a peer restarting on the same
+    // port must retry within a second rather than waiting libtorrent's 60s
+    // default backoff or exhausting its 3-attempt failcount cap.
+    pack.set_int(lt::settings_pack::min_reconnect_time, 1);
+    pack.set_int(lt::settings_pack::max_failcount, 31);
     // Only the alerts that are acted on. The default set is chatty enough that
     // pumping it would be most of the cost of a read.
     pack.set_int(lt::settings_pack::alert_mask,
                  lt::alert_category::status | lt::alert_category::storage |
-                     lt::alert_category::error | lt::alert_category::dht |
+                     lt::alert_category::error | lt::alert_category::connect |
+                     lt::alert_category::dht |
                      lt::alert_category::dht_operation);
     if (options.dhtPacketsPerSecond < 1)
       throw std::invalid_argument("DHT packet allowance must be positive");
     pack.set_int(lt::settings_pack::dht_block_ratelimit,
                  options.dhtPacketsPerSecond);
     pack.set_int(lt::settings_pack::connections_limit, 128);
-    pack.set_str(lt::settings_pack::user_agent, "xudu/0.1");
+    pack.set_str(lt::settings_pack::user_agent, "xanadu/0.1");
     return pack;
   }
 
@@ -298,6 +310,7 @@ struct SwarmContentSource::Impl {
   }
 
   void tryConnectPeers() {
+    const auto now = std::chrono::steady_clock::now();
     for (auto &[hash, swarm] : swarms) {
       if (swarm.wantedPeers.empty()) {
         continue;
@@ -307,9 +320,11 @@ struct SwarmContentSource::Impl {
           lt::torrent_status::checking_resume_data == status.state) {
         continue;
       }
-      if (status.num_peers > 0) {
+      if (status.num_peers > 0 ||
+          now - swarm.lastPeerConnect < std::chrono::milliseconds{250}) {
         continue;
       }
+      swarm.lastPeerConnect = now;
       for (const auto &peer : swarm.wantedPeers) {
         try {
           swarm.handle.connect_peer(peer);
@@ -487,6 +502,10 @@ struct SwarmContentSource::Impl {
                 std::ranges::find(found->second.wantedPeers, peer) ==
                     found->second.wantedPeers.end())
               found->second.wantedPeers.push_back(peer);
+      } else if (const auto *disconnected =
+                     lt::alert_cast<lt::peer_disconnected_alert>(alert)) {
+        GLEDITOR_LOG_DEBUG("xanadu.swarm", "Peer disconnected: {}",
+                           disconnected->error.message());
       } else if (const auto *error =
                      lt::alert_cast<lt::peer_error_alert>(alert)) {
         GLEDITOR_LOG_DEBUG("xudu.swarm", "Peer protocol error: {}",
@@ -571,27 +590,27 @@ struct SwarmContentSource::Impl {
 // -- BEP 10 BitTorrent Extension Protocol Plugins ----------------------------
 //
 // Extensible framework for libtorrent peer plugins supporting custom extension
-// protocols (e.g. "xudu_live_op", and upcoming merkle ledger sync /
+// protocols (e.g. "xanadu_live_op", and upcoming merkle ledger sync /
 // decentralized oracle consensus).
 
-static constexpr const char *kExtLiveOpName = "xudu_live_op";
+static constexpr const char *kExtLiveOpName = "xanadu_live_op";
 // Keep local IDs clear of libtorrent's built-in extensions; outgoing packets
 // always use the IDs negotiated by the receiving peer.
 static constexpr int kExtLiveOpMsgId              = 21;
-static constexpr const char *kExtScrollSealedName = "xudu_scroll_sealed";
+static constexpr const char *kExtScrollSealedName = "xanadu_scroll_sealed";
 static constexpr int kExtScrollSealedMsgId        = 22;
-static constexpr const char *kExtPublicationName  = "xudu_publications";
+static constexpr const char *kExtPublicationName  = "xanadu_publications";
 static constexpr int kExtPublicationMsgId         = 23;
 
-class XuduPeerPlugin : public lt::peer_plugin,
-                       public std::enable_shared_from_this<XuduPeerPlugin> {
+class XanaduPeerPlugin : public lt::peer_plugin,
+                         public std::enable_shared_from_this<XanaduPeerPlugin> {
 public:
-  XuduPeerPlugin(lt::peer_connection_handle pc, const InfoHash &swarmHash,
-                 SwarmContentSource::Impl *impl)
+  XanaduPeerPlugin(lt::peer_connection_handle pc, const InfoHash &swarmHash,
+                   SwarmContentSource::Impl *impl)
       : pc_(std::move(pc)), swarmHash_(swarmHash), impl_(impl) {}
 
   [[nodiscard]] lt::string_view type() const override {
-    return "xudu_peer_plugin";
+    return "xanadu_peer_plugin";
   }
 
   void add_handshake(lt::entry &h) override {
@@ -613,11 +632,11 @@ public:
     }
     const auto m = node.dict_find_dict("m");
     if (m) {
-      const auto opNode = m.dict_find_int("xudu_live_op");
+      const auto opNode = m.dict_find_int("xanadu_live_op");
       if (opNode) {
         remoteLiveOpId_ = static_cast<int>(opNode.int_value());
       }
-      const auto sealedNode = m.dict_find_int("xudu_scroll_sealed");
+      const auto sealedNode = m.dict_find_int("xanadu_scroll_sealed");
       if (sealedNode) {
         remoteScrollSealedId_ = static_cast<int>(sealedNode.int_value());
       }
@@ -656,6 +675,16 @@ public:
   }
 
   bool on_extended(int length, int msg, lt::span<char const> body) override {
+    const bool owned = msg == kExtPublicationMsgId || msg == kExtLiveOpMsgId ||
+                       msg == kExtScrollSealedMsgId;
+    if (!owned) return false;
+    if (length < 0 ||
+        static_cast<std::size_t>(length) > maximumAuthorCatalogBytes ||
+        body.size() > length)
+      return true;
+    // Libtorrent supplies cumulative fragments. Claim our extension while
+    // waiting, or it treats the first fragment as an unsupported message.
+    if (body.size() < length) return true;
     if (msg == kExtPublicationMsgId) {
       if (length < 0 ||
           static_cast<std::size_t>(length) > maximumAuthorCatalogBytes)
@@ -756,15 +785,15 @@ private:
   std::shared_ptr<const std::string> lastCatalog_;
 };
 
-class XuduTorrentPlugin : public lt::torrent_plugin {
+class XanaduTorrentPlugin : public lt::torrent_plugin {
 public:
-  XuduTorrentPlugin(lt::torrent_handle handle, const InfoHash &swarmHash,
-                    SwarmContentSource::Impl *impl)
+  XanaduTorrentPlugin(lt::torrent_handle handle, const InfoHash &swarmHash,
+                      SwarmContentSource::Impl *impl)
       : handle_(std::move(handle)), swarmHash_(swarmHash), impl_(impl) {}
 
   std::shared_ptr<lt::peer_plugin>
   new_connection(lt::peer_connection_handle const &pc) override {
-    auto plugin = std::make_shared<XuduPeerPlugin>(pc, swarmHash_, impl_);
+    auto plugin = std::make_shared<XanaduPeerPlugin>(pc, swarmHash_, impl_);
     std::scoped_lock lock(mutex_);
     peers_.push_back(plugin);
     return plugin;
@@ -801,16 +830,28 @@ private:
   InfoHash swarmHash_;
   SwarmContentSource::Impl *impl_{nullptr};
   std::mutex mutex_;
-  std::vector<std::weak_ptr<XuduPeerPlugin>> peers_;
+  std::vector<std::weak_ptr<XanaduPeerPlugin>> peers_;
 };
 
 SwarmContentSource::Impl::Impl(SwarmContentSource::Options aOptions)
     : options(std::move(aOptions)), session(settings(options)) {
+  if (options.identityController) {
+    session.add_extension(
+        [controller = options.identityController](
+            lt::torrent_handle const &h,
+            lt::client_data_t) -> std::shared_ptr<lt::torrent_plugin> {
+          const auto hash = fromLt(h.info_hashes().v1);
+          auto plugin     = std::make_shared<identity::IdentityTorrentPlugin>(
+              h, hash, controller.get());
+          controller->registerTorrentPlugin(plugin);
+          return plugin;
+        });
+  }
   session.add_extension(
       [this](lt::torrent_handle const &h,
              lt::client_data_t) -> std::shared_ptr<lt::torrent_plugin> {
         const auto hash = fromLt(h.info_hashes().v1);
-        auto plugin     = std::make_shared<XuduTorrentPlugin>(h, hash, this);
+        auto plugin     = std::make_shared<XanaduTorrentPlugin>(h, hash, this);
         std::scoped_lock lock(pluginsMutex);
         torrentPlugins[hash] = plugin;
         return plugin;
@@ -1029,7 +1070,12 @@ void SwarmContentSource::connectPeer(const InfoHash &hash,
   if (error) {
     throw std::runtime_error("peer address " + host + ": " + error.message());
   }
-  found->second.wantedPeers.emplace_back(address, port);
+  const lt::tcp::endpoint endpoint(address, port);
+  if (std::ranges::find(found->second.wantedPeers, endpoint) ==
+      found->second.wantedPeers.end()) {
+    found->second.wantedPeers.push_back(endpoint);
+  }
+  found->second.lastPeerConnect = {};
   // Attempted now in case the torrent is already running, and again on every
   // pump until it takes.
   impl->tryConnectPeers();
@@ -1378,9 +1424,9 @@ InfoHash
 SwarmContentSource::collabRoomTarget(const std::string_view hostFingerprint,
                                      const std::string_view roomName) {
   InfoHash h;
-  const std::string key = "xudu:collab:" + std::string(hostFingerprint) + ":" +
-                          std::string(roomName);
-  h.bytes = sha1(key);
+  const std::string key = "xanadu:collab:" + std::string(hostFingerprint) +
+                          ":" + std::string(roomName);
+  h.bytes               = sha1(key);
   return h;
 }
 

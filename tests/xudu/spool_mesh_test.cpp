@@ -9,7 +9,12 @@
  * it LOCALLY (mints its own cell) -- the no-remote-mutation invariant -- with
  * content-id dedup giving effectively-once delivery.
  */
+#include <limits>
 #include <memory>
+#include <stdexcept>
+
+#include "common/xanadu/bencode.hpp"
+#include "common/xanadu/identity/identity_layout.hpp"
 #include <string>
 
 #include <gtest/gtest.h>
@@ -168,6 +173,99 @@ TEST(SpoolMeshTest, MessageCarriesOriginNotCellRef) {
   // The message names its origin node; it carries bytes, never an arena ref.
   EXPECT_EQ(msg.origin, nodeA());
   EXPECT_EQ(msg.payload, "v");
+}
+
+TEST(SpoolMeshTest, WireRoundTripPreservesBinaryValueAndOrigin) {
+  const auto message = MeshMessage::value(nodeA(), std::string{"a\0b", 3});
+  const auto encoded = zigzag::vortex::mesh::encodeMessage(message);
+  ASSERT_TRUE(encoded);
+  LoopbackChannel channel;
+  const auto decoded = zigzag::vortex::mesh::decodeMessage(*encoded);
+  ASSERT_TRUE(decoded);
+  channel.send(*decoded);
+  MeshNode receiver(nodeB());
+  const auto received = channel.receive();
+  ASSERT_TRUE(received);
+  EXPECT_EQ(received->origin, nodeA());
+  const auto local = receiver.tryMerge(*received);
+  ASSERT_TRUE(local);
+  EXPECT_EQ(receiver.context().arena.textOf(*local), message.payload);
+}
+
+TEST(SpoolMeshTest, CorruptRedeliveryIsRefusedBeforeMutation) {
+  MeshNode receiver(nodeB());
+  auto message = MeshMessage::value(nodeA(), "original");
+  ASSERT_TRUE(receiver.tryMerge(message));
+  const auto before = receiver.context().arena.cells().size();
+  message.payload   = "tampered";
+  const auto result = receiver.tryMerge(message);
+  ASSERT_FALSE(result);
+  EXPECT_EQ(result.error(), zigzag::vortex::mesh::MeshError::ContentMismatch);
+  EXPECT_THROW(receiver.merge(message), std::invalid_argument);
+  EXPECT_EQ(receiver.context().arena.cells().size(), before);
+  EXPECT_EQ(receiver.mergedCount(), 1U);
+}
+
+TEST(SpoolMeshTest, WireRefusesOversizeIncludingEnvelopeOverhead) {
+  using namespace zigzag::vortex::mesh;
+  const auto message = MeshMessage::value(
+      nodeA(), std::string(xanadu::identity::kMaxPayloadBytes, 'x'));
+  const auto encoded = encodeMessage(message);
+  ASSERT_FALSE(encoded);
+  EXPECT_EQ(encoded.error(), MeshError::PayloadOverflow);
+  const auto decoded =
+      decodeMessage(std::string(xanadu::identity::kMaxPayloadBytes + 1, 'x'));
+  ASSERT_FALSE(decoded);
+  EXPECT_EQ(decoded.error(), MeshError::PayloadOverflow);
+  MeshNode receiver(nodeB());
+  EXPECT_FALSE(receiver.tryMerge(message));
+  EXPECT_EQ(receiver.mergedCount(), 0U);
+}
+
+TEST(SpoolMeshTest, WireRefusesMalformedFieldsAndUnsupportedVersion) {
+  using namespace zigzag::vortex::mesh;
+  using V = xanadu::bencode::Value;
+  EXPECT_EQ(decodeMessage("garbage").error(), MeshError::InvalidBencode);
+  EXPECT_EQ(decodeMessage("de").error(), MeshError::InvalidFields);
+  const auto encoded = encodeMessage(MeshMessage::value(nodeA(), "v"));
+  ASSERT_TRUE(encoded);
+  const auto original = xanadu::bencode::decode(*encoded).asDict();
+  for (const auto &[key, replacement] :
+       std::vector<std::pair<std::string, V>>{{"version", V::integer(2)},
+                                              {"epoch", V::integer(-1)},
+                                              {"epoch", V::string("1")},
+                                              {"payload", V::integer(0)}}) {
+    auto fields       = original;
+    fields[key]       = replacement;
+    const auto result = decodeMessage(V::dict(fields).encode());
+    ASSERT_FALSE(result) << key;
+    EXPECT_EQ(result.error(), MeshError::InvalidFields) << key;
+  }
+  auto fields    = original;
+  fields["kind"] = V::integer(256);
+  EXPECT_EQ(decodeMessage(V::dict(fields).encode()).error(),
+            MeshError::InvalidKind);
+  fields            = original;
+  fields["payload"] = V::string("changed");
+  EXPECT_EQ(decodeMessage(V::dict(fields).encode()).error(),
+            MeshError::ContentMismatch);
+  EXPECT_FALSE(decodeMessage(*encoded + "junk"));
+}
+
+TEST(SpoolMeshTest, InvalidIdentityAndPayloadKindCannotMerge) {
+  using namespace zigzag::vortex::mesh;
+  MeshNode receiver(nodeB());
+  auto message      = MeshMessage::value(nodeA(), "v");
+  const auto before = receiver.context().arena.cells().size();
+  message.origin.authorKey.clear();
+  EXPECT_EQ(receiver.tryMerge(message).error(), MeshError::InvalidIdentity);
+  message.origin            = nodeA();
+  message.origin.arenaEpoch = std::numeric_limits<std::uint64_t>::max();
+  EXPECT_EQ(receiver.tryMerge(message).error(), MeshError::InvalidIdentity);
+  message.origin = nodeA();
+  message.kind   = static_cast<MeshPayloadKind>(255);
+  EXPECT_EQ(receiver.tryMerge(message).error(), MeshError::InvalidKind);
+  EXPECT_EQ(receiver.context().arena.cells().size(), before);
 }
 
 } // namespace

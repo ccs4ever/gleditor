@@ -1,6 +1,6 @@
 # gleditor on Android
 
-An Android build of `gleditor` (not yet `xudu`, which additionally needs libtorrent-rasterbar, Boost
+An Android build of `gleditor` (not yet `xuzz`, which additionally needs libtorrent-rasterbar, Boost
 and OpenSSL cross-built for Android -- a large enough second lift that it is left for a follow-up
 rather than folded into this one). Two backends are carried, matching the desktop build: **OpenGL ES
 3.0**, which every device this targets has, and **Vulkan**, which not all of them do -- see
@@ -92,7 +92,7 @@ with `adb install` or by dragging it onto a running emulator window.
 
 ## What is not here yet
 
-- **xudu.** Needs `libtorrent-rasterbar`, Boost and OpenSSL cross-built for Android on top of
+- **xuzz.** Needs `libtorrent-rasterbar`, Boost and OpenSSL cross-built for Android on top of
   everything here.
 - **A launcher icon.** The manifest names none; Android shows a generic placeholder in its place.
   `assets/logo.png` is the source to derive one from.

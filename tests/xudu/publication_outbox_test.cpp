@@ -977,14 +977,14 @@ TEST_F(PublicationOutboxNetworkTest,
     EXPECT_THAT(
         log, testing::HasSubstr("opened downloaded publication Story Ideas"));
     xanadu::PublicationDiscovery offline(
-        {.directory = profile / "data/xudu/publication-discovery"});
+        {.directory = profile / "data/xuzz/publication-discovery"});
     ASSERT_EQ(offline.cachedCatalogs().size(), 1U);
     EXPECT_EQ(offline.cachedCatalogs().front().publisher, keys.publicKey);
     EXPECT_EQ(offline.cachedCatalogs().front().entries.front().hash,
               status(publisher, id).manifestHash);
     EXPECT_EQ(offline.followedAuthors().size(), author ? 1U : 0U);
     const auto copies =
-        fs::directory_iterator(profile / "data/xudu/publication-inbox");
+        fs::directory_iterator(profile / "data/xuzz/publication-inbox");
     ASSERT_NE(copies, fs::directory_iterator{});
     xanadu::Store reader(std::make_shared<xanadu::UserPermascroll>());
     reader.load((copies->path() / "store").string());
@@ -1133,7 +1133,7 @@ TEST_F(PublicationOutboxNetworkTest,
         log, testing::HasSubstr("opened downloaded publication Story Ideas"));
   }
   xanadu::LinkPackageExchange offline(
-      {.directory = profile / "data/xudu/link-packages"});
+      {.directory = profile / "data/xuzz/link-packages"});
   ASSERT_EQ(offline.statuses().size(), 2U);
   for (const auto &pkg : offline.statuses()) {
     ASSERT_EQ(pkg.phase, xanadu::LinkPackagePhase::Ready);
@@ -1142,7 +1142,7 @@ TEST_F(PublicationOutboxNetworkTest,
     EXPECT_EQ(pkg.package.links.front().left.size(), 2U);
   }
   xanadu::PublicationDiscovery discovered(
-      {.directory = profile / "data/xudu/publication-discovery"});
+      {.directory = profile / "data/xuzz/publication-discovery"});
   EXPECT_TRUE(discovered.followedAuthors().empty());
   EXPECT_EQ(authored->opCount(), originalOps);
   // This source snapshot is fixture setup. The controls below prove package
@@ -1181,13 +1181,13 @@ TEST_F(PublicationOutboxNetworkTest,
   EXPECT_THAT(preparedLog, testing::HasSubstr("mock verification"));
   curators.clear();
   xanadu::LinkPackageExchange::Options devinOptions;
-  devinOptions.directory      = devinProfile / "data/xudu/link-packages";
+  devinOptions.directory      = devinProfile / "data/xuzz/link-packages";
   devinOptions.verifyIdentity = [](const auto &) {
     return xanadu::PublicationIdentity::MockVerified;
   };
   devinOptions.makePublisher = xanadu::publicationSwarmTransport(
       devinKeys, network, nodes,
-      devinProfile / "data/xudu/author-catalog" / devinKeys.publicKey.hex());
+      devinProfile / "data/xuzz/author-catalog" / devinKeys.publicKey.hex());
   xanadu::LinkPackageExchange devin(std::move(devinOptions));
   const auto devinStatus = devin.statuses().front();
   ASSERT_TRUE(
@@ -1221,13 +1221,13 @@ TEST_F(PublicationOutboxNetworkTest,
         quote(userLog.string()) + " 2>&1";
     ASSERT_EQ(std::system(fetch.c_str()), 0) << read(userLog);
     xanadu::LinkPackageExchange offline(
-        {.directory = readerProfile / "data/xudu/link-packages"});
+        {.directory = readerProfile / "data/xuzz/link-packages"});
     const auto cached = offline.statuses();
     ASSERT_EQ(cached.size(), 1U) << read(userLog);
     ASSERT_EQ(cached[0].package.title, "Devin's links") << read(userLog);
     ASSERT_EQ(cached[0].phase, xanadu::LinkPackagePhase::Ready);
     xanadu::PublicationInbox inbox(
-        {.directory = readerProfile / "data/xudu/publication-inbox"});
+        {.directory = readerProfile / "data/xuzz/publication-inbox"});
     const auto downloads = inbox.statuses();
     ASSERT_EQ(downloads.size(), 1U) << read(userLog);
     ASSERT_EQ(downloads[0].phase, xanadu::PublicationDownloadPhase::Ready);
@@ -1270,7 +1270,7 @@ TEST_F(PublicationOutboxNetworkTest,
     EXPECT_THAT(read(enableLog),
                 testing::HasSubstr("Research [value kind: none] (Focused)"));
     EXPECT_TRUE(xanadu::ReaderLinkPackages(readerProfile /
-                                           "data/xudu/package-visibility")
+                                           "data/xuzz/package-visibility")
                     .enabled(cached[0].hash));
     const auto disableLog = layerEvidence / (user + "-restart-disabled.log");
     const auto disable =
@@ -1286,7 +1286,7 @@ TEST_F(PublicationOutboxNetworkTest,
     EXPECT_THAT(read(disableLog), testing::HasSubstr("reader layer enabled"));
     EXPECT_THAT(read(disableLog), testing::HasSubstr("reader layer disabled"));
     EXPECT_FALSE(xanadu::ReaderLinkPackages(readerProfile /
-                                            "data/xudu/package-visibility")
+                                            "data/xuzz/package-visibility")
                      .enabled(cached[0].hash));
     EXPECT_EQ(read(native / "ops.nodes"), originalNodes);
     EXPECT_EQ(read(native / "store.tables"), originalTables);
@@ -1419,9 +1419,9 @@ TEST_F(PublicationOutboxNetworkTest,
                 testing::HasSubstr("Open update alongside earlier version"));
     EXPECT_THAT(log, testing::HasSubstr("Story Ideas revised"));
     xanadu::PublicationInbox inbox(
-        {.directory = root / name / "data/xudu/publication-inbox"});
+        {.directory = root / name / "data/xuzz/publication-inbox"});
     xanadu::PublicationSubscriptions offline(
-        {.directory = root / name / "data/xudu/publication-subscriptions",
+        {.directory = root / name / "data/xuzz/publication-subscriptions",
          .inbox     = &inbox});
     const auto subscriptions = offline.statuses();
     ASSERT_EQ(subscriptions.size(), 1U);
@@ -1588,7 +1588,7 @@ TEST_F(PublicationOutboxNetworkTest,
   EXPECT_THAT(log, testing::HasSubstr("Ready to open"));
   EXPECT_THAT(log,
               testing::HasSubstr("opened downloaded publication Story Ideas"));
-  const auto inbox = uiRoot / "data/xudu/publication-inbox";
+  const auto inbox = uiRoot / "data/xuzz/publication-inbox";
   ASSERT_TRUE(fs::exists(inbox));
   const auto uiCopies = fs::directory_iterator(inbox);
   ASSERT_NE(uiCopies, fs::directory_iterator{});

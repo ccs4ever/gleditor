@@ -2,8 +2,8 @@
  * @file transcopyright_overlay.hpp
  * @brief Retained paywall badges, withheld labels and unlock animations.
  */
-#ifndef XUDU_TRANSCOPYRIGHT_OVERLAY_HPP
-#define XUDU_TRANSCOPYRIGHT_OVERLAY_HPP
+#ifndef XANADU_TRANSCOPYRIGHT_OVERLAY_HPP
+#define XANADU_TRANSCOPYRIGHT_OVERLAY_HPP
 
 #include <atomic>
 #include <cstdint>

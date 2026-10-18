@@ -49,8 +49,10 @@ namespace zigzag::vortex {
  * hold one by pointer or in a node-stable container.
  */
 struct WorkerContext {
-  explicit WorkerContext(const Manifold *baseManifold = nullptr)
-      : arena(baseManifold), core(arena), vm(core), stdlib(core, vm) {}
+  explicit WorkerContext(const Manifold *baseManifold     = nullptr,
+                         const xanadu::SpanReader *reader = nullptr)
+      : arena(baseManifold), core(*arena.setDefaultSpanReader(reader)),
+        vm(core), stdlib(core, vm) {}
 
   WorkerContext(const WorkerContext &)            = delete;
   WorkerContext &operator=(const WorkerContext &) = delete;

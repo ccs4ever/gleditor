@@ -1,9 +1,9 @@
 /**
  * @file batch_orchestrator.hpp
- * @brief Decoupled batch CLI and headless orchestration pipeline for Xudu.
+ * @brief Decoupled batch CLI and headless orchestration pipeline for Xuzz.
  */
-#ifndef XUDU_BATCH_ORCHESTRATOR_HPP
-#define XUDU_BATCH_ORCHESTRATOR_HPP
+#ifndef XANADU_BATCH_ORCHESTRATOR_HPP
+#define XANADU_BATCH_ORCHESTRATOR_HPP
 
 #include <cstdint>
 #include <optional>
@@ -47,4 +47,4 @@ public:
 
 } // namespace xanadu
 
-#endif // XUDU_BATCH_ORCHESTRATOR_HPP
+#endif // XANADU_BATCH_ORCHESTRATOR_HPP

@@ -21,8 +21,8 @@
  * what the caching here is: expensive to answer, asked when something changes,
  * and turned into geometry every frame by a matrix multiply.
  */
-#ifndef XUDU_BEAMS_H
-#define XUDU_BEAMS_H
+#ifndef XANADU_BEAMS_H
+#define XANADU_BEAMS_H
 
 #include <array>
 #include <cstdint>
@@ -163,7 +163,7 @@ public:
   // -- gleditor::a11y::Source ------------------------------------------------
   //
   // A beam is a line drawn between two passages. Nothing about a line is
-  // reachable without seeing it, which makes this the part of Xudu that most
+  // reachable without seeing it, which makes this the part of Xuzz that most
   // needs saying rather than drawing: the links are the hypertext.
   void describe(gleditor::a11y::Builder &into) override;
   [[nodiscard]] std::uint64_t accessibilityRevision() const override;
@@ -660,4 +660,4 @@ private:
 
 } // namespace xanadu
 
-#endif // XUDU_BEAMS_H
+#endif // XANADU_BEAMS_H

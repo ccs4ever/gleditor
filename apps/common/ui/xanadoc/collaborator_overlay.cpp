@@ -1,5 +1,5 @@
 /**
- * @file apps/xudu/collaborator_overlay.cpp
+ * @file apps/common/ui/xanadoc/collaborator_overlay.cpp
  * @brief 3D multi-author remote carets, selection highlights, and nameplate
  * badges.
  */

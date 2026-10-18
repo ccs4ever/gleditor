@@ -3,8 +3,8 @@
  * @brief Screen-edge Pouch Drawer overlay with partitioned drop zones and clasp
  * bench.
  */
-#ifndef XUDU_POUCH_DRAWER_HPP
-#define XUDU_POUCH_DRAWER_HPP
+#ifndef XANADU_POUCH_DRAWER_HPP
+#define XANADU_POUCH_DRAWER_HPP
 
 #include "common/xanadu/system_docs.hpp"
 #include <array>
@@ -107,7 +107,7 @@ public:
   [[nodiscard]] std::optional<gleditor::InputArea> pointerArea() const override;
   [[nodiscard]] DockSide dockSide() const noexcept { return side_; }
 
-  /// What a card's insert button does with its item: xudu transcludes it
+  /// What a card's insert button does with its item: xuzz transcludes it
   /// at the caret, which is how a pouch item is used later.
   PouchDrawer *setUseHandler(SwingBackHandler handler) {
     useHandler_ = std::move(handler);
@@ -272,4 +272,4 @@ private:
 
 } // namespace xanadu
 
-#endif // XUDU_POUCH_DRAWER_HPP
+#endif // XANADU_POUCH_DRAWER_HPP

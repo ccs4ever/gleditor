@@ -274,7 +274,7 @@ std::optional<InputArea> ScreenOverlay::pointerArea() const {
 }
 void ScreenOverlay::cancel() { setVisible(false); }
 bool ScreenOverlay::acceptsCommand(std::string_view command) const {
-  return command == "quit" || command == "std:xudu/quit";
+  return command == "quit" || command == "std:xuzz/quit";
 }
 bool ScreenOverlay::pointerEvent(const PointerEvent &event) {
   WidgetId activateId = 0, scrollId = 0;
@@ -328,10 +328,10 @@ bool ScreenOverlay::pointerEvent(const PointerEvent &event) {
     }
     if (activateId) {
       const auto *box = scene_->layout.find(activateId);
-      fraction        = box && box->contentRect.width > 0
-                            ? (static_cast<double>(event.x) - box->contentRect.left) /
+      fraction = box && box->contentRect.width > 0
+                     ? (static_cast<double>(event.x) - box->contentRect.left) /
                            box->contentRect.width
-                            : 0;
+                     : 0;
     }
   }
   if (scrollId) return scrollList(scrollId, scroll);

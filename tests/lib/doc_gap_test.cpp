@@ -489,10 +489,10 @@ TEST_F(DocGapTest, RetainedBlankLineAndMediaGeometrySurvivesByteRenumbering) {
   for (const auto &box : native.boxes)
     expectedBoxes.emplace(
         box.anchorByteOffset,
-        BoxGeometry{.x = page->leftPixels() + Page::marginPixels + box.left,
-                    .y = page->topPixels() -
-                         (Page::marginPixels + box.top + box.height),
-                    .width  = box.width,
+        BoxGeometry{.x     = page->leftPixels() + Page::marginPixels + box.left,
+                    .y     = page->topPixels() -
+                             (Page::marginPixels + box.top + box.height),
+                    .width = box.width,
                     .height = box.height});
   const auto font = gleditor::text::FontManager::instance().getFont(
       appState->defaultFontName);

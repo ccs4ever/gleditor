@@ -42,6 +42,11 @@ public:
   explicit VPLEngine(Store &store);
   ~VPLEngine();
 
+  VPLEngine *withConsoleEffects(bool enabled) noexcept {
+    consoleEffects_ = enabled;
+    return this;
+  }
+
   /// Evaluates an AST node and returns the resulting VplView.
   VplView evaluate(const AstNode &node);
 
@@ -127,6 +132,7 @@ private:
   zigzag::vortex::VortexVM *vm_{nullptr};
   zigzag::vortex::VortexStdLib *stdlib_{nullptr};
   Store *store_{nullptr};
+  bool consoleEffects_{true};
 
   zigzag::DimRef defaultDim_{zigzag::noCell};
   std::unordered_map<std::string, VplView> env_;

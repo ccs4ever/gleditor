@@ -104,7 +104,7 @@ void LinkPanelOverlay::rebuildHighlights() {
   if (cells != cellHighlights || linkColour != cellHighlightColour) {
     cellHighlights      = cells;
     cellHighlightColour = linkColour;
-    GLEDITOR_LOG_DEBUG("xudu.links", "marking {} cell ranges", cells.size());
+    GLEDITOR_LOG_DEBUG("xuzz.links", "marking {} cell ranges", cells.size());
     if (cellHighlighter) {
       cellHighlighter(std::move(cells), linkColour | 0xFFU);
     }
@@ -136,8 +136,8 @@ LinkPanelOverlay::noteNavigationSelection(const Caret &caret,
         session.generation(),
         caret.documentIndex(),
         DocumentSite{.store   = session.store(view.storeIndex).documentId(),
-                       .version = view.version,
-                       .range = {caret.selectionStart(), caret.selectionEnd()}}};
+                     .version = view.version,
+                     .range = {caret.selectionStart(), caret.selectionEnd()}}};
   }
   return this;
 }

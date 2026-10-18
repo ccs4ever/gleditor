@@ -128,7 +128,7 @@ std::string canonicalPublicationTopic(std::string_view topic) {
   return topics.front();
 }
 InfoHash publicationTopicTarget(std::string_view topic) {
-  const auto name = "xudu:topic:" + canonicalPublicationTopic(topic);
+  const auto name = "xanadu:topic:" + canonicalPublicationTopic(topic);
   libtorrent::hasher hash(name.data(), static_cast<int>(name.size()));
   const auto digest = hash.final();
   InfoHash result;

@@ -44,6 +44,7 @@ ArrayCellEntry::fromCell(const zigzag::CellRef ref,
     break;
   case xanadu::ValueKind::OpHandle:
   case xanadu::ValueKind::ExternRef:
+  case xanadu::ValueKind::ForeignOpHandle:
   case xanadu::ValueKind::None:
     entry.numericValue = 0.0;
     break;

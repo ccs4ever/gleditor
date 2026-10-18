@@ -168,7 +168,7 @@ std::pair<std::size_t, std::size_t> List::visibleRange(float viewport,
   const auto offset = std::clamp(static_cast<double>(scrollPx), 0.0, maxScroll);
   const auto first  = static_cast<std::size_t>(std::floor(offset / height));
   const auto last   = std::min(rows.size(), static_cast<std::size_t>(std::ceil(
-                                              (offset + viewport) / height)));
+                                                (offset + viewport) / height)));
   return {first > overscan ? first - overscan : 0,
           overscan > rows.size() - last ? rows.size() : last + overscan};
 }

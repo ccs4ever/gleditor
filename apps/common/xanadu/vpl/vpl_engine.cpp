@@ -166,6 +166,7 @@ VPLEngine::dependenciesOf(const zigzag::CellRef cell) const {
 void VPLEngine::recordSources(VplView &view) {
   auto dependencies = view.dependencies();
   for (const auto cell : view.collectCells(arena())) {
+    arena().consumeWork();
     if (arena().resolveForeign(cell)) {
       const std::array identity{cell};
       mergeDependencies(dependencies, identity);
@@ -193,6 +194,7 @@ VplView VPLEngine::evaluate(const AstNode &node) {
   mergeDependencies(dependencies, result.dependencies());
   result.setDependencies(dependencies);
   for (const auto cell : result.collectCells(arena())) {
+    arena().consumeWork();
     cellDependencies_.try_emplace(cell, dependencies);
   }
   if (!dependencyStack_.empty()) {
@@ -202,6 +204,7 @@ VplView VPLEngine::evaluate(const AstNode &node) {
 }
 
 VplView VPLEngine::evaluateNode(const AstNode &node) {
+  arena().consumeWork();
   if (const auto *s = dynamic_cast<const ScalarExpr *>(&node)) {
     return evalScalar(*s);
   }
@@ -264,6 +267,7 @@ VplView VPLEngine::evalVector(const VectorExpr &expr) {
   bool allDimensions = true;
 
   for (const auto &el : expr.elements()) {
+    arena().consumeWork();
     VplView v = evaluate(*el);
     if (!v.isScalar()) {
       allScalars = false;
@@ -282,6 +286,7 @@ VplView VPLEngine::evalVector(const VectorExpr &expr) {
     std::vector<zigzag::DirectedDim> axes;
     axes.reserve(elemViews.size());
     for (const auto &ev : elemViews) {
+      arena().consumeWork();
       if (!ev.axes().empty()) {
         axes.push_back(ev.axes()[0]);
       }
@@ -294,6 +299,7 @@ VplView VPLEngine::evalVector(const VectorExpr &expr) {
     std::vector<std::string> strVals;
     strVals.reserve(elemViews.size());
     for (const auto &ev : elemViews) {
+      arena().consumeWork();
       strVals.push_back(ev.isString() ? ev.scalarString()
                                       : std::to_string(ev.scalarInt()));
     }
@@ -306,6 +312,7 @@ VplView VPLEngine::evalVector(const VectorExpr &expr) {
       std::vector<double> vals;
       vals.reserve(elemViews.size());
       for (const auto &ev : elemViews) {
+        arena().consumeWork();
         vals.push_back(ev.isFloat() ? ev.scalarFloat()
                                     : static_cast<double>(ev.scalarInt()));
       }
@@ -314,6 +321,7 @@ VplView VPLEngine::evalVector(const VectorExpr &expr) {
     std::vector<std::int64_t> vals;
     vals.reserve(elemViews.size());
     for (const auto &ev : elemViews) {
+      arena().consumeWork();
       vals.push_back(ev.scalarInt());
     }
     return mintRank(vals, defaultDim());
@@ -322,6 +330,7 @@ VplView VPLEngine::evalVector(const VectorExpr &expr) {
   // Mixed or sub-views: mint cells and link
   std::vector<zigzag::CellRef> cells;
   for (const auto &ev : elemViews) {
+    arena().consumeWork();
     if (ev.origin() != zigzag::noCell) {
       cells.push_back(ev.origin());
     } else if (ev.isScalar()) {
@@ -410,12 +419,14 @@ VplView VPLEngine::evalIndexing(const IndexingExpr &expr) {
   std::vector<std::int64_t> indices;
   indices.reserve(idxCells.size());
   for (zigzag::CellRef ic : idxCells) {
+    arena().consumeWork();
     indices.push_back(cellValueInt(ic));
   }
 
   std::vector<zigzag::CellRef> selected;
   selected.reserve(indices.size());
   for (std::int64_t idx : indices) {
+    arena().consumeWork();
     if (idx >= 0 && static_cast<std::size_t>(idx) < cells.size()) {
       selected.push_back(cells[idx]);
     }
@@ -427,6 +438,7 @@ VplView VPLEngine::evalIndexing(const IndexingExpr &expr) {
   zigzag::CellRef head = zigzag::noCell;
   zigzag::CellRef prev = zigzag::noCell;
   for (zigzag::CellRef c : selected) {
+    arena().consumeWork();
     zigzag::CellRef copy = arena().makeCell();
     if (isScalarCell(arena(), c)) {
       if (auto d = arena().asDouble(c); d.has_value()) {
@@ -453,6 +465,7 @@ VplView VPLEngine::evalIndexing(const IndexingExpr &expr) {
 VplView VPLEngine::evalProgram(const Program &expr) {
   VplView last;
   for (const auto &e : expr.expressions()) {
+    arena().consumeWork();
     last = evaluate(*e);
   }
   return last;
@@ -480,6 +493,7 @@ VplView VPLEngine::evalMonadic(const MonadicExpr &expr) {
         }
         double acc = cellValueDouble(cells[0]);
         for (std::size_t i = 1; i < cells.size(); ++i) {
+          arena().consumeWork();
           acc = computeDyadicScalar(verb, acc, cellValueDouble(cells[i]));
         }
         return VplView::makeScalar(static_cast<std::int64_t>(acc));
@@ -495,6 +509,7 @@ VplView VPLEngine::evalMonadic(const MonadicExpr &expr) {
         double acc = cellValueDouble(cells[0]);
         partials.push_back(static_cast<std::int64_t>(acc));
         for (std::size_t i = 1; i < cells.size(); ++i) {
+          arena().consumeWork();
           acc = computeDyadicScalar(verb, acc, cellValueDouble(cells[i]));
           partials.push_back(static_cast<std::int64_t>(acc));
         }
@@ -508,6 +523,7 @@ VplView VPLEngine::evalMonadic(const MonadicExpr &expr) {
         auto cells = right.collectCells(arena());
         std::vector<std::int64_t> results;
         for (zigzag::CellRef c : cells) {
+          arena().consumeWork();
           VplView cellView = VplView::makeScalar(cellValueDouble(c), false, c);
           VplView mapped   = applyMonadicVerb(verb, cellView);
           results.push_back(mapped.scalarInt());
@@ -550,11 +566,13 @@ VplView VPLEngine::evalDyadic(const DyadicExpr &expr) {
         zigzag::CellRef prevRowHead = zigzag::noCell;
 
         for (zigzag::CellRef lc : leftCells) {
+          arena().consumeWork();
           double lVal             = cellValueDouble(lc);
           zigzag::CellRef rowHead = zigzag::noCell;
           zigzag::CellRef prevCol = zigzag::noCell;
 
           for (zigzag::CellRef rc : rightCells) {
+            arena().consumeWork();
             double rVal = cellValueDouble(rc);
             double val  = computeDyadicScalar(verb, lVal, rVal);
             zigzag::CellRef cell =
@@ -592,6 +610,7 @@ VplView VPLEngine::evalDyadic(const DyadicExpr &expr) {
         std::vector<zigzag::CellRef> selected;
         for (std::size_t i = 0;
              i < std::min(maskCells.size(), targetCells.size()); ++i) {
+          arena().consumeWork();
           if (cellValueDouble(maskCells[i]) != 0.0) {
             selected.push_back(targetCells[i]);
           }
@@ -601,6 +620,7 @@ VplView VPLEngine::evalDyadic(const DyadicExpr &expr) {
         zigzag::CellRef head = zigzag::noCell;
         zigzag::CellRef prev = zigzag::noCell;
         for (zigzag::CellRef sc : selected) {
+          arena().consumeWork();
           zigzag::CellRef copy = arena().makeCell();
           if (isScalarCell(arena(), sc)) {
             if (auto n = arena().asInt64(sc); n.has_value()) {
@@ -641,6 +661,7 @@ VplView VPLEngine::evalConjunction(const ConjunctionExpr &expr) {
 
     std::unordered_map<std::string, std::vector<zigzag::CellRef>> groups;
     for (zigzag::CellRef dc : dataCells) {
+      arena().consumeWork();
       std::string k = arena().textOf(dc);
       if (k.empty()) k = std::to_string(cellValueInt(dc));
       groups[k].push_back(dc);
@@ -649,10 +670,12 @@ VplView VPLEngine::evalConjunction(const ConjunctionExpr &expr) {
     zigzag::DimRef dClone = core_->dims().clone;
     std::vector<std::string> keys;
     for (const auto &[k, members] : groups) {
+      arena().consumeWork();
       keys.push_back(k);
       zigzag::CellRef master = arena().makeCell(k);
       zigzag::CellRef prev   = master;
       for (zigzag::CellRef m : members) {
+        arena().consumeWork();
         (void)m;
         zigzag::CellRef cloneCell = arena().makeCell();
         zigzag::expectWritten(
@@ -669,6 +692,9 @@ VplView VPLEngine::evalConjunction(const ConjunctionExpr &expr) {
 VplView VPLEngine::evalQuad(const QuadExpr &expr) {
   // ⎕ (Print)
   if (expr.quadKind() == TokenKind::Quad) {
+    if (!consoleEffects_)
+      throw std::runtime_error(
+          "Console effects are disabled in remote evaluation");
     if (expr.arg()) {
       VplView v = evaluate(*expr.arg());
       if (v.isScalar()) {
@@ -682,6 +708,7 @@ VplView VPLEngine::evalQuad(const QuadExpr &expr) {
       } else {
         auto cells = v.collectCells(arena());
         for (std::size_t i = 0; i < cells.size(); ++i) {
+          arena().consumeWork();
           if (i > 0) std::cout << " ";
           if (isScalarCell(arena(), cells[i])) {
             std::cout << cellValueInt(cells[i]);
@@ -724,6 +751,7 @@ VplView VPLEngine::catenate(const std::span<const VplView> operands) {
   std::vector<zigzag::CellRef> output;
   const auto dim = defaultDim();
   for (const auto &operand : operands) {
+    arena().consumeWork();
     if (operand.isEnclosed()) {
       throw std::invalid_argument("Catenate requires an unboxed value");
     }
@@ -737,10 +765,12 @@ VplView VPLEngine::catenate(const std::span<const VplView> operands) {
       continue;
     }
     for (const auto source : operand.collectCells(arena())) {
+      arena().consumeWork();
       auto cell = arena().makeCell();
       if (const auto quoted = arena().quotedContent(source)) {
         bool bound = false;
         for (std::uint32_t space = 1; space <= arena().spaceCount(); ++space) {
+          arena().consumeWork();
           if (arena().spaceAt(space)->store == quoted->store) {
             cell  = arena().makeQuote(space, quoted->spans);
             bound = true;
@@ -878,6 +908,7 @@ VplView VPLEngine::applyMonadicVerb(TokenKind verb, const VplView &arg) {
     auto cells = arg.collectCells(arena());
     std::vector<std::int64_t> indices;
     for (std::size_t i = 0; i < cells.size(); ++i) {
+      arena().consumeWork();
       if (cellValueDouble(cells[i]) != 0.0) {
         indices.push_back(static_cast<std::int64_t>(i));
       }
@@ -920,6 +951,7 @@ VplView VPLEngine::applyMonadicVerb(TokenKind verb, const VplView &arg) {
     std::vector<zigzag::CellRef> trans;
     zigzag::DimRef dTrans = resolveDimension("d.transclude");
     for (zigzag::CellRef c : cells) {
+      arena().consumeWork();
       std::ranges::copy(zigzag::rankAfter(arena(), c, dTrans),
                         std::back_inserter(trans));
     }
@@ -942,6 +974,7 @@ VplView VPLEngine::applyMonadicVerb(TokenKind verb, const VplView &arg) {
   std::vector<double> vals;
   vals.reserve(cells.size());
   for (zigzag::CellRef c : cells) {
+    arena().consumeWork();
     vals.push_back(computeMonadicScalar(verb, cellValueDouble(c)));
   }
   return mintRank(vals, arg.axes().empty() ? defaultDim() : arg.axes()[0].dim);
@@ -962,6 +995,7 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
     zigzag::CellRef firstMinted = zigzag::noCell;
     zigzag::CellRef prev        = lastH;
     for (std::size_t i = 1; i <= n; ++i) {
+      arena().consumeWork();
       zigzag::CellRef c = arena().makeScalarCell(static_cast<std::int64_t>(i));
       if (firstMinted == zigzag::noCell) firstMinted = c;
       zigzag::expectWritten(arena().link(prev, d, zigzag::DimVector::POS, c));
@@ -986,7 +1020,8 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
     if (!right.axes().empty() && left.valence() > 0) {
       zigzag::DimRef d = right.axes()[0].dim;
       auto cells       = left.collectCells(arena());
-      zigzag::expectWritten(arena().linkChain(cells, d, zigzag::DimVector::POS));
+      zigzag::expectWritten(
+          arena().linkChain(cells, d, zigzag::DimVector::POS));
       VplView res(cells.empty() ? zigzag::noCell : cells[0],
                   {zigzag::DirectedDim{d, zigzag::DimVector::POS}});
       res.setExtents({cells.size()});
@@ -1000,6 +1035,7 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
       newDims.push_back(static_cast<std::size_t>(left.scalarInt()));
     } else {
       for (zigzag::CellRef sc : shapeCells) {
+        arena().consumeWork();
         newDims.push_back(static_cast<std::size_t>(cellValueInt(sc)));
       }
     }
@@ -1015,10 +1051,12 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
       zigzag::CellRef prevRowHead = zigzag::noCell;
 
       for (std::size_t r = 0; r < R; ++r) {
+        arena().consumeWork();
         zigzag::CellRef rowHead = zigzag::noCell;
         zigzag::CellRef prevCol = zigzag::noCell;
 
         for (std::size_t c = 0; c < C; ++c) {
+          arena().consumeWork();
           std::size_t idx      = (r * C + c) % itemCells.size();
           zigzag::CellRef cell = arena().makeCell();
           if (isScalarCell(arena(), itemCells[idx])) {
@@ -1061,6 +1099,7 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
     std::vector<std::size_t> perm;
     perm.reserve(pCells.size());
     for (zigzag::CellRef pc : pCells) {
+      arena().consumeWork();
       perm.push_back(static_cast<std::size_t>(cellValueInt(pc)));
     }
     VplView copy = right;
@@ -1083,7 +1122,8 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
     }
     zigzag::DimRef axis =
         right.axes().empty() ? defaultDim() : right.axes()[0].dim;
-    zigzag::expectWritten(arena().linkChain(taken, axis, zigzag::DimVector::POS));
+    zigzag::expectWritten(
+        arena().linkChain(taken, axis, zigzag::DimVector::POS));
     VplView res(taken.empty() ? zigzag::noCell : taken[0],
                 {zigzag::DirectedDim{axis, zigzag::DimVector::POS}});
     res.setExtents({taken.size()});
@@ -1123,6 +1163,7 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
     }
     bool found = false;
     for (zigzag::CellRef rc : rightCells) {
+      arena().consumeWork();
       if (cellValueDouble(rc) == targetVal) {
         found = true;
         break;
@@ -1171,6 +1212,7 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
       std::vector<std::int64_t> vals;
       vals.reserve(rCells.size());
       for (zigzag::CellRef rc : rCells) {
+        arena().consumeWork();
         vals.push_back(static_cast<std::int64_t>(computeDyadicScalar(
             verb, static_cast<double>(l), cellValueDouble(rc))));
       }
@@ -1183,6 +1225,7 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
     std::vector<double> vals;
     vals.reserve(rCells.size());
     for (zigzag::CellRef rc : rCells) {
+      arena().consumeWork();
       vals.push_back(computeDyadicScalar(verb, l, cellValueDouble(rc)));
     }
     return mintRank(vals,
@@ -1197,6 +1240,7 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
       std::vector<std::int64_t> vals;
       vals.reserve(lCells.size());
       for (zigzag::CellRef lc : lCells) {
+        arena().consumeWork();
         vals.push_back(static_cast<std::int64_t>(computeDyadicScalar(
             verb, cellValueDouble(lc), static_cast<double>(r))));
       }
@@ -1209,6 +1253,7 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
     std::vector<double> vals;
     vals.reserve(lCells.size());
     for (zigzag::CellRef lc : lCells) {
+      arena().consumeWork();
       vals.push_back(computeDyadicScalar(verb, cellValueDouble(lc), r));
     }
     return mintRank(vals,
@@ -1223,6 +1268,7 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
     std::vector<std::int64_t> vals;
     vals.reserve(count);
     for (std::size_t i = 0; i < count; ++i) {
+      arena().consumeWork();
       vals.push_back(static_cast<std::int64_t>(computeDyadicScalar(
           verb, cellValueDouble(lCells[i]), cellValueDouble(rCells[i]))));
     }
@@ -1232,6 +1278,7 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
   std::vector<double> vals;
   vals.reserve(count);
   for (std::size_t i = 0; i < count; ++i) {
+    arena().consumeWork();
     vals.push_back(computeDyadicScalar(verb, cellValueDouble(lCells[i]),
                                        cellValueDouble(rCells[i])));
   }
@@ -1349,6 +1396,7 @@ VplView VPLEngine::mintRank(const std::vector<double> &values,
   zigzag::CellRef head = arena().makeScalarCell(values[0]);
   zigzag::CellRef prev = head;
   for (std::size_t i = 1; i < values.size(); ++i) {
+    arena().consumeWork();
     zigzag::CellRef c = arena().makeScalarCell(values[i]);
     zigzag::expectWritten(arena().link(prev, dim, zigzag::DimVector::POS, c));
     prev = c;
@@ -1365,6 +1413,7 @@ VplView VPLEngine::mintRank(const std::vector<std::int64_t> &values,
   zigzag::CellRef head = arena().makeScalarCell(values[0]);
   zigzag::CellRef prev = head;
   for (std::size_t i = 1; i < values.size(); ++i) {
+    arena().consumeWork();
     zigzag::CellRef c = arena().makeScalarCell(values[i]);
     zigzag::expectWritten(arena().link(prev, dim, zigzag::DimVector::POS, c));
     prev = c;
@@ -1381,6 +1430,7 @@ VplView VPLEngine::mintRank(const std::vector<std::string> &values,
   zigzag::CellRef head = arena().makeCell(values[0]);
   zigzag::CellRef prev = head;
   for (std::size_t i = 1; i < values.size(); ++i) {
+    arena().consumeWork();
     zigzag::CellRef c = arena().makeCell(values[i]);
     zigzag::expectWritten(arena().link(prev, dim, zigzag::DimVector::POS, c));
     prev = c;

@@ -422,7 +422,7 @@ TEST(VortexHostTest, AppActionDelegateAndCanonicalDispatch) {
   host.setAppActionDelegate([&](std::string_view action, CellRef /*focus*/,
                                 ViewAxisBinding & /*axes*/, CellRef &focusOut) {
     lastInterceptedAction = std::string(action);
-    if (action == "std:xudu/custom_save") {
+    if (action == "std:xuzz/custom_save") {
       focusOut = root;
       return true;
     }
@@ -431,13 +431,13 @@ TEST(VortexHostTest, AppActionDelegateAndCanonicalDispatch) {
 
   // Custom action handled by delegate
   EXPECT_TRUE(
-      host.dispatchAction("std:xudu/custom_save", noCell, axes, newFocus));
+      host.dispatchAction("std:xuzz/custom_save", noCell, axes, newFocus));
   EXPECT_EQ(newFocus, root);
-  EXPECT_EQ(lastInterceptedAction, "std:xudu/custom_save");
+  EXPECT_EQ(lastInterceptedAction, "std:xuzz/custom_save");
 
   // Canonical mapping invoked for legacy action to delegate
   host.dispatchAction("save", noCell, axes, newFocus);
-  EXPECT_EQ(lastInterceptedAction, "std:xudu/save");
+  EXPECT_EQ(lastInterceptedAction, "std:xuzz/save");
 
   // Canonical navigation dispatch
   DimRef d1  = host.core().mintDimension("d.1");
@@ -456,7 +456,7 @@ TEST(VortexHostTest, AppActionDelegateAndCanonicalDispatch) {
   EXPECT_EQ(axes.y_dimension, "d.dynamic");
 
   // Fallback to stdlib resolution for sovereign stdlib action
-  EXPECT_TRUE(host.dispatchAction("std:xudu/quit", root, axes, newFocus));
+  EXPECT_TRUE(host.dispatchAction("std:xuzz/quit", root, axes, newFocus));
 }
 
 // Stage 1 of design/vortex-multithreading-study.md §3.3: the host can hold

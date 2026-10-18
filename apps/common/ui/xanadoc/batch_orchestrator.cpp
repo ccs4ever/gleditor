@@ -1,6 +1,6 @@
 /**
  * @file batch_orchestrator.cpp
- * @brief Decoupled batch CLI and headless orchestration pipeline for Xudu.
+ * @brief Decoupled batch CLI and headless orchestration pipeline for Xuzz.
  */
 #include "batch_orchestrator.hpp"
 
@@ -242,7 +242,7 @@ BatchOrchestrator::execute(Session &session,
       opening              = openedVer;
       startIdx             = 1;
       if (!quiet) {
-        std::cout << "xudu: opened system doc " << firstFile << " as "
+        std::cout << "xuzz: opened system doc " << firstFile << " as "
                   << openedVer.str() << "\n";
       }
     } else if (0 == session.store(0).opCount()) {
@@ -267,7 +267,7 @@ BatchOrchestrator::execute(Session &session,
               piece.bytes, fileName, piece.mimeType, session.publishedDir(0));
           const auto sId = session.store(0).addScroll(scroll);
           span           = PrimediaSpan{
-                        .scroll = sId, .start = 0, .length = piece.bytes.size()};
+              .scroll = sId, .start = 0, .length = piece.bytes.size()};
           Op op;
           op.kind  = OpKind::Transclude;
           op.at    = at;
@@ -284,7 +284,7 @@ BatchOrchestrator::execute(Session &session,
       opening = imported;
       session.viewOpened(imported, 0);
       if (!quiet) {
-        std::cout << "xudu: imported " << firstFile << " as " << imported.str()
+        std::cout << "xuzz: imported " << firstFile << " as " << imported.str()
                   << "\n";
       }
       startIdx = 1;
@@ -296,7 +296,7 @@ BatchOrchestrator::execute(Session &session,
         const auto openedVer = session.openSystemDoc(*kind);
         extraImports.emplace_back(openedVer, sIdx);
         if (!quiet) {
-          std::cout << "xudu: opened " << f << " in system store " << sIdx
+          std::cout << "xuzz: opened " << f << " in system store " << sIdx
                     << " as " << openedVer.str() << "\n";
         }
       } else {
@@ -304,7 +304,7 @@ BatchOrchestrator::execute(Session &session,
         session.viewOpened(imported, sIdx);
         extraImports.emplace_back(imported, sIdx);
         if (!quiet) {
-          std::cout << "xudu: imported " << f << " to temp store " << sIdx
+          std::cout << "xuzz: imported " << f << " to temp store " << sIdx
                     << " as " << imported.str() << "\n";
         }
       }
@@ -321,7 +321,7 @@ BatchOrchestrator::execute(Session &session,
         const auto openedVer = session.openSystemDoc(*kind);
         extraImports.emplace_back(openedVer, sIdx);
         if (!quiet) {
-          std::cout << "xudu: opened system doc " << uri << " in store " << sIdx
+          std::cout << "xuzz: opened system doc " << uri << " in store " << sIdx
                     << " as " << openedVer.str() << "\n";
         }
       }
@@ -493,7 +493,7 @@ BatchOrchestrator::execute(Session &session,
         const auto imported = session.importBranch(0, f);
         session.viewOpened(imported, 0);
         if (!quiet) {
-          std::cout << "xudu: imported branch " << f << " as " << imported.str()
+          std::cout << "xuzz: imported branch " << f << " as " << imported.str()
                     << "\n";
         }
       }

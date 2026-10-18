@@ -82,7 +82,7 @@ LinkPanelPresentation linkPanelPresentation(
                  cache.fitted(button.label, metadataFont, {}).heightPx);
   const auto captionSlot = std::ceil(captionTextHeight) + 2;
   const auto columnsFor  = [&](float width, const auto &face,
-                              float padding = 0.F) {
+                               float padding = 0.F) {
     float longest = metrics.px(sourceTheme.type.minTouchPx);
     for (const auto &button : buttons)
       longest = std::max(
@@ -105,8 +105,8 @@ LinkPanelPresentation linkPanelPresentation(
         for (const auto &entry : sourceLines) {
           if (compact && !entry.compactContext.empty() && contexts++ > 0)
             continue;
-          const auto prefix = (entry.active ? "\u25B8 " : "") +
-                              entry.text.substr(0, entry.requiredBytes);
+          const auto prefix    = (entry.active ? "\u25B8 " : "") +
+                                 entry.text.substr(0, entry.requiredBytes);
           const auto &required = cache.fitted(
               prefix, captions && !entry.requiredBytes ? metadataFont : font,
               {.maxWidthPx = std::max(0.F, width),
@@ -255,9 +255,9 @@ LinkPanelPresentation linkPanelPresentation(
   result.theme.gapEm     = line > 0 ? gap / line : 0;
   const auto colour      = [](std::uint32_t rgba) {
     return glm::vec4(static_cast<float>((rgba >> 24U) & 255U) / 255,
-                          static_cast<float>((rgba >> 16U) & 255U) / 255,
-                          static_cast<float>((rgba >> 8U) & 255U) / 255,
-                          static_cast<float>(rgba & 255U) / 255);
+                     static_cast<float>((rgba >> 16U) & 255U) / 255,
+                     static_cast<float>((rgba >> 8U) & 255U) / 255,
+                     static_cast<float>(rgba & 255U) / 255);
   };
   result.theme.colours.surface       = colour(config.backgroundColour);
   result.theme.colours.text          = colour(config.textColour);
@@ -270,9 +270,9 @@ LinkPanelPresentation linkPanelPresentation(
   for (const auto &entry : lines)
     desiredWidth = std::max(
         desiredWidth, cache.fitted(entry.text, font, {}).widthPx + pad * 2);
-  desiredWidth             = std::max(desiredWidth,
-                                      (longestAction + pad * 2 * actionPadRatio) * columns +
-                                          pad * 4 + gap * (columns - 1));
+  desiredWidth = std::max(desiredWidth,
+                          (longestAction + pad * 2 * actionPadRatio) * columns +
+                              pad * 4 + gap * (columns - 1));
   const auto width         = std::floor(std::min(maxWidth, desiredWidth));
   const auto interiorWidth = std::max(0.0F, width - pad * 2);
   const auto buttonWidth   = std::floor(std::max(
@@ -356,8 +356,8 @@ LinkPanelPresentation linkPanelPresentation(
     for (std::size_t index = 0; index < labelHeights.size(); ++index) {
       auto &label = labelHeights[index];
       label       = minimumLabels[index] +
-              std::floor((label - minimumLabels[index]) * extra /
-                         std::max(1.0F, wantedLabels - base));
+                    std::floor((label - minimumLabels[index]) * extra /
+                               std::max(1.0F, wantedLabels - base));
     }
   }
   const auto buttonHeight =
@@ -375,7 +375,7 @@ LinkPanelPresentation linkPanelPresentation(
     const auto fullLabel = entry.active ? "\u25B8 " + entry.text : entry.text;
     auto label           = caption(index);
     const auto required  = entry.requiredBytes +
-                          (entry.active ? std::string("\u25B8 ").size() : 0);
+                           (entry.active ? std::string("\u25B8 ").size() : 0);
     if (entry.requiredBytes) {
       const auto &fitted =
           cache.fitted(fullLabel, font,
@@ -492,9 +492,9 @@ inspectorPresentation(std::span<const xanadu::PanelLine> lines,
     pinned.push_back(
         {.id        = static_cast<ui::WidgetId>(i + 3),
          .model     = ui::Label{text,
-                            i == 0 ? ui::TextPurpose::Description
+                                i == 0 ? ui::TextPurpose::Description
                                        : ui::TextPurpose::Label,
-                            i == 0 ? fullContext : lines[i].text},
+                                i == 0 ? fullContext : lines[i].text},
          .preferred = {local.logical(width), local.logical(slot)},
          .fontRole  = ui::FontRole::Caption,
          .tone      = lines[i].active ? ui::Tone::Accent : ui::Tone::Normal,
@@ -525,7 +525,7 @@ inspectorPresentation(std::span<const xanadu::PanelLine> lines,
                              std::string accessible = {}) {
     return ui::Widget{.id        = id,
                       .model     = ui::Button{std::move(label), "link_controls",
-                                          enabled, std::move(accessible)},
+                                              enabled, std::move(accessible)},
                       .preferred = {0, local.logical(actionSlot)}};
   };
   footer.push_back(addButton(request.previousId, "Previous", true));

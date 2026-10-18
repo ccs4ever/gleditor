@@ -1,7 +1,7 @@
 # BEP 10 BitTorrent Wire Protocol Extensions Specification
 
 An architectural specification and reference document for all custom BEP 10 (BitTorrent Extension
-Protocol) extensions across the `gleditor`, `xudu`, and `zigzag` systems.
+Protocol) extensions in the Xanadu engine used by `xuzz` and the language frontends.
 
 ______________________________________________________________________
 
@@ -9,14 +9,14 @@ ______________________________________________________________________
 
 In traditional decentralized systems, identity, collaborative live editing, and micropayments are
 delegated to separate network sidecars, HTTP servers, or blockchain RPC nodes. In the Xanadulogical
-architecture of `xudu` and `gleditor`, **the BitTorrent peer wire is the sole transport layer**.
+architecture of Xanadu, **the BitTorrent peer wire is the sole transport layer**.
 
 By building on **BEP 10 (Extension Protocol for BitTorrent)**:
 
 1. **Zero Additional Ports**: All metadata, identity handshakes, live ops, and payment settlement
    travel over the single established BitTorrent TCP/uTP peer socket.
-1. **Unified NAT Traversal & Encryption**: All traffic inherits libtorrent's built-in hole punching,
-   UPnP, NAT-PMP, and MSE/PE stream encryption.
+1. **Shared Session**: All traffic uses the engine's libtorrent session. UPnP and NAT-PMP are
+   disabled by the session settings.
 1. **Swarm Locality**: Peers collaborating on a specific Xanadoc or quoting the same permascroll
    interact directly over the swarm carrying that content.
 
@@ -33,11 +33,11 @@ name to its preferred local integer message ID:
 ```
 {
   "m": {
-    "xudu_live_op": 1,
-    "xudu_identity_lookup": 2,
-    "xudu_oracle_vote": 3,
-    "xudu_oracle_verify": 4,
-    "xudu_transcopyright": 5
+    "xanadu_live_op": 1,
+    "xanadu_identity_lookup": 2,
+    "xanadu_oracle_vote": 3,
+    "xanadu_oracle_verify": 4,
+    "xanadu_transcopyright": 5
   }
 }
 ```
@@ -102,21 +102,24 @@ ______________________________________________________________________
 
 ## 3. Extension Catalog
 
-```
-┌───────────────────────┬──────────┬───────────────────────────────────────┐
-│ Extension Name        │ Local ID │ Core Functionality                    │
-├───────────────────────┼──────────┼───────────────────────────────────────┤
-│ xudu_live_op          │ 1        │ Collaborative editing without text    │
-│ xudu_identity_lookup  │ 2        │ Identity queries & peer authentication│
-│ xudu_oracle_vote      │ 3        │ Oracle vote gossip & quorum consensus │
-│ xudu_oracle_verify    │ 4        │ Out-of-band email attestation         │
-│ xudu_transcopyright   │ 5        │ Per-byte micropayment & CEK unlocking │
-└───────────────────────┴──────────┴───────────────────────────────────────┘
-```
+| Extension                | Local ID | Function                                   |
+| ------------------------ | -------- | ------------------------------------------ |
+| `xanadu_live_op`         | 21       | Live operation descriptors                 |
+| `xanadu_scroll_sealed`   | 22       | Sealed scroll notifications                |
+| `xanadu_publications`    | 23       | Publication/topic catalogs                 |
+| `xanadu_identity_lookup` | 24       | Identity queries and device authentication |
+| `xanadu_oracle_vote`     | 25       | Oracle vote gossip                         |
+| `xanadu_oracle_verify`   | 26       | Email attestation                          |
+| `xanadu_transcopyright`  | 27       | Settlement and key delivery                |
+| `xanadu_vortex_actor`    | 6        | Authenticated distributed actor control    |
+
+These are incoming local IDs. Outgoing frames always use the peer's negotiated ID. The identity
+extensions use 24–27 because low IDs overlap libtorrent's built-in extensions; sharing an ID with
+`ut_metadata` prevents real peer authentication even when frame-sink unit tests pass.
 
 ______________________________________________________________________
 
-## 4. Specification: `xudu_live_op` (ID: 1)
+## 4. Specification: `xanadu_live_op` (ID: 21)
 
 ### Purpose
 
@@ -142,13 +145,13 @@ deterministic OT/CRDT convergence.
 
 1. Author types text locally into their sovereign `UserPermascroll` (Slot 0).
 1. The client commits the span to its local spool and generates a `GlobalSpan`.
-1. The client broadcasts `xudu_live_op` containing the descriptor.
+1. The client broadcasts `xanadu_live_op` containing the descriptor.
 1. Remote peers receive the descriptor and stage the operation into their local `Store` without
    downloading raw text until rendered.
 
 ______________________________________________________________________
 
-## 5. Specification: `xudu_identity_lookup` (ID: 2)
+## 5. Specification: `xanadu_identity_lookup` (ID: 24)
 
 ### Purpose
 
@@ -235,7 +238,7 @@ Delivers the identity record, block header, and Merkle audit path.
 
 ______________________________________________________________________
 
-## 6. Specification: `xudu_oracle_vote` (ID: 3)
+## 6. Specification: `xanadu_oracle_vote` (ID: 25)
 
 ### Purpose
 
@@ -273,7 +276,7 @@ Synchronizes candidate vote tallies and the active quorum root between peers.
 
 ______________________________________________________________________
 
-## 7. Specification: `xudu_oracle_verify` (ID: 4)
+## 7. Specification: `xanadu_oracle_verify` (ID: 26)
 
 ### Purpose
 
@@ -331,7 +334,7 @@ Oracle delivers the signed attestation token.
 
 ______________________________________________________________________
 
-## 8. Specification: `xudu_transcopyright` (ID: 5)
+## 8. Specification: `xanadu_transcopyright` (ID: 27)
 
 ### Purpose
 
@@ -426,11 +429,11 @@ ______________________________________________________________________
 
 ## 10. Implementation File Reference
 
-| Component                 | Files                                                                                                                                      | Description                                                            |
-| :------------------------ | :----------------------------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------- |
-| **Live Op Plugin**        | [`apps/xudu/core/swarm.cpp`](apps/xudu/core/swarm.cpp)                                                                                     | `XuduPeerPlugin` & `XuduTorrentPlugin` (`xudu_live_op`)                |
-| **Identity Controller**   | [`apps/xudu/core/identity/identity_network_controller.hpp/.cpp`](apps/xudu/core/identity/identity_network_controller.hpp)                  | `IdentityPeerPlugin` & `IdentityTorrentPlugin` (Extensions 2, 3, 4, 5) |
-| **Message Layouts**       | [`apps/xudu/core/identity/identity_layout.hpp`](apps/xudu/core/identity/identity_layout.hpp)                                               | Struct definitions for all wire messages                               |
-| **Bencode Serialization** | [`apps/xudu/core/identity/identity_serialization.hpp/.cpp`](apps/xudu/core/identity/identity_serialization.hpp)                            | Zero-copy encoders and decoders for all wire frames                    |
-| **PoW Engine**            | [`apps/xudu/core/identity/identity_validation.hpp/.cpp`](apps/xudu/core/identity/identity_validation.hpp)                                  | `HashcashEngine` verifier, miner, and anti-replay cache                |
-| **Unit Tests**            | [`tests/xudu/identity_test.cpp`](tests/xudu/identity_test.cpp), [`tests/xudu/transcopyright_test.cpp`](tests/xudu/transcopyright_test.cpp) | BEP 10 encoding, decoding, and network integration tests               |
+| Component                 | Files                                                                                                                                      | Description                                                                   |
+| :------------------------ | :----------------------------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------------- |
+| **Live Op Plugin**        | [`apps/common/xanadu/swarm.cpp`](apps/common/xanadu/swarm.cpp)                                                                             | `XanaduPeerPlugin` & `XanaduTorrentPlugin` (`xanadu_live_op`)                 |
+| **Identity Controller**   | [`apps/common/xanadu/identity/identity_network_controller.hpp/.cpp`](apps/common/xanadu/identity/identity_network_controller.hpp)          | `IdentityPeerPlugin` & `IdentityTorrentPlugin` (Extensions 24–27 and actor 6) |
+| **Message Layouts**       | [`apps/common/xanadu/identity/identity_layout.hpp`](apps/common/xanadu/identity/identity_layout.hpp)                                       | Struct definitions for all wire messages                                      |
+| **Bencode Serialization** | [`apps/common/xanadu/identity/identity_serialization.hpp/.cpp`](apps/common/xanadu/identity/identity_serialization.hpp)                    | Zero-copy encoders and decoders for all wire frames                           |
+| **PoW Engine**            | [`apps/common/xanadu/identity/identity_validation.hpp/.cpp`](apps/common/xanadu/identity/identity_validation.hpp)                          | `HashcashEngine` verifier, miner, and anti-replay cache                       |
+| **Unit Tests**            | [`tests/xudu/identity_test.cpp`](tests/xudu/identity_test.cpp), [`tests/xudu/transcopyright_test.cpp`](tests/xudu/transcopyright_test.cpp) | BEP 10 encoding, decoding, and network integration tests                      |

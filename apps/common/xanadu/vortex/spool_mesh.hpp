@@ -33,10 +33,12 @@
 
 #include <cstdint>
 #include <deque>
+#include <expected>
 #include <memory>
 #include <optional>
 #include <string>
-#include <unordered_set>
+#include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "common/xanadu/vortex/worker_context.hpp"
@@ -56,6 +58,16 @@ struct NodeId {
 
   [[nodiscard]] std::string str() const;
   bool operator==(const NodeId &) const = default;
+};
+
+/// Refusals at the untrusted message boundary.
+enum class MeshError {
+  InvalidBencode,
+  InvalidFields,
+  InvalidIdentity,
+  InvalidKind,
+  ContentMismatch,
+  PayloadOverflow,
 };
 
 /// What a message carries. Slice 0 has one payload kind -- an immutable value
@@ -78,9 +90,18 @@ struct MeshMessage {
   std::string payload;   ///< the immutable bytes (a sealed value)
   std::string contentId; ///< sha256Hex(payload); the dedup + merge key
 
+  [[nodiscard]] std::expected<void, MeshError> validate() const;
+
   /// Build a Value message, computing the content id from the payload.
   [[nodiscard]] static MeshMessage value(NodeId origin, std::string payload);
 };
+
+/// A bounded, versioned envelope. The content id addresses the value, while
+/// origin remains untrusted until the transport authenticates its device key.
+[[nodiscard]] std::expected<std::string, MeshError>
+encodeMessage(const MeshMessage &message);
+[[nodiscard]] std::expected<MeshMessage, MeshError>
+decodeMessage(std::string_view bytes);
 
 /// The transport seam. Slice 0's implementation is an in-memory loopback queue;
 /// Slice 2 replaces it with a BEP10 wire extension. A channel moves immutable
@@ -140,7 +161,10 @@ public:
   /// no-remote-mutation invariant in code: the receiver creates its own cell;
   /// the sender's arena is never touched. A message whose content id was
   /// already merged is a no-op and returns the existing local cell (dedup).
+  /// Invalid envelopes throw std::invalid_argument before any arena mutation.
   CellRef merge(const MeshMessage &msg);
+  [[nodiscard]] std::expected<CellRef, MeshError>
+  tryMerge(const MeshMessage &msg);
 
   /// Whether this node has already merged a message with @p contentId.
   [[nodiscard]] bool hasMerged(const std::string &contentId) const;
@@ -154,8 +178,7 @@ private:
   NodeId id_;
   std::unique_ptr<WorkerContext> ctx_;
   // content id -> the local cell minted when it was first merged (dedup map).
-  std::vector<std::pair<std::string, CellRef>> mergedCells_;
-  std::unordered_set<std::string> merged_;
+  std::unordered_map<std::string, CellRef> merged_;
 };
 
 } // namespace zigzag::vortex::mesh

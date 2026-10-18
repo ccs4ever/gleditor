@@ -1,7 +1,7 @@
 # The Anything-to-ZigZag Lens: Generalizing the Xanadu Projector into a Bidirectional Source Lens
 
 A design specification for generalizing the Xanadu-to-ZigZag translator
-([`zz_xudu_projector.{hpp,cpp}`](apps/common/xanadu/zigzag/zz_xudu_projector.hpp)) into a
+([`xanadu_projector.{hpp,cpp}`](apps/common/xanadu/zigzag/xanadu_projector.hpp)) into a
 source-agnostic, bidirectional **lens**: a trait that projects arbitrary external structure into a
 ZigZag manifold and unprojects edits back to that structure's own operations. The existing xanadoc
 projector becomes one implementation; a filesystem-tree lens is the second, built to force the
@@ -20,15 +20,15 @@ The engine already turns one external structure — a Xanadu store's documents, 
 into a ZigZag manifold, and back. That translator is hard-wired to xanadocs in three ways:
 
 - its *source* is a `xanadu::Store` plus a list of `MicroversionId`s
-  ([`zz_xudu_projector.hpp:92`](apps/common/xanadu/zigzag/zz_xudu_projector.hpp));
+  ([`xanadu_projector.hpp:92`](apps/common/xanadu/zigzag/xanadu_projector.hpp));
 - its *dimensions* are the xanadoc-specific `d.doc` / `d.transclude` / `d.link` / `d.version` /
   `d.clone` set, baked into `XuduProjectorOptions`
-  ([`zz_xudu_projector.hpp`](apps/common/xanadu/zigzag/zz_xudu_projector.hpp), the
+  ([`xanadu_projector.hpp`](apps/common/xanadu/zigzag/xanadu_projector.hpp), the
   `XuduProjectorOptions` struct);
 - its *projection logic* is paragraph-splitting and span-overlap heuristics specific to concatext
   (the assembled, transclusion-resolved document text)
-  ([`zz_xudu_projector.cpp:43`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp),
-  `projectXuduToZigzag`).
+  ([`xanadu_projector.cpp:43`](apps/common/xanadu/zigzag/xanadu_projector.cpp),
+  `projectXanaduToZigzag`).
 
 Yet the manifold is a general multidimensional cell space, and the convergence
 ([`store-slice-convergence.md`](store-slice-convergence.md)) already treats *any* authored structure
@@ -61,30 +61,30 @@ ______________________________________________________________________
 
 ## 2. Evidence: How the Current Projector Works
 
-Read in full: `zz_xudu_projector.{hpp,cpp}`, `manifold.hpp`, `arena_manifold.hpp`,
-`zzstructure.hpp`, the Structure API in `store.hpp`, and `store-slice-convergence.md` §3–§5, R7, R8.
+Read in full: `xanadu_projector.{hpp,cpp}`, `manifold.hpp`, `arena_manifold.hpp`, `zzstructure.hpp`,
+the Structure API in `store.hpp`, and `store-slice-convergence.md` §3–§5, R7, R8.
 
 ### 2.1 Two translators, two source shapes, two targets
 
 There are, confusingly, **two** translation surfaces in the one file, and the lens must subsume
 both:
 
-- **The DTO projector.** `projectXuduToZigzag()`
-  ([`zz_xudu_projector.cpp:43`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp)) takes a
-  `std::vector<XuduDocInput>` and `std::vector<xanadu::Link>` and produces a `ZzStructureDocument` —
-  the in-memory DTO ([`zzstructure.hpp`](apps/common/xanadu/zigzag/zzstructure.hpp),
+- **The DTO projector.** `projectXanaduToZigzag()`
+  ([`xanadu_projector.cpp:43`](apps/common/xanadu/zigzag/xanadu_projector.cpp)) takes a
+  `std::vector<XanaduDocInput>` and `std::vector<xanadu::Link>` and produces a `ZzStructureDocument`
+  — the in-memory DTO ([`zzstructure.hpp`](apps/common/xanadu/zigzag/zzstructure.hpp),
   `ZzStructureDocument`). It reads assembled *text* and *spans*, not a `Store`.
   `projectStoreToZigzag` / `projectStoreWithProvenance`
-  ([`zz_xudu_projector.cpp:343`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp)) are thin wrappers
+  ([`xanadu_projector.cpp:343`](apps/common/xanadu/zigzag/xanadu_projector.cpp)) are thin wrappers
   that first `store.rebuild(verId)` each version, assemble its text through
   `store.read`/`store.resolve`, and hand the result to the DTO projector. The target here is the
   DTO, not a `Manifold`.
 - **The convergence translators.** `sliceToStore()`
-  ([`zz_xudu_projector.cpp:548`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp)) mints a
+  ([`xanadu_projector.cpp:548`](apps/common/xanadu/zigzag/xanadu_projector.cpp)) mints a
   `ZzStructureDocument` into a `xanadu::Store` **as `OpKind::Structure` operations** via the
   Structure API, and `storeToSlice()`
-  ([`zz_xudu_projector.cpp:678`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp)) folds a
-  `Manifold` back into a DTO. These are the real cell-minting path; the DTO projector is the legacy
+  ([`xanadu_projector.cpp:678`](apps/common/xanadu/zigzag/xanadu_projector.cpp)) folds a `Manifold`
+  back into a DTO. These are the real cell-minting path; the DTO projector is the legacy
   paragraph-splitting path that step 20 of the convergence is retiring.
 
 ### 2.2 How documents/branches/links become cells on dimensions
@@ -93,11 +93,11 @@ In the DTO projector:
 
 - **`d.doc` — reading flow.** Each paragraph (or whole document) becomes a `Cell`; sequential cells
   within one document are linked `pos`/`neg` on `opts.doc_dimension`
-  ([`zz_xudu_projector.cpp`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp), the `docCellChains`
+  ([`xanadu_projector.cpp`](apps/common/xanadu/zigzag/xanadu_projector.cpp), the `docCellChains`
   loop under comment `--- 1. Link sequential reading order`).
 - **`d.transclude` — shared spans.** Cells in *different* documents whose spans overlap
-  (`spansOverlap`, [`zz_xudu_projector.cpp:28`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp))
-  are linked on `opts.transclusion_dimension` (`--- 2. Link transclusions`).
+  (`spansOverlap`, [`xanadu_projector.cpp:28`](apps/common/xanadu/zigzag/xanadu_projector.cpp)) are
+  linked on `opts.transclusion_dimension` (`--- 2. Link transclusions`).
 - **`d.version` — microversion lineage.** Positionally-aligned cells across consecutive documents
   are linked on `opts.version_dimension` (`--- 3. Link sequential microversion steps`).
 - **`d.link` — xanalinks.** Each `xanadu::Link`'s left/right endsets are matched to cells by span
@@ -108,11 +108,11 @@ In the DTO projector:
 
 In the convergence translator `sliceToStore()`, `role` / `mime_type` / `media_path` do **not** ride
 in `CompactOpNode` fields — they become **cells on their own ranks** `d.role` / `d.mime` / `d.media`
-([`zz_xudu_projector.cpp:37`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp)), attached posward of
+([`xanadu_projector.cpp:37`](apps/common/xanadu/zigzag/xanadu_projector.cpp)), attached posward of
 the cell they describe (the `attach` lambda in `sliceToStore`). `storeToSlice()` reads them back off
 those ranks and classes the attribute cells and the dimension cells as *structure* (the `structural`
 set in `storeToSlice`,
-[`zz_xudu_projector.cpp:700`-ish](apps/common/xanadu/zigzag/zz_xudu_projector.cpp)), so a round trip
+[`xanadu_projector.cpp:700`-ish](apps/common/xanadu/zigzag/xanadu_projector.cpp)), so a round trip
 does not re-emit them as content. This is R13's "metadata is cells on a dimension" and is exactly
 the mechanism a filesystem lens needs for file metadata.
 
@@ -123,14 +123,14 @@ Both directions lose something, and the losses are different:
 - **Project (source → cells), lossy.** A paragraph straddling two pieces is addressed by its first
   part only, because a cell holds one span — the code says so in a comment: "Clamped to the piece
   the paragraph starts in, because a cell holds one span … a truncation, not a misdirection"
-  ([`zz_xudu_projector.cpp`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp), inside the
+  ([`xanadu_projector.cpp`](apps/common/xanadu/zigzag/xanadu_projector.cpp), inside the
   `split_by_paragraphs` branch). `storeToLinkPackage()` publishes a multi-span cell "under the
-  address of its first" ([`zz_xudu_projector.cpp`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp),
+  address of its first" ([`xanadu_projector.cpp`](apps/common/xanadu/zigzag/xanadu_projector.cpp),
   the `contentRun.front()` comment).
 - **Unproject (cells → DTO), lossy on ids.** `storeToSlice()`'s own doc comment: "a CellRef is an
   operation index and is used directly as the YAML id, so a round trip renumbers cells rather than
   restoring whatever numbers the original file used"
-  ([`zz_xudu_projector.hpp`](apps/common/xanadu/zigzag/zz_xudu_projector.hpp), `storeToSlice` doc
+  ([`xanadu_projector.hpp`](apps/common/xanadu/zigzag/xanadu_projector.hpp), `storeToSlice` doc
   comment). Scene metadata, dimension colours, and the `view` axis binding are **not** reconstructed
   by `storeToSlice()` — it emits only cells, their data, role/mime/media, and dimension links.
 
@@ -143,7 +143,7 @@ refused operations and `verifyAgainstFullRebuild()` holding"
 ([`store-slice-convergence.md`](store-slice-convergence.md), §9 step 20). The id renumbering is
 intrinsic: `sliceToStore()` maps each DTO `CellID` to the `CellRef` of the operation that minted it
 (`out.cells.emplace(id, store.cellRefOf(out.version))`,
-[`zz_xudu_projector.cpp`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp)), so the DTO's own ids do
+[`xanadu_projector.cpp`](apps/common/xanadu/zigzag/xanadu_projector.cpp)), so the DTO's own ids do
 not survive — the cell's identity becomes its name in hypertime (R4, R7). This is the single most
 important fact for the generalized lens: **the engine side owns identity as an ops index; the source
 side's own identity is a separate space the lens must map.**
@@ -156,7 +156,7 @@ regression bar becomes meaning-equivalence rather than byte-equality (§9.3).
 ### 2.5 Where projection reads and where it writes
 
 - **DTO projector reads** assembled text + spans from `Store::rebuild` / `read` / `resolve`
-  ([`zz_xudu_projector.cpp:343`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp)) and **writes** a
+  ([`xanadu_projector.cpp:343`](apps/common/xanadu/zigzag/xanadu_projector.cpp)) and **writes** a
   `ZzStructureDocument` DTO.
 - **`sliceToStore()` reads** a DTO and **writes** persistent `Manifold` state by calling the
   Structure API on a `xanadu::Store`: `sliceGenesis`
@@ -194,7 +194,7 @@ code that enforces it.
    and the fold maintains both ends ([`manifold.hpp`](apps/common/xanadu/zigzag/manifold.hpp),
    `Manifold::link` doc comment). A lens emits posward links only, plus any negward link the source
    does not state reciprocally — exactly as `sliceToStore()` does
-   ([`zz_xudu_projector.cpp`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp), the "Posward links
+   ([`xanadu_projector.cpp`](apps/common/xanadu/zigzag/xanadu_projector.cpp), the "Posward links
    only" loop).
 1. **A cell exists only where an operation minted one.** Typing into a xanadoc mints no cells
    ([`store-slice-convergence.md`](store-slice-convergence.md) §3, R12 `d.meta-dims` is *generated*
@@ -213,9 +213,9 @@ code that enforces it.
    crosses to persistence only here.
 1. **Determinism.** `sliceToStore()` mints cells and dimensions in sorted order so "one document
    always produces one operation sequence"
-   ([`zz_xudu_projector.cpp`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp), the
+   ([`xanadu_projector.cpp`](apps/common/xanadu/zigzag/xanadu_projector.cpp), the
    `std::ranges::sort` on `ids`;
-   [`zz_xudu_projector.hpp`](apps/common/xanadu/zigzag/zz_xudu_projector.hpp), `sliceToStore` doc
+   [`xanadu_projector.hpp`](apps/common/xanadu/zigzag/xanadu_projector.hpp), `sliceToStore` doc
    comment). A lens must impose a total order on source nodes so a fixture can be regenerated and
    diffed.
 1. **R8 — view movement is not an edit.** Navigating the projected manifold mints nothing in the
@@ -304,7 +304,7 @@ public:
   /// Dimensions this lens needs, in mint order, each as (name, GenericDim or
   /// Custom). Declared up front so the framework can mint them deterministically
   /// before any node references one. Maps onto sliceToStore()'s dimension
-  /// pre-mint pass (zz_xudu_projector.cpp, the `dimensionNames` set).
+  /// pre-mint pass (xanadu_projector.cpp, the `dimensionNames` set).
   [[nodiscard]] virtual std::vector<std::pair<std::string, std::optional<GenericDim>>>
   dimensions() const = 0;
 
@@ -393,7 +393,7 @@ pinned by name across lenses.
 
 The four `GenericDim` values plus the two pinned attribute ranks are the vocabulary a visualizer and
 a query rely on across every lens; `d.role` / `d.mime` are the attribute ranks already named in the
-engine ([`zz_xudu_projector.cpp:37`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp)), populated
+engine ([`xanadu_projector.cpp:37`](apps/common/xanadu/zigzag/xanadu_projector.cpp)), populated
 through `SourceNode::attributes`. A source-specific concept with no generic analogue
 (`d.transclude`, `d.size`) is declared per lens via `dimensions()` under its own name and is simply
 not reachable by a generic cross-lens query — which is honest, not a failure.
@@ -544,9 +544,9 @@ the second is recommended:
 
 - **(b) An attribute rank, `d.extkey`.** The external key is minted as an ordinary content cell on a
   `d.extkey` rank off each projected cell — identical to how `d.role`/`d.mime`/`d.media` carry
-  attributes ([`zz_xudu_projector.cpp:37`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp)). The
-  key then travels in hypertime, is scrubbable, is published in a seal like any other operation, and
-  is read back by a walk of `d.extkey` — no side artefact. **(b) is the recommendation**, because it
+  attributes ([`xanadu_projector.cpp:37`](apps/common/xanadu/zigzag/xanadu_projector.cpp)). The key
+  then travels in hypertime, is scrubbable, is published in a seal like any other operation, and is
+  read back by a walk of `d.extkey` — no side artefact. **(b) is the recommendation**, because it
   reuses the engine's own answer for metadata (R13) and keeps the mapping inside the one address
   space the convergence insists everything live in.
 
@@ -839,14 +839,14 @@ ______________________________________________________________________
   therefore a **requirement placed on promotion**, not a property it currently has: either the lens
   emits clone members as a master plus content-free members mapped to the master's address (as the
   xanadoc projector's empty-data clones already do,
-  [`zz_xudu_projector.cpp`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp), the `isUnchangedClone`
+  [`xanadu_projector.cpp`](apps/common/xanadu/zigzag/xanadu_projector.cpp), the `isUnchangedClone`
   branch), or `promote()` learns to resolve `cloneMaster()` and reuse spans. Flagged in §11 (U-L4).
 - **The identity-and-boundary machinery** — `ephemeralBit`, `isEphemeral`, `applyStructure`'s
   `EphemeralTarget` refusal, `Store::setLink`'s throw
   ([`manifold.hpp`](apps/common/xanadu/zigzag/manifold.hpp),
   [`store.hpp`](apps/common/xanadu/store.hpp)).
 - **Attribute-rank metadata** — `d.role` / `d.mime` / `d.media` and the attach/read-back pattern
-  ([`zz_xudu_projector.cpp:37`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp)), generalized to
+  ([`xanadu_projector.cpp:37`](apps/common/xanadu/zigzag/xanadu_projector.cpp)), generalized to
   `d.size` / `d.mtime` / `d.perm` / `d.extkey`.
 - **Dimension lookup/creation** — `DimensionRegistry::getOrCreate`
   ([`dimension_registry.hpp:115`](apps/common/xanadu/zigzag/dimension_registry.hpp)),
@@ -924,7 +924,7 @@ ______________________________________________________________________
 ## 9. Mapping the Existing Projector onto the Lens — and Improving It
 
 Nothing is in production, so `XanadocLens` is not held to byte-for-byte parity with today's
-`projectXuduToZigzag` output. It is re-expressed on the lens primitives, and that re-expression is
+`projectXanaduToZigzag` output. It is re-expressed on the lens primitives, and that re-expression is
 the occasion to *fix* losses the current projector carries as deliberate compromises. The bar is
 meaning: a fixture projected through `XanadocLens`, then unprojected, is the same document — not the
 same byte sequence of operations.
@@ -934,16 +934,16 @@ same byte sequence of operations.
 - The genuinely xanadoc-only ranks keep their own names because no generic analogue exists:
   `d.transclude` (overlapping primedia spans) and `d.version` (microversion lineage), declared
   through `dimensions()` as custom rather than a per-call `XuduProjectorOptions` struct
-  ([`zz_xudu_projector.hpp`](apps/common/xanadu/zigzag/zz_xudu_projector.hpp)).
+  ([`xanadu_projector.hpp`](apps/common/xanadu/zigzag/xanadu_projector.hpp)).
 - The `ExternalKey` for a xanadoc cell is the provenance triple the projector already tracks,
-  `XuduProjectionProvenance`
-  ([`zz_xudu_projector.hpp`](apps/common/xanadu/zigzag/zz_xudu_projector.hpp)):
+  `XanaduProjectionProvenance`
+  ([`xanadu_projector.hpp`](apps/common/xanadu/zigzag/xanadu_projector.hpp)):
   `"xd:<documentId>:<version>:<span>"`. The identity map generalizes
   `ProjectedXuduStore::sourceByProjectedCell`
-  ([`zz_xudu_projector.hpp`](apps/common/xanadu/zigzag/zz_xudu_projector.hpp)).
+  ([`xanadu_projector.hpp`](apps/common/xanadu/zigzag/xanadu_projector.hpp)).
 - Attribute metadata still rides on `d.role`/`d.mime`/`d.media` ranks
-  ([`zz_xudu_projector.cpp:37`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp)) — the mechanism
-  the filesystem lens reuses for `d.size`/`d.mtime`/`d.perm`.
+  ([`xanadu_projector.cpp:37`](apps/common/xanadu/zigzag/xanadu_projector.cpp)) — the mechanism the
+  filesystem lens reuses for `d.size`/`d.mtime`/`d.perm`.
 
 ### 9.2 What the lens model lets us improve (and should)
 
@@ -961,7 +961,7 @@ choice to revisit:
 
 - **Multi-span cells instead of first-span truncation.** Today a paragraph straddling pieces is
   addressed by its first part only, "a truncation, not a misdirection"
-  ([`zz_xudu_projector.cpp`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp), the
+  ([`xanadu_projector.cpp`](apps/common/xanadu/zigzag/xanadu_projector.cpp), the
   `split_by_paragraphs` branch) — the convergence's U3 single-span-per-cell limit. The lens's
   `SourceNode::content` is already a `std::span<const PrimediaSpan>`, so a node may carry *all* its
   spans. A cell's content is already modelled as a *run* of spans via `Splice` / `spliceCellSpan`
@@ -990,8 +990,8 @@ choice to revisit:
   lens reading the store's own cell structure (the `sliceToStore`/`storeToSlice` path, not the
   legacy DTO path) does not need to re-derive paragraphs by scanning text; it projects the cells the
   store already has. `XanadocLens` should be built on the convergence translators
-  ([`zz_xudu_projector.cpp:548`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp),
-  [`:678`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp)), retiring the heuristic DTO projector
+  ([`xanadu_projector.cpp:548`](apps/common/xanadu/zigzag/xanadu_projector.cpp),
+  [`:678`](apps/common/xanadu/zigzag/xanadu_projector.cpp)), retiring the heuristic DTO projector
   that step 20 of the convergence was already retiring.
 
 ### 9.3 The regression that replaces "byte-identical"
@@ -1036,7 +1036,7 @@ the privileged set ([`multi_store.cpp:333`](apps/common/xanadu/multi_store.cpp))
 predicate resolves the same rank everywhere; (3) attribute values are read by stepping onto the
 attribute cell and reading its content (`/d.role` then `value()`), which already works because the
 lens attaches `d.role`/`d.mime` posward exactly as the projector does
-([`zz_xudu_projector.cpp:37`](apps/common/xanadu/zigzag/zz_xudu_projector.cpp)). The DX hazard worth
+([`xanadu_projector.cpp:37`](apps/common/xanadu/zigzag/xanadu_projector.cpp)). The DX hazard worth
 documenting: an unknown generic name is **not an error** — it mints an empty dimension and the query
 reads as "no data," so a lens that fails to mint a canonical name fails silently.
 

@@ -422,13 +422,13 @@ PageShaping TextLayout::layoutPage(std::string_view text,
                                    const LayoutOptions &options) {
   if (options.ellipsize && options.boxes.empty() &&
       options.blockStyles.empty()) {
-    auto fitted         = fit(text, font,
-                              {.maxWidthPx  = options.maxWidthPx,
-                               .maxHeightPx = options.maxHeightPx,
-                               .maxLines    = static_cast<std::uint16_t>(
+    auto fitted = fit(text, font,
+                      {.maxWidthPx  = options.maxWidthPx,
+                       .maxHeightPx = options.maxHeightPx,
+                       .maxLines    = static_cast<std::uint16_t>(
                            options.singleParagraph ? 1 : 0),
-                               .overflow = options.singleParagraph ? Overflow::Ellipsis
-                                                                   : Overflow::Wrap});
+                       .overflow = options.singleParagraph ? Overflow::Ellipsis
+                                                           : Overflow::Wrap});
     fitted.shaping.page = options.page;
     for (auto &glyph : fitted.shaping.glyphs) {
       const auto &cluster = fitted.shaping.clusters[glyph.clusterIndex];

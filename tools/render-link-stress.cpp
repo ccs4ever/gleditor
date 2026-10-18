@@ -167,7 +167,7 @@ std::string sha256(const fs::path &path) {
 std::vector<fs::path> sourceFiles() {
   return {"left/ops.nodes", "left/store.tables", "right/ops.nodes",
           "right/store.tables",
-          "data/xudu/permascroll/default/active.primedia"};
+          "data/xuzz/permascroll/default/active.primedia"};
 }
 
 std::map<std::string, std::string> hashes(const fs::path &root) {

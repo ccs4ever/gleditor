@@ -137,6 +137,7 @@ std::vector<zigzag::CellRef> VQLEngine::execute(std::string_view queryString) {
 }
 
 std::vector<zigzag::CellRef> VQLEngine::execute(const QueryExpression &query) {
+  this->arena().consumeWork();
   if (std::holds_alternative<PathExpression>(query.expr)) {
     return evaluatePath(std::get<PathExpression>(query.expr));
   }
@@ -227,6 +228,7 @@ VQLEngine::resolveAnchor(const AnchorNode &anchor,
 
   if (anchor.derefMaster) {
     for (auto &c : results) {
+      this->arena().consumeWork();
       c = coordinator_.derefCloneMaster(c).value_or(c);
     }
   }
@@ -246,6 +248,7 @@ VQLEngine::evaluatePath(const PathExpression &path,
   });
 
   for (const auto &step : path.steps) {
+    this->arena().consumeWork();
     // Nothing flowing in ends a walk, but not a function: count() of nothing
     // is zero, and it used to print nothing at all.
     if (current.empty() &&
@@ -258,7 +261,9 @@ VQLEngine::evaluatePath(const PathExpression &path,
   // Clone joins: leftmost operand is master
   if (path.cloneTail.has_value() && !current.empty()) {
     for (zigzag::CellRef master : current) {
+      this->arena().consumeWork();
       for (const auto &operand : path.cloneTail->operands) {
+        this->arena().consumeWork();
         if (operand.bareCreate.has_value()) {
           const auto &bc = *operand.bareCreate;
           zigzag::CellRef cloneCell =
@@ -275,6 +280,7 @@ VQLEngine::evaluatePath(const PathExpression &path,
         } else if (operand.path != nullptr) {
           auto clones = evaluatePath(*operand.path, contextCells);
           for (zigzag::CellRef c : clones) {
+            this->arena().consumeWork();
             const zigzag::CellRef tail =
                 zigzag::rankTail(core_->arena(), master, core_->dims().clone);
             zigzag::expectWritten(
@@ -306,6 +312,7 @@ VQLEngine::traverseDimension(const SignedDimensionStep &dimStep,
     for (auto cell = arena.linkedMinting(start, dim, way);
          zigzag::noCell != cell && seen.insert(cell).second;
          cell = arena.linkedMinting(cell, dim, way)) {
+      this->arena().consumeWork();
       visit(cell);
     }
   };
@@ -317,6 +324,7 @@ VQLEngine::traverseDimension(const SignedDimensionStep &dimStep,
   };
 
   for (zigzag::CellRef in : inputs) {
+    this->arena().consumeWork();
     if (!arena.contains(in)) {
       continue;
     }
@@ -367,9 +375,11 @@ void VQLEngine::findInDocuments(const StoreInfo &info,
   const auto sourceDim = coordinator_.resolveDimension("d.source");
   auto &arena          = core_->arena();
   for (const auto &version : info.store->currentVersions()) {
+    this->arena().consumeWork();
     const auto document = info.store->rebuild(version);
     const auto text     = info.store->textOf(version);
     for (auto at = text.find(needle); std::string::npos != at;) {
+      this->arena().consumeWork();
       const auto newline = text.rfind('\n', at);
       const auto begin   = std::string::npos == newline ? 0 : newline + 1;
       const auto end     = std::min(text.find('\n', at), text.size());
@@ -400,6 +410,7 @@ VQLEngine::performCreates(const SignedDimensionStep &dimStep,
   zigzag::DimRef dim = resolveDimension(dimStep.dimName);
 
   for (zigzag::CellRef in : inputs) {
+    this->arena().consumeWork();
     if (!core_->arena().contains(in)) {
       continue;
     }
@@ -413,6 +424,7 @@ VQLEngine::performCreates(const SignedDimensionStep &dimStep,
 
     std::vector<zigzag::CellRef> created;
     for (const auto &c : dimStep.creates) {
+      this->arena().consumeWork();
       zigzag::CellRef newC = zigzag::noCell;
       if (c.kind == CreateValue::Kind::Empty) {
         newC = core_->arena().makeCell();
@@ -491,6 +503,7 @@ VQLEngine::evaluateStep(const PathStep &step,
         *std::get<std::shared_ptr<MacroDimensionGroup>>(step.selector);
     auto runOnce = [&](std::vector<zigzag::CellRef> in) {
       for (const auto &innerStep : mg.steps) {
+        this->arena().consumeWork();
         in = evaluateStep(innerStep, in);
       }
       return in;
@@ -509,6 +522,7 @@ VQLEngine::evaluateStep(const PathStep &step,
       }
       int iters = 0;
       while (iters++ < 1000) {
+        this->arena().consumeWork();
         auto next = runOnce(cur);
         if (next == cur || next.empty()) {
           break;
@@ -535,6 +549,7 @@ VQLEngine::evaluateStep(const PathStep &step,
         }
       }
       for (zigzag::CellRef c : currentCells) {
+        this->arena().consumeWork();
         auto res = core_->value(c, offset, length);
         if (res.has_value()) {
           stepOutput.push_back(*res);
@@ -547,10 +562,12 @@ VQLEngine::evaluateStep(const PathStep &step,
       const auto needle =
           textOfValue(evaluateValueExpr(fn.args[0], zigzag::noCell));
       for (const auto &info : coordinator_.stores()) {
+        this->arena().consumeWork();
         if (!info.manifold || !info.store) {
           continue;
         }
         for (const auto &slot : info.manifold->cells()) {
+          this->arena().consumeWork();
           if (info.manifold->textOf(slot.birthOp, *info.store).find(needle) !=
               std::string::npos) {
             stepOutput.push_back(
@@ -647,6 +664,7 @@ VQLEngine::evaluateStep(const PathStep &step,
         auto gen = core_->cloneGenerator(targetCell);
         std::vector<zigzag::CellRef> attachedClones;
         for (zigzag::CellRef c : currentCells) {
+          this->arena().consumeWork();
           zigzag::CellRef cloneCell = gen();
           core_->link(c, dim, direction, cloneCell);
           attachedClones.push_back(cloneCell);
@@ -674,6 +692,7 @@ VQLEngine::evaluateStep(const PathStep &step,
   // Master Dereference >
   if (step.derefMaster) {
     for (auto &c : stepOutput) {
+      this->arena().consumeWork();
       c = coordinator_.derefCloneMaster(c).value_or(c);
     }
   }
@@ -682,8 +701,10 @@ VQLEngine::evaluateStep(const PathStep &step,
   if (!step.predicates.empty()) {
     std::vector<zigzag::CellRef> filtered;
     for (zigzag::CellRef c : stepOutput) {
+      this->arena().consumeWork();
       bool allPassed = true;
       for (const auto &pred : step.predicates) {
+        this->arena().consumeWork();
         if (!evaluatePredicate(pred, c)) {
           allPassed = false;
           break;
@@ -739,6 +760,7 @@ zigzag::CellRef VQLEngine::cellFromValue(const zigzag::vortex::CellValue &val) {
 
 zigzag::vortex::CellValue
 VQLEngine::evaluateValueExpr(const ValueExpr &expr, zigzag::CellRef context) {
+  this->arena().consumeWork();
   if (std::holds_alternative<ScalarLiteral>(expr.kind)) {
     const auto &lit = std::get<ScalarLiteral>(expr.kind);
     if (std::holds_alternative<std::string>(lit.value)) {
@@ -766,9 +788,9 @@ VQLEngine::evaluateValueExpr(const ValueExpr &expr, zigzag::CellRef context) {
 
   if (std::holds_alternative<std::shared_ptr<PathExpression>>(expr.kind)) {
     const auto &path = *std::get<std::shared_ptr<PathExpression>>(expr.kind);
-    auto cells       = evaluatePath(path, context != zigzag::noCell
-                                              ? std::vector<zigzag::CellRef>{context}
-                                              : std::vector<zigzag::CellRef>{});
+    auto cells = evaluatePath(path, context != zigzag::noCell
+                                        ? std::vector<zigzag::CellRef>{context}
+                                        : std::vector<zigzag::CellRef>{});
     if (!cells.empty()) {
       return core_->render(cells[0]);
     }
@@ -859,6 +881,7 @@ bool VQLEngine::compareValues(const zigzag::vortex::CellValue &left, CompOp op,
 
 bool VQLEngine::evaluateFactor(const BooleanFactor &factor,
                                zigzag::CellRef context) {
+  this->arena().consumeWork();
   bool result = false;
 
   if (std::holds_alternative<ComparisonExpr>(factor.test)) {
@@ -888,6 +911,7 @@ bool VQLEngine::evaluateFactor(const BooleanFactor &factor,
 }
 
 bool VQLEngine::evaluateTerm(const BooleanTerm &term, zigzag::CellRef context) {
+  this->arena().consumeWork();
   return std::ranges::all_of(term.factors, [this, context](const auto &factor) {
     return evaluateFactor(factor, context);
   }); // Short-circuit AND
@@ -895,6 +919,7 @@ bool VQLEngine::evaluateTerm(const BooleanTerm &term, zigzag::CellRef context) {
 
 bool VQLEngine::evaluatePredicate(const BooleanExpr &expr,
                                   zigzag::CellRef context) {
+  this->arena().consumeWork();
   return std::ranges::any_of(expr.terms, [this, context](const auto &term) {
     return evaluateTerm(term, context);
   }); // Short-circuit OR
@@ -910,6 +935,7 @@ VQLEngine::executeBlock(const ExecutionBlock &block) {
 void VQLEngine::evaluateBindings(
     const ExecutionBlock &block, std::size_t bindingIndex,
     std::vector<zigzag::CellRef> &accumulatedResults) {
+  this->arena().consumeWork();
   if (bindingIndex >= block.bindings.size()) {
     // All bindings completed, test where clause
     if (block.where.has_value()) {
@@ -927,6 +953,7 @@ void VQLEngine::evaluateBindings(
     const auto &fc = std::get<ForClause>(binding);
     auto inCells   = evaluatePath(fc.inPath);
     for (zigzag::CellRef c : inCells) {
+      this->arena().consumeWork();
       env_[fc.varName] = {c};
       evaluateBindings(block, bindingIndex + 1, accumulatedResults);
     }
@@ -949,6 +976,7 @@ void VQLEngine::executeActionClause(
   if (std::holds_alternative<ReturnClause>(action.clause)) {
     const auto &ret = std::get<ReturnClause>(action.clause);
     for (const auto &item : ret.items) {
+      this->arena().consumeWork();
       if (std::holds_alternative<PathExpression>(item.item)) {
         auto res = evaluatePath(std::get<PathExpression>(item.item));
         accumulatedResults.insert(accumulatedResults.end(), res.begin(),
@@ -958,6 +986,7 @@ void VQLEngine::executeActionClause(
         zigzag::CellRef resultCell = core_->arena().makeCell();
         std::vector<zigzag::CellRef> cur{resultCell};
         for (const auto &step : fw.steps) {
+          this->arena().consumeWork();
           cur = evaluateStep(step, cur);
         }
         accumulatedResults.push_back(resultCell);
@@ -983,6 +1012,7 @@ void VQLEngine::executeActionClause(
 void VQLEngine::executeEffectClause(
     const EffectClause &eff, std::vector<zigzag::CellRef> &accumulatedResults) {
   for (const auto &item : eff.items) {
+    this->arena().consumeWork();
     if (std::holds_alternative<PathExpression>(item.item)) {
       auto res = evaluatePath(std::get<PathExpression>(item.item));
       accumulatedResults.insert(accumulatedResults.end(), res.begin(),
@@ -1007,6 +1037,7 @@ void VQLEngine::executeEffectClause(
               item.item);
       auto inCells = evaluatePath(p.first.inPath);
       for (zigzag::CellRef c : inCells) {
+        this->arena().consumeWork();
         env_[p.first.varName] = {c};
         if (p.second) {
           executeEffectClause(*p.second, accumulatedResults);

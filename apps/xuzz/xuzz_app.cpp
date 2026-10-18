@@ -52,7 +52,7 @@
 #include "common/xanadu/zigzag/filesystem_lens.hpp"
 #include "common/xanadu/zigzag/projection_lens.hpp"
 #include "common/xanadu/zigzag/projection_session.hpp"
-#include "common/xanadu/zigzag/zz_xudu_projector.hpp"
+#include "common/xanadu/zigzag/xanadu_projector.hpp"
 #include "common/xanadu/zigzag/zzcore.hpp"
 
 #include "common/ui/hypertime_graph.hpp"
@@ -121,7 +121,7 @@ void applyKeymap(
       const bool shadowsTab =
           std::ranges::any_of(keymap.bindings, [&](const auto &binding) {
             return xanadu::canonicalKeymapAction(binding.first)
-                       .starts_with("std:xudu/doc_") &&
+                       .starts_with("std:xuzz/doc_") &&
                    gleditor::parseKeyCombo(binding.second) == combo;
           });
       if (shadowsTab) continue;
@@ -494,7 +494,7 @@ int XuzzApp::run(const int argc, char **argv) {
                                         .passphrase = {}},
         openingStore);
     if (!opts.quiet) {
-      std::cout << "xudu: prepared " << opening.str() << " as " << manifest
+      std::cout << "xuzz: prepared " << opening.str() << " as " << manifest
                 << "\n";
     }
   }
@@ -583,7 +583,7 @@ int XuzzApp::run(const int argc, char **argv) {
   try {
     (void)session->publicationSubscriptions();
   } catch (const std::exception &error) {
-    GLEDITOR_LOG_DEBUG("xudu.publication", "Subscription cache refused: {}",
+    GLEDITOR_LOG_DEBUG("xuzz.publication", "Subscription cache refused: {}",
                        error.what());
   }
   try {
@@ -592,7 +592,7 @@ int XuzzApp::run(const int argc, char **argv) {
     for (const auto &catalog : session->publicationDiscovery().cachedCatalogs())
       swarmCatalog.ingestAuthorCatalog(catalog);
   } catch (const std::exception &error) {
-    GLEDITOR_LOG_DEBUG("xudu.discovery", "Cached catalog refused: {}",
+    GLEDITOR_LOG_DEBUG("xuzz.discovery", "Cached catalog refused: {}",
                        error.what());
   }
   xanadu::SwarmTelescopeOverlay swarmTelescope(swarmCatalog, renderer, "");
@@ -994,8 +994,8 @@ int XuzzApp::run(const int argc, char **argv) {
   // 5. Zigzag presentation & BridgeCoordinator
   auto zigzagPresentation = std::make_shared<zigzag::ZigzagVisualizer>("");
   auto &bridgeStore       = session->store(0);
-  zigzagPresentation->bindXuduStore(bridgeStore,
-                                    bridgeStore.primaryCurrentVersion());
+  zigzagPresentation->bindXanaduStore(bridgeStore,
+                                      bridgeStore.primaryCurrentVersion());
   const auto initialLayout = xanadu::LayoutConfig::fromStore(
       session->systemStore(xanadu::SystemDocKind::Layout));
   zigzagPresentation->setPresentationConfig(initialLayout.zigzag);
@@ -1171,7 +1171,7 @@ int XuzzApp::run(const int argc, char **argv) {
     if (!zigzagPresentation->sliceHead().isZero()) {
       sliceHeads[zigzagStoreIndex] = zigzagPresentation->sliceHead();
     }
-    zigzagPresentation->bindXuduStore(session->store(storeIndex), version);
+    zigzagPresentation->bindXanaduStore(session->store(storeIndex), version);
     zigzagStoreIndex       = storeIndex;
     sliceHeads[storeIndex] = version;
     map.setStoreIndex(storeIndex);
@@ -1608,7 +1608,7 @@ int XuzzApp::run(const int argc, char **argv) {
            &quotationOverlay, &storeObjectManager, &pouchDrawer, &map,
            radialMenu.get()}) {
     modalScopes.push_back(state->focusManager.registerScope(
-        *scope, {.allowedCommands = {"quit", "std:xudu/quit"}}));
+        *scope, {.allowedCommands = {"quit", "std:xuzz/quit"}}));
   }
 
   renderer->addPickObserver(docSwitcher.get());
@@ -3430,7 +3430,7 @@ int XuzzApp::run(const int argc, char **argv) {
   for (const auto &result : session->waitForContentRetention()) {
     if (!result.outcome) {
       retentionFailed = true;
-      GLEDITOR_LOG_WARN("xudu.publication",
+      GLEDITOR_LOG_WARN("xuzz.publication",
                         "Draft saved; offline quotation retention failed: {}",
                         result.outcome.error());
     }

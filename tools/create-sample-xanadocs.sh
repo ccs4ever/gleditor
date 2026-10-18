@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # tools/create-sample-xanadocs.sh
-# Generate all sample Xanadocs by invoking the xudu application directly in headless mode.
+# Generate all sample Xanadocs by invoking the xuzz application directly in headless mode.
 #
 # Every invocation binds the same permascroll, because these samples are one
 # author's documents and a document holds no primedia of its own: what makes
@@ -12,19 +12,19 @@
 
 set -euo pipefail
 
-XUDU="./build/xudu"
+XUZZ="./build/xuzz"
 BASE_DIR="tests/samples/xudu"
 SOURCES_DIR="${BASE_DIR}/sources"
 PERMA="${BASE_DIR}/permascroll"
 XUZZ_BASE_DIR="tests/samples/xuzz"
 XUZZ_PERMA="${XUZZ_BASE_DIR}/slice_then_xanadoc/permascroll"
 
-if [[ ! -x "${XUDU}" ]]; then
-  echo "Error: ${XUDU} not found or not executable. Build it first with: make -j\$(nproc) xudu" >&2
+if [[ ! -x "${XUZZ}" ]]; then
+  echo "Error: ${XUZZ} not found or not executable. Build it first with: make -j\$(nproc) xuzz" >&2
   exit 1
 fi
 
-echo "==> Creating sample Xanadocs using ${XUDU}..."
+echo "==> Creating sample Xanadocs using ${XUZZ}..."
 
 # Clean target directories and old scroll
 rm -rf "${BASE_DIR}/core_hypertext" "${BASE_DIR}/multimedia" "${BASE_DIR}/beams" "${PERMA}" \
@@ -37,13 +37,13 @@ mkdir -p "${BASE_DIR}/core_hypertext" "${BASE_DIR}/multimedia" "${BASE_DIR}/beam
 echo "--> Creating Core Hypertext sample stores..."
 
 # xanadoc_a (Doc A base)
-${XUDU} "${BASE_DIR}/core_hypertext/xanadoc_a" \
+${XUZZ} "${BASE_DIR}/core_hypertext/xanadoc_a" \
   --permascroll "${PERMA}" \
   --import "${SOURCES_DIR}/literary_machines_doc_a.txt" \
   --export-osmic --headless
 
 # xanadoc_b (Doc B with transcluded quote from Doc A)
-${XUDU} "${BASE_DIR}/core_hypertext/xanadoc_b" \
+${XUZZ} "${BASE_DIR}/core_hypertext/xanadoc_b" \
   --permascroll "${PERMA}" \
   --import "${SOURCES_DIR}/intertwingularity_doc_b_prefix.txt" \
   --open-store "${BASE_DIR}/core_hypertext/xanadoc_a" \
@@ -52,7 +52,7 @@ ${XUDU} "${BASE_DIR}/core_hypertext/xanadoc_b" \
   --export-osmic --headless
 
 # Update xanadoc_a with all 8 author links pointing to Doc B spans
-${XUDU} "${BASE_DIR}/core_hypertext/xanadoc_a" \
+${XUZZ} "${BASE_DIR}/core_hypertext/xanadoc_a" \
   --permascroll "${PERMA}" \
   --open-store "${BASE_DIR}/core_hypertext/xanadoc_b" \
   --link "0@Links must be two-way and visible:35,1:0:60:comment:author:Theodor_Holm_Nelson" \
@@ -66,7 +66,7 @@ ${XUDU} "${BASE_DIR}/core_hypertext/xanadoc_a" \
   --export-osmic --headless
 
 # unified_store (both docs, transclusion, and all 8 link types in one store)
-${XUDU} "${BASE_DIR}/core_hypertext/unified_store" \
+${XUZZ} "${BASE_DIR}/core_hypertext/unified_store" \
   --permascroll "${PERMA}" \
   --import "${SOURCES_DIR}/literary_machines_doc_a.txt" \
   --import-branch "${SOURCES_DIR}/intertwingularity_doc_b_prefix.txt" \
@@ -88,13 +88,13 @@ ${XUDU} "${BASE_DIR}/core_hypertext/unified_store" \
 echo "--> Creating Multimedia sample stores..."
 
 # 01_multipage_pdf
-${XUDU} "${BASE_DIR}/multimedia/01_multipage_pdf" \
+${XUZZ} "${BASE_DIR}/multimedia/01_multipage_pdf" \
   --permascroll "${PERMA}" \
   --import "tests/samples/multipage.pdf" \
   --export-osmic --headless
 
 # 02_pdf_linked_xanadoc
-${XUDU} "${BASE_DIR}/multimedia/02_pdf_linked_xanadoc" \
+${XUZZ} "${BASE_DIR}/multimedia/02_pdf_linked_xanadoc" \
   --permascroll "${PERMA}" \
   --import "tests/samples/multipage.pdf" \
   --import-branch "${SOURCES_DIR}/multipage_pdf_review.txt" \
@@ -103,7 +103,7 @@ ${XUDU} "${BASE_DIR}/multimedia/02_pdf_linked_xanadoc" \
   --export-osmic --headless
 
 # 03_mixed_text_image
-${XUDU} "${BASE_DIR}/multimedia/03_mixed_text_image" \
+${XUZZ} "${BASE_DIR}/multimedia/03_mixed_text_image" \
   --permascroll "${PERMA}" \
   --import "tests/samples/sample_image.png" \
   --import-branch "${SOURCES_DIR}/mixed_text_image.txt" \
@@ -111,19 +111,19 @@ ${XUDU} "${BASE_DIR}/multimedia/03_mixed_text_image" \
   --export-osmic --headless
 
 # 04_audio_doc
-${XUDU} "${BASE_DIR}/multimedia/04_audio_doc" \
+${XUZZ} "${BASE_DIR}/multimedia/04_audio_doc" \
   --permascroll "${PERMA}" \
   --import "tests/samples/sample_audio.wav" \
   --export-osmic --headless
 
 # 05_video_doc
-${XUDU} "${BASE_DIR}/multimedia/05_video_doc" \
+${XUZZ} "${BASE_DIR}/multimedia/05_video_doc" \
   --permascroll "${PERMA}" \
   --import "tests/samples/sample_video_seekable.mp4" \
   --export-osmic --headless
 
 # 06_embedded_media_page
-${XUDU} "${BASE_DIR}/multimedia/06_embedded_media_page" \
+${XUZZ} "${BASE_DIR}/multimedia/06_embedded_media_page" \
   --permascroll "${PERMA}" \
   --import "${SOURCES_DIR}/embedded_media_page_p1.txt" \
   --insert-text "0:append:tests/samples/sample_audio.wav" \
@@ -134,7 +134,7 @@ ${XUDU} "${BASE_DIR}/multimedia/06_embedded_media_page" \
   --export-osmic --headless
 
 # 07_audio_transclusion
-${XUDU} "${BASE_DIR}/multimedia/07_audio_transclusion" \
+${XUZZ} "${BASE_DIR}/multimedia/07_audio_transclusion" \
   --permascroll "${PERMA}" \
   --import "tests/samples/sample_audio.wav" \
   --import-branch "${SOURCES_DIR}/audio_transclusion_b_prefix.txt" \
@@ -143,7 +143,7 @@ ${XUDU} "${BASE_DIR}/multimedia/07_audio_transclusion" \
   --export-osmic --headless
 
 # 08_video_transclusion
-${XUDU} "${BASE_DIR}/multimedia/08_video_transclusion" \
+${XUZZ} "${BASE_DIR}/multimedia/08_video_transclusion" \
   --permascroll "${PERMA}" \
   --import "tests/samples/sample_video_seekable.mp4" \
   --import-branch "${SOURCES_DIR}/video_transclusion_b_prefix.txt" \
@@ -152,7 +152,7 @@ ${XUDU} "${BASE_DIR}/multimedia/08_video_transclusion" \
   --export-osmic --headless
 
 # 09_image_transclusion
-${XUDU} "${BASE_DIR}/multimedia/09_image_transclusion" \
+${XUZZ} "${BASE_DIR}/multimedia/09_image_transclusion" \
   --permascroll "${PERMA}" \
   --import "tests/samples/sample_image.png" \
   --import-branch "${SOURCES_DIR}/image_transclusion_b_prefix.txt" \
@@ -161,7 +161,7 @@ ${XUDU} "${BASE_DIR}/multimedia/09_image_transclusion" \
   --export-osmic --headless
 
 # 10_svg_static_image
-${XUDU} "${BASE_DIR}/multimedia/10_svg_static_image" \
+${XUZZ} "${BASE_DIR}/multimedia/10_svg_static_image" \
   --permascroll "${PERMA}" \
   --import "tests/samples/sample_image.svg" \
   --import-branch "${SOURCES_DIR}/mixed_text_svg.txt" \
@@ -174,7 +174,7 @@ ${XUDU} "${BASE_DIR}/multimedia/10_svg_static_image" \
 echo "--> Creating Beams sample stores..."
 
 # 01_one_to_many
-${XUDU} "${BASE_DIR}/beams/01_one_to_many" \
+${XUZZ} "${BASE_DIR}/beams/01_one_to_many" \
   --permascroll "${PERMA}" \
   --import "${SOURCES_DIR}/hypertext_theses_doc_a.txt" \
   --import-branch "${SOURCES_DIR}/supporting_evidence_doc_b.txt" \
@@ -182,7 +182,7 @@ ${XUDU} "${BASE_DIR}/beams/01_one_to_many" \
   --export-osmic --headless
 
 # 02_many_to_many
-${XUDU} "${BASE_DIR}/beams/02_many_to_many" \
+${XUZZ} "${BASE_DIR}/beams/02_many_to_many" \
   --permascroll "${PERMA}" \
   --import "${SOURCES_DIR}/hypertext_theses_doc_a.txt" \
   --import-branch "${SOURCES_DIR}/supporting_evidence_doc_b.txt" \
@@ -190,7 +190,7 @@ ${XUDU} "${BASE_DIR}/beams/02_many_to_many" \
   --export-osmic --headless
 
 # 03_multi_span_stacked
-${XUDU} "${BASE_DIR}/beams/03_multi_span_stacked" \
+${XUZZ} "${BASE_DIR}/beams/03_multi_span_stacked" \
   --permascroll "${PERMA}" \
   --import "${SOURCES_DIR}/hypertext_theses_doc_a.txt" \
   --import-branch "${SOURCES_DIR}/supporting_evidence_doc_b.txt" \
@@ -204,9 +204,9 @@ ${XUDU} "${BASE_DIR}/beams/03_multi_span_stacked" \
 # -----------------------------------------------------------------------------
 echo "--> Creating Xuzz convergence sample store..."
 
-${XUDU} "${XUZZ_BASE_DIR}/slice_then_xanadoc" \
+${XUZZ} "${XUZZ_BASE_DIR}/slice_then_xanadoc" \
   --permascroll "${XUZZ_PERMA}" \
   --structure-script "${XUZZ_BASE_DIR}/sources/slice_then_xanadoc.xuzz" \
   --export-osmic --headless
 
-echo "==> All sample Xanadocs successfully created by xudu application!"
+echo "==> All sample Xanadocs successfully created by xuzz application!"

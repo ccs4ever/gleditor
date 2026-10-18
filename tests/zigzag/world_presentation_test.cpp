@@ -241,9 +241,9 @@ TEST(WorldPresentationTest,
   EXPECT_FALSE(
       sat.snapshots().front()->find(100)->fitted.shaping.glyphs.empty());
   ASSERT_FALSE(device.drawn.empty());
-  auto tag    = render::unpackPickingTag(device.identities.front(),
-                                         device.drawn.front().paper & 65535U, 0);
-  tag.kind    = render::tagKindOverlay;
+  auto tag = render::unpackPickingTag(device.identities.front(),
+                                      device.drawn.front().paper & 65535U, 0);
+  tag.kind = render::tagKindOverlay;
   auto widget = render::resolveOverlayWidget(state.overlayPickScene, tag);
   ASSERT_TRUE(widget);
   gleditor::a11y::Tree tree;

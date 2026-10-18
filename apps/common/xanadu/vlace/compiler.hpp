@@ -151,6 +151,12 @@ public:
   /// is truncated rather than looping (§6.7).
   [[nodiscard]] std::string render(const ValuePtr &v, int depthBudget = 10000);
 
+  /// Force a portable result under the same evaluator budget, without
+  /// rendering.
+  std::expected<ValuePtr, EvalError> forceValue(ValuePtr value) {
+    return force(std::move(value));
+  }
+
   [[nodiscard]] zigzag::vortex::VortexCore &core() noexcept { return core_; }
 
 private:
@@ -203,6 +209,7 @@ private:
   zigzag::vortex::VortexCore &core_;
   zigzag::vortex::VortexVM &vm_;
   EnvPtr globals_{std::make_shared<Env>()};
+  std::size_t evaluationDepth_{0};
   // Constructor name -> arity. Nil/Cons and True/False are pre-registered.
   std::unordered_map<std::string, std::size_t> ctorArity_;
   // Record constructor name -> ordered field names, in Inputs-Wing order

@@ -304,10 +304,10 @@ void MediaWidget::deviceReady(render::RenderDevice &device,
                               const render::PipelineDesc &documentPipeline) {
   device_       = &device;
   pipelineDesc_ = documentPipeline;
-  drawnFont_    = ui::scaledFontDescription(fontName_, ui::FontRole::Caption,
-                                            ui::UiMetrics{}, ui::defaultTheme());
-  canvas_       = std::make_unique<Canvas>(&device, drawnFont_);
-  liveCanvas_   = std::make_unique<Canvas>(&device, drawnFont_);
+  drawnFont_  = ui::scaledFontDescription(fontName_, ui::FontRole::Caption,
+                                          ui::UiMetrics{}, ui::defaultTheme());
+  canvas_     = std::make_unique<Canvas>(&device, drawnFont_);
+  liveCanvas_ = std::make_unique<Canvas>(&device, drawnFont_);
   drawnScreenSpace_ = screenSpace_;
   // Embedded in 3D world space uses depth testing; screen overlay turns it off
   canvas_->createPipeline(documentPipeline, !screenSpace_);
@@ -546,7 +546,7 @@ void MediaWidget::drawFrame(FrameContext &ctx) {
     const float gap =
         std::min(std::max(0.0F, theme_.gapEm * lineHeight), padding);
     const float available = std::max(0.0F, width_ - 2.0F * padding);
-    const auto textBox    = [&](ui::Rect box, std::string_view label,
+    const auto textBox = [&](ui::Rect box, std::string_view label,
                              std::uint32_t foreground, std::uint32_t background,
                              text::EllipsisAt at = text::EllipsisAt::End) {
       if (box.width <= 0.0F || box.height < lineHeight) return;
@@ -626,7 +626,7 @@ void MediaWidget::drawFrame(FrameContext &ctx) {
         std::max(0.0F, height_ - 2.0F * padding - headerHeight - gap));
     const std::string timeStr = formatTime(chromeState_.seconds) + " / " +
                                 formatTime(chromeState_.duration);
-    const auto timeWidth = shaping_.fitted(timeStr, font_, {}).widthPx;
+    const auto timeWidth      = shaping_.fitted(timeStr, font_, {}).widthPx;
     std::vector<ui::LayoutItem> controls;
     controls.reserve(clickables_.controls().size() + 1);
     for (const auto &ctrl : clickables_.controls()) {
@@ -911,7 +911,7 @@ void MediaWidget::describe(a11y::Builder &into) {
   auto &seekNode    = into.add(seekId, a11y::Role::Label);
   seekNode.label    = "Playback Position";
   seekNode.value    = formatTime(player_->positionSeconds()) + " of " +
-                   formatTime(player_->durationSeconds());
+                      formatTime(player_->durationSeconds());
   seekNode.actions =
       a11y::bit(a11y::Action::Click) | a11y::bit(a11y::Action::SetValue);
   seekNode.bounds = seekBounds_;

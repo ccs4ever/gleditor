@@ -1,14 +1,14 @@
 # Distributed Vortex over the swarm: the Spool-Mesh model
 
-This document is a grounded design investigation, not an implementation. Nothing described here is
-built; no tracked repository file is modified by it. It evaluates adding multiprocess and
-network-transparent distribution — in the Julia and Erlang sense of location-transparent processes
-and futures — to the Vortex virtual machine, carried over the existing BitTorrent, BEP 46, and
-OpenPGP identity layer. It is the distributed sequel to the single-machine
-[Vortex multithreading study](vortex-multithreading-study.md): where that study stopped the Global
-Interpreter Lock by giving each OS worker its own `ArenaManifold` over one shared immutable base,
-this document asks what changes when the next worker is not on the next core but on another machine,
-reachable only through a churning DHT.
+This document specifies the distributed-runtime target. The implementation status below
+distinguishes the existing loopback foundation from the remaining work. It evaluates adding
+multiprocess and network-transparent distribution — in the Julia and Erlang sense of
+location-transparent processes and futures — to the Vortex virtual machine, carried over the
+existing BitTorrent, BEP 46, and OpenPGP identity layer. It is the distributed sequel to the
+single-machine [Vortex multithreading study](vortex-multithreading-study.md): where that study
+stopped the Global Interpreter Lock by giving each OS worker its own `ArenaManifold` over one shared
+immutable base, this document asks what changes when the next worker is not on the next core but on
+another machine, reachable only through a churning DHT.
 
 The model is called **Spool-Mesh**: a mesh of share-nothing arenas that communicate only by
 content-addressed, immutable messages. Its one-sentence thesis is that distribution is not a new
@@ -29,6 +29,53 @@ credibility. The verified anchors are collected once here and repeated in contex
 standing `RefusingVerifier` default (`payment_verifier.hpp:104`; controller default
 `identity_network_controller.hpp:412`), and the `std::expected`-refusing decoders
 (`identity_serialization.hpp:62-72`).
+
+## Implementation status (2026-10-17)
+
+The Spool-Mesh distributed runtime is implemented in `apps/common/xanadu/vortex/mesh_*` alongside
+the `spool_mesh` loopback foundation.
+
+Verified increments:
+
+- The published-value boundary promotes and seals actual graphs, signs their global root, parent,
+  computation identity and continuation metadata, fetches metadata before payload, verifies sealed
+  history and content, and imports receiver-local references while preserving published spans,
+  scalar bits, cell-relocation handles and foreign operation handles (`ValueKind::ForeignOpHandle`
+  with `d.op-label` provenance). `MeshValueTest` checks the round trip, tampering, missing
+  dependencies, foreign operation-handle identity preservation and byte-identical operation output
+  for differently ordered result batches.
+- Immutable jobs fetch source programs and optional base snapshots in a background worker, enforce
+  signed capabilities, delegated device identity, Hashcash and explicit default-refuse admission,
+  evaluate through the real VPL/VQL/VProlog/VLace engines under resource limits, and seed signed
+  results. Raw Vortex source is refused explicitly until a sealed instruction artifact has an
+  execution entry point. `MeshJobsTest` checks all four frontends, asynchronous polling,
+  deduplication and refusal.
+- The actor extension has bounded named-error codecs, authenticated peer dispatch, cumulative BEP 10
+  fragment framing and queued sends. Actual session plugins share the content listener, and each
+  downloaded torrent is isolated under its own info-hash directory. `MeshSwarmTest` verifies
+  delegated device authentication, actor control and verified program content over a real two-peer
+  socket connection. Identity extensions use local IDs 24–27 to avoid libtorrent built-ins; actor
+  local ID remains 6.
+- Actor contexts, opaque PIDs, persistent monotonic device epochs (`mesh_epoch`), bounded mailboxes,
+  acknowledgements/retries, content deduplication, immutable redispatch and three-state monitors
+  with fresh discovery evidence are covered by `MeshEpochTest` and `MeshActorTest`. Resource limits
+  apply inside frontend evaluation, including recursive work.
+- Signed message-boundary continuation encoding, the pending-to-committed DHT publication state
+  machine and checkpoint reactivation (`MeshActorRuntime::resume`, `resolveCheckpoint`) are
+  implemented. `MeshCheckpointTest` verifies that only an acknowledgement for the exact key, salt,
+  hash and sequence commits a checkpoint, and `MeshCheckpointNetworkTest` (under
+  `tools/swarm-netns-test.sh`) verifies real BEP 46 DHT publication, publisher teardown, route
+  blackhole partition refusal, partition healing, state/dedup restoration and higher-epoch
+  incarnation handoff.
+- `MeshHost` and the shared CLI runner (`mesh_cli`, exposed on `vpl`, `vquery`, `vprolog` and
+  `vlace` via `--mesh-worker`, `--mesh-run` and `--mesh-help`) wire the swarm transport,
+  authenticated job admission, background evaluation and deterministic multi-worker result merging
+  into a complete multiprocess lifecycle. `MeshHostTest`, `MeshHostSocketTest` and `MeshCliTest`
+  verify closed worker sets, degraded/expired worker refusal, two-host socket futures and separate
+  requester subprocesses across all four frontends against a real worker and GnuPG signer.
+
+Application command names use `std:xuzz`; shared project/protocol names use `xanadu`. Naming cleanup
+retains explicit compatibility aliases and fixture paths pending the separate migration work.
 
 ## Scope and relationship to the multithreading study
 
@@ -177,7 +224,7 @@ on new infrastructure. The boundary is drawn, not invented.
 | Immutable copy-on-send       | content-addressed value → free idempotent dedup                       | the substrate's addressing                                               |
 | Node identity                | device-salted BEP 46 key + `DeviceDelegation`                         | `swarm.hpp:62`, `user_permascroll.hpp:38`                                |
 | Node authentication          | `PeerChallenge` / `PeerChallengeResponse`, gated by `trustDelegation` | `identity_layout.hpp:457-479`, `identity_network_controller.hpp:280-292` |
-| Discovery                    | topic rendezvous (`xudu:topic:` / `xudu:collab:`)                     | `author_catalog.cpp:131`, `swarm.cpp:1378-1384`                          |
+| Discovery                    | topic rendezvous (`xanadu:topic:` / `xanadu:collab:`)                 | `author_catalog.cpp:131`, `swarm.cpp:1378-1384`                          |
 | Durable actor state pointer  | BEP 46 mutable name                                                   | `swarm.hpp:40-54`, `:226-232`                                            |
 | Bulk write-set transfer      | sealed torrent fetched metadata-first by infohash                     | `swarm.hpp:177-182`                                                      |
 | Backpressure / cancellation  | `run maxCycles`, `PromotionBudget`, `allocationLimit_`                | `vortex_vm.cpp:1050`, `arena_manifold.hpp:222-224`, `:409-414`           |
@@ -235,13 +282,13 @@ pointer — it must never silently discard a branch's content.
 ## The wire mapping
 
 Live actor control is the one thing the swarm layer lacks and the one new piece this design
-proposes: a BEP 10 wire extension named `xudu_vortex_actor`, faithful to the existing four
+proposes: a BEP 10 wire extension named `xanadu_vortex_actor`, faithful to the existing four
 (`identity_layout.hpp:245-272`). It advertises itself in the handshake `m` dictionary with a fixed
-local id. The four extant extensions hold local ids 2 through 5, so the proposal is **local id 6**,
-and they occupy `MessageType` codes `0x01` through `0x3F`, so the proposal reserves the sub-range
-`0x40` through `0x4F`. The frame format is unchanged: a 4-byte big-endian length, extended id 20,
-the peer's local id, then one `MessageType` byte and a bencoded dictionary, no larger than
-`kMaxPayloadBytes` of 64 KiB (`identity_layout.hpp:30`).
+local id. The identity extensions use local ids 24 through 27 to avoid libtorrent built-ins; the
+actor extension uses **local id 6**, and they occupy `MessageType` codes `0x01` through `0x3F`, so
+the proposal reserves the sub-range `0x40` through `0x4F`. The frame format is unchanged: a 4-byte
+big-endian length, extended id 20, the peer's local id, then one `MessageType` byte and a bencoded
+dictionary, no larger than `kMaxPayloadBytes` of 64 KiB (`identity_layout.hpp:30`).
 
 | `MessageType`          | Code   | Purpose                                                                       |
 | ---------------------- | ------ | ----------------------------------------------------------------------------- |
@@ -279,8 +326,8 @@ acked sequence wins. This gives genuine survival and migration — a new node re
 fetches the sealed arena, and resumes — but honestly only at **checkpoint granularity**: a DHT put
 and ack is seconds, not microseconds. It is Erlang `hibernate`-to-disk-and-respawn, fine for a
 durable service actor, wrong for an actor that mutates state thousands of times a second. Discovery
-is topic rendezvous — SHA-1 of `xudu:topic:` plus the canonical topic (`author_catalog.cpp:131`), or
-the ephemeral room target `xudu:collab:` (`swarm.cpp:1378-1384`) — and authentication is the
+is topic rendezvous — SHA-1 of `xanadu:topic:` plus the canonical topic (`author_catalog.cpp:131`),
+or the ephemeral room target `xanadu:collab:` (`swarm.cpp:1378-1384`) — and authentication is the
 device-key challenge-response `PeerChallenge` / `PeerChallengeResponse`
 (`identity_layout.hpp:457-479`), the challenge an unpredictable nonce, a peer that fails isolated
 and disconnected by `ConnectionDenial`.
@@ -343,7 +390,7 @@ merges by the stable key, and branches on conflict. This reuses `promote()`, pub
 and identity whole, blocks nothing, and needs none of the hard pieces. It is the honest sweet spot
 of the transport: coarse, asynchronous, idempotent, tolerant of eventual consistency.
 
-**Slice 2 — the `xudu_vortex_actor` BEP 10 extension.** The new local id, the `MessageType`
+**Slice 2 — the `xanadu_vortex_actor` BEP 10 extension.** The new local id, the `MessageType`
 sub-range, and `std::expected` decoders that refuse bad frames, then PIDs, mailboxes, and monitors
 in that order. Links come last, if ever.
 
@@ -365,7 +412,11 @@ guessed timeout. The exact capability-grant format for an authorized spawn — w
 is signed, how a budget is encoded — is unspecified. And it is unresolved whether
 checkpoint-granularity handoff (BEP 46 to a sealed torrent, seconds of latency, Erlang
 hibernate-and-respawn rather than hot message-passing) is acceptable for live actor migration, or
-whether a non-swarm side-channel is eventually required for latency-sensitive coupling.
+whether a non-swarm side-channel is eventually required for latency-sensitive coupling. See
+[`design/vortex-transport-and-or-parallelism-study.md`](vortex-transport-and-or-parallelism-study.md)
+for the follow-up architectural study evaluating transport alternatives (QUIC/Iroh, libp2p,
+Kafka-style `SegmentedOpsSpool` offset tailing, SQS/NATS leases) and cross-machine OR-parallelism
+(`choiceStack_`, DelPhi/Derby oracle paths, and Muse shadow-delta hydration).
 
 ______________________________________________________________________
 
@@ -374,5 +425,5 @@ positions (`_mp_position_codebase_realist.md`, `position-bittorrent-expert.md`) 
 orchestrating architect's synthesis (`synthesis-convergence.md`), with the distributed-systems
 position reflected through the synthesis; cross-referenced against the single-machine
 [multithreading study](vortex-multithreading-study.md), whose §4 distributed framing this document
-extends from threads to machines. Design investigation only; nothing is implemented, and the
-file-and-line citations are carried from the sources as the investigation's factual basis.
+extends from threads to machines. The implementation status above records subsequent work; the
+original file-and-line citations remain the investigation's factual basis.

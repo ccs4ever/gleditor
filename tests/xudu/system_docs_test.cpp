@@ -101,7 +101,7 @@ TEST(SystemDocsTest, ModalCommandsAreKeymapDataAndNotBindings) {
   xanadu::initializeSystemStore(store, SystemDocKind::Keymap);
   auto config = KeymapConfig::fromStore(store);
   EXPECT_EQ(config.modalGlobalCommands,
-            std::vector<std::string>{"std:xudu/quit"});
+            std::vector<std::string>{"std:xuzz/quit"});
   EXPECT_FALSE(config.bindingFor(xanadu::settings::kModalGlobalCommands));
   const auto head =
       xanadu::setSetting(store, store.primaryCurrentVersion(),
@@ -133,7 +133,7 @@ TEST(SystemDocsTest, KeymapScopesFollowTheActionFamily) {
   EXPECT_EQ(xanadu::keymapScope("std:ui/confirm_action"), "zigzag");
   EXPECT_EQ(xanadu::keymapScope("std:nav/zigzag_step_x_pos"), "");
   EXPECT_EQ(xanadu::keymapScope("std:edit/caret_left"), "document");
-  EXPECT_EQ(xanadu::keymapScope("std:xudu/save"), "");
+  EXPECT_EQ(xanadu::keymapScope("std:xuzz/save"), "");
   EXPECT_EQ(xanadu::keymapScope("std:xuzz/link_next"), "");
 }
 
@@ -617,34 +617,34 @@ TEST(SystemDocsTest, StoreExclusiveConfigLoaders) {
   EXPECT_FALSE(kmCfg.bindings.empty());
   EXPECT_EQ(kmCfg.bindingFor("new-doc"), "Ctrl+N");
   EXPECT_EQ(kmCfg.bindingFor(xanadu::settings::kKeymapNewDoc), "Ctrl+N");
-  EXPECT_EQ(kmCfg.bindingFor("std:xudu/new_doc"), "Ctrl+N");
-  EXPECT_EQ(xanadu::canonicalKeymapAction("new-doc"), "std:xudu/new_doc");
-  EXPECT_EQ(xanadu::legacyKeymapAction("std:xudu/new_doc"), "new-doc");
-  EXPECT_EQ(xanadu::canonicalKeymapAction("std:xudu/new_doc"),
-            "std:xudu/new_doc");
+  EXPECT_EQ(kmCfg.bindingFor("std:xuzz/new_doc"), "Ctrl+N");
+  EXPECT_EQ(xanadu::canonicalKeymapAction("new-doc"), "std:xuzz/new_doc");
+  EXPECT_EQ(xanadu::legacyKeymapAction("std:xuzz/new_doc"), "new-doc");
+  EXPECT_EQ(xanadu::canonicalKeymapAction("std:xuzz/new_doc"),
+            "std:xuzz/new_doc");
   EXPECT_EQ(xanadu::legacyKeymapAction("new-doc"), "new-doc");
 
   EXPECT_EQ(xanadu::canonicalKeymapAction("format-bold"),
-            "std:xudu/format_bold");
-  EXPECT_EQ(xanadu::legacyKeymapAction("std:xudu/format_bold"), "format-bold");
+            "std:xuzz/format_bold");
+  EXPECT_EQ(xanadu::legacyKeymapAction("std:xuzz/format_bold"), "format-bold");
   EXPECT_EQ(xanadu::canonicalKeymapAction("format-italic"),
-            "std:xudu/format_italic");
-  EXPECT_EQ(xanadu::legacyKeymapAction("std:xudu/format_italic"),
+            "std:xuzz/format_italic");
+  EXPECT_EQ(xanadu::legacyKeymapAction("std:xuzz/format_italic"),
             "format-italic");
   EXPECT_EQ(xanadu::canonicalKeymapAction("format-underline"),
-            "std:xudu/format_underline");
-  EXPECT_EQ(xanadu::legacyKeymapAction("std:xudu/format_underline"),
+            "std:xuzz/format_underline");
+  EXPECT_EQ(xanadu::legacyKeymapAction("std:xuzz/format_underline"),
             "format-underline");
-  EXPECT_EQ(xanadu::canonicalKeymapAction("save-document"), "std:xudu/save");
-  EXPECT_EQ(xanadu::canonicalKeymapAction("std:xudu/save_document"),
-            "std:xudu/save");
+  EXPECT_EQ(xanadu::canonicalKeymapAction("save-document"), "std:xuzz/save");
+  EXPECT_EQ(xanadu::canonicalKeymapAction("std:xuzz/save_document"),
+            "std:xuzz/save");
   EXPECT_EQ(xanadu::canonicalKeymapAction("insert-break"),
-            "std:xudu/page_break");
-  EXPECT_EQ(xanadu::canonicalKeymapAction("std:xudu/insert_break"),
-            "std:xudu/page_break");
+            "std:xuzz/page_break");
+  EXPECT_EQ(xanadu::canonicalKeymapAction("std:xuzz/insert_break"),
+            "std:xuzz/page_break");
   EXPECT_EQ(xanadu::canonicalKeymapAction("clear-bench"),
-            "std:xudu/clear_bench");
-  EXPECT_EQ(xanadu::legacyKeymapAction("std:xudu/clear_bench"), "clear-bench");
+            "std:xuzz/clear_bench");
+  EXPECT_EQ(xanadu::legacyKeymapAction("std:xuzz/clear_bench"), "clear-bench");
   EXPECT_EQ(xanadu::canonicalKeymapAction("bundle-execution"),
             "std:ui/bundle_execution");
   EXPECT_EQ(xanadu::legacyKeymapAction("std:ui/bundle_execution"),

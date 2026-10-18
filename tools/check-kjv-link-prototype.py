@@ -48,7 +48,7 @@ def main():
                for file in ('ops.nodes', 'store.tables')]
     before = {str(path.relative_to(out)): digest(path) for path in sources}
     env = dict(os.environ, SDL_VIDEODRIVER='offscreen', SDL_AUDIODRIVER='dummy',
-               LIBGL_ALWAYS_SOFTWARE='1', SPDLOG_LEVEL='xudu.links=debug',
+               LIBGL_ALWAYS_SOFTWARE='1', SPDLOG_LEVEL='xuzz.links=debug',
                KJV_PROTOTYPE_ROOT=str(out))
     command = ['tools/run-kjv-link-prototype.sh', '--backend', args.backend,
                '--resize', '1800,1050', '--chord', 'Alt+Shift+Return',

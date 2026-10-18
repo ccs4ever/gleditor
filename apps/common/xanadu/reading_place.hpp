@@ -78,7 +78,7 @@ MicroversionId recordPlace(Store &store, const ReadingPlace &place);
 
 /**
  * @brief Where the reader's activity store lives:
- *        `$XDG_DATA_HOME/xudu/activity`.
+ *        `$XDG_DATA_HOME/xuzz/activity`.
  *
  * Data rather than configuration, so beside the xanadocs rather than with
  * the system xanadocs; system://activity is its name.

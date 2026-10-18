@@ -59,7 +59,7 @@
         },
         "budget_store": {
           "description": "Store path discovered after saving the actual GUI-authored slice.",
-          "example": "${profile}/data/xudu/xanadocs/untitled-..."
+          "example": "${profile}/data/xuzz/xanadocs/untitled-..."
         }
       }
     },
@@ -198,7 +198,7 @@
         },
         "budget_store": {
           "description": "Exact current GUI-authored budget store path.",
-          "example": "${profile}/data/xudu/xanadocs/untitled-..."
+          "example": "${profile}/data/xuzz/xanadocs/untitled-..."
         },
         "budget_result": {
           "description": "Fresh independent saved VPL result store.",
@@ -267,7 +267,7 @@
         },
         "budget_store": {
           "description": "Actual current GUI-authored budget store.",
-          "example": "${profile}/data/xudu/xanadocs/untitled-..."
+          "example": "${profile}/data/xuzz/xanadocs/untitled-..."
         },
         "cell_12": {
           "description": "CellRef of the authored int64 value 12, discovered from the current fresh store dump/native tree.",

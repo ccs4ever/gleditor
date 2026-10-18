@@ -14,6 +14,7 @@
 #include <string>
 
 #include "common/xanadu/vlace/driver.hpp"
+#include "common/xanadu/vortex/mesh_cli.hpp"
 
 namespace {
 
@@ -96,6 +97,9 @@ void runREPL(Driver &driver) {
 // rather than be swallowed into a generic error message.
 // NOLINTNEXTLINE(bugprone-exception-escape)
 int main(int argc, char *argv[]) {
+  if (const auto mesh = zigzag::vortex::mesh::runMeshCommand(
+          zigzag::vortex::mesh::Frontend::Vlace, argc, argv))
+    return *mesh;
   argparse::ArgumentParser program("vlace", "0.1.0");
   program.add_description("vlace — a lazy functional language on Vortex");
 

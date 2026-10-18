@@ -24,6 +24,7 @@
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/store_stream.hpp"
 #include "common/xanadu/user_permascroll.hpp"
+#include "common/xanadu/vortex/mesh_cli.hpp"
 #include "common/xanadu/vprolog/compiler.hpp"
 #include "common/xanadu/vprolog/parser.hpp"
 #include "common/xanadu/vql/ascii_visualizer.hpp"
@@ -430,6 +431,9 @@ std::vector<std::string> reorderArgs(int argc, char *argv[]) {
 // rather than be swallowed into a generic error message.
 // NOLINTNEXTLINE(bugprone-exception-escape)
 int main(int argc, char *argv[]) {
+  if (const auto mesh = zigzag::vortex::mesh::runMeshCommand(
+          zigzag::vortex::mesh::Frontend::Vprolog, argc, argv))
+    return *mesh;
   argparse::ArgumentParser program("vprolog", "0.1.0");
   program.add_description(
       "VProlog — Hyperstructural Logic Engine (Nelsonian Prolog on Vortex / "

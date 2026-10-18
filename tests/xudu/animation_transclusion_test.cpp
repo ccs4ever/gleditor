@@ -147,9 +147,9 @@ std::size_t changedPixels(const fs::path &before, const fs::path &after) {
 
 fs::path findXuduBinary() {
   const std::vector<fs::path> candidates = {
-      fs::current_path() / "build" / "xudu",
-      fs::current_path() / "xudu",
-      fs::current_path() / ".." / "build" / "xudu",
+      fs::current_path() / "build" / "xuzz",
+      fs::current_path() / "xuzz",
+      fs::current_path() / ".." / "build" / "xuzz",
   };
   for (const auto &cand : candidates) {
     if (fs::exists(cand) && (fs::status(cand).permissions() &
@@ -157,7 +157,7 @@ fs::path findXuduBinary() {
       return cand;
     }
   }
-  return fs::current_path() / "build" / "xudu";
+  return fs::current_path() / "build" / "xuzz";
 }
 
 std::string activeBackend() {
@@ -245,8 +245,8 @@ TEST_F(AnimationTransclusionTest, TranscludeAnimatedGifRendersAsMediaCard) {
 
   auto textVer     = store.insert(MicroversionId{}, 0, before);
   std::uint32_t at = static_cast<std::uint32_t>(before.size());
-  textVer          = store.transclude(textVer, at, animVersion, 0,
-                                      static_cast<std::uint32_t>(gifBytes.size()));
+  textVer = store.transclude(textVer, at, animVersion, 0,
+                             static_cast<std::uint32_t>(gifBytes.size()));
   at += static_cast<std::uint32_t>(gifBytes.size());
   textVer = store.insert(textVer, at, after);
 
@@ -286,8 +286,8 @@ TEST_F(AnimationTransclusionTest, TranscludeAnimatedSvgRendersAsMediaCard) {
 
   auto textVer     = store.insert(MicroversionId{}, 0, before);
   std::uint32_t at = static_cast<std::uint32_t>(before.size());
-  textVer          = store.transclude(textVer, at, animVersion, 0,
-                                      static_cast<std::uint32_t>(svgBytes.size()));
+  textVer = store.transclude(textVer, at, animVersion, 0,
+                             static_cast<std::uint32_t>(svgBytes.size()));
   at += static_cast<std::uint32_t>(svgBytes.size());
   textVer = store.insert(textVer, at, after);
 

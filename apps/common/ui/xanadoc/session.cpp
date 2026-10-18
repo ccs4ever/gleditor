@@ -91,13 +91,13 @@ std::filesystem::path xanadocsDirectory() {
   namespace fs = std::filesystem;
   if (const char *xdgData = std::getenv("XDG_DATA_HOME");
       nullptr != xdgData && '\0' != *xdgData) {
-    return fs::path(xdgData) / "xudu" / "xanadocs";
+    return fs::path(xdgData) / "xuzz" / "xanadocs";
   }
   if (const char *home = std::getenv("HOME");
       nullptr != home && '\0' != *home) {
-    return fs::path(home) / ".local" / "share" / "xudu" / "xanadocs";
+    return fs::path(home) / ".local" / "share" / "xuzz" / "xanadocs";
   }
-  return fs::temp_directory_path() / "xudu" / "xanadocs";
+  return fs::temp_directory_path() / "xuzz" / "xanadocs";
 }
 
 Session::Session(std::string aStorePath,
@@ -350,12 +350,12 @@ Session::~Session() {
     // unwinding from another exception, so the flush's own failure is
     // reported and swallowed rather than propagated.
     std::cerr << std::format(
-        "xudu [warning]: failed to flush uncommitted edits on session "
+        "xuzz [warning]: failed to flush uncommitted edits on session "
         "teardown: {}\n",
         err.what());
   } catch (...) {
     // Same reasoning as above, for a throw that isn't std::exception-derived.
-    std::cerr << "xudu [warning]: failed to flush uncommitted edits on "
+    std::cerr << "xuzz [warning]: failed to flush uncommitted edits on "
                  "session teardown (non-standard exception)\n";
   }
   // Flushing can queue retention; drain before temporary sources disappear.
@@ -372,7 +372,7 @@ Session::~Session() {
       std::error_code ec;
       std::filesystem::remove_all(entry.path, ec);
     } else {
-      std::cout << "xudu: kept untitled xanadoc at " << entry.path << "\n";
+      std::cout << "xuzz: kept untitled xanadoc at " << entry.path << "\n";
     }
   }
 }
@@ -628,7 +628,7 @@ const MutableKeys &Session::identity() {
                                std::filesystem::perms::owner_read |
                                    std::filesystem::perms::owner_write,
                                std::filesystem::perm_options::replace, ignored);
-  std::cout << "xudu: minted this machine's name " << keys->publicKey.hex()
+  std::cout << "xuzz: minted this machine's name " << keys->publicKey.hex()
             << "\n";
   return *keys;
 }
@@ -928,7 +928,7 @@ Session::openDownloadedPublication(std::string_view id) {
   if (index == stores.size())
     index = loadAuxiliaryStore(downloaded.storePath.string());
   invalidate();
-  std::cout << "xudu: opened downloaded publication " << downloaded.title
+  std::cout << "xuzz: opened downloaded publication " << downloaded.title
             << " (complete store " << index << ")\n";
   return {index, downloaded.version};
 }
@@ -1148,7 +1148,7 @@ Session::readPublication(const std::string &aPath) {
       *pub, roots, stores[0].store->userPermascrollPtr(), destination);
   const auto index = addStore(std::move(restored), destination.string(), false);
   invalidate();
-  std::cout << "xudu: read " << pub->describe() << " as " << pub->version.str()
+  std::cout << "xuzz: read " << pub->describe() << " as " << pub->version.str()
             << " (complete store " << index << ")\n";
   return {index, pub->version};
 }
@@ -1421,7 +1421,7 @@ Store *Session::activity() {
     activityStore = std::move(opened);
   } catch (const std::exception &err) {
     activityRefused = true;
-    std::cerr << "xudu: not resuming or recording where you were: the "
+    std::cerr << "xuzz: not resuming or recording where you were: the "
                  "activity store at "
               << dir.string() << " cannot be read (" << err.what()
               << "); it is left untouched\n";
@@ -1437,7 +1437,7 @@ std::optional<xanadu::ReadingPlace> Session::lastPlace() {
   try {
     return xanadu::latestPlace(*store);
   } catch (const std::exception &err) {
-    std::cerr << "xudu: cannot read where you were: " << err.what() << "\n";
+    std::cerr << "xuzz: cannot read where you were: " << err.what() << "\n";
     return std::nullopt;
   }
 }
@@ -1632,7 +1632,7 @@ std::size_t Session::systemStoreIndex(const SystemDocKind kind) {
       std::error_code moved;
       std::filesystem::rename(dir, aside, moved);
       std::cerr << std::format(
-          "xudu [warning]: the system {} xanadoc could not be read ({}). It "
+          "xuzz [warning]: the system {} xanadoc could not be read ({}). It "
           "has been moved to {} and a default one written in its place.\n",
           systemDocName(kind), refusal, aside.string());
       std::filesystem::create_directories(dir);
@@ -1667,7 +1667,7 @@ std::size_t Session::systemStoreIndex(const SystemDocKind kind) {
           retainForOffline(*sysStore, dir);
         }
       } else {
-        GLEDITOR_LOG_WARN("xudu.settings",
+        GLEDITOR_LOG_WARN("xuzz.settings",
                           "UI settings structure cannot be resolved with the "
                           "active permascroll; leaving the store unchanged");
       }
@@ -2263,7 +2263,7 @@ Session::mediaSpansFor(const MicroversionId &version,
     const auto &entry = cached->second;
     if (entry.document == st.documentId() &&
         entry.operationCount == st.opCount() && stableLocal(entry.pieces)) {
-      GLEDITOR_LOG_TRACE("xudu.media", "Reusing local media classification");
+      GLEDITOR_LOG_TRACE("xuzz.media", "Reusing local media classification");
       return entry.spans;
     }
     mediaClassifications_.erase(cached);
@@ -2545,7 +2545,7 @@ void Session::flushUncommitted(const std::optional<std::uint32_t> docIndex) {
           // whoever typed the line first. Storage economy is a real goal, but
           // it belongs below the address layer, not at it.
           curVersion = st.insert(curVersion, op.at, op.text, ctxId);
-          GLEDITOR_LOG_DEBUG("xudu.edit", "{} insert {} bytes at {}",
+          GLEDITOR_LOG_DEBUG("xuzz.edit", "{} insert {} bytes at {}",
                              curVersion.str(), op.text.size(), op.at);
           if (swarmSource && !st.isSystem()) {
             if (auto appliedOp = st.getOp(curVersion)) {
@@ -2559,7 +2559,7 @@ void Session::flushUncommitted(const std::optional<std::uint32_t> docIndex) {
       } else if (op.kind == OpKind::Delete) {
         if (op.length > 0) {
           curVersion = st.erase(curVersion, op.at, op.length, ctxId);
-          GLEDITOR_LOG_DEBUG("xudu.edit", "{} delete {} bytes at {}",
+          GLEDITOR_LOG_DEBUG("xuzz.edit", "{} delete {} bytes at {}",
                              curVersion.str(), op.length, op.at);
           if (swarmSource && !st.isSystem()) {
             if (auto appliedOp = st.getOp(curVersion)) {
@@ -2699,7 +2699,7 @@ void Session::markDecorated(const std::size_t docIndex, const std::uint32_t at,
     link.left  = content;
     link.right.push_back(xanadu::vocabularySpanFor(*attribute));
     version = st.addLink(version, link);
-    GLEDITOR_LOG_DEBUG("xudu.edit", "{} format {} [{}, {})", version.str(),
+    GLEDITOR_LOG_DEBUG("xuzz.edit", "{} format {} [{}, {})", version.str(),
                        xanadu::formatAttributeName(*attribute), start,
                        start + effLen);
   }
@@ -2757,7 +2757,7 @@ void Session::setAlignment(const std::size_t docIndex, const std::uint32_t at,
   link.left  = content;
   link.right.push_back(xanadu::vocabularySpanFor(*attribute));
   auto version = st.addLink(open[docIndex].version, link);
-  GLEDITOR_LOG_DEBUG("xudu.edit", "{} align {} [{}, {})", version.str(),
+  GLEDITOR_LOG_DEBUG("xuzz.edit", "{} align {} [{}, {})", version.str(),
                      xanadu::formatAttributeName(*attribute), start,
                      start + effLen);
   save(sIdx);

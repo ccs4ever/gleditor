@@ -71,6 +71,8 @@ const char *valueKindName(const ValueKind kind) {
     return "extern_ref";
   case ValueKind::Timestamp:
     return "timestamp";
+  case ValueKind::ForeignOpHandle:
+    return "foreign_op_handle";
   }
   return "unknown";
 }

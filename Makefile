@@ -31,11 +31,11 @@ LIBGL_ALWAYS_SOFTWARE ?= 1
 export SDL_VIDEODRIVER SDL_AUDIODRIVER LIBGL_ALWAYS_SOFTWARE
 
 # And under the build tree, not the developer's home. A store holds no primedia
-# of its own: what was typed lives in the author's permascroll, which xudu
-# resolves to $XDG_DATA_HOME/xudu/permascroll by default. Without this, running
+# of its own: what was typed lives in the author's permascroll, which xuzz
+# resolves to $XDG_DATA_HOME/xuzz/permascroll by default. Without this, running
 # the suite writes every byte the tests type into the real permascroll of
 # whoever ran it, and it stays there. $XDG_CONFIG_HOME is the same argument for
-# the system xanadocs -- keymap, settings, layout, ui -- which xudu writes for
+# the system xanadocs -- keymap, settings, layout, ui -- which xuzz writes for
 # itself on first run and which a test run would otherwise overwrite with
 # whatever that test was demonstrating. $XDG_CACHE_HOME keeps the LMDB content
 # cache under the build tree as well; without it, Resolver falls back to the
@@ -282,7 +282,7 @@ TEST_PKGS := gmock_main
 # means, and the only safe answer refuses every peer, which is not a build
 # worth having. RNP rather than GnuPG's gpgme because it is a library first
 # and links the same way on every platform this ships to.
-XUDU_PKGS := libtorrent-rasterbar openssl lmdb libmagic sqlite3 spdlog libzstd
+XUDU_PKGS := libtorrent-rasterbar openssl lmdb libmagic sqlite3 spdlog libzstd libblake3 libzmq libsodium libngtcp2 libngtcp2_crypto_ossl
 ifneq (,$(filter-out $(NO_SDL_GOALS),$(or $(MAKECMDGOALS),all)))
 ifneq ($(shell pkg-config --exists libtorrent-rasterbar && echo 1),1)
 $(error libtorrent-rasterbar was not found by pkg-config. It is required: \
@@ -534,7 +534,7 @@ GLEDITOR_LIBS :=
 XUDU_LIBS := $(shell pkg-config $(STATIC) --libs $(XUDU_PKGS))
 # Matches XUDU_PKGS because ZIGZAG_SHARED_CORE_OBJS is XUDU_CORE_OBJS: zigzag
 # links the whole xanalogical engine, so it needs whatever that engine needs.
-ZIGZAG_PKGS := libtorrent-rasterbar openssl lmdb libmagic sqlite3 spdlog libzstd
+ZIGZAG_PKGS := $(XUDU_PKGS)
 ZIGZAG_LIBS := $(shell pkg-config $(STATIC) --libs $(ZIGZAG_PKGS))
 
 # glslangValidator is the traditional name and glslang the current one; which
@@ -555,7 +555,7 @@ GLSLANG := $(shell command -v glslangValidator 2>/dev/null || command -v glslang
 # one program be built on it.
 #
 # The programs live under apps/. `gleditor` is the plain editor -- a command
-# line, a key map and an event loop over the library. `xudu` is a second one
+# line, a key map and an event loop over the library. `xuzz` is a second one
 # that keeps a versioned hypertext and renders it with the same library. The
 # library must not need either of them in order to build, and neither program
 # may need the other; that is the whole of what the boundary is for.
@@ -906,7 +906,7 @@ sanitize/engine-thread/run: sanitize/engine-thread
 	  $(OBJDIR)/zigzag_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
 
 
-.PHONY: gleditor_test xudu_test xuzz_test zigzag_test
+.PHONY: gleditor_test xanadu_test xudu_test xuzz_test zigzag_test
 TEST_LIBS = $(shell pkg-config $(STATIC) --libs $(TEST_PKGS))
 
 # The library's own tests, linked against the library the programs link
@@ -921,8 +921,11 @@ $(OBJDIR)/gleditor_test: $(LIB_TEST_OBJS) $(OBJDIR)/apps/gleditor/editor_config.
 # merely asserted: if a rule about versions, links or content addresses ever
 # needed a renderer, this would stop linking. Focus arbitration is also
 # device-independent and is shared with the modal adapter contract tests.
+xanadu_test: $(OBJDIR)/xanadu_test
 xudu_test: $(OBJDIR)/xudu_test
-$(OBJDIR)/xudu_test: $(XUDU_TEST_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o
+$(OBJDIR)/xudu_test: $(OBJDIR)/xanadu_test
+	ln -sf xanadu_test $@
+$(OBJDIR)/xanadu_test: $(XUDU_TEST_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
 
 xuzz_test: $(OBJDIR)/xuzz_test
@@ -946,7 +949,7 @@ FUZZ_FLAGS    := -fsanitize=fuzzer-no-link,address,undefined
 FUZZ_CORE_OBJS := $(patsubst %.cpp,$(FUZZ_OBJDIR)/%.o,$(XUDU_CORE_SRCS))
 # scroll.cpp and publication.cpp (both under XUDU_CORE_SRCS above) now call
 # into MimeType and SourceGrounder, which live under src/ rather than
-# apps/xudu/core/ and so are not swept up by XUDU_CORE_SRCS. Needed here for
+# apps/common/xanadu/ and so are not swept up by XUDU_CORE_SRCS. Needed here for
 # the same reason xudu-swarm-peer needs them below: anything linking the
 # engine now needs these two as well.
 FUZZ_CORE_OBJS += $(FUZZ_OBJDIR)/src/mimetype.o $(FUZZ_OBJDIR)/src/source_grounder.o
@@ -1130,7 +1133,7 @@ decode-index-spike:
 endif
 
 .PHONY: sample-xanadocs
-sample-xanadocs: $(OBJDIR)/xudu
+sample-xanadocs: $(OBJDIR)/xuzz
 	tools/create-sample-xanadocs.sh
 
 # The swarm tests proper, with the two peers on separate network stacks via
@@ -1138,11 +1141,11 @@ sample-xanadocs: $(OBJDIR)/xudu
 .PHONY: test/swarm
 test/swarm: $(OBJDIR)/xudu-swarm-peer $(OBJDIR)/xudu_test $(OBJDIR)/xuzz
 	tools/swarm-netns-test.sh
-	XUDU_SWARM_TEST_FILTER='PublicationOutboxNetworkTest.*' tools/swarm-netns-test.sh
+	XUDU_SWARM_TEST_FILTER='PublicationOutboxNetworkTest.*:MeshCheckpointNetworkTest.*' tools/swarm-netns-test.sh
 
 .PHONY: test/publication-swarm
 test/publication-swarm: $(OBJDIR)/xudu-swarm-peer $(OBJDIR)/xudu_test $(OBJDIR)/xuzz
-	XUDU_SWARM_TEST_FILTER='PublicationOutboxNetworkTest.*' tools/swarm-netns-test.sh
+	XUDU_SWARM_TEST_FILTER='PublicationOutboxNetworkTest.*:MeshCheckpointNetworkTest.*' tools/swarm-netns-test.sh
 
 .PHONY: test/publication-local
 test/publication-local: $(OBJDIR)/xuzz
@@ -1157,7 +1160,7 @@ test: test/ux-journey-plans
 
 # Network namespace suites that require two peers on separate network stacks.
 # Standalone xudu_test skips these; tools/swarm-netns-test.sh runs them.
-SWARM_NETNS_TESTS := SwarmTest.*:MutableNameTest.*:PublicationOutboxNetworkTest.*
+SWARM_NETNS_TESTS := SwarmTest.*:MutableNameTest.*:PublicationOutboxNetworkTest.*:MeshCheckpointNetworkTest.*
 TEST_FILTER ?= -$(SWARM_NETNS_TESTS)
 
 # Programs the suites run as child processes (the E2E tests look for them
@@ -1174,14 +1177,14 @@ test: $(TEST_PROGRAMS) $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test $(OBJDIR)/xuz
 	$(OBJDIR)/zigzag_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
 	@if [ -z "$(TEST_FILTER)" ] || [ "$(TEST_FILTER)" = "-$(SWARM_NETNS_TESTS)" ] || echo "$(TEST_FILTER)" | grep -qE 'Swarm|MutableName|PublicationOutboxNetwork|\*'; then \
 		tools/swarm-netns-test.sh && \
-		XUDU_SWARM_TEST_FILTER='PublicationOutboxNetworkTest.*' tools/swarm-netns-test.sh; \
+		XUDU_SWARM_TEST_FILTER='PublicationOutboxNetworkTest.*:MeshCheckpointNetworkTest.*' tools/swarm-netns-test.sh; \
 	fi
 
 test/all: test
 
 
 test/integration: test/e2e-orchestration
-test/e2e-orchestration: $(OBJDIR)/xudu $(OBJDIR)/xudu_test
+test/e2e-orchestration: $(OBJDIR)/xuzz $(OBJDIR)/xudu_test
 	tools/xudu-e2e-orchestration.sh
 
 # produces gleditor_test.prof (a human-readable code coverage report) and
@@ -1341,7 +1344,7 @@ TIDY_FILES              ?= '^(?!.*thirdparty).*/(src|apps)/'
 TIDY_CHECKS             ?=
 TIDY_WARNINGS_AS_ERRORS ?=
 TIDY_HEADER_FILTER      ?= '^(include|src|apps)/'
-SCAN_BUILD_TARGETS      ?= lib gleditor xudu zigzag
+SCAN_BUILD_TARGETS      ?= lib gleditor xuzz zigzag
 SCAN_BUILD_FLAGS        ?= -o $(OBJDIR)/scan-reports
 CPPCHECK_FLAGS          ?= --enable=warning,style,performance,portability \
                            --suppress=missingIncludeSystem \
@@ -1568,11 +1571,15 @@ endif
 	$(INSTALL) -d $(DESTDIR)$(mandir)/man1
 	$(SED) 's,@DATADIR@,$(appdir),g' packaging/gleditor.1 > $(OBJDIR)/gleditor.1
 	$(INSTALL) -m 644 $(OBJDIR)/gleditor.1 $(DESTDIR)$(mandir)/man1/gleditor.1
+	$(SED) 's,@DATADIR@,$(appdir),g' packaging/xuzz.1 > $(OBJDIR)/xuzz.1
+	$(INSTALL) -m 644 $(OBJDIR)/xuzz.1 $(DESTDIR)$(mandir)/man1/xuzz.1
 	$(SED) 's,@DATADIR@,$(appdir),g' packaging/xudu.1 > $(OBJDIR)/xudu.1
 	$(INSTALL) -m 644 $(OBJDIR)/xudu.1 $(DESTDIR)$(mandir)/man1/xudu.1
 
 uninstall:
 	$(RM) -f $(DESTDIR)$(bindir)/gleditor
+	$(RM) -f $(DESTDIR)$(bindir)/xuzz
+	$(RM) -f $(DESTDIR)$(bindir)/zigzag
 	$(RM) -f $(DESTDIR)$(bindir)/xudu
 	$(RM) -f $(DESTDIR)$(libdir)/$(notdir $(LIBREAL))
 	$(RM) -f $(DESTDIR)$(libdir)/$(LIBNAME)
@@ -1583,6 +1590,7 @@ uninstall:
 	$(RM) -f $(DESTDIR)$(datadir)/metainfo/gleditor.metainfo.xml
 	$(RM) -f $(DESTDIR)$(datadir)/icons/hicolor/256x256/apps/gleditor.png
 	$(RM) -f $(DESTDIR)$(mandir)/man1/gleditor.1
+	$(RM) -f $(DESTDIR)$(mandir)/man1/xuzz.1
 	$(RM) -f $(DESTDIR)$(mandir)/man1/xudu.1
 
 # A release tarball, which is what the distribution packages build from. The

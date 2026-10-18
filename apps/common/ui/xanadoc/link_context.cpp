@@ -211,14 +211,14 @@ std::vector<xanadu::Visit> LinkContext::forwardChoices() const {
 
 xanadu::ReadingPosition LinkContext::reading() const {
   xanadu::ReadingPosition position;
-  const auto current  = navigator.currentVisit();
-  const auto visit    = current
-                            ? activity.find(*current)
-                            : gleditor::cpp26::optional<const xanadu::Visit &>{};
+  const auto current = navigator.currentVisit();
+  const auto visit   = current
+                           ? activity.find(*current)
+                           : gleditor::cpp26::optional<const xanadu::Visit &>{};
   const auto selected = navigator.selection();
   position.entered    = visit && selected &&
-                     xanadu::Arrival::EnteredEndpoint == visit->arrival &&
-                     visit->link && visit->link->key == selected->key;
+                        xanadu::Arrival::EnteredEndpoint == visit->arrival &&
+                        visit->link && visit->link->key == selected->key;
   const bool inCell =
       visit && std::holds_alternative<xanadu::CellSite>(visit->target);
   position.here =
@@ -267,7 +267,7 @@ std::string LinkContext::previewVisit(const VisitId id) const {
               0, std::vector<PrimediaSpan>(spans.begin(), spans.end()));
         } else {
           const auto view = viewIndexOf(site);
-          text            = store.rebuild(site.version,
+          text = store.rebuild(site.version,
                                view ? session.views()[*view].focusedBirth : 0);
         }
         if (site.range.end < site.range.start || site.range.end > text.length())
@@ -413,7 +413,7 @@ LinkContext::execute(const xanadu::NavigationCommand &command) {
 
   auto result = navigator.dispatch(command);
   if (!result) {
-    GLEDITOR_LOG_DEBUG("xudu.links", "link command '{}' refused: {}",
+    GLEDITOR_LOG_DEBUG("xuzz.links", "link command '{}' refused: {}",
                        xanadu::name(command), xanadu::name(result.error()));
     return result;
   }
@@ -454,7 +454,7 @@ void LinkContext::apply(xanadu::NavigationEffect effect) {
     const auto supplied = navigator.supply(effect.resolve->generation,
                                            resolve(effect.resolve->key));
     if (!supplied) {
-      GLEDITOR_LOG_DEBUG("xudu.links", "link {} did not resolve: {}",
+      GLEDITOR_LOG_DEBUG("xuzz.links", "link {} did not resolve: {}",
                          effect.resolve->key.id,
                          xanadu::name(supplied.error()));
       previewing.reset();
@@ -572,7 +572,7 @@ void LinkContext::focus(const xanadu::OccurrenceSite &site) {
           }
           // The version is no longer open. Opening it is the pending-target
           // work of a later stage; landing somewhere else would be worse.
-          GLEDITOR_LOG_DEBUG("xudu.links", "entered {} is not open",
+          GLEDITOR_LOG_DEBUG("xuzz.links", "entered {} is not open",
                              at.version.str());
         } else {
           if (cellEntry && renderState_) {
@@ -585,7 +585,7 @@ void LinkContext::focus(const xanadu::OccurrenceSite &site) {
           if (!manifold || at.version != manifoldVersion ||
               at.store != session.store(manifoldStoreIndex).documentId() ||
               !manifold->contains(at.cell)) {
-            GLEDITOR_LOG_DEBUG("xudu.links",
+            GLEDITOR_LOG_DEBUG("xuzz.links",
                                "saved cell {} is outside the bound slice",
                                at.cell);
             return;
@@ -593,7 +593,7 @@ void LinkContext::focus(const xanadu::OccurrenceSite &site) {
           if (focusCell) {
             focusCell(at.cell, at.range);
           } else {
-            GLEDITOR_LOG_DEBUG("xudu.links", "no ZigZag view to enter cell {}",
+            GLEDITOR_LOG_DEBUG("xuzz.links", "no ZigZag view to enter cell {}",
                                at.cell);
           }
         }

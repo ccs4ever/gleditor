@@ -55,7 +55,7 @@
         },
         "query_store": {
           "description": "Absolute current GUI-authored menu slice store path.",
-          "example": "/work/run/J2/data/xudu/xanadocs/untitled-..."
+          "example": "/work/run/J2/data/xuzz/xanadocs/untitled-..."
         },
         "query_home": {
           "description": "Current query slice home CellRef discovered from closed dump.",

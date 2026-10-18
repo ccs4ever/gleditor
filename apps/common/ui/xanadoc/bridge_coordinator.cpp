@@ -1,6 +1,6 @@
 /**
  * @file bridge_coordinator.cpp
- * @brief Xudu composition boundary for an embedded Zigzag presentation.
+ * @brief Xuzz composition boundary for an embedded Zigzag presentation.
  */
 #include "bridge_coordinator.hpp"
 

@@ -4,7 +4,7 @@
 # whether its package built.
 #
 #   packaging/smoke-test.sh /usr/bin/gleditor [backend...]
-#   packaging/smoke-test.sh /usr/bin/xudu [backend...]
+#   packaging/smoke-test.sh /usr/bin/xuzz [backend...]
 #
 # The test runs the binary from a scratch directory that has no relation to the
 # source tree. That is the whole point: until the data files were found at run
@@ -16,7 +16,7 @@
 # only reports what it finds.
 set -eu
 
-BIN=${1:?usage: smoke-test.sh <path to gleditor or xudu> [backend...]}
+BIN=${1:?usage: smoke-test.sh <path to gleditor or xuzz> [backend...]}
 shift
 # Named backends are rendered with. Naming none checks everything that does not
 # need a GPU and stops there, which is what the Nix job does: a binary from the
@@ -74,7 +74,7 @@ SAMPLE
 # --import, which it will only accept into an empty one -- hence a store per
 # backend rather than one shared by the loop.
 case $(basename "$BIN") in
-  xudu*) doc_args() { echo "--import sample.txt $work/$1.xanadoc"; } ;;
+  xuzz* | xudu* | zigzag*) doc_args() { echo "--import sample.txt $work/$1.xanadoc"; } ;;
   *) doc_args() { echo "sample.txt"; } ;;
 esac
 

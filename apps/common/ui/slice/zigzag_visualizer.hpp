@@ -13,7 +13,7 @@
 #include "common/xanadu/vortex/vortex_host.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
 #include "common/xanadu/zigzag/presentation_surface.hpp"
-#include "common/xanadu/zigzag/zz_xudu_projector.hpp"
+#include "common/xanadu/zigzag/xanadu_projector.hpp"
 #include "common/xanadu/zigzag/zzcore.hpp"
 #include "common/xanadu/zigzag/zzstructure.hpp"
 
@@ -167,23 +167,24 @@ public:
   [[nodiscard]] std::optional<gleditor::InputArea> textArea() const override;
 
   // -- ZigZag Actions -------------------------------------------------------
-  void adoptDocument(ZzStructureDocument &&doc, std::string sourcePath,
-                     const std::unordered_map<CellID, XuduProjectionProvenance>
-                         *origins = nullptr);
+  void adoptDocument(
+      ZzStructureDocument &&doc, std::string sourcePath,
+      const std::unordered_map<CellID, XanaduProjectionProvenance> *origins =
+          nullptr);
   void populateFallbackStructure();
 
-  void adoptXuduStore(const xanadu::Store &store,
-                      const std::vector<xanadu::MicroversionId> &versions);
-  void bindXuduStore(xanadu::Store &store,
-                     const xanadu::MicroversionId &version);
+  void adoptXanaduStore(const xanadu::Store &store,
+                        const std::vector<xanadu::MicroversionId> &versions);
+  void bindXanaduStore(xanadu::Store &store,
+                       const xanadu::MicroversionId &version);
   void reloadStoreVersion(const xanadu::MicroversionId &version,
                           zigzag::CellRef newFocus = zigzag::noCell);
   ZigzagVisualizer *setOnOpenQuoteBuilder(std::function<void()> cb) {
     onOpenQuoteBuilder_ = std::move(cb);
     return this;
   }
-  void adoptXuduDocs(const std::vector<XuduDocInput> &docs,
-                     const std::vector<xanadu::Link> &links = {});
+  void adoptXanaduDocs(const std::vector<XanaduDocInput> &docs,
+                       const std::vector<xanadu::Link> &links = {});
   [[nodiscard]] ZzRasterResult
   rasterize(const DimID &primaryDim   = "d.doc",
             const DimID &secondaryDim = "d.transclude") const;
@@ -619,7 +620,7 @@ public:
 private:
   void refreshCellLayouts();
   /// Point the view at the dimensions the home cell links along when it
-  /// links along neither of the current two; see bindXuduStore().
+  /// links along neither of the current two; see bindXanaduStore().
   void fitViewToHome();
 
   std::string fontName_;
@@ -704,7 +705,7 @@ private:
   std::unordered_map<CellRef, std::shared_ptr<const render::PickSemanticTarget>>
       pickTargets_;
   std::string pickTargetVersion_;
-  std::unordered_map<CellRef, XuduProjectionProvenance> sourceOrigins_;
+  std::unordered_map<CellRef, XanaduProjectionProvenance> sourceOrigins_;
 
   DimensionBundle dimension_bundle_{DimensionBundle::Custom};
   std::shared_ptr<vortex::VortexHost> vortex_host_{nullptr};

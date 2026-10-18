@@ -1232,10 +1232,10 @@ Store::diffVersions(const std::vector<MicroversionId> &versions) const {
       if (states.empty()) states.resize(versions.size());
       const auto links = manifold.dimensionsOf(slot.birthOp);
       states[vIdx]     = CellState{
-              .text  = manifold.textOf(slot.birthOp, *this),
-              .kind  = slot.valueKind,
-              .bits  = slot.valueBits,
-              .links = std::vector<zigzag::DimLink>(links.begin(), links.end())};
+          .text  = manifold.textOf(slot.birthOp, *this),
+          .kind  = slot.valueKind,
+          .bits  = slot.valueBits,
+          .links = std::vector<zigzag::DimLink>(links.begin(), links.end())};
     }
   }
   for (const auto &[ref, states] : cells) {
@@ -2546,8 +2546,8 @@ Store::AppendedPouchItem Store::appendPouchItemWithRef(
           currentFold->scrollRegistry(*this).placeholderForExtern(extRef);
       if (placeholder && *placeholder != zigzag::noCell) {
         const auto dimOriginCell = ensureDim("d.origin-cell");
-        curHead                  = setLink(curHead, itemCell, dimOriginCell,
-                                           zigzag::DimVector::POS, *placeholder);
+        curHead = setLink(curHead, itemCell, dimOriginCell,
+                          zigzag::DimVector::POS, *placeholder);
         updateFold(curHead);
       }
     }

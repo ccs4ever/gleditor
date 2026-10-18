@@ -245,7 +245,7 @@ TEST(ZigzagVisualizerTest, CloneCellEditingSync) {
   doc.meta.name = "Clone Sync Test";
   doc.focus     = 2;
   doc.view      = {
-           .x_dimension = "d.1", .y_dimension = "d.clone", .z_dimension = "d.3"};
+      .x_dimension = "d.1", .y_dimension = "d.clone", .z_dimension = "d.3"};
   doc.cells[1] = Cell{.id         = 1,
                       .data       = std::string("Original Text"),
                       .dimensions = {{"d.clone", LinkPairs{.pos = 2}}}};
@@ -1192,7 +1192,7 @@ TEST(ZigzagVisualizerTest, QuotationCellInspectionAndBadge) {
       localStore.quote(regVer, lroot, dimRef, "Alice's Keymap", pin, spec);
 
   ZigzagVisualizer viz("Sans 12");
-  viz.bindXuduStore(localStore, q.version);
+  viz.bindXanaduStore(localStore, q.version);
   viz.focusCell(q.quotationCell);
 
   const auto qInfo = viz.inspectCell(q.quotationCell);
@@ -1356,16 +1356,16 @@ TEST(ZigzagVisualizerTest, aSliceOpensAlongTheDimensionItsHomeUses) {
                        results.cellRefOf(at));
 
   ZigzagVisualizer viz("Sans 12");
-  viz.bindXuduStore(results, at);
+  viz.bindXanaduStore(results, at);
   EXPECT_EQ(viz.currentView().x_dimension, "d.result");
 
   xanadu::Store sequence;
   auto seq       = sequence.sliceGenesis(xanadu::MicroversionId{});
   const auto two = sequence.makeDimension(seq, "d.2");
   seq            = sequence.makeCell(two.version, "below");
-  seq            = sequence.setLink(seq, sequence.homeCell(), two.dim,
-                                    zigzag::DimVector::POS, sequence.cellRefOf(seq));
-  viz.bindXuduStore(sequence, seq);
+  seq = sequence.setLink(seq, sequence.homeCell(), two.dim,
+                         zigzag::DimVector::POS, sequence.cellRefOf(seq));
+  viz.bindXanaduStore(sequence, seq);
   EXPECT_EQ(viz.currentView().x_dimension, "d.result")
       << "home links along d.2, which the view still shows";
 }
@@ -1398,7 +1398,7 @@ TEST(ZigzagVisualizerTest, DimensionBundlesDoNotAuthorMissingDimensions) {
   xanadu::Store store;
   const auto head = store.sliceGenesis({});
   ZigzagVisualizer viz("Sans 12");
-  viz.bindXuduStore(store, head);
+  viz.bindXanaduStore(store, head);
   const auto before = store.opCount();
   for (const auto bundle : {ZigzagVisualizer::DimensionBundle::Execution,
                             ZigzagVisualizer::DimensionBundle::Scope,

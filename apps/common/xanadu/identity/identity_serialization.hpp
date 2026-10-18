@@ -19,6 +19,12 @@
 
 namespace xanadu::identity {
 
+/// Encodes/decodes the complete extension payload, including its type byte.
+[[nodiscard]] std::expected<std::string, SerializationError>
+encodeActorMessage(const ActorMessage &message);
+[[nodiscard]] std::expected<ActorMessage, SerializationError>
+decodeActorMessage(std::span<const std::uint8_t> bytes);
+
 // Zero-copy decoding functions from raw bytes (std::span)
 [[nodiscard]] std::expected<IdentityEntry, SerializationError>
 decodeIdentityEntry(std::span<const std::uint8_t> bytes);

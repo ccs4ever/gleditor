@@ -138,14 +138,14 @@ void PouchDrawer::layout(const gleditor::ui::UiMetrics &metrics,
     const float cap  = caption->metrics().lineHeight;
     touchPx_         = std::ceil(std::max(metrics.px(theme.type.minTouchPx),
                                           line * (1 + 2 * theme.paddingEm))) +
-               2;
+                       2;
     zoneTouchPx_ =
         std::ceil(std::max(metrics.px(theme.type.minTouchPx), line)) + 2;
     captionLinePx_ = std::ceil(cap) + 2;
     capTouchPx_    = std::ceil(std::max(metrics.px(theme.type.minTouchPx),
                                         cap * (1 + 2 * theme.paddingEm))) +
-                  2;
-    gapPx_    = line * theme.gapEm;
+                     2;
+    gapPx_         = line * theme.gapEm;
     headerPx_ = captionLinePx_ + static_cast<float>(headerRows_) * capTouchPx_ +
                 4 * line * theme.paddingEm + 3 * gapPx_;
   }
@@ -301,10 +301,10 @@ void PouchDrawer::rebuildModels(const gleditor::ui::UiMetrics &metrics,
       list.scrollPx = static_cast<float>(it->second) * zoneTouchPx_;
     for (const auto &item : zone->items()) {
       const auto key = std::to_string(item.itemId);
-      list.rows.push_back({.id   = actionId("item:" + key, {.tag  = kTagItemBase,
-                                                            .item = item.itemId,
-                                                            .zone = zone->id()}),
-                           .text = "Open source: " + item.previewText,
+      list.rows.push_back({.id = actionId("item:" + key, {.tag  = kTagItemBase,
+                                                          .item = item.itemId,
+                                                          .zone = zone->id()}),
+                           .text   = "Open source: " + item.previewText,
                            .action = "origin"});
       list.rows.push_back({.id = actionId("use:" + key, {.tag = kTagItemUseBase,
                                                          .item = item.itemId,
@@ -676,7 +676,7 @@ void PouchDrawer::drawFrame(gleditor::FrameContext &ctx) {
     const float captionPad = 2 * cap * compactTheme_.paddingEm;
     const float pairs      = std::max(controlWidths_[0] + controlWidths_[1],
                                       controlWidths_[2] + controlWidths_[3]) +
-                        2 * captionPad + line * compactTheme_.gapEm;
+                             2 * captionPad + line * compactTheme_.gapEm;
     minimumWidthPx_ =
         std::max(3 * (std::ceil(std::max(
                           metrics.px(sourceTheme.type.minTouchPx), line)) +
@@ -826,13 +826,13 @@ void PouchDrawer::describe(gleditor::a11y::Builder &into) {
                        "Activate to widen.";
     node.focusable   = true;
     node.actions     = gleditor::a11y::bit(gleditor::a11y::Action::Click) |
-                   gleditor::a11y::bit(gleditor::a11y::Action::SetValue);
+                       gleditor::a11y::bit(gleditor::a11y::Action::SetValue);
     const auto scene = resizeHandle_->snapshot();
     const auto *box  = scene ? scene->layout.find(resizeId_) : nullptr;
     const auto &b    = box ? box->rect : *resizeBounds_;
     const auto h     = preparedMetrics_->screenHeight;
     node.bounds      = gleditor::a11y::Rect{b.left, h - b.bottom - b.height,
-                                       b.left + b.width, h - b.bottom};
+                                            b.left + b.width, h - b.bottom};
     into.contribute(into.id(resizeId_));
   }
   if (header_) header_->describe(into);

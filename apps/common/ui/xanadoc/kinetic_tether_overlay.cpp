@@ -1,5 +1,5 @@
 /**
- * @file apps/xudu/kinetic_tether_overlay.cpp
+ * @file apps/common/ui/xanadoc/kinetic_tether_overlay.cpp
  * @brief Visual overlay implementation for Hookean spring tether and floating
  * blueprint quad.
  */

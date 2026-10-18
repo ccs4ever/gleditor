@@ -17,17 +17,17 @@
 
 set -euo pipefail
 
-XUDU="./build/xudu"
+XUZZ="./build/xuzz"
 OUT="tests/samples/xudu/multimedia/11_floating_image"
 PERMA="${OUT}.permascroll"
 
-if [[ ! -x "${XUDU}" ]]; then
-  echo "Error: ${XUDU} not found or not executable. Build it first with: make -j\$(nproc) xudu" >&2
+if [[ ! -x "${XUZZ}" ]]; then
+  echo "Error: ${XUZZ} not found or not executable. Build it first with: make -j\$(nproc) xuzz" >&2
   exit 1
 fi
 
 rm -rf "${OUT}" "${PERMA}"
-"${XUDU}" "${OUT}" \
+"${XUZZ}" "${OUT}" \
   --permascroll "${PERMA}" \
   --import tests/samples/sample_image.png \
   --insert-text "0:append:tests/samples/floating_image_body.txt" \

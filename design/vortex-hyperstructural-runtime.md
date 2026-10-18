@@ -1204,7 +1204,7 @@ its own effect vocabulary (vlace's `IO`, VQL's non-transparency note, vicon's ed
 | `text_of`          | `CellRef -> Manifold -> Resolved String`                              | staged                   | `Manifold::textOf` behind `Resolved`            |
 | `localise`         | `GlobalSpan -> IO (Option VSpan)`                                     | effect                   | `publication::localise`                         |
 | `promote`          | `MicroversionId -> CellRef -> Arena -> IO (Result Overflow Promoted)` | effect                   | `promote(Store&, parent, arena, root, …)`       |
-| `project_xanadoc`  | `MicroversionId -> Manifold`                                          | read-only                | `projectXuduToZigzag(…, &provenance)`           |
+| `project_xanadoc`  | `MicroversionId -> Manifold`                                          | read-only                | `projectXanaduToZigzag(…, &provenance)`         |
 | `store_to_slice`   | `Manifold -> Slice`                                                   | read-only                | `storeToSlice`                                  |
 
 Three shapes the engine forces, each a correction a naive binding would get wrong:

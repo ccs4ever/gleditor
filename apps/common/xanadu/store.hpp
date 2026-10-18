@@ -516,6 +516,12 @@ public:
                               std::uint32_t target, std::string_view text = {},
                               const MicroversionId &context = {});
 
+  /// Names an arbitrary operation in another history without adopting it or
+  /// writing its foreign spool index. The descriptor is ordinary primedia.
+  MicroversionId makeForeignOpHandle(const MicroversionId &parent,
+                                     const GlobalOpRef &target,
+                                     const MicroversionId &context = {});
+
   /// Restate @p cell as carrying @p value: a new rendering into the permascroll
   /// and new bits in the operation, both together, as setValue() requires.
   MicroversionId setScalar(const MicroversionId &parent, zigzag::CellRef cell,

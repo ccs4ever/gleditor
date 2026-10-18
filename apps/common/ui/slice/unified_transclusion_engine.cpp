@@ -52,7 +52,7 @@ void UnifiedTransclusionEngine::syncIncremental() {
   // which is now an operation rather than a field somebody assigns.
   //
   // So a xanadoc's pieces become cells only when something mints them --
-  // sliceToStore() in zz_xudu_projector, or the makeCell/setLink verbs -- and
+  // sliceToStore() in xanadu_projector, or the makeCell/setLink verbs -- and
   // this walks new operations handing each to the manifold, which ignores the
   // kinds that are not Structure. §7's "d.transclude maintained as a stored
   // rank at write time" is the same point from the other side: the rank is

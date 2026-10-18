@@ -1672,14 +1672,14 @@ Manifold::links(const xanadu::SpanReader &reader) const {
               });
     };
 
-    link.left  = readEndpoint(dimFrom);
-    link.right = readEndpoint(dimTo);
-    link.type  = readProp(dimType)
-                    .transform(xanadu::linkTypeFromName)
-                    .value_or(xanadu::LinkType::Comment);
-    link.tier = readProp(dimTier)
-                    .transform(xanadu::prominenceTierFromName)
-                    .value_or(xanadu::ProminenceTier::Author);
+    link.left    = readEndpoint(dimFrom);
+    link.right   = readEndpoint(dimTo);
+    link.type    = readProp(dimType)
+                       .transform(xanadu::linkTypeFromName)
+                       .value_or(xanadu::LinkType::Comment);
+    link.tier    = readProp(dimTier)
+                       .transform(xanadu::prominenceTierFromName)
+                       .value_or(xanadu::ProminenceTier::Author);
     link.owner   = readProp(dimOwner).value_or("");
     link.curator = readProp(dimCurator).value_or("");
 

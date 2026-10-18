@@ -108,7 +108,7 @@
     ],
     "plan": {
       "launch_args": [
-        "${evidence}/data/xudu/xanadocs/untitled-20261011-223123"
+        "${evidence}/data/xuzz/xanadocs/untitled-20261011-223123"
       ],
       "steps": [
         "--chord",
@@ -253,7 +253,7 @@
     ],
     "plan": {
       "launch_args": [
-        "${evidence}/data/xudu/xanadocs/untitled-20261011-223123"
+        "${evidence}/data/xuzz/xanadocs/untitled-20261011-223123"
       ],
       "steps": [
         "--chord",

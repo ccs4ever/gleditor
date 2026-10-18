@@ -139,7 +139,7 @@
         },
         "budget_store": {
           "description": "Actual J7 original author store path.",
-          "example": "${profile}/data/xudu/xanadocs/untitled-..."
+          "example": "${profile}/data/xuzz/xanadocs/untitled-..."
         },
         "budget_result": {
           "description": "Actual saved J7 VPL result store path.",

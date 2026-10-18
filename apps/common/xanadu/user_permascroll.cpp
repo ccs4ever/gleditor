@@ -109,7 +109,7 @@ std::optional<Scroll> permascrollState(UserPermascroll::Config &config,
         throw PermascrollStateUnreadable(
             "permascroll state format 1: invalid key pair");
       const std::string storedDev = device->asString();
-      const bool devMatch         = (storedDev == config.deviceId) ||
+      const bool devMatch = (storedDev == config.deviceId) ||
                             (config.deviceId.empty() && storedDev == "main");
       if (master->asString() != config.masterIdentity.toString() || !devMatch ||
           (!config.deviceKeys.publicKey.isZero() &&
@@ -491,10 +491,15 @@ std::string UserPermascroll::globalScrollKey() const {
 
 std::optional<ScrollSegment> UserPermascroll::sealIncremental(
     const std::filesystem::path &outputDir, const SignedProvenance &provenance,
-    const std::vector<PublishedHoleRecord> &holes) {
+    const std::vector<PublishedHoleRecord> &holes,
+    const std::optional<std::uint64_t> expectedEnd) {
   std::scoped_lock lock(appendMutex_);
 
   const auto allBytes = spool_.bytes();
+  if (expectedEnd && allBytes.size() != *expectedEnd) {
+    throw std::runtime_error(
+        "permascroll changed while its seal was being signed");
+  }
   if (allBytes.size() <= sealedBytes_) {
     return std::nullopt; // Nothing new to seal
   }

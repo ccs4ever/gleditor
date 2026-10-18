@@ -21,7 +21,7 @@ HEADLESS = {
     "SDL_AUDIODRIVER": "dummy",
     "LIBGL_ALWAYS_SOFTWARE": "1",
 }
-LOG_LEVEL = "render.scene=debug,text.layout=debug,xudu.edit=debug,input.pick=debug"
+LOG_LEVEL = "render.scene=debug,text.layout=debug,xuzz.edit=debug,input.pick=debug"
 TIMEOUT_SECONDS = 90
 
 

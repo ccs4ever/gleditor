@@ -1,6 +1,6 @@
 /**
  * @file link_context.hpp
- * @brief The selected-link context of a running xudu or xuzz.
+ * @brief The selected-link context of a running xuzz.
  *
  * The engine's LinkNavigator decides what a gesture means; this carries its
  * answers out against the open session -- resolving a link's occurrences in
@@ -13,8 +13,8 @@
  * navigator and the caret, document views and presentation surface, none of
  * which Vortex reaches. The keymap actions that call it are Vortex-bound.
  */
-#ifndef XUDU_LINK_CONTEXT_HPP
-#define XUDU_LINK_CONTEXT_HPP
+#ifndef XANADU_LINK_CONTEXT_HPP
+#define XANADU_LINK_CONTEXT_HPP
 
 #include <cstddef>
 #include <cstdint>
@@ -232,4 +232,4 @@ private:
 
 } // namespace xanadu
 
-#endif // XUDU_LINK_CONTEXT_HPP
+#endif // XANADU_LINK_CONTEXT_HPP

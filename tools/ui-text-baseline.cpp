@@ -283,7 +283,7 @@ changedPixels(const render::FrameImage &text,
         const float x = static_cast<float>((offset / 4) % screenWidth) + 0.5F;
         const float y = static_cast<float>(screenHeight) -
                         static_cast<float>((offset / 4) / screenWidth) - 0.5F;
-        bool inside = false;
+        bool inside   = false;
         for (int index = 0; index < labelCount; ++index) {
           const float left =
               margin + static_cast<float>(index / rows) * (columnWidth + gap) +

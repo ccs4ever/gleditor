@@ -2,7 +2,7 @@
  * @file quotation_builder_overlay.hpp
  * @brief Interactive Quotation Builder Overlay with navigable preview (§5.10).
  *
- * Provides a shared modal UI for xudu, xuzz, and zigzag to visually select
+ * Provides a shared modal UI for xuzz to visually select
  * foreign stores, root cells, and dimension mappings, or enter custom VQL
  * queries, with a real-time navigable 2D preview before committing.
  */
@@ -40,7 +40,7 @@ namespace xanadu {
 /**
  * @class QuotationBuilderOverlay
  * @brief Interactive modal dialog for building and previewing structure
- * quotations across Xudu, Xuzz, and Zigzag.
+ * quotations across Xanadu documents and ZigZag slices.
  */
 class QuotationBuilderOverlay : public gleditor::FrameContributor,
                                 public gleditor::ui::FocusScope,

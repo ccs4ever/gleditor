@@ -11,8 +11,8 @@
  * Both are rebuilt only when the selection, the open views, the window or the
  * configuration change; an unchanged frame redraws what was committed.
  */
-#ifndef XUDU_LINK_PANEL_OVERLAY_HPP
-#define XUDU_LINK_PANEL_OVERLAY_HPP
+#ifndef XANADU_LINK_PANEL_OVERLAY_HPP
+#define XANADU_LINK_PANEL_OVERLAY_HPP
 
 #include <array>
 #include <cstddef>
@@ -195,4 +195,4 @@ private:
 
 } // namespace xanadu
 
-#endif // XUDU_LINK_PANEL_OVERLAY_HPP
+#endif // XANADU_LINK_PANEL_OVERLAY_HPP

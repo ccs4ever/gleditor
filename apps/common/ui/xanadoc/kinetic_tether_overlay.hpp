@@ -1,9 +1,9 @@
 /**
- * @file apps/xudu/kinetic_tether_overlay.hpp
+ * @file apps/common/ui/xanadoc/kinetic_tether_overlay.hpp
  * @brief Visual overlay for Hookean spring tether and floating blueprint quad.
  */
-#ifndef XUDU_KINETIC_TETHER_OVERLAY_HPP
-#define XUDU_KINETIC_TETHER_OVERLAY_HPP
+#ifndef XANADU_KINETIC_TETHER_OVERLAY_HPP
+#define XANADU_KINETIC_TETHER_OVERLAY_HPP
 
 #include <cstdint>
 #include <memory>
@@ -63,4 +63,4 @@ private:
 
 } // namespace xanadu
 
-#endif // XUDU_KINETIC_TETHER_OVERLAY_HPP
+#endif // XANADU_KINETIC_TETHER_OVERLAY_HPP

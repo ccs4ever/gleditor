@@ -8,8 +8,8 @@
  * is activated, a lightweight proxy quad glides into collinear reading
  * alignment beside the text line rather than teleporting the reader.
  */
-#ifndef XUDU_SATELLOID_HPP
-#define XUDU_SATELLOID_HPP
+#ifndef XANADU_SATELLOID_HPP
+#define XANADU_SATELLOID_HPP
 
 #include <algorithm>
 #include <chrono>
@@ -245,4 +245,4 @@ private:
 
 } // namespace xanadu
 
-#endif // XUDU_SATELLOID_HPP
+#endif // XANADU_SATELLOID_HPP

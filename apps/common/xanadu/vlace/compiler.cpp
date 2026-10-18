@@ -295,6 +295,7 @@ ValuePtr Compiler::makeThunk(const ExprNode *body, const EnvPtr &env) {
 
 std::expected<ValuePtr, EvalError> Compiler::force(ValuePtr v) {
   while (v && v->kind == Value::Kind::Thunk) {
+    core_.arena().consumeWork();
     Thunk &th = *v->thunk;
     if (th.forced) {
       v = th.cached;
@@ -621,6 +622,14 @@ Compiler::apply(const ValuePtr &fnRaw, ValuePtr arg, SourceLocation loc) {
 
 std::expected<ValuePtr, EvalError> Compiler::eval(const ExprNode &e,
                                                   const EnvPtr &env) {
+  core_.arena().consumeWork();
+  if (core_.arena().executionLimited() && evaluationDepth_ >= 512)
+    throw std::runtime_error("Vlace evaluation nesting budget exhausted");
+  struct DepthGuard {
+    std::size_t &depth;
+    explicit DepthGuard(std::size_t &value) : depth(value) { ++depth; }
+    ~DepthGuard() { --depth; }
+  } guard(evaluationDepth_);
   return std::visit(
       [&](const auto &node) -> std::expected<ValuePtr, EvalError> {
         using T = std::remove_cvref_t<decltype(node)>;

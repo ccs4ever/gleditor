@@ -1,6 +1,6 @@
 /**
  * @file views.cpp
- * @brief Document presentation and views coordinator for Xudu.
+ * @brief Document presentation and views coordinator for Xuzz.
  */
 #include "views.hpp"
 
@@ -103,7 +103,7 @@ void Views::drawFrame(gleditor::FrameContext &ctx) {
             render::DiagnosticSeverity::Error));
         publicationNoticeError_ = true;
       }
-      GLEDITOR_LOG_DEBUG("xudu.publication",
+      GLEDITOR_LOG_DEBUG("xuzz.publication",
                          "Update notice delivery failed: {}", error.what());
     }
   }
@@ -140,9 +140,9 @@ void Views::frameForReading(const gleditor::FrameContext &ctx) {
                           glm::vec4(frame->leftPx, frame->topPx, 0.0F, 1.0F));
   const glm::vec3 topRight(frame->localToWorld *
                            glm::vec4(frame->rightPx, frame->topPx, 0.0F, 1.0F));
-  const float halfH = *distance * std::tan(glm::radians(view.fov) * 0.5F);
-  const float halfW = halfH * static_cast<float>(view.screenWidth) /
-                      static_cast<float>(view.screenHeight);
+  const float halfH       = *distance * std::tan(glm::radians(view.fov) * 0.5F);
+  const float halfW       = halfH * static_cast<float>(view.screenWidth) /
+                            static_cast<float>(view.screenHeight);
   const float x           = topRight.x - topLeft.x <= 2.0F * halfW
                                 ? 0.5F * (topLeft.x + topRight.x)
                                 : topLeft.x + halfW;
@@ -509,7 +509,7 @@ void Views::focusSpan(const std::size_t docIndex, const std::uint32_t charStart,
 void Views::focusSpanAt(RenderState &rState, const std::size_t docIndex,
                         const std::uint32_t charStart,
                         const std::uint32_t charEnd) {
-  GLEDITOR_LOG_DEBUG("xudu.links", "focus document {} range [{},{})", docIndex,
+  GLEDITOR_LOG_DEBUG("xuzz.links", "focus document {} range [{},{})", docIndex,
                      charStart, charEnd);
   if (docIndex >= session.views().size() || docIndex >= rState.docs.size() ||
       !rState.docs[docIndex])
@@ -542,7 +542,7 @@ void Views::focusContent(std::vector<PrimediaSpan> content) {
         return;
       }
     }
-    GLEDITOR_LOG_DEBUG("xudu.links",
+    GLEDITOR_LOG_DEBUG("xuzz.links",
                        "activated cell content is in no open document");
   });
 }
@@ -554,11 +554,11 @@ void Views::back() {
     }
     const auto here = session.views().front().version;
     if (here.isZero()) {
-      std::cout << "xudu: already at the null document\n";
+      std::cout << "xuzz: already at the null document\n";
       return;
     }
     const auto there = here.parent();
-    std::cout << "xudu: " << here.str() << " -> " << there.str() << "\n";
+    std::cout << "xuzz: " << here.str() << " -> " << there.str() << "\n";
     showOnly(there, session.views().front().storeIndex);
   });
 }
@@ -572,10 +572,10 @@ void Views::forward() {
     const auto here     = session.views().front().version;
     const auto children = session.store(sIdx).children(here);
     if (children.empty()) {
-      std::cout << "xudu: " << here.str() << " has no successor\n";
+      std::cout << "xuzz: " << here.str() << " has no successor\n";
       return;
     }
-    std::cout << "xudu: " << here.str() << " -> " << children.front().str();
+    std::cout << "xuzz: " << here.str() << " -> " << children.front().str();
     if (children.size() > 1) {
       std::cout << " (of " << children.size() << " futures)";
     }
@@ -607,7 +607,7 @@ void Views::scrubHistory(const bool backward) {
           (it != hist.end())
               ? static_cast<std::size_t>(std::distance(hist.begin(), it) + 1)
               : 0U;
-      std::cout << "xudu: hypertime scrub -> " << newVer.str() << " (" << step
+      std::cout << "xuzz: hypertime scrub -> " << newVer.str() << " (" << step
                 << "/" << hist.size() << ")\n";
     }
   });
@@ -667,14 +667,14 @@ void Views::moveCaret(const gleditor::CaretMotion motion, const bool extend) {
 void Views::transcludeSelection() {
   withCaret([this](RenderState &, const Where &where, Caret *) {
     if (!where.hasRange) {
-      std::cout << "xudu: select something to transclude first\n";
+      std::cout << "xuzz: select something to transclude first\n";
       return;
     }
     const auto from   = session.versionOf(where.doc);
     const auto sIdx   = session.storeIndexOf(where.doc);
     const auto quoted = session.store(sIdx).transclude(
         MicroversionId{}, 0, from, where.start, where.end - where.start);
-    std::cout << "xudu: transcluded [" << where.start << "," << where.end
+    std::cout << "xuzz: transcluded [" << where.start << "," << where.end
               << ") of " << from.str() << " into " << quoted.str() << "\n";
     showAlongside(quoted, 0.0F, sIdx);
   });
@@ -683,7 +683,7 @@ void Views::transcludeSelection() {
 void Views::linkSelection() {
   withCaret([this](RenderState &, const Where &where, Caret *) {
     if (!where.hasRange) {
-      std::cout << "xudu: select something to xanalink first\n";
+      std::cout << "xuzz: select something to xanalink first\n";
       return;
     }
     const auto version = session.versionOf(where.doc);
@@ -697,7 +697,7 @@ void Views::linkSelection() {
                         .start      = where.start,
                         .end        = where.end,
                         .spans      = std::move(spans)};
-      std::cout << "xudu: xanalink from doc " << where.doc << " ["
+      std::cout << "xuzz: xanalink from doc " << where.doc << " ["
                 << where.start << "," << where.end
                 << ") -- select the other end and press ctrl-l again\n";
       return;
@@ -716,7 +716,7 @@ void Views::linkSelection() {
     link.left        = *left;
     link.right       = std::move(spans);
     const auto after = session.addLink(where.doc, link);
-    std::cout << "xudu: link doc " << pending->doc << " [" << pending->start
+    std::cout << "xuzz: link doc " << pending->doc << " [" << pending->start
               << "," << pending->end << ") -> doc " << where.doc << " ["
               << where.start << "," << where.end << ") at " << after.str()
               << "\n";
@@ -727,10 +727,10 @@ void Views::linkSelection() {
 void Views::cancelLink() {
   renderer->runWithState([this](RenderState &) {
     if (!pending) {
-      std::cout << "xudu: no link waiting for its other end\n";
+      std::cout << "xuzz: no link waiting for its other end\n";
       return;
     }
-    std::cout << "xudu: dropped the link begun at doc " << pending->doc << " ["
+    std::cout << "xuzz: dropped the link begun at doc " << pending->doc << " ["
               << pending->start << "," << pending->end << ")\n";
     pending.reset();
   });
@@ -739,11 +739,11 @@ void Views::cancelLink() {
 void Views::addCellToPendingLink(const std::span<const PrimediaSpan> content,
                                  const std::size_t sourceStoreIndex) {
   if (!pending) {
-    std::cout << "xudu: select a document passage with Ctrl+L first\n";
+    std::cout << "xuzz: select a document passage with Ctrl+L first\n";
     return;
   }
   if (content.empty()) {
-    std::cout << "xudu: focused cell has no content to link\n";
+    std::cout << "xuzz: focused cell has no content to link\n";
     return;
   }
   const auto carried = carrySpans(session.store(sourceStoreIndex),
@@ -755,7 +755,7 @@ void Views::addCellToPendingLink(const std::span<const PrimediaSpan> content,
   }
   pending->right.insert(pending->right.end(), carried->begin(), carried->end());
   ++pending->rightCells;
-  std::cout << "xudu: added cell " << pending->rightCells
+  std::cout << "xuzz: added cell " << pending->rightCells
             << " to the pending link; choose another or finish the link\n";
 }
 
@@ -763,11 +763,11 @@ void Views::finishCellLink() {
   if (pending && (pending->doc >= session.views().size() ||
                   session.storeIndexOf(pending->doc) != pending->storeIndex)) {
     pending.reset();
-    std::cout << "xudu: link destination was closed; begin a new link\n";
+    std::cout << "xuzz: link destination was closed; begin a new link\n";
     return;
   }
   if (!pending || pending->right.empty()) {
-    std::cout << "xudu: select a passage and add at least one cell first\n";
+    std::cout << "xuzz: select a passage and add at least one cell first\n";
     return;
   }
   xanadu::Link link;
@@ -776,7 +776,7 @@ void Views::finishCellLink() {
   link.left        = std::move(pending->spans);
   link.right       = std::move(pending->right);
   const auto after = session.addLink(pending->doc, std::move(link));
-  std::cout << "xudu: linked document passage to " << pending->rightCells
+  std::cout << "xuzz: linked document passage to " << pending->rightCells
             << " cell(s) at " << after.str() << "\n";
   pending.reset();
 }
@@ -784,19 +784,19 @@ void Views::finishCellLink() {
 void Views::publishCurrent(const std::string &salt) {
   renderer->runWithState([this, salt](RenderState &) {
     if (session.views().empty()) {
-      std::cout << "xudu: nothing open to publish\n";
+      std::cout << "xuzz: nothing open to publish\n";
       state->showDialog(render::DiagnosticSeverity::Warning,
                         "Nothing to publish",
                         "No document is open. Open one, and what is under "
                         "the caret is what gets published.");
       return;
     }
-    auto *const caret   = renderer->editCaret();
-    const auto which    = nullptr != caret && caret->active() &&
-                               caret->documentIndex() < session.views().size()
-                              ? caret->documentIndex()
-                              : 0U;
-    const auto version  = session.versionOf(which);
+    auto *const caret  = renderer->editCaret();
+    const auto which   = nullptr != caret && caret->active() &&
+                                 caret->documentIndex() < session.views().size()
+                             ? caret->documentIndex()
+                             : 0U;
+    const auto version = session.versionOf(which);
     const auto storeIdx = session.storeIndexOf(which);
     const auto who      = session.author();
 
@@ -822,7 +822,7 @@ void Views::publishCurrent(const std::string &salt) {
       }
     }
     if (keys.options.empty()) {
-      std::cout << "xudu: no signing key in the keyring\n";
+      std::cout << "xuzz: no signing key in the keyring\n";
       state->showDialog(
           render::DiagnosticSeverity::Error, "No signing key",
           "The keyring has no secret key to sign an authorship record with, "
@@ -992,10 +992,10 @@ void Views::publishAnswers(const MicroversionId &version,
       [this, version, which, storeIdx, request](RenderState &) {
         try {
           const auto path = session.publishDocument(version, request, storeIdx);
-          std::cout << "xudu: prepared doc " << which << " as " << path
+          std::cout << "xuzz: prepared doc " << which << " as " << path
                     << "; inspect Publication status with Ctrl+Shift+P\n";
         } catch (const std::exception &err) {
-          std::cout << "xudu: cannot publish: " << err.what() << "\n";
+          std::cout << "xuzz: cannot publish: " << err.what() << "\n";
           state->showDialog(render::DiagnosticSeverity::Error,
                             "Could not publish " + version.str(), err.what());
         }
@@ -1044,7 +1044,7 @@ void Views::publicationStatus() {
                     renderer->runWithState([this, id](RenderState &) {
                       try {
                         session.publicationOutbox().retry(id);
-                        std::cout << "xudu: publication retry queued\n";
+                        std::cout << "xuzz: publication retry queued\n";
                       } catch (const std::exception &error) {
                         state->showDialog(render::DiagnosticSeverity::Error,
                                           "Publication retry", error.what());
@@ -1107,7 +1107,7 @@ void Views::saveCurrent() {
           });
     } else {
       session.save(storeIdx);
-      std::cout << "xudu: saved draft to " << session.path(storeIdx) << "\n";
+      std::cout << "xuzz: saved draft to " << session.path(storeIdx) << "\n";
       if (!session.store(storeIdx).scrolls().empty())
         renderer->push(RenderItemNotification(
             "Draft saved. Preparing offline quotations…"));
@@ -1128,10 +1128,10 @@ void Views::preserveAnswers(const std::size_t storeIdx,
       fs::create_directories(targetDir);
       session.saveTo(storeIdx, targetDir);
       session.setStorePath(storeIdx, targetDir.string(), false);
-      std::cout << "xudu: preserved temporary store to " << targetDir.string()
+      std::cout << "xuzz: preserved temporary store to " << targetDir.string()
                 << "\n";
     } catch (const std::exception &err) {
-      std::cout << "xudu: cannot preserve store: " << err.what() << "\n";
+      std::cout << "xuzz: cannot preserve store: " << err.what() << "\n";
       state->showDialog(render::DiagnosticSeverity::Error,
                         "Could not preserve xanadoc", err.what());
     }
@@ -1195,7 +1195,7 @@ std::size_t Views::newDocument() {
   const auto storeIndex = session.createNewStore("");
   showAlongside(MicroversionId{}, 0.0F, storeIndex);
   activateNewest();
-  std::cout << "xudu: created new sovereign document (store " << storeIndex
+  std::cout << "xuzz: created new sovereign document (store " << storeIndex
             << ")\n";
   return storeIndex;
 }
@@ -1294,7 +1294,7 @@ void Views::spawnTranscludedDocument(const TetherPayload &payload,
     session.save(destination);
     showAlongside(version, 0.0F, destination);
     activateNewest();
-    std::cout << "xudu: spawned transcluded document version " << version.str()
+    std::cout << "xuzz: spawned transcluded document version " << version.str()
               << " from origin version " << payload.originVersion.str() << " ["
               << payload.originCharStart << ", " << payload.originCharEnd
               << ")\n";
@@ -1727,7 +1727,7 @@ void Views::insertSpanAt(RenderState &rState, const std::uint32_t doc,
   if (auto *const caret = renderer->editCaret(); caret) {
     caret->placeAt(doc, at + static_cast<std::uint32_t>(span.length));
   }
-  std::cout << "xudu: transcluded " << span.length << " bytes into doc " << doc
+  std::cout << "xuzz: transcluded " << span.length << " bytes into doc " << doc
             << " at " << at << "\n";
 }
 
@@ -1743,7 +1743,7 @@ void Views::insertPageBreak(const std::uint32_t docIndex,
       rState.docs[docIndex]->load(*src);
       syncMediaWidgets(rState);
     }
-    std::cout << "xudu: page break inserted at doc " << docIndex << " offset "
+    std::cout << "xuzz: page break inserted at doc " << docIndex << " offset "
               << charOffset << "\n";
   });
 }
@@ -1759,7 +1759,7 @@ void Views::insertPageBreakAtCaret() {
       rState.docs[where.doc]->load(*src);
       syncMediaWidgets(rState);
     }
-    std::cout << "xudu: page break inserted at doc " << where.doc << " offset "
+    std::cout << "xuzz: page break inserted at doc " << where.doc << " offset "
               << where.start << "\n";
   });
 }
@@ -1772,12 +1772,12 @@ void Views::exportOsmic() {
     }
     auto *const caret   = renderer->editCaret();
     const auto which    = (nullptr != caret && caret->active() &&
-                        caret->documentIndex() < session.views().size())
+                           caret->documentIndex() < session.views().size())
                               ? caret->documentIndex()
                               : 0U;
     const auto storeIdx = session.storeIndexOf(which);
     session.store(storeIdx).saveOsmicText(session.path(storeIdx));
-    std::cout << "xudu: exported osmic text for doc " << which << " ("
+    std::cout << "xuzz: exported osmic text for doc " << which << " ("
               << session.path(storeIdx) << ")\n";
   });
 }
@@ -1789,18 +1789,18 @@ void Views::importFile(const std::string &filePath) {
     }
     std::ifstream file(filePath, std::ios::binary);
     if (!file) {
-      std::cout << "xudu: cannot read import file: " << filePath << "\n";
+      std::cout << "xuzz: cannot read import file: " << filePath << "\n";
       return;
     }
     const std::string bytes((std::istreambuf_iterator<char>(file)),
                             std::istreambuf_iterator<char>());
     auto *const caret   = renderer->editCaret();
     const auto docIdx   = (nullptr != caret && caret->active() &&
-                         caret->documentIndex() < session.views().size())
+                           caret->documentIndex() < session.views().size())
                               ? caret->documentIndex()
                               : 0U;
     const auto at       = (nullptr != caret && caret->active() &&
-                     caret->documentIndex() == docIdx)
+                           caret->documentIndex() == docIdx)
                               ? caret->byteOffset()
                               : 0U;
     const auto detected = gleditor::MimeDetector::detectFile(filePath);
@@ -1814,7 +1814,7 @@ void Views::importFile(const std::string &filePath) {
         syncMediaWidgets(rState);
       }
     }
-    std::cout << "xudu: imported file " << filePath << " into doc " << docIdx
+    std::cout << "xuzz: imported file " << filePath << " into doc " << docIdx
               << " at offset " << at << " -> version " << prod.str() << "\n";
   });
 }
@@ -2008,7 +2008,7 @@ void Views::openDocumentFromPath(const std::string &chosen) {
     const auto head = sysStore.primaryCurrentVersion();
     showAlongside(head, 0.0F, sIdx);
     activateNewest();
-    std::cout << "xudu: opened system document " << chosen << " (store " << sIdx
+    std::cout << "xuzz: opened system document " << chosen << " (store " << sIdx
               << ")\n";
     return;
   }
@@ -2032,7 +2032,7 @@ void Views::openDocumentFromPath(const std::string &chosen) {
       const auto head = st.primaryCurrentVersion();
       showAlongside(head, 0.0F, sIdx);
       activateNewest();
-      std::cout << "xudu: opened store " << chosen << " (store " << sIdx
+      std::cout << "xuzz: opened store " << chosen << " (store " << sIdx
                 << ")\n";
     } catch (const std::exception &err) {
       state->showDialog(render::DiagnosticSeverity::Error,
@@ -2043,7 +2043,7 @@ void Views::openDocumentFromPath(const std::string &chosen) {
       const auto [sIdx, imported] = session.importFileToTemporaryStore(chosen);
       showAlongside(imported, 0.0F, sIdx);
       activateNewest();
-      std::cout << "xudu: imported file " << chosen << " to temporary store "
+      std::cout << "xuzz: imported file " << chosen << " to temporary store "
                 << sIdx << "\n";
     } catch (const std::exception &err) {
       state->showDialog(render::DiagnosticSeverity::Error,
@@ -2093,7 +2093,7 @@ void Views::printHistory() {
     const auto sIdx =
         session.views().empty() ? 0 : session.views().front().storeIndex;
     const auto &st = session.store(sIdx);
-    std::cout << "xudu: " << st.opCount() << " operations, "
+    std::cout << "xuzz: " << st.opCount() << " operations, "
               << st.primedia().size() << " bytes of primedia\n";
     for (const auto &id : st.allVersions()) {
       const auto op = st.getOp(id);

@@ -83,7 +83,7 @@
     },
     "default_store": {
       "description": "Default xanadoc store in this journey profile.",
-      "example": "/tmp/ux-run/data/xudu/xanadocs/default"
+      "example": "/tmp/ux-run/data/xuzz/xanadocs/default"
     }
   }
 }

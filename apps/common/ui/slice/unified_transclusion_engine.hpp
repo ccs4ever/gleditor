@@ -1,6 +1,6 @@
 /**
  * @file unified_transclusion_engine.hpp
- * @brief High-performance coordinator bridging Xudu storage, Zigzag topology,
+ * @brief High-performance coordinator bridging Xanadu storage, Zigzag topology,
  *        and Gleditor GPU text streaming.
  */
 #ifndef ZIGZAG_UNIFIED_TRANSCLUSION_ENGINE_HPP
@@ -38,7 +38,7 @@ namespace zigzag {
 
 /**
  * @class UnifiedTransclusionEngine
- * @brief Coordinates incremental topological mapping from Xudu append-only
+ * @brief Coordinates incremental topological mapping from Xanadu append-only
  *        operations spools into multidimensional ZigZag ranks, performing
  *        zero-copy text resolution and GPU instance buffer staging.
  */
@@ -241,7 +241,7 @@ public:
   //
   // toZzStructureDocument() and loadFromZzStructureDocument() were here, and
   // migration step 19 deleted them. The YAML document is a transfer format now,
-  // not a second cell space: sliceToStore() in zz_xudu_projector mints one as
+  // not a second cell space: sliceToStore() in xanadu_projector mints one as
   // Structure operations and storeToSlice() reads a Manifold back out, both
   // tested against the real sample slice. Ingesting a document by filling in
   // cells that no operation minted is exactly the arrangement the convergence

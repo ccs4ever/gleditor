@@ -239,7 +239,7 @@ PouchManager *PouchManager::ensureZoneCell(DropZone &zone) {
                                           .label        = zone.label(),
                                           .auraColor    = zone.auraColor(),
                                           .heightWeight = zone.heightWeight(),
-                                 },
+                                      },
                                       &cell);
   if (zigzag::noCell != cell) {
     zone.setCell(cell);
@@ -268,9 +268,9 @@ PouchItem PouchManager::dropSpan(const std::string_view zoneId,
               : (origin.document ? origin.document->version : currentVersion_),
       .originDocIndex  = 0,
       .originCharStart = origin.source ? origin.source->start : 0,
-      .originCharEnd   = origin.source ? origin.source->end
-                                       : static_cast<std::uint32_t>(span.length),
-      .timestampUtc    = static_cast<std::uint64_t>(
+      .originCharEnd = origin.source ? origin.source->end
+                                     : static_cast<std::uint32_t>(span.length),
+      .timestampUtc  = static_cast<std::uint64_t>(
           std::chrono::duration_cast<std::chrono::seconds>(
               std::chrono::system_clock::now().time_since_epoch())
               .count()),
@@ -561,12 +561,12 @@ PouchManager *PouchManager::loadManifest() {
           }
 
           PouchItem item{
-              .itemId           = itemCell,
-              .span             = span,
-              .previewText      = std::move(previewText),
-              .originVersion    = originSource
-                                      ? originSource->version
-                                      : store().segmentedOps().idOf(slot->birthOp),
+              .itemId        = itemCell,
+              .span          = span,
+              .previewText   = std::move(previewText),
+              .originVersion = originSource
+                                   ? originSource->version
+                                   : store().segmentedOps().idOf(slot->birthOp),
               .originDocIndex   = 0,
               .originCharStart  = originSource ? originSource->start : 0,
               .originCharEnd    = originSource

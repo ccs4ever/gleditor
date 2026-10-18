@@ -292,12 +292,16 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
                       std::size_t &solutionsCount, std::size_t maxSolutions,
                       std::size_t depth, std::size_t &nextFrameId,
                       std::size_t &cutToFrame) {
+  core.arena().consumeWork();
+  if (core.arena().executionLimited() && depth >= 512)
+    throw std::runtime_error("Prolog resolution nesting budget exhausted");
   if (solutionsCount >= maxSolutions || depth > 1000) {
     return false;
   }
   if (goals.empty()) {
     LogicSolution sol;
     for (CellRef v : queryVars) {
+      core.arena().consumeWork();
       CellRef val = stdlib.deref(v);
       sol.bindings.emplace_back(v, val);
       sol.varMap[v] = val;
@@ -333,6 +337,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
       CellRef cur        = listArg;
       std::size_t limit  = core.arena().cellCount() + 1;
       while (cur != noCell && !stdlib.isVar(cur) && limit-- > 0) {
+        core.arena().consumeWork();
         cur       = stdlib.deref(cur);
         auto args = stdlib.argumentsOf(cur);
         if (stdlib.functorOf(cur) == "." && args.size() >= 2) {
@@ -381,6 +386,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
   if ((goalFunctor == "vortex_module" || goalFunctor == "stdlib_module") &&
       goalArgs.size() == 1) {
     for (const auto &modName : stdlib.modules()) {
+      core.arena().consumeWork();
       if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
       auto mark     = core.arena().mark();
       CellRef mCell = core.arena().makeCell(modName);
@@ -404,7 +410,9 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
   if ((goalFunctor == "vortex_function" || goalFunctor == "stdlib_function") &&
       goalArgs.size() == 2) {
     for (const auto &modName : stdlib.modules()) {
+      core.arena().consumeWork();
       for (const auto &symName : stdlib.symbolsInModule(modName)) {
+        core.arena().consumeWork();
         if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
         auto mark     = core.arena().mark();
         CellRef mCell = core.arena().makeCell(modName);
@@ -433,7 +441,9 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
   if ((goalFunctor == "vortex_function" || goalFunctor == "stdlib_function") &&
       goalArgs.size() == 3) {
     for (const auto &modName : stdlib.modules()) {
+      core.arena().consumeWork();
       for (const auto &symName : stdlib.symbolsInModule(modName)) {
+        core.arena().consumeWork();
         if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
         auto mark            = core.arena().mark();
         CellRef mCell        = core.arena().makeCell(modName);
@@ -466,7 +476,9 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
   if ((goalFunctor == "vortex_function" || goalFunctor == "stdlib_function") &&
       goalArgs.size() == 1) {
     for (const auto &modName : stdlib.modules()) {
+      core.arena().consumeWork();
       for (const auto &symName : stdlib.symbolsInModule(modName)) {
+        core.arena().consumeWork();
         if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
         auto mark     = core.arena().mark();
         CellRef fCell = core.arena().makeCell(symName);
@@ -492,7 +504,9 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
   // OpcodeLabel)
   if (goalFunctor == "vortex_instruction" && goalArgs.size() == 3) {
     for (const auto &modName : stdlib.modules()) {
+      core.arena().consumeWork();
       for (const auto &symName : stdlib.symbolsInModule(modName)) {
+        core.arena().consumeWork();
         if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
         std::string fullPath = modName;
         fullPath += "/";
@@ -505,6 +519,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
         std::int64_t stepIdx = 0;
         std::size_t limit    = core.arena().cellCount() + 1;
         while (curOp != noCell && limit-- > 0) {
+          core.arena().consumeWork();
           if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
           auto mark         = core.arena().mark();
           CellRef pCell     = core.arena().makeCell(fullPath);
@@ -539,7 +554,9 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
   // Manifold stdlib introspection: vortex_contract(Path, Type, ContractLabel)
   if (goalFunctor == "vortex_contract" && goalArgs.size() == 3) {
     for (const auto &modName : stdlib.modules()) {
+      core.arena().consumeWork();
       for (const auto &symName : stdlib.symbolsInModule(modName)) {
+        core.arena().consumeWork();
         if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
         std::string fullPath = modName;
         fullPath += "/";
@@ -551,10 +568,12 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
         CellRef curOp     = entryOp;
         std::size_t limit = core.arena().cellCount() + 1;
         while (curOp != noCell && limit-- > 0) {
+          core.arena().consumeWork();
           if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
           // Preconditions along -d.contract
           std::vector<CellRef> preconds = core.preconditionsOf(curOp);
           for (CellRef p : preconds) {
+            core.arena().consumeWork();
             if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
             auto mark         = core.arena().mark();
             CellRef pCell     = core.arena().makeCell(fullPath);
@@ -579,6 +598,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
           // Postconditions along +d.contract
           std::vector<CellRef> postconds = core.postconditionsOf(curOp);
           for (CellRef p : postconds) {
+            core.arena().consumeWork();
             if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
             auto mark         = core.arena().mark();
             CellRef pCell     = core.arena().makeCell(fullPath);
@@ -611,7 +631,9 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
   // Manifold stdlib introspection: vortex_param(Path, Wing, SlotIndex, Target)
   if (goalFunctor == "vortex_param" && goalArgs.size() == 4) {
     for (const auto &modName : stdlib.modules()) {
+      core.arena().consumeWork();
       for (const auto &symName : stdlib.symbolsInModule(modName)) {
+        core.arena().consumeWork();
         if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
         std::string fullPath = modName;
         fullPath += "/";
@@ -623,6 +645,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
         // Input wing
         std::vector<CellRef> inCells = core.inputsOf(entryOp);
         for (std::size_t i = 0; i < inCells.size(); ++i) {
+          core.arena().consumeWork();
           if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
           auto mark     = core.arena().mark();
           CellRef pCell = core.arena().makeCell(fullPath);
@@ -650,6 +673,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
         // Output wing
         std::vector<CellRef> outCells = core.outputsOf(entryOp);
         for (std::size_t i = 0; i < outCells.size(); ++i) {
+          core.arena().consumeWork();
           if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
           auto mark     = core.arena().mark();
           CellRef pCell = core.arena().makeCell(fullPath);
@@ -796,6 +820,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
       const auto model =
           xanadu::SystemStoreModel::fromStore(*stdlib.boundStore());
       for (const auto &s : model.settings()) {
+        core.arena().consumeWork();
         bool cont = evalSetting(s.name, [&]() -> CellRef {
           if (s.value.elements.empty()) {
             return core.arena().makeCell("");
@@ -815,6 +840,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
           }
           std::vector<CellRef> elCells;
           for (const auto &el : s.value.elements) {
+            core.arena().consumeWork();
             if (std::holds_alternative<double>(el)) {
               elCells.push_back(
                   core.arena().makeScalarCell(std::get<double>(el)));
@@ -840,6 +866,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
           core.arena().linked(core.home(), varsDim, DimVector::POS);
       std::size_t limit = core.arena().cellCount() + 1;
       while (curVar != noCell && limit-- > 0) {
+        core.arena().consumeWork();
         std::string sName = core.arena().textOf(curVar);
         CellRef curVal = core.arena().linked(curVar, valsDim, DimVector::POS);
         bool cont      = evalSetting(sName, [&]() -> CellRef {
@@ -858,13 +885,16 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
       const auto model =
           xanadu::SystemStoreModel::fromStore(*stdlib.boundStore());
       for (const auto &s : model.settings()) {
+        core.arena().consumeWork();
         for (const auto &alt : s.schema.alternatives) {
+          core.arena().consumeWork();
           if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
           auto mark        = core.arena().mark();
           CellRef nameCell = core.arena().makeCell(s.name);
           std::vector<CellRef> typeCells;
           typeCells.reserve(alt.expectedTypes.size());
           for (const auto &t : alt.expectedTypes) {
+            core.arena().consumeWork();
             typeCells.push_back(core.arena().makeCell(t));
           }
           CellRef shapeCell = stdlib.makeList(typeCells);
@@ -893,7 +923,9 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
       const auto model =
           xanadu::SystemStoreModel::fromStore(*stdlib.boundStore());
       for (const auto &s : model.settings()) {
+        core.arena().consumeWork();
         for (const auto &alt : s.schema.alternatives) {
+          core.arena().consumeWork();
           if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
           auto mark        = core.arena().mark();
           CellRef nameCell = core.arena().makeCell(s.name);
@@ -912,6 +944,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
           } else {
             std::vector<CellRef> defCells;
             for (const auto &el : alt.defaultValues) {
+              core.arena().consumeWork();
               if (std::holds_alternative<double>(el)) {
                 defCells.push_back(
                     core.arena().makeScalarCell(std::get<double>(el)));
@@ -984,6 +1017,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
     } else {
       std::size_t total = core.arena().cellCount();
       for (std::size_t c = 1; c < total; ++c) {
+        core.arena().consumeWork();
         CellRef target =
             zigzag::ArenaManifold::refOf(static_cast<std::uint32_t>(c));
         if (!core.arena().contains(target)) continue;
@@ -1058,6 +1092,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
           core.arena().contains(static_cast<CellRef>(fromNum))) {
         auto fromCell = static_cast<CellRef>(fromNum);
         for (const auto &dl : core.arena().dimensionsOf(fromCell)) {
+          core.arena().consumeWork();
           std::string dimName = core.arena().textOf(dl.dim);
           if (dimName.empty()) {
             dimName = "d." + std::to_string(dl.dim);
@@ -1073,11 +1108,13 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
     } else {
       std::size_t total = core.arena().cellCount();
       for (std::size_t c = 1; c < total; ++c) {
+        core.arena().consumeWork();
         CellRef fromCell =
             zigzag::ArenaManifold::refOf(static_cast<std::uint32_t>(c));
         if (!core.arena().contains(fromCell)) continue;
         if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
         for (const auto &dl : core.arena().dimensionsOf(fromCell)) {
+          core.arena().consumeWork();
           std::string dimName = core.arena().textOf(dl.dim);
           if (dimName.empty()) {
             dimName = "d." + std::to_string(dl.dim);
@@ -1100,6 +1137,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
       const auto &store       = *stdlib.boundStore();
       const std::size_t count = store.opCount();
       for (std::size_t i = 0; i < count; ++i) {
+        core.arena().consumeWork();
         if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
         const auto *cop = store.getCompactOp(static_cast<std::uint32_t>(i));
         if (cop != nullptr && cop->kind == xanadu::OpKind::Transclude) {
@@ -1133,6 +1171,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
     if (stdlib.boundStore() != nullptr) {
       const auto &store = *stdlib.boundStore();
       for (const auto &link : store.linkView()) {
+        core.arena().consumeWork();
         if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
         auto mark = core.arena().mark();
         std::string leftStr =
@@ -1174,6 +1213,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
     auto matchCellSpans = [&](CellRef c) -> bool {
       auto spans = core.arena().contentOf(c);
       for (const auto &sp : spans) {
+        core.arena().consumeWork();
         if (solutionsCount >= maxSolutions || cutToFrame > 0) return false;
         auto mark = core.arena().mark();
         CellRef cCell =
@@ -1209,6 +1249,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
     } else {
       std::size_t total = core.arena().cellCount();
       for (std::size_t c = 1; c < total; ++c) {
+        core.arena().consumeWork();
         CellRef target =
             zigzag::ArenaManifold::refOf(static_cast<std::uint32_t>(c));
         if (!core.arena().contains(target)) continue;
@@ -1226,6 +1267,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
       DimRef cloneDim   = core.dims().clone;
       std::size_t total = core.arena().cellCount();
       for (std::size_t c = 1; c < total; ++c) {
+        core.arena().consumeWork();
         CellRef presCell =
             zigzag::ArenaManifold::refOf(static_cast<std::uint32_t>(c));
         if (!core.arena().contains(presCell)) continue;
@@ -1261,6 +1303,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
       auto matchEdgesFrom = [&](CellRef fromCell) -> bool {
         if (!core.arena().contains(fromCell)) return true;
         for (const auto &dl : core.arena().dimensionsOf(fromCell)) {
+          core.arena().consumeWork();
           if (dl.pos == noCell) continue;
           std::string dimName = core.arena().textOf(dl.dim);
           if (dimName.empty()) {
@@ -1304,6 +1347,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
       } else {
         std::size_t total = core.arena().cellCount();
         for (std::size_t c = 1; c < total; ++c) {
+          core.arena().consumeWork();
           CellRef fromCell =
               zigzag::ArenaManifold::refOf(static_cast<std::uint32_t>(c));
           if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
@@ -1316,6 +1360,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
 
   // Iterate over matching predicates
   for (CellRef pred : candidatePreds) {
+    core.arena().consumeWork();
     if (pred == noCell) continue;
     if (core.arena().textOf(pred) != goalFunctor) continue;
 
@@ -1324,6 +1369,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
         core.arena().linked(pred, core.dims().clause, DimVector::POS);
     std::size_t limit = core.arena().cellCount() + 1;
     while (clause != noCell && solutionsCount < maxSolutions && limit-- > 0) {
+      core.arena().consumeWork();
       if (cutToFrame > 0 && cutToFrame <= frameId) break;
       auto mark = core.arena().mark();
 
@@ -1339,6 +1385,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
             core.arena().linked(clause, core.dims().spin, DimVector::POS);
         std::size_t bodyLimit = core.arena().cellCount() + 1;
         while (curBody != noCell && bodyLimit-- > 0) {
+          core.arena().consumeWork();
           std::unordered_map<CellRef, CellRef> bodyVisited;
           CellRef bTerm =
               freshenTerm(stdlib, core, curBody, varMap, bodyVisited);
@@ -1413,7 +1460,7 @@ void VortexStdLib::bootstrap() {
   CellRef modUI          = getOrCreateModule("std:ui");
   CellRef modNav         = getOrCreateModule("std:nav");
   CellRef modBridge      = getOrCreateModule("std:bridge");
-  CellRef modXudu        = getOrCreateModule("std:xudu");
+  CellRef modXuzz        = getOrCreateModule("std:xuzz");
 
   buildMathModule(modMath);
   buildStringModule(modString);
@@ -1429,7 +1476,7 @@ void VortexStdLib::bootstrap() {
   buildUiModule(modUI);
   buildNavModule(modNav);
   buildBridgeModule(modBridge);
-  buildXuduModule(modXudu);
+  buildXuzzModule(modXuzz);
 }
 
 void VortexStdLib::buildMathModule(CellRef mod) {
@@ -4052,8 +4099,8 @@ bool VortexStdLib::bridgeCellUnlock(xanadu::ZigzagPresentationSurface &surface,
   return surface.unlockCell(cell);
 }
 
-void VortexStdLib::buildXuduModule(CellRef mod) {
-  constexpr std::pair<std::string_view, std::string_view> kXuduActions[] = {
+void VortexStdLib::buildXuzzModule(CellRef mod) {
+  constexpr std::pair<std::string_view, std::string_view> kXuzzActions[] = {
       {"quit", "#XUDU_QUIT"},
       {"save", "#XUDU_SAVE"},
       {"close", "#XUDU_CLOSE"},
@@ -4099,7 +4146,7 @@ void VortexStdLib::buildXuduModule(CellRef mod) {
       {"radial_menu", "#XUDU_RADIAL_MENU"},
   };
 
-  for (const auto &[name, opcode] : kXuduActions) {
+  for (const auto &[name, opcode] : kXuzzActions) {
     CellRef out = core_.arena().makeCell();
     CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, opcode);
     core_.bindOutput(op, out);

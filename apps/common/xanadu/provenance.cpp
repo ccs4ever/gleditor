@@ -187,8 +187,8 @@ Ran run(const std::vector<std::string> &argv,
   // cannot block: it is far below what a pipe holds without a reader.
   if (!feed.empty()) {
     DWORD written = 0;
-    std::ignore   = WriteFile(inPipe.writeEnd, feed.data(),
-                              static_cast<DWORD>(feed.size()), &written, nullptr);
+    std::ignore = WriteFile(inPipe.writeEnd, feed.data(),
+                            static_cast<DWORD>(feed.size()), &written, nullptr);
   }
   // Closed either way, so a program waiting on end of input is not left
   // waiting for a passphrase that is not coming.

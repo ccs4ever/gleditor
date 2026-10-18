@@ -17,7 +17,7 @@ TEST(PairedEditHeadsTest, InterleavedTextAndCellsKeepOneAncestry) {
   session.viewOpened(base);
   session.viewOpened(base);
   zigzag::ZigzagVisualizer slice("Sans 12");
-  slice.bindXuduStore(store, base);
+  slice.bindXanaduStore(store, base);
   std::vector<std::pair<xanadu::MicroversionId, xanadu::MicroversionId>>
       commits;
   session.setAuthoredCommitHandler([&](const std::uint32_t doc,
@@ -80,7 +80,7 @@ TEST(PairedEditHeadsTest, HistoricSliceIsNeverMovedByAnUnrelatedCommit) {
   const auto sibling  = store.insert(base, 0, "Other branch");
   session.viewOpened(selected);
   zigzag::ZigzagVisualizer slice("Sans 12");
-  slice.bindXuduStore(store, selected);
+  slice.bindXanaduStore(store, selected);
   const auto ops = store.opCount();
   EXPECT_FALSE(slice.advanceEditingHead(base, sibling));
   EXPECT_FALSE(slice.advanceEditingHead(selected, sibling));

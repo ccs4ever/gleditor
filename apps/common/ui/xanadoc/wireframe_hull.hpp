@@ -3,8 +3,8 @@
  * @brief Progressive 3D streaming wireframe hull for documents materializing
  * from BitTorrent swarms.
  */
-#ifndef XUDU_WIREFRAME_HULL_HPP
-#define XUDU_WIREFRAME_HULL_HPP
+#ifndef XANADU_WIREFRAME_HULL_HPP
+#define XANADU_WIREFRAME_HULL_HPP
 
 #include <cstdint>
 #include <memory>
@@ -89,4 +89,4 @@ private:
 
 } // namespace xanadu
 
-#endif // XUDU_WIREFRAME_HULL_HPP
+#endif // XANADU_WIREFRAME_HULL_HPP

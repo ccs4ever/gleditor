@@ -143,7 +143,7 @@
     ],
     "plan": {
       "launch_args": [
-        "${evidence}/data/xudu/xanadocs/untitled-20261011-223124"
+        "${evidence}/data/xuzz/xanadocs/untitled-20261011-223124"
       ],
       "steps": [
         "--chord",
@@ -165,7 +165,7 @@
         "--chord",
         "Tab",
         "--type",
-        "${evidence}/data/xudu/xanadocs/untitled-20261011-223253",
+        "${evidence}/data/xuzz/xanadocs/untitled-20261011-223253",
         "--chord",
         "Return",
         "--click-label",

@@ -10,8 +10,8 @@
  * places and the focused ZigZag card. A click on it moves the camera there,
  * keeping the zoom.
  */
-#ifndef XUDU_OVERVIEW_OVERLAY_HPP
-#define XUDU_OVERVIEW_OVERLAY_HPP
+#ifndef XANADU_OVERVIEW_OVERLAY_HPP
+#define XANADU_OVERVIEW_OVERLAY_HPP
 
 #include <cstdint>
 #include <functional>
@@ -120,4 +120,4 @@ private:
 
 } // namespace xanadu
 
-#endif // XUDU_OVERVIEW_OVERLAY_HPP
+#endif // XANADU_OVERVIEW_OVERLAY_HPP

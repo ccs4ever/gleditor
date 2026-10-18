@@ -783,6 +783,15 @@ std::expected<TyPtr, TypeError> TypeChecker::infer(const ExprNode &e,
           }
           (void)hasCatchAll;
           return resultTy;
+        } else if constexpr (std::is_same_v<T, ETuple>) {
+          std::vector<TyPtr> elements;
+          elements.reserve(node.elems.size());
+          for (const auto &element : node.elems) {
+            auto type = infer(*element, env);
+            if (!type) return type;
+            elements.push_back(*type);
+          }
+          return tycon("Tuple", std::move(elements));
         } else if constexpr (std::is_same_v<T, ERecordUpdate>) {
           return inferRecordUpdate(node, env, e.loc);
         } else {

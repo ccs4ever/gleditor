@@ -54,17 +54,17 @@ replace this fixture boundary. They must not be simulated by calling an unrelate
 Use these fixture names consistently; labels below are chosen test data, not hardcoded product
 defaults:
 
-| Object                         | Stable salt or rendezvous                     | Owner                      |
-| ------------------------------ | --------------------------------------------- | -------------------------- |
-| Author catalog                 | `catalog`                                     | Each user's publishing key |
-| Story Ideas store publication  | `doc:story-ideas`                             | Alice                      |
-| Imported local research scroll | `scroll:story-research`                       | Alice                      |
-| Main user permascroll          | `permascroll`                                 | Each user's device key     |
-| Bob's Commentary               | `doc:bobs-commentary`                         | Bob                        |
-| Carl's Commentary              | `doc:carls-commentary`                        | Carl                       |
-| Devin's link package           | `curations:story-ideas`                       | Devin                      |
-| Topic discovery                | `SHA1("xudu:topic:" + canonicalize("Ideas"))` | Shared rendezvous          |
-| Links touching a scroll        | `linkPackageRendezvousTarget(scrollKey)`      | Shared rendezvous          |
+| Object                         | Stable salt or rendezvous                       | Owner                      |
+| ------------------------------ | ----------------------------------------------- | -------------------------- |
+| Author catalog                 | `catalog`                                       | Each user's publishing key |
+| Story Ideas store publication  | `doc:story-ideas`                               | Alice                      |
+| Imported local research scroll | `scroll:story-research`                         | Alice                      |
+| Main user permascroll          | `permascroll`                                   | Each user's device key     |
+| Bob's Commentary               | `doc:bobs-commentary`                           | Bob                        |
+| Carl's Commentary              | `doc:carls-commentary`                          | Carl                       |
+| Devin's link package           | `curations:story-ideas`                         | Devin                      |
+| Topic discovery                | `SHA1("xanadu:topic:" + canonicalize("Ideas"))` | Shared rendezvous          |
+| Links touching a scroll        | `linkPackageRendezvousTarget(scrollKey)`        | Shared rendezvous          |
 
 The topic convention and `catalog` salt come from
 [topic ledgers and search](swarm-topic-ledger-and-search.md). The older

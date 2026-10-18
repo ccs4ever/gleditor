@@ -5,7 +5,7 @@
  * A "Slice" was once a self-contained YAML file following this schema; since
  * migration step 20 a slice is a Store, and these types are the transfer
  * format between a Store/Manifold and ZigzagVisualizer's in-memory model
- * (see zz_xudu_projector.hpp's sliceToStore()/storeToSlice()) rather than an
+ * (see xanadu_projector.hpp's sliceToStore()/storeToSlice()) rather than an
  * on-disk format of their own. Nothing here loads from or saves to a YAML
  * file any more.
  *
@@ -199,7 +199,7 @@ struct StructureMeta {
 /// A Slice document (DTO). In-memory runtime state is managed by
 /// xanadu::Store and zigzag::Manifold (via UnifiedTransclusionEngine);
 /// ZzStructureDocument is the transfer format between that and
-/// ZigzagVisualizer's own model (see zz_xudu_projector.hpp's
+/// ZigzagVisualizer's own model (see xanadu_projector.hpp's
 /// sliceToStore()/storeToSlice()), not an on-disk format of its own.
 struct ZzStructureDocument {
   StructureMeta meta;

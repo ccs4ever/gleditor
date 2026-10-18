@@ -26,6 +26,7 @@
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/store_stream.hpp"
 #include "common/xanadu/user_permascroll.hpp"
+#include "common/xanadu/vortex/mesh_cli.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/vpl/compiler.hpp"
@@ -283,6 +284,9 @@ std::vector<std::string> reorderArgs(int argc, char *argv[]) {
 // rather than be swallowed into a generic error message.
 // NOLINTNEXTLINE(bugprone-exception-escape)
 int main(int argc, char *argv[]) {
+  if (const auto mesh = zigzag::vortex::mesh::runMeshCommand(
+          zigzag::vortex::mesh::Frontend::Vpl, argc, argv))
+    return *mesh;
   argparse::ArgumentParser program("vpl", "1.0.0");
 
   program.add_argument("file")

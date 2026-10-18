@@ -1,6 +1,6 @@
 /**
- * @file xudu-dump.cpp
- * @brief Render any section of a xudu store as text.
+ * @file store-dump.cpp
+ * @brief Render any section of a Xanadu store as text.
  *
  * R11 says a format is free to stop being human-readable, on the condition
  * that a tool can show it: "debuggability is a tool's job, not a format's".
@@ -59,7 +59,7 @@ using xanadu::OpsSegmentHeader;
 bool sawTrouble = false;
 
 void trouble(const std::string &what) {
-  std::cerr << "xudu-dump: " << what << '\n';
+  std::cerr << "store-dump: " << what << '\n';
   sawTrouble = true;
 }
 
@@ -565,7 +565,7 @@ int main(int argc, char **argv) {
     trouble(
         (target / "ops.spool").string() +
         ": a store from before operations were kept as nodes. Open and save "
-        "it with xudu to bring it forward; this renders nodes only.");
+        "it with xuzz to bring it forward; this renders nodes only.");
   }
 
   if (wants("scrolls") || wants("links") || wants("versions")) {
@@ -583,7 +583,7 @@ int main(int argc, char **argv) {
                (exists("current.yaml") || exists("versions.yaml"))) {
       trouble((target / "current.yaml").string() +
               ": author-facing metadata from before it moved into "
-              "store.tables. Open and save the store with xudu to bring it "
+              "store.tables. Open and save the store with xuzz to bring it "
               "forward.");
     }
   }

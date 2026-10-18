@@ -3,8 +3,8 @@
  * @brief 3D Swarm Telescope discovery overlay with topic swarms and FTS5
  * search.
  */
-#ifndef XUDU_SWARM_TELESCOPE_OVERLAY_HPP
-#define XUDU_SWARM_TELESCOPE_OVERLAY_HPP
+#ifndef XANADU_SWARM_TELESCOPE_OVERLAY_HPP
+#define XANADU_SWARM_TELESCOPE_OVERLAY_HPP
 
 #include <array>
 #include <cstdint>
@@ -166,4 +166,4 @@ private:
 
 } // namespace xanadu
 
-#endif // XUDU_SWARM_TELESCOPE_OVERLAY_HPP
+#endif // XANADU_SWARM_TELESCOPE_OVERLAY_HPP

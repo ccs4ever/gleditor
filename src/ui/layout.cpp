@@ -60,8 +60,8 @@ void addBox(LayoutResult &result, const LayoutItem &item, Rect rect,
   const float vertical   = std::min(padding, rect.height * 0.5F);
   const auto content     = intersection(
       UiMetrics{}.rounded({rect.left + horizontal, rect.bottom + vertical,
-                               std::max(0.0F, rect.width - 2.0F * horizontal),
-                               std::max(0.0F, rect.height - 2.0F * vertical)}),
+                           std::max(0.0F, rect.width - 2.0F * horizontal),
+                           std::max(0.0F, rect.height - 2.0F * vertical)}),
       rect);
   result.boxes.push_back(
       {item.id, parent, rect, content, item.focusable, item.enabled});

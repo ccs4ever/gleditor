@@ -28,7 +28,7 @@ DEB_VERSION_UPSTREAM := $(shell dpkg-parsechangelog -SVersion | sed 's/-[^-]*$$/
 # DEB_BUILD_OPTIONS into a -j flag. Calling make directly silently built the
 # whole package on one core.
 override_dh_auto_build:
-	dh_auto_build -- GLEDITOR_VERSION=$(DEB_VERSION_UPSTREAM) lib gleditor xudu shaders
+	dh_auto_build -- GLEDITOR_VERSION=$(DEB_VERSION_UPSTREAM) lib gleditor xuzz shaders
 
 # The test binary links gmock, which is a build dependency Debian would rather
 # not carry for a package that has no autopkgtest. The suite is run in CI on

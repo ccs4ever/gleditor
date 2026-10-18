@@ -113,7 +113,7 @@ authority is restricted to an elected quorum of **Oracles**.
 graph TD
     Voters["Community Members<br/>(Identities in Ledger)"]
     Aging["Aging Function<br/>Weight = floor(log2(AgeDays)) + 1"]
-    Votes["VoteEntry Gossip<br/>(xudu_oracle_vote)"]
+    Votes["VoteEntry Gossip<br/>(xanadu_oracle_vote)"]
     Engine["EnginePipeline::getActiveOracleQuorum()"]
     Quorum["Active Oracle Quorum<br/>(Top 5 Candidates)"]
     Attestation["Signed OracleAttestation<br/>(SMTP/DKIM Verified)"]
@@ -221,13 +221,13 @@ dedicated BEP 10 protocol extensions:
 ┌───────────────────────────┬──────────────┬───────────────────────────────┐
 │ Extension Name            │ Message ID   │ Purpose                       │
 ├───────────────────────────┼──────────────┼───────────────────────────────┤
-│ xudu_identity_lookup      │ 1            │ Identity & Merkle Proof Query │
-│ xudu_oracle_vote          │ 3            │ Oracle Vote Gossip & Quorum   │
-│ xudu_oracle_verify        │ 4            │ Out-of-Band Email Attestation │
+│ xanadu_identity_lookup      │ 1            │ Identity & Merkle Proof Query │
+│ xanadu_oracle_vote          │ 3            │ Oracle Vote Gossip & Quorum   │
+│ xanadu_oracle_verify        │ 4            │ Out-of-Band Email Attestation │
 └───────────────────────────┴──────────────┴───────────────────────────────┘
 ```
 
-### 1. `xudu_identity_lookup`
+### 1. `xanadu_identity_lookup`
 
 - **`IdentityQuery`**: Requests identity metadata and inclusion proofs for a fingerprint or email
   address.
@@ -235,13 +235,13 @@ dedicated BEP 10 protocol extensions:
 - **`PeerAuthChallenge` / `PeerAuthResponse`**: Two-way zero-knowledge challenge-response handshake
   verifying peer private key possession before granting swarm access.
 
-### 2. `xudu_oracle_vote`
+### 2. `xanadu_oracle_vote`
 
 - **`OracleVoteBroadcast`**: Gossips new `VoteEntry` records across peers.
 - **`OracleConsensusQuery` / `OracleConsensusResponse`**: Synchronizes the current candidate vote
   tallies and active quorum root.
 
-### 3. `xudu_oracle_verify`
+### 3. `xanadu_oracle_verify`
 
 - **`EmailVerifyRequest`**: Submits an email verification request to an Oracle, protected by a
   Hashcash Proof-of-Work challenge.
@@ -319,13 +319,13 @@ ______________________________________________________________________
 
 ## 9. Implementation File Map
 
-| Component               | Source Files                                                                                                                  | Description                                                                          |
-| :---------------------- | :---------------------------------------------------------------------------------------------------------------------------- | :----------------------------------------------------------------------------------- |
-| **Merkle Tree Core**    | [`apps/xudu/core/merkle_ledger.hpp/.cpp`](apps/xudu/core/merkle_ledger.hpp)                                                   | Append-only Merkle ledger using `microsoft/merklecpp`                                |
-| **Validation Engine**   | [`apps/xudu/core/identity/identity_validation.hpp/.cpp`](apps/xudu/core/identity/identity_validation.hpp)                     | `EnginePipeline`, quorum election, and `HashcashEngine`                              |
-| **Layout & Structs**    | [`apps/xudu/core/identity/identity_layout.hpp`](apps/xudu/core/identity/identity_layout.hpp)                                  | `IdentityEntry`, `VoteEntry`, `BlockHeader`, `OracleAttestation`                     |
-| **Serialization**       | [`apps/xudu/core/identity/identity_serialization.hpp/.cpp`](apps/xudu/core/identity/identity_serialization.hpp)               | Zero-copy Bencode encoders and decoders for all identity frames                      |
-| **Peer Controller**     | [`apps/xudu/core/identity/identity_network_controller.hpp/.cpp`](apps/xudu/core/identity/identity_network_controller.hpp)     | BEP 10 extensions (`xudu_identity_lookup`, `xudu_oracle_vote`, `xudu_oracle_verify`) |
-| **Provenance Engine**   | [`apps/xudu/core/provenance.hpp/.cpp`](apps/xudu/core/provenance.hpp)                                                         | OpenPGP document signature creation and verification                                 |
-| **Zigzag Verification** | [`tests/zigzag/zz_merkle_test.cpp`](tests/zigzag/zz_merkle_test.cpp)                                                          | Zigzag slice author verification against ledger root                                 |
-| **Unit Test Suites**    | [`tests/xudu/identity_test.cpp`](tests/xudu/identity_test.cpp), [`merkle_ledger_test.cpp`](tests/xudu/merkle_ledger_test.cpp) | Full test coverage for validation, consensus, and wire encoding                      |
+| Component               | Source Files                                                                                                                  | Description                                                                                |
+| :---------------------- | :---------------------------------------------------------------------------------------------------------------------------- | :----------------------------------------------------------------------------------------- |
+| **Merkle Tree Core**    | [`apps/xudu/core/merkle_ledger.hpp/.cpp`](apps/xudu/core/merkle_ledger.hpp)                                                   | Append-only Merkle ledger using `microsoft/merklecpp`                                      |
+| **Validation Engine**   | [`apps/xudu/core/identity/identity_validation.hpp/.cpp`](apps/xudu/core/identity/identity_validation.hpp)                     | `EnginePipeline`, quorum election, and `HashcashEngine`                                    |
+| **Layout & Structs**    | [`apps/xudu/core/identity/identity_layout.hpp`](apps/xudu/core/identity/identity_layout.hpp)                                  | `IdentityEntry`, `VoteEntry`, `BlockHeader`, `OracleAttestation`                           |
+| **Serialization**       | [`apps/xudu/core/identity/identity_serialization.hpp/.cpp`](apps/xudu/core/identity/identity_serialization.hpp)               | Zero-copy Bencode encoders and decoders for all identity frames                            |
+| **Peer Controller**     | [`apps/xudu/core/identity/identity_network_controller.hpp/.cpp`](apps/xudu/core/identity/identity_network_controller.hpp)     | BEP 10 extensions (`xanadu_identity_lookup`, `xanadu_oracle_vote`, `xanadu_oracle_verify`) |
+| **Provenance Engine**   | [`apps/xudu/core/provenance.hpp/.cpp`](apps/xudu/core/provenance.hpp)                                                         | OpenPGP document signature creation and verification                                       |
+| **Zigzag Verification** | [`tests/zigzag/zz_merkle_test.cpp`](tests/zigzag/zz_merkle_test.cpp)                                                          | Zigzag slice author verification against ledger root                                       |
+| **Unit Test Suites**    | [`tests/xudu/identity_test.cpp`](tests/xudu/identity_test.cpp), [`merkle_ledger_test.cpp`](tests/xudu/merkle_ledger_test.cpp) | Full test coverage for validation, consensus, and wire encoding                            |

@@ -76,11 +76,11 @@
     },
     "document_store": {
       "description": "Generated xanadoc store from this authoring run.",
-      "example": "/tmp/ux-run/data/xudu/xanadocs/untitled-<run-id>"
+      "example": "/tmp/ux-run/data/xuzz/xanadocs/untitled-<run-id>"
     },
     "neighbor_store": {
       "description": "Generated neighboring xanadoc store from this authoring run.",
-      "example": "/tmp/ux-run/data/xudu/xanadocs/untitled-<run-id>"
+      "example": "/tmp/ux-run/data/xuzz/xanadocs/untitled-<run-id>"
     }
   }
 }

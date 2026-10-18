@@ -406,8 +406,8 @@ VisibleRange Layoutfilade::visibleRange(const float viewportTopY,
   // Ending offset / coordinates
   range.endByteOffset = hitBottom->startByte + hitBottom->entry.byteLength;
   range.endYPx        = hitBottom->startYPx + hitBottom->entry.heightPx +
-                 (2.0F * hitBottom->entry.marginPx);
-  range.entryCount = (lastIdx - firstIdx) + 1;
+                        (2.0F * hitBottom->entry.marginPx);
+  range.entryCount    = (lastIdx - firstIdx) + 1;
 
   for (std::size_t idx = firstIdx; idx <= lastIdx; ++idx) {
     if (entries_[idx].isMediaBox()) {

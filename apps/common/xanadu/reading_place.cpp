@@ -160,7 +160,7 @@ std::optional<ReadingPlace> latestPlace(const Store &store) {
   const auto anchor    = dim(kAnchor);
   const auto active    = dim(kActive);
   const auto along     = [&](const zigzag::CellRef from,
-                         const std::optional<zigzag::DimRef> onto) {
+                             const std::optional<zigzag::DimRef> onto) {
     return onto ? manifold.linked(from, *onto) : zigzag::OptionalCell{};
   };
   const auto activeCell = along(here, active);
@@ -227,13 +227,13 @@ std::filesystem::path activityDirectory() {
   namespace fs = std::filesystem;
   if (const char *xdgData = std::getenv("XDG_DATA_HOME");
       nullptr != xdgData && '\0' != *xdgData) {
-    return fs::path(xdgData) / "xudu" / "activity";
+    return fs::path(xdgData) / "xuzz" / "activity";
   }
   if (const char *home = std::getenv("HOME");
       nullptr != home && '\0' != *home) {
-    return fs::path(home) / ".local" / "share" / "xudu" / "activity";
+    return fs::path(home) / ".local" / "share" / "xuzz" / "activity";
   }
-  return fs::temp_directory_path() / "xudu" / "activity";
+  return fs::temp_directory_path() / "xuzz" / "activity";
 }
 
 } // namespace xanadu

@@ -32,7 +32,7 @@ Catalog format 1 is canonical, signed bencode capped at 512 KiB and 1,024 entrie
 its document salt, immutable root, title, advertised topics, selected microversion and publication
 sequence. The catalog uses an independent durable sequence. Updating it does not choose editions or
 infer changes from hypertime order. Its mutable pointer uses the established author `catalog` salt.
-Topic targets use the established `SHA1("xudu:topic:" + canonical-topic)` convention.
+Topic targets use the established `SHA1("xanadu:topic:" + canonical-topic)` convention.
 
 Catalog ingestion verifies the signature, requested author or advertised topic, and cached
 high-water marks. A topic response carries the author's signature directly; no curator identity is

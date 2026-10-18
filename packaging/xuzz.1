@@ -1,0 +1,239 @@
+.TH XUZZ 1 "August 2026" "xuzz" "User Commands"
+.SH NAME
+xuzz \- a xanadoc editor, after Ted Nelson's OSMIC
+.SH SYNOPSIS
+.B xuzz
+[\fIOPTION\fR]... [\fISTORE\fR]
+.SH DESCRIPTION
+.B xuzz
+edits a
+.IR xanadoc :
+a document kept as an append-and-read-only record of operations rather than as
+a file. Text that is typed goes into the author's permascroll at an address it
+keeps forever, and each edit is recorded in the document's operations spool
+under the state it produced.
+.PP
+The permascroll is the author's, not the document's. Everything typed into
+every xanadoc goes into one of them, so a passage quoted from one document into
+another is the same bytes at the same address rather than a copy \-\- which is
+what makes the two detectably related afterwards. A store directory is
+therefore an edit decision list: it names addresses and does not contain them,
+and it is read against the permascroll it was written against. See
+.B \-\-permascroll .
+.PP
+No version is stored. A state's name spells out the operations that rebuild it,
+in Nelson's numbering where change 2a4 creates state 2a4, so 2a4 is reached by
+replaying 1, 2, 2a1, 2a2, 2a3 and 2a4.
+.PP
+Going back to an earlier state and editing it starts a branch rather than
+destroying what already followed, and deleting stops pointing at content
+without removing it from the permascroll, so every state the document has ever
+been in stays reachable.
+.PP
+Quoting a passage from one document into another inserts a pointer to the
+address the original already uses, so there is one copy and two documents
+showing it. Whether two documents share content is therefore a question about
+addresses: it survives editing around the quotation, and two documents that
+merely read the same are correctly not treated as sharing anything.
+.PP
+.I STORE
+is the directory the document lives in. It is created if it is not there, and
+defaults to
+.IR xanadoc .
+.SH OPTIONS
+.TP
+.BR \-\-import " \fIFILE\fR"
+Read
+.I FILE
+into an empty store as its first operation. Refused on a store that already has
+operations, since importing into one would be an ordinary edit and should be
+made as one.
+.TP
+.BR \-\-torrent " \fIFILE\fR|\fIMAGNET\fR"
+Make a torrent's content available for quoting. Repeatable.
+.IP
+A torrent's info hash is derived from its content, so it names that content
+everywhere and permanently, and every piece carries a hash so what arrives can
+be checked against what was named. A quotation into a torrent therefore means
+the same thing to anyone who has the reference, and keeps meaning it after this
+machine is gone.
+.IP
+A magnet link is accepted here too, in either the hex or base-32 spelling, but
+it carries only the name: the piece hashes it must be verified against are in
+the torrent's info dictionary, which a client normally fetches from the swarm.
+A magnet whose metadata is not available is refused rather than recorded as a
+reference that could never resolve.
+.IP
+A BEP 46 name is accepted here as well, written
+.BR magnet:?xs=urn:btpk: \fIKEY\fR .
+It is not a hash of anything: it is an ed25519 public key, and what it points
+at is a signed entry in the DHT that its holder can move. That is what a
+reference to something still being written has to be, since an info hash fixes
+the content it names and appending would produce a different one.
+.IP
+The answer is believed only if it carries a signature made by the key in the
+name, so the node that supplied it is not trusted, and neither is the DHT. It
+resolves to an info hash, and from there nothing is different.
+.TP
+.BR \-\-dht\-node " \fIHOST\fR:\fIPORT\fR"
+Introduce a DHT node. Repeatable. A DHT is joined by knowing somebody already
+in it, and no public router is contacted unless it is named here, so resolving
+a
+.B btpk
+name needs at least one.
+.TP
+.B \-\-private\-dht
+Do not apply the public-DHT rule that limits the routing table to one node per
+/8. On one private network every node is in the same /8, and the rule leaves a
+DHT of one.
+.TP
+.B \-\-swarm
+Fetch quoted content from BitTorrent peers rather than only from this disk.
+.IP
+Without it a reference resolves only when this machine already holds the bytes,
+which is the dependency on one machine that addressing content by its hash
+exists to remove. Only the pieces a quotation needs are requested, and only
+whole pieces, since a piece hash covers a piece and says nothing about a
+fragment of one. With a swarm a bare magnet link resolves too: the metadata it
+lacks is fetched from a peer and accepted only if it hashes back to the name
+the link carried.
+.IP
+Available only when the program was built with libtorrent.
+.TP
+.BR \-\-peer " \fIHOST\fR:\fIPORT\fR"
+Introduce a peer known to hold some of the content. Repeatable. Needed only
+when there is no tracker or DHT to find one through.
+.TP
+.BR \-\-torrent\-data " \fIDIR\fR"
+Directory the torrent's files are in. The default is the directory the
+.I .torrent
+file itself is in, which is where a downloader usually leaves them.
+.TP
+.BR \-\-quote " \fIFILE\fR,\fIOFFSET\fR,\fILENGTH\fR"
+Quote that range of the most recently given
+.B \-\-torrent
+into the document. A length of 0 means the rest of the file. Repeatable.
+.IP
+Nothing is copied: the document ends up holding a pointer to content addressed
+by its own hash, so a store made entirely of quotations adds nothing to the
+author's permascroll at all. Content that cannot be reached, or that does not
+hash to what the
+reference named, reads as nothing rather than as something plausible -- and the
+rest of the document is unaffected, because failing to resolve a reference is
+not the same as the document being corrupt.
+.TP
+.BR \-\-permascroll " \fIDIR\fR"
+Bind this directory as the author's permascroll instead of
+.IR $XDG_DATA_HOME/xuzz/permascroll/default .
+It is created if it is not there.
+.IP
+Every document opened in this run shares it, and a document records addresses
+into whichever permascroll was bound when it was written. Opening a store
+against a different one resolves its local spans against the wrong content, so
+this is what a xanadoc written elsewhere \-\- a checked-in sample, another
+machine's export \-\- needs alongside it.
+.TP
+.BR \-\-version\-id " \fIID\fR"
+Open this microversion, for example
+.BR 2a4 .
+The default is the most recent state in the store.
+.TP
+.BR \-\-alongside " \fIID\fR"
+Also open this microversion as a second document, for reading two states
+against each other. Passages they share are shaded in both.
+.TP
+.B \-\-map
+Start with the hypertime map shown.
+.TP
+.BR \-\-backend " \fINAME\fR"
+Rendering backend:
+.BR opengl " (the default), " opengles " or " vulkan .
+The Vulkan backend is present only when the binary was built with it.
+.TP
+.BR \-\-font " \fIDESCRIPTION\fR"
+Font, as a Pango font description, for example "Serif 16".
+.TP
+.BR \-\-fov " \fIDEGREES\fR"
+Initial vertical field of view. Widening it brings more of the documents on
+screen at once.
+.TP
+.B \-\-print\-asset\-dir
+Report the directory the shaders and the icon were found in, then quit.
+.TP
+.B \-\-help\-all
+Show every option, including those for driving a run without a person at the
+keyboard, and describe them at length.
+.SH KEYS
+Commands take control, because a bare letter is text: the point of this program
+is that typing is an edit, so it has to reach the document.
+.TP
+.BR ctrl\-b ", " ctrl\-n
+Go back or forward in hypertime. Nothing is lost either way.
+.TP
+.B ctrl\-t
+Quote the selection into a second document.
+.TP
+.B ctrl\-l
+Attach a link to the selected content. A link names content rather than a
+position, so it appears on every document quoting it.
+.TP
+.B ctrl\-m
+Show or hide the hypertime map.
+.TP
+.B ctrl\-p
+Print every state to the terminal.
+.TP
+.BR ctrl\-s ", " ctrl\-q
+Write the document out; save and quit.
+.TP
+.B backspace
+Stop pointing at the selection.
+.SH FILES
+.TP
+.I STORE/ops.nodes
+Every operation, as the fixed-size records the program holds them as, filed
+under the state each produced. Opens with a header naming the format version
+and the record size, so a file written in another shape is refused rather than
+read as this one.
+.TP
+.I STORE/store.tables
+The document's side tables, in one versioned binary container: the scroll
+registry, the local media segments, the links, the author's current versions,
+and the aliases and descriptions given to any of them.
+.IP
+The scroll registry is what gives a span's scroll number something behind it
+\-\- a publisher's key, or nothing when the scroll has none \-\- and which
+torrent carries which stretch of it. Which torrent carries a stretch changes
+every time something is sealed, and changing it moves no address: that is what
+addressing content by scroll rather than by container buys.
+.IP
+Binary, and not meant to be read with
+.BR less .
+.BR store\-dump (1)
+renders any of it as text; that is the tool's purpose.
+.TP
+.I STORE/ops.export
+Present only when
+.B \-\-export\-osmic
+was given: the same operations in canonical OSMIC text. Read back if
+.I ops.nodes
+is absent.
+.TP
+.I $XDG_DATA_HOME/xuzz/permascroll/default/active.primedia
+Every byte the author has ever typed, in any document, at the address it was
+given. Not part of any store: see
+.B \-\-permascroll
+and the description above.
+.TP
+.I @DATADIR@/shaders
+Shader sources loaded at run time.
+.SH ENVIRONMENT
+.TP
+.B GLEDITOR_ASSET_DIR
+Directory to read the shaders and icon from, overriding the search.
+.SH SEE ALSO
+.BR gleditor (1)
+.PP
+OSMIC: <https://xanadu.com.au/ted/OSMIC/>
+.SH AUTHOR
+Written by the gleditor authors.

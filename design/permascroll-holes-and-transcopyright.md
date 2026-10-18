@@ -171,10 +171,10 @@ The cryptographic engine provides:
 
 ______________________________________________________________________
 
-## 4. BEP 10 Peer-Wire Micropayment Protocol (`xudu_transcopyright`)
+## 4. BEP 10 Peer-Wire Micropayment Protocol (`xanadu_transcopyright`)
 
 Unlocking Transcopyright content occurs over the BitTorrent peer wire using the
-`xudu_transcopyright` BEP 10 extension.
+`xanadu_transcopyright` BEP 10 extension.
 
 ```mermaid
 sequenceDiagram

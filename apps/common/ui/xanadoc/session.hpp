@@ -11,8 +11,8 @@
  *
  * There is nothing in the library that had to learn what a transclusion is.
  */
-#ifndef XUDU_SESSION_H
-#define XUDU_SESSION_H
+#ifndef XANADU_SESSION_H
+#define XANADU_SESSION_H
 
 #include <chrono>
 #include <cstdint>
@@ -71,7 +71,7 @@ class Session;
 
 /**
  * @brief Where the reader's xanadocs live unless they say otherwise:
- *        `$XDG_DATA_HOME/xudu/xanadocs`.
+ *        `$XDG_DATA_HOME/xuzz/xanadocs`.
  *
  * New and imported documents start here, under generated names, rather than
  * in a temporary directory: a xanadoc is saved as it is typed, so one kept
@@ -1067,4 +1067,4 @@ private:
 
 } // namespace xanadu
 
-#endif // XUDU_SESSION_H
+#endif // XANADU_SESSION_H

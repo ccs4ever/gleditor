@@ -1,9 +1,9 @@
 /**
  * @file views.hpp
- * @brief Document presentation and views coordinator for Xudu.
+ * @brief Document presentation and views coordinator for Xuzz.
  */
-#ifndef XUDU_VIEWS_HPP
-#define XUDU_VIEWS_HPP
+#ifndef XANADU_VIEWS_HPP
+#define XANADU_VIEWS_HPP
 
 #include <algorithm>
 #include <cstdint>
@@ -283,4 +283,4 @@ private:
 
 } // namespace xanadu
 
-#endif // XUDU_VIEWS_HPP
+#endif // XANADU_VIEWS_HPP

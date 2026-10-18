@@ -479,7 +479,7 @@ challengedPlugin(IdentityNetworkController &controller) {
       lt_compat::nullPeerConnection(), InfoHash{}, &controller);
 
   const std::string handshake =
-      "d1:md20:xudu_identity_lookupi3e16:xudu_oracle_votei4eee";
+      "d1:md22:xanadu_identity_lookupi3e18:xanadu_oracle_votei4eee";
   libtorrent::bdecode_node node;
   libtorrent::error_code ec;
   libtorrent::bdecode(handshake.data(), handshake.data() + handshake.size(),
@@ -524,8 +524,13 @@ Signature64 signNonce(const Hash32 &nonce, const xanadu::MutableKeys &keys) {
 bool deliver(IdentityPeerPlugin &plugin, const MessageType type,
              const std::string &bencoded) {
   const std::string frame = encodeExtendedMessage(type, bencoded);
-  return plugin.on_extended(static_cast<int>(frame.size()),
-                            kExtIdentityLookupMsgId,
+  const auto range        = static_cast<unsigned>(type) >> 4;
+  const int id            = range == 0   ? kExtIdentityLookupMsgId
+                            : range == 1 ? kExtOracleVoteMsgId
+                            : range == 2 ? kExtOracleVerifyMsgId
+                            : range == 3 ? kExtTranscopyrightMsgId
+                                         : kExtVortexActorMsgId;
+  return plugin.on_extended(static_cast<int>(frame.size()), id,
                             libtorrent::span<char const>(frame));
 }
 

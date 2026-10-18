@@ -1,5 +1,5 @@
 /**
- * @file apps/xudu/page_break_overlay.cpp
+ * @file apps/common/ui/xanadoc/page_break_overlay.cpp
  * @brief Inter-paragraph hover gap affordance and page break overlay.
  */
 #include "page_break_overlay.hpp"

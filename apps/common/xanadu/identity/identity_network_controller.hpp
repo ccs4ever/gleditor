@@ -5,6 +5,7 @@
 #ifndef XUDU_IDENTITY_NETWORK_CONTROLLER_HPP
 #define XUDU_IDENTITY_NETWORK_CONTROLLER_HPP
 
+#include <deque>
 #include <expected>
 #include <functional>
 #include <libtorrent/alert_types.hpp>
@@ -54,18 +55,13 @@ inline constexpr const char *kExtOracleVoteName     = "xanadu_oracle_vote";
 inline constexpr const char *kExtOracleVerifyName   = "xanadu_oracle_verify";
 inline constexpr const char *kExtTranscopyrightName = "xanadu_transcopyright";
 
-// Legacy xudu extension names for wire backward compatibility
-inline constexpr const char *kExtLegacyIdentityLookupName =
-    "xudu_identity_lookup";
-inline constexpr const char *kExtLegacyOracleVoteName   = "xudu_oracle_vote";
-inline constexpr const char *kExtLegacyOracleVerifyName = "xudu_oracle_verify";
-inline constexpr const char *kExtLegacyTranscopyrightName =
-    "xudu_transcopyright";
-
-inline constexpr int kExtIdentityLookupMsgId = 2;
-inline constexpr int kExtOracleVoteMsgId     = 3;
-inline constexpr int kExtOracleVerifyMsgId   = 4;
-inline constexpr int kExtTranscopyrightMsgId = 5;
+// Keep local IDs clear of libtorrent built-ins; outgoing IDs are negotiated.
+inline constexpr int kExtIdentityLookupMsgId     = 24;
+inline constexpr int kExtOracleVoteMsgId         = 25;
+inline constexpr int kExtOracleVerifyMsgId       = 26;
+inline constexpr int kExtTranscopyrightMsgId     = 27;
+inline constexpr const char *kExtVortexActorName = "xanadu_vortex_actor";
+inline constexpr int kExtVortexActorMsgId        = 6;
 
 /// How long an invoice stands. Short, because the challenge inside it is
 /// single-use and held in memory until spent: a long window is an author
@@ -88,13 +84,14 @@ public:
   ~IdentityPeerPlugin() override;
 
   [[nodiscard]] libtorrent::string_view type() const override {
-    return "xudu_identity_peer_plugin";
+    return "xanadu_identity_peer_plugin";
   }
 
   void add_handshake(libtorrent::entry &h) override;
   bool on_extension_handshake(const libtorrent::bdecode_node &node) override;
   bool on_extended(int length, int msg,
                    libtorrent::span<char const> body) override;
+  void tick() override;
 
   // Connection gate & Challenge-Response
   bool sendAuthChallenge(const Hash32 &nonce);
@@ -111,6 +108,16 @@ public:
   bool sendTcSettleRequest(const TcSettleRequestMsg &req);
   bool sendTcKeyDelivery(const TcKeyDeliveryMsg &delivery);
   bool sendDeviceRevocationBroadcast(const DeviceRevocationRecord &rec);
+  bool sendActorMessage(const ActorMessage &message);
+
+  /// The owner must authorize signed capability and budgets before execution.
+  /// With no owner installed every actor request is refused.
+  using ActorHandler =
+      std::function<bool(const Fingerprint &, const ActorMessage &)>;
+  IdentityPeerPlugin *setActorHandler(ActorHandler handler) {
+    actorHandler_ = std::move(handler);
+    return this;
+  }
 
   void isolateAndDisconnect(std::string_view reason);
 
@@ -197,6 +204,9 @@ private:
   int remoteOracleVoteId_{0};
   int remoteOracleVerifyId_{0};
   int remoteTranscopyrightId_{0};
+  int remoteVortexActorId_{0};
+  std::uint16_t remoteDirectPort_{0};
+  ActorHandler actorHandler_;
 
   bool isAuthenticated_{false};
   bool isIsolated_{false};
@@ -382,6 +392,32 @@ public:
   void registerTorrentPlugin(std::shared_ptr<IdentityTorrentPlugin> plugin);
   void broadcastDeviceRevocation(const DeviceRevocationRecord &rec);
 
+  /// Installed once on the controller; applies to existing and future peers.
+  /// The handler runs on libtorrent's owner thread and should only enqueue.
+  using ActorHandler = IdentityPeerPlugin::ActorHandler;
+  IdentityNetworkController *setActorHandler(ActorHandler handler);
+  [[nodiscard]] bool dispatchActorMessage(const Fingerprint &identity,
+                                          const ActorMessage &message) const;
+  /// Thread-safe bounded enqueue. Actual sends happen in authenticated peer
+  /// tick callbacks, never from the application or render thread.
+  [[nodiscard]] bool sendActorMessage(const Fingerprint &identity,
+                                      const ActorMessage &message);
+  void pumpActorMessages(IdentityPeerPlugin &peer);
+
+  /// Direct side-channel endpoint advertisement and discovery via BEP 10.
+  using DirectPeerHandler = std::function<void(
+      const Fingerprint &, std::string_view address, std::uint16_t port)>;
+  IdentityNetworkController *setDirectPort(std::uint16_t port) noexcept {
+    directPort_ = port;
+    return this;
+  }
+  [[nodiscard]] std::uint16_t directPort() const noexcept {
+    return directPort_;
+  }
+  IdentityNetworkController *setDirectPeerHandler(DirectPeerHandler handler);
+  void notifyDirectPeer(const Fingerprint &identity, std::string_view address,
+                        std::uint16_t port) const;
+
 private:
   /// In-memory Tier 1 Transient Quarantine Cache (TQC)
   struct TransientQuarantineCache {
@@ -411,6 +447,12 @@ private:
   std::shared_ptr<PaymentVerifier> paymentVerifier_{
       std::make_shared<RefusingVerifier>()};
   CekSink cekSink_;
+  mutable std::mutex actorMutex_;
+  ActorHandler actorHandler_;
+  std::map<Fingerprint, std::deque<ActorMessage>> actorOutgoing_;
+  std::size_t actorOutgoingCount_{};
+  std::uint16_t directPort_{0};
+  DirectPeerHandler directPeerHandler_;
 };
 
 } // namespace xanadu::identity

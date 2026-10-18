@@ -147,7 +147,7 @@
         },
         "issue_store": {
           "description": "Actual saved GUI-authored issue/gates store path.",
-          "example": "${profile}/data/xudu/xanadocs/untitled-..."
+          "example": "${profile}/data/xuzz/xanadocs/untitled-..."
         },
         "issue_home": {
           "description": "Current home CellRef read from the closed author store.",
@@ -221,7 +221,7 @@
         },
         "issue_store": {
           "description": "Actual GUI-authored issue/gates store path.",
-          "example": "${profile}/data/xudu/xanadocs/untitled-..."
+          "example": "${profile}/data/xuzz/xanadocs/untitled-..."
         },
         "issue_home": {
           "description": "Current home CellRef determined from dump.",
@@ -719,7 +719,7 @@
         },
         "issue_store": {
           "description": "Actual GUI-authored issue/gates store.",
-          "example": "${profile}/data/xudu/xanadocs/untitled-..."
+          "example": "${profile}/data/xuzz/xanadocs/untitled-..."
         },
         "report_cell": {
           "description": "Current stage CellRef from actual closed dump/native tree; resolve after upstream output is created.",

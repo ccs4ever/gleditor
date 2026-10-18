@@ -155,7 +155,7 @@ void ZigzagVisualizer::populateFallbackStructure() {
   doc.meta.name = "Xanadu ZigZag Sample Structure";
   doc.focus     = 1;
   doc.view      = ViewAxisBinding{
-           .x_dimension = "d.1", .y_dimension = "d.2", .z_dimension = "d.3"};
+      .x_dimension = "d.1", .y_dimension = "d.2", .z_dimension = "d.3"};
 
   Cell c1;
   c1.id         = 1;
@@ -210,7 +210,8 @@ void ZigzagVisualizer::populateFallbackStructure() {
 
 void ZigzagVisualizer::adoptDocument(
     ZzStructureDocument &&doc, std::string sourcePath,
-    const std::unordered_map<CellID, XuduProjectionProvenance> *const origins) {
+    const std::unordered_map<CellID, XanaduProjectionProvenance> *const
+        origins) {
   structure_name_     = doc.meta.name.empty() ? sourcePath : doc.meta.name;
   current_slice_path_ = std::move(sourcePath);
   current_view_       = doc.view;
@@ -338,16 +339,16 @@ void ZigzagVisualizer::fitViewToHome() {
   }
 }
 
-void ZigzagVisualizer::adoptXuduStore(
+void ZigzagVisualizer::adoptXanaduStore(
     const xanadu::Store &store,
     const std::vector<xanadu::MicroversionId> &versions) {
   auto projected = projectStoreWithProvenance(store, versions);
-  adoptDocument(std::move(projected.document), "xudu_store",
+  adoptDocument(std::move(projected.document), "xanadu_store",
                 &projected.sourceByProjectedCell);
 }
 
-void ZigzagVisualizer::bindXuduStore(xanadu::Store &store,
-                                     const xanadu::MicroversionId &version) {
+void ZigzagVisualizer::bindXanaduStore(xanadu::Store &store,
+                                       const xanadu::MicroversionId &version) {
   engine_.reset();
   if (&store != store_) {
     ownedStore_.reset();
@@ -355,7 +356,7 @@ void ZigzagVisualizer::bindXuduStore(xanadu::Store &store,
   }
   engine_ = std::make_unique<UnifiedTransclusionEngine>(store, version);
   engine_->setAuthoredCommitHandler(authoredCommitHandler_);
-  structure_name_ = "Xudu/Zigzag unified store";
+  structure_name_ = "Xanadu/ZigZag unified store";
   current_slice_path_.clear();
 
   accursed_cell_focus_ = engine_->manifold().home();
@@ -396,7 +397,7 @@ void ZigzagVisualizer::reloadStoreVersion(const xanadu::MicroversionId &version,
     return;
   }
   store_->setCurrentVersions({version});
-  bindXuduStore(*store_, version);
+  bindXanaduStore(*store_, version);
   if (newFocus != zigzag::noCell) {
     accursed_cell_focus_ = newFocus;
     rebuildActiveViewTopology();
@@ -404,10 +405,10 @@ void ZigzagVisualizer::reloadStoreVersion(const xanadu::MicroversionId &version,
   }
 }
 
-void ZigzagVisualizer::adoptXuduDocs(const std::vector<XuduDocInput> &docs,
-                                     const std::vector<xanadu::Link> &links) {
-  auto doc = projectXuduToZigzag(docs, links);
-  adoptDocument(std::move(doc), "xudu_documents");
+void ZigzagVisualizer::adoptXanaduDocs(const std::vector<XanaduDocInput> &docs,
+                                       const std::vector<xanadu::Link> &links) {
+  auto doc = projectXanaduToZigzag(docs, links);
+  adoptDocument(std::move(doc), "xanadu_documents");
 }
 
 ZzRasterResult ZigzagVisualizer::rasterize(const DimID &primaryDim,
@@ -857,6 +858,8 @@ std::string ZigzagVisualizer::cellBadge(const CellRef id,
     return "extern / unresolved";
   case xanadu::ValueKind::Timestamp:
     return "timestamp";
+  case xanadu::ValueKind::ForeignOpHandle:
+    return "foreign operation";
   case xanadu::ValueKind::None:
     return std::string(role);
   }
@@ -1667,10 +1670,10 @@ void ZigzagVisualizer::refreshTypography(const gleditor::FrameContext &ctx) {
   metrics.screenHeight = ctx.screenHeight;
   metrics.chrome       = ctx.chrome;
   const bool changed   = !typographyReady_ || uiTheme_ != ctx.theme ||
-                       metrics.fontScale != uiMetrics_.fontScale ||
-                       metrics.userScale != uiMetrics_.userScale ||
-                       metrics.contentScale != uiMetrics_.contentScale;
-  uiMetrics_ = metrics;
+                         metrics.fontScale != uiMetrics_.fontScale ||
+                         metrics.userScale != uiMetrics_.userScale ||
+                         metrics.contentScale != uiMetrics_.contentScale;
+  uiMetrics_           = metrics;
   if (!changed) return;
   uiTheme_         = ctx.theme;
   valueFontName_   = ui::scaledFontDescription(fontName_, ui::FontRole::Body,
@@ -1849,12 +1852,12 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
         ++projectionRevision_;
       projectedCells_[id] = *plane;
       const auto visible  = [&](const gleditor::text::FittedText &text,
-                               const gleditor::text::FontFacePtr &font) {
+                                const gleditor::text::FontFacePtr &font) {
         return ui::labelLOD(
             *plane, font->metrics().lineHeight,
             {text.widthPx * plane->minPixelsPerUnit > 0
-                  ? std::min(plane->widthPx, font->metrics().lineHeight)
-                  : 0,
+                 ? std::min(plane->widthPx, font->metrics().lineHeight)
+                 : 0,
              uiTheme_.type.minFontPx});
       };
       if (visible(layout.title, captionFont_)) mask |= 1;
@@ -2203,7 +2206,7 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
     const float leftLimit = presentation_config_.hudHorizontalPaddingPx +
                             structureMetrics.width +
                             presentation_config_.hudColumnGapPx;
-    float rightEdge = width - presentation_config_.hudHorizontalPaddingPx;
+    float rightEdge       = width - presentation_config_.hudHorizontalPaddingPx;
     for (const auto &[label, colour] :
          {std::pair{std::cref(dimsInfo), 0x70B0FFFFU},
           std::pair{std::cref(modeLabel), 0xF59E0BFFU},
