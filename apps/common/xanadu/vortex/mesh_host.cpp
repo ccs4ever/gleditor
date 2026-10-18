@@ -92,7 +92,7 @@ public:
           if (meta) return *meta;
           return std::nullopt;
         });
-    if (!value) return std::nullopt;
+    if (!value) return gleditor::cpp26::nullopt;
     std::lock_guard lock(mutex_);
     return metadata_.try_emplace(hash, std::move(*value)).first->second;
   }

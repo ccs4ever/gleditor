@@ -104,6 +104,7 @@ int main(int argc, char *argv[]) {
 
   program.add_argument("files")
       .help("vicon source files (.icn / .vicon) to run")
+      .default_value(std::vector<std::string>{})
       .remaining();
 
   try {
@@ -114,17 +115,17 @@ int main(int argc, char *argv[]) {
   }
 
   Driver driver;
-  const auto eval = program.get<std::string>("-e");
+  const auto eval  = program.get<std::string>("-e");
   const auto files = program.get<std::vector<std::string>>("files");
 
   for (const auto &file : files) {
     std::string source;
     try {
       source = file == "-" ? ([&] {
-                 std::stringstream ss;
-                 ss << std::cin.rdbuf();
-                 return ss.str();
-               })()
+        std::stringstream ss;
+        ss << std::cin.rdbuf();
+        return ss.str();
+      })()
                            : readFile(file);
     } catch (const std::exception &e) {
       std::cerr << e.what() << "\n";

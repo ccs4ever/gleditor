@@ -35,8 +35,7 @@ public:
 
   /// Compile a source string and start its generator. Replaces any
   /// program currently loaded.
-  [[nodiscard]] std::expected<void, DriverError>
-  start(std::string_view source);
+  [[nodiscard]] std::expected<void, DriverError> start(std::string_view source);
 
   /// Resume the top-level generator once. nullopt is Icon failure — the
   /// sequence ran dry — not an error.
@@ -45,8 +44,7 @@ public:
   /// Drive the generator to exhaustion, projecting each result to text
   /// through render() at the arena boundary. `cpp26::function_ref` because
   /// the sink is called and not kept (spec §8.2).
-  Driver &
-  every(gleditor::cpp26::function_ref<void(std::string_view)> sink);
+  Driver &every(gleditor::cpp26::function_ref<void(std::string_view)> sink);
 
   /// Convenience: compile and drive to exhaustion, collecting rendered
   /// results. A failing program yields an empty vector, not an error.
@@ -60,7 +58,9 @@ public:
   [[nodiscard]] static std::string formatError(const DriverError &e);
 
   [[nodiscard]] zigzag::vortex::VortexCore &core() noexcept { return core_; }
-  [[nodiscard]] zigzag::vortex::VortexVM &vm() noexcept { return vm_; }
+  [[nodiscard]] zigzag::vortex::VortexVM &vm() noexcept {
+    return compiler_.vm();
+  }
 
 private:
   zigzag::ArenaManifold arena_;

@@ -51,12 +51,28 @@ struct EUnary {
 /// Binary operators. Comparisons produce their right operand or fail.
 struct EBinary {
   enum class Op : std::uint8_t {
-    Add, Sub, Mul, Div, Mod, Pow,
-    Concat,                      // ||
-    Lt, Le, Eq, Ne, Gt, Ge,      // numeric comparisons (produce right operand)
-    StrLt, StrLe, StrEq, StrNe, StrGt, StrGe,
-    Assign, RevAssign,           // := and <-
-    Scan,                        // s ? e
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    Pow,
+    Concat, // ||
+    Lt,
+    Le,
+    Eq,
+    Ne,
+    Gt,
+    Ge, // numeric comparisons (produce right operand)
+    StrLt,
+    StrLe,
+    StrEq,
+    StrNe,
+    StrGt,
+    StrGe,
+    Assign,
+    RevAssign, // := and <-
+    Scan,      // s ? e
   } op{Op::Add};
   ExprPtr left;
   ExprPtr right;
@@ -168,12 +184,13 @@ struct ProcDecl {
 struct Expr {
   std::variant<ELiteral, EIdent, EKeyword, EUnary, EBinary, EAlternation, ETo,
                ELimit, ECall, ESubscript, ESlice, ESequence, EIf, EWhile,
-               EUntil, EEvery, EBreak, ENext, EReturn, EFail, ESuspend,
-               ERepeat, ECase>
+               EUntil, EEvery, EBreak, ENext, EReturn, EFail, ESuspend, ERepeat,
+               ECase>
       node;
   SourceLocation loc{};
 
-  template <typename T> explicit Expr(T &&n, SourceLocation l = {})
+  template <typename T>
+  explicit Expr(T &&n, SourceLocation l = {})
       : node(std::forward<T>(n)), loc(l) {}
 };
 
