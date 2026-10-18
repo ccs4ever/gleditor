@@ -639,6 +639,8 @@ VPLC_SRCS       := $(shell find apps/vplc -name '*.cpp' 2>/dev/null)
 VPLC_OBJS       := $(call obj,$(VPLC_SRCS))
 VPL_SRCS        := $(shell find apps/vpl -name '*.cpp' 2>/dev/null)
 VPL_OBJS        := $(call obj,$(VPL_SRCS))
+SPIKE_SRCS      := $(shell find tools/spikes -name '*.cpp' 2>/dev/null)
+SPIKE_OBJS      := $(call obj,$(SPIKE_SRCS))
 
 # What a shared library is called, and how a program finds it, differ enough
 # between the two targets that both are spelled out rather than guessed at.
@@ -703,7 +705,7 @@ ALL_OBJS := $(sort $(LIB_OBJS) $(GLEDITOR_OBJS) $(XUDU_CORE_OBJS) $(XUZZ_OBJS) \
 	$(ZIGZAG_CORE_OBJS) $(ZIGZAG_TEST_OBJS) $(COMMON_UI_OBJS) \
 	$(LIB_TEST_OBJS) $(XUDU_TEST_OBJS) $(XUZZ_TEST_OBJS) $(SWARM_PEER_OBJS) \
 	$(GENERATE_SAMPLE_XANADOCS_OBJS) $(VQUERYC_OBJS) $(VQUERY_OBJS) $(VPROLOG_OBJS) $(VPLC_OBJS) $(VPL_OBJS) $(VLACE_OBJS) $(VLACEC_OBJS) \
-	$(UI_TEXT_BASELINE_OBJS) $(LINK_STRESS_OBJS))
+	$(UI_TEXT_BASELINE_OBJS) $(LINK_STRESS_OBJS) $(SPIKE_OBJS))
 ALL_OBJ_DIRS := $(sort $(OBJDIR)/ $(OBJDIR)/tmp/ $(dir $(ALL_OBJS)))
 DEPS := $(sort $(patsubst %.o,%.dep,$(ALL_OBJS)))
 JFILES := $(sort $(patsubst %.o,%.j,$(ALL_OBJS)))
@@ -1131,6 +1133,38 @@ else
 decode-index-spike:
 	@echo "decode-index-spike: libavformat/libavcodec/libavutil/zlib/libjpeg/libwebp not all found by pkg-config -- skipping (optional, see tools/decode-index-spike.cpp)"
 endif
+
+.PHONY: spikes spike-s1 spike-s2 spike-s3 spike-s4 spike-s5 spike-s6 spike-runner
+spike-s1: $(OBJDIR)/spike-s1
+$(OBJDIR)/spike-s1: $(call obj,tools/spikes/spike_s1_rankfilade.cpp) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(LIBLINK)
+	$(CXX) $(LDFLAGS) $(RPATH_FLAGS) -o $@ $^ $(XUDU_LIBS) $(LIBS)
+
+spike-s2: $(OBJDIR)/spike-s2
+$(OBJDIR)/spike-s2: $(call obj,tools/spikes/spike_s2_zz9p.cpp)
+	$(CXX) $(LDFLAGS) -o $@ $^
+
+spike-s3: $(OBJDIR)/spike-s3
+$(OBJDIR)/spike-s3: $(call obj,tools/spikes/spike_s3_crdt_zz.cpp)
+	$(CXX) $(LDFLAGS) -o $@ $^
+
+spike-s4: $(OBJDIR)/spike-s4
+$(OBJDIR)/spike-s4: $(call obj,tools/spikes/spike_s4_layoutfilade.cpp) $(OBJDIR)/src/enfilade/layoutfilade.o $(LIBLINK)
+	$(CXX) $(LDFLAGS) $(RPATH_FLAGS) -o $@ $^ $(LIBS)
+
+spike-s5: $(OBJDIR)/spike-s5
+$(OBJDIR)/spike-s5: $(call obj,tools/spikes/spike_s5_arena_toss.cpp) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(LIBLINK)
+	$(CXX) $(LDFLAGS) $(RPATH_FLAGS) -o $@ $^ $(XUDU_LIBS) $(LIBS)
+
+spike-s6: $(OBJDIR)/spike-s6
+$(OBJDIR)/spike-s6: $(call obj,tools/spikes/spike_s6_treefilade.cpp)
+	$(CXX) $(LDFLAGS) -o $@ $^
+
+spike-runner: $(OBJDIR)/spike-runner
+$(OBJDIR)/spike-runner: $(call obj,tools/spikes/spike_runner.cpp)
+	$(CXX) $(LDFLAGS) -o $@ $^ -pthread
+
+spikes: $(OBJDIR)/spike-s1 $(OBJDIR)/spike-s2 $(OBJDIR)/spike-s3 $(OBJDIR)/spike-s4 $(OBJDIR)/spike-s5 $(OBJDIR)/spike-s6 $(OBJDIR)/spike-runner
+	LD_LIBRARY_PATH=$(OBJDIR) $(OBJDIR)/spike-runner
 
 .PHONY: sample-xanadocs
 sample-xanadocs: $(OBJDIR)/xuzz

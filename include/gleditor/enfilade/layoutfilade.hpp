@@ -117,9 +117,10 @@ struct LayoutEntry {
   float baselineOffsetPx{0.0F}; ///< Inline baseline offset.
   std::uint32_t boxId{0};       ///< Opaque media handle (LayoutBox::id).
   LayoutEntryKind kind{LayoutEntryKind::TextLine};
-  std::uint8_t placement{0};     ///< gleditor::BoxPlacement.
-  std::uint16_t flags{0};        ///< Bitflags (e.g. HasNewline).
-  std::uint32_t reservedZero{0}; ///< Cache alignment padding.
+  std::uint8_t placement{0}; ///< gleditor::BoxPlacement.
+  std::uint16_t flags{0};    ///< Bitflags (e.g. HasNewline).
+  float effectiveHeightPx{
+      0.0F}; ///< Cached total height (heightPx + 2.0F * marginPx).
 
   [[nodiscard]] bool isMediaBox() const noexcept {
     return LayoutEntryKind::BlockBox == kind ||
@@ -225,6 +226,13 @@ public:
   [[nodiscard]] std::optional<LayoutHit> findEntryAtY(float targetYPx) const;
 
   /**
+   * @brief Locate the 0-based entry index at vertical screen coordinate Y in
+   * O(log N) without constructing a full LayoutHit snapshot.
+   */
+  [[nodiscard]] inline std::size_t
+  findEntryIndexAtY(float targetYPx) const noexcept;
+
+  /**
    * @brief Locate the line or media box containing byte offset in O(log N).
    */
   [[nodiscard]] std::optional<LayoutHit>
@@ -266,6 +274,167 @@ private:
   void recomputeWid(std::size_t crumIdx);
   void buildTree();
 };
+
+inline std::size_t
+Layoutfilade::findEntryIndexAtY(float targetYPx) const noexcept {
+  if (entries_.empty() || crums_.empty()) {
+    return 0;
+  }
+
+  std::size_t currCrumIdx = rootIndex_;
+
+  while (!crums_[currCrumIdx].isLeaf) {
+    const auto &crum      = crums_[currCrumIdx];
+    const auto childCount = crum.childCount;
+    if (childCount == 0) return 0;
+    const LayoutCrum *childPtr = &crums_[crum.firstChild];
+
+    std::size_t chosenChild = 0;
+    if (__builtin_expect(childCount == 16, 1)) {
+      if (targetYPx < childPtr[0].wid.totalHeightPx) {
+        chosenChild = 0;
+        goto descended_child;
+      }
+      targetYPx -= childPtr[0].wid.totalHeightPx;
+      if (targetYPx < childPtr[1].wid.totalHeightPx) {
+        chosenChild = 1;
+        goto descended_child;
+      }
+      targetYPx -= childPtr[1].wid.totalHeightPx;
+      if (targetYPx < childPtr[2].wid.totalHeightPx) {
+        chosenChild = 2;
+        goto descended_child;
+      }
+      targetYPx -= childPtr[2].wid.totalHeightPx;
+      if (targetYPx < childPtr[3].wid.totalHeightPx) {
+        chosenChild = 3;
+        goto descended_child;
+      }
+      targetYPx -= childPtr[3].wid.totalHeightPx;
+      if (targetYPx < childPtr[4].wid.totalHeightPx) {
+        chosenChild = 4;
+        goto descended_child;
+      }
+      targetYPx -= childPtr[4].wid.totalHeightPx;
+      if (targetYPx < childPtr[5].wid.totalHeightPx) {
+        chosenChild = 5;
+        goto descended_child;
+      }
+      targetYPx -= childPtr[5].wid.totalHeightPx;
+      if (targetYPx < childPtr[6].wid.totalHeightPx) {
+        chosenChild = 6;
+        goto descended_child;
+      }
+      targetYPx -= childPtr[6].wid.totalHeightPx;
+      if (targetYPx < childPtr[7].wid.totalHeightPx) {
+        chosenChild = 7;
+        goto descended_child;
+      }
+      targetYPx -= childPtr[7].wid.totalHeightPx;
+      if (targetYPx < childPtr[8].wid.totalHeightPx) {
+        chosenChild = 8;
+        goto descended_child;
+      }
+      targetYPx -= childPtr[8].wid.totalHeightPx;
+      if (targetYPx < childPtr[9].wid.totalHeightPx) {
+        chosenChild = 9;
+        goto descended_child;
+      }
+      targetYPx -= childPtr[9].wid.totalHeightPx;
+      if (targetYPx < childPtr[10].wid.totalHeightPx) {
+        chosenChild = 10;
+        goto descended_child;
+      }
+      targetYPx -= childPtr[10].wid.totalHeightPx;
+      if (targetYPx < childPtr[11].wid.totalHeightPx) {
+        chosenChild = 11;
+        goto descended_child;
+      }
+      targetYPx -= childPtr[11].wid.totalHeightPx;
+      if (targetYPx < childPtr[12].wid.totalHeightPx) {
+        chosenChild = 12;
+        goto descended_child;
+      }
+      targetYPx -= childPtr[12].wid.totalHeightPx;
+      if (targetYPx < childPtr[13].wid.totalHeightPx) {
+        chosenChild = 13;
+        goto descended_child;
+      }
+      targetYPx -= childPtr[13].wid.totalHeightPx;
+      if (targetYPx < childPtr[14].wid.totalHeightPx) {
+        chosenChild = 14;
+        goto descended_child;
+      }
+      chosenChild = 15;
+    } else {
+      const auto lastC = static_cast<std::size_t>(childCount - 1);
+      chosenChild      = lastC;
+      for (std::size_t c = 0; c < lastC; ++c) {
+        const float h = childPtr[c].wid.totalHeightPx;
+        if (targetYPx < h) {
+          chosenChild = c;
+          break;
+        }
+        targetYPx -= h;
+      }
+    }
+
+  descended_child:
+    currCrumIdx = crum.firstChild + static_cast<std::uint32_t>(chosenChild);
+  }
+
+  // At leaf crum
+  const auto &leaf = crums_[currCrumIdx];
+  const auto count = leaf.entryCount;
+  if (count == 0) {
+    return 0;
+  }
+  const LayoutEntry *entryPtr = &entries_[leaf.firstEntry];
+
+  if (__builtin_expect(count == 16, 1)) {
+    if (targetYPx < entryPtr[0].effectiveHeightPx) return leaf.firstEntry;
+    targetYPx -= entryPtr[0].effectiveHeightPx;
+    if (targetYPx < entryPtr[1].effectiveHeightPx) return leaf.firstEntry + 1;
+    targetYPx -= entryPtr[1].effectiveHeightPx;
+    if (targetYPx < entryPtr[2].effectiveHeightPx) return leaf.firstEntry + 2;
+    targetYPx -= entryPtr[2].effectiveHeightPx;
+    if (targetYPx < entryPtr[3].effectiveHeightPx) return leaf.firstEntry + 3;
+    targetYPx -= entryPtr[3].effectiveHeightPx;
+    if (targetYPx < entryPtr[4].effectiveHeightPx) return leaf.firstEntry + 4;
+    targetYPx -= entryPtr[4].effectiveHeightPx;
+    if (targetYPx < entryPtr[5].effectiveHeightPx) return leaf.firstEntry + 5;
+    targetYPx -= entryPtr[5].effectiveHeightPx;
+    if (targetYPx < entryPtr[6].effectiveHeightPx) return leaf.firstEntry + 6;
+    targetYPx -= entryPtr[6].effectiveHeightPx;
+    if (targetYPx < entryPtr[7].effectiveHeightPx) return leaf.firstEntry + 7;
+    targetYPx -= entryPtr[7].effectiveHeightPx;
+    if (targetYPx < entryPtr[8].effectiveHeightPx) return leaf.firstEntry + 8;
+    targetYPx -= entryPtr[8].effectiveHeightPx;
+    if (targetYPx < entryPtr[9].effectiveHeightPx) return leaf.firstEntry + 9;
+    targetYPx -= entryPtr[9].effectiveHeightPx;
+    if (targetYPx < entryPtr[10].effectiveHeightPx) return leaf.firstEntry + 10;
+    targetYPx -= entryPtr[10].effectiveHeightPx;
+    if (targetYPx < entryPtr[11].effectiveHeightPx) return leaf.firstEntry + 11;
+    targetYPx -= entryPtr[11].effectiveHeightPx;
+    if (targetYPx < entryPtr[12].effectiveHeightPx) return leaf.firstEntry + 12;
+    targetYPx -= entryPtr[12].effectiveHeightPx;
+    if (targetYPx < entryPtr[13].effectiveHeightPx) return leaf.firstEntry + 13;
+    targetYPx -= entryPtr[13].effectiveHeightPx;
+    if (targetYPx < entryPtr[14].effectiveHeightPx) return leaf.firstEntry + 14;
+    return leaf.firstEntry + 15;
+  }
+
+  const auto lastI = static_cast<std::size_t>(count - 1);
+  for (std::size_t i = 0; i < lastI; ++i) {
+    const float h = entryPtr[i].effectiveHeightPx;
+    if (targetYPx < h) {
+      return leaf.firstEntry + i;
+    }
+    targetYPx -= h;
+  }
+
+  return leaf.firstEntry + lastI;
+}
 
 } // namespace gleditor::enfilade
 
