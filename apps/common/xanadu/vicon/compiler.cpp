@@ -669,6 +669,10 @@ std::expected<CellRef, CompileFailure> Compiler::emitUntil(const EUntil &e) {
   CellRef push       = mintOp(OpcodeKind::Choice, "VICON_UNTIL");
   CellRef setD       = mintOp(OpcodeKind::Value, "VICON_UNTIL_DONE");
   CellRef setJ       = mintOp(OpcodeKind::Jump, "VICON_UNTIL_DONEJ");
+  // d.spin edges are mutual: body's NEG slot can name only one predecessor,
+  // so the guard's loop-back goes through a Jump (by-value target), leaving
+  // init -> body as the single incoming edge.
+  CellRef gJump      = mintOp(OpcodeKind::Jump, "VICON_UNTIL_GJUMP");
 
   const CellRef prodE = emitProduce(nullCell_);
   auto body = nullptr == e.body ? std::expected<CellRef, CompileFailure>{push}
@@ -683,7 +687,7 @@ std::expected<CellRef, CompileFailure> Compiler::emitUntil(const EUntil &e) {
 
   spin(init, *body);
   spin(push, *cond);
-  spin(guard, *body);
+  spin(guard, gJump);
   spin(setD, setJ);
 
   core_.bindInput(init, done);
@@ -693,6 +697,7 @@ std::expected<CellRef, CompileFailure> Compiler::emitUntil(const EUntil &e) {
   core_.bindInput(push, opref(guardedAlt(guard)));
   core_.bindInput(guard, done);
   core_.bindInput(guard, opref(dead));
+  core_.bindInput(gJump, opref(*body));
   core_.bindInput(setD, done);
   core_.bindInput(setD, zero_);
   core_.bindInput(setD, negOne_);
