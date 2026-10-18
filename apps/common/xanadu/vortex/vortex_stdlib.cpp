@@ -13,6 +13,8 @@
 #include <sstream>
 #include <unordered_set>
 
+#include <gleditor/logging.hpp>
+
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/system_docs.hpp"
 #include "common/xanadu/vortex/vortex_worker_pool.hpp"
@@ -1145,8 +1147,8 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
           CellRef oDocCell    = core.arena().makeCell("store");
           std::string spanStr = "[" + std::to_string(cop->spanStart) + "," +
                                 std::to_string(cop->spanLength) + "]";
-          CellRef spanCell    = core.arena().makeCell(spanStr);
-          CellRef tDocCell    = core.arena().makeCell("active");
+          CellRef spanCell = core.arena().makeCell(spanStr);
+          CellRef tDocCell = core.arena().makeCell("active");
           if (stdlib.unify(goalArgs[0], oDocCell) &&
               stdlib.unify(goalArgs[1], spanCell) &&
               stdlib.unify(goalArgs[2], tDocCell)) {
@@ -1220,7 +1222,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
             core.arena().makeScalarCell(static_cast<std::int64_t>(c));
         std::string spanStr = "[" + std::to_string(sp.start) + "," +
                               std::to_string(sp.length) + "]";
-        CellRef spCell      = core.arena().makeCell(spanStr);
+        CellRef spCell = core.arena().makeCell(spanStr);
         if (stdlib.unify(goalArgs[0], cCell) &&
             stdlib.unify(goalArgs[1], spCell)) {
           bool keepGoing = solveQueryHelper(
@@ -1454,13 +1456,16 @@ void VortexStdLib::bootstrap() {
   CellRef modMath        = getOrCreateModule("std:math");
   CellRef modString      = getOrCreateModule("std:string");
   CellRef modLogic       = getOrCreateModule("std:logic");
-  CellRef modArray       = getOrCreateModule("sys:array");
-  CellRef modZigzag      = getOrCreateModule("std:zigzag");
-  CellRef modGC          = getOrCreateModule("std:gc");
-  CellRef modUI          = getOrCreateModule("std:ui");
-  CellRef modNav         = getOrCreateModule("std:nav");
-  CellRef modBridge      = getOrCreateModule("std:bridge");
-  CellRef modXuzz        = getOrCreateModule("std:xuzz");
+  // std:goal weaves in after std:logic because its generators call
+  // std:logic's #Choice/#Fail plumbing (vicon spec section 7.1).
+  CellRef modGoal   = getOrCreateModule("std:goal");
+  CellRef modArray  = getOrCreateModule("sys:array");
+  CellRef modZigzag = getOrCreateModule("std:zigzag");
+  CellRef modGC     = getOrCreateModule("std:gc");
+  CellRef modUI     = getOrCreateModule("std:ui");
+  CellRef modNav    = getOrCreateModule("std:nav");
+  CellRef modBridge = getOrCreateModule("std:bridge");
+  CellRef modXuzz   = getOrCreateModule("std:xuzz");
 
   buildMathModule(modMath);
   buildStringModule(modString);
@@ -1470,6 +1475,7 @@ void VortexStdLib::bootstrap() {
   buildFunctionalModule(modFunctional);
   buildCollectionsModule(modCollections);
   buildLogicModule(modLogic);
+  buildGoalModule(modGoal);
   buildArrayModule(modArray);
   buildZigzagModule(modZigzag);
   buildGCModule(modGC);
@@ -2112,6 +2118,71 @@ std::vector<CellValue> VortexStdLib::call(CellRef fnOp,
   }
   if (opName == "#GC_SWEEP") {
     return {static_cast<std::int64_t>(gcSweep())};
+  }
+  if (opName.starts_with("#GOAL_")) {
+    // std:goal's host-driven routines: the synchronous forms of control
+    // structures the vicon compiler emits inline. Args carry CellRefs as
+    // integers, as the #ZZ_ routines take them.
+    const auto refArg = [&args](const std::size_t i) -> CellRef {
+      return i < args.size() ? static_cast<CellRef>(toInt64(args[i])) : noCell;
+    };
+    if (opName == "#GOAL_BANG") {
+      // !x over a rank: every element's CellRef as a std:collections list,
+      // eagerly. The lazy one-#Choice-per-step form is the inline emission.
+      const CellRef head = refArg(0);
+      const DimRef dim   = refArg(1) != noCell ? static_cast<DimRef>(refArg(1))
+                                               : core_.dims().step;
+      std::vector<CellValue> items;
+      if (head != noCell && core_.arena().contains(head)) {
+        for (const CellRef cell : zigzag::rank(core_.arena(), head, dim)) {
+          items.push_back(static_cast<std::int64_t>(cell));
+        }
+      }
+      return {static_cast<std::int64_t>(createList(items))};
+    }
+    if (opName == "#GOAL_EVERY") {
+      const CellRef haltOp = refArg(2) != noCell ? refArg(2) : goalHalt_;
+      const auto values    = goalResults(refArg(0), refArg(1), haltOp);
+      return {static_cast<std::int64_t>(createList(values))};
+    }
+    if (opName == "#GOAL_IF") {
+      const CellRef haltOp = refArg(6) != noCell ? refArg(6) : goalHalt_;
+      if (goalBoundedFirst(refArg(0), refArg(1), haltOp).has_value()) {
+        // The condition produced; the if's result is the then-arm's.
+        if (auto v = goalBoundedFirst(refArg(2), refArg(3), haltOp)) {
+          return {*v};
+        }
+        return {};
+      }
+      const CellRef elseEntry = refArg(4);
+      if (elseEntry == noCell) {
+        return {}; // no else arm: a failing condition fails the if
+      }
+      if (auto v = goalBoundedFirst(elseEntry, refArg(5), haltOp)) {
+        return {*v};
+      }
+      return {};
+    }
+    if (opName == "#GOAL_WHILE" || opName == "#GOAL_UNTIL") {
+      const CellRef condEntry = refArg(0);
+      const CellRef condOut   = refArg(1);
+      const CellRef bodyEntry = refArg(2);
+      const CellRef bodyOut   = refArg(3);
+      const CellRef haltOp    = refArg(4) != noCell ? refArg(4) : goalHalt_;
+      const bool isWhile      = opName == "#GOAL_WHILE";
+      std::int64_t iterations = 0;
+      // The condition is re-entered each iteration under bounded evaluation
+      // (section 5.1); the same run-cycle bound guards a `repeat` condition.
+      while (iterations < 100000) {
+        if (goalBoundedFirst(condEntry, condOut, haltOp).has_value() !=
+            isWhile) {
+          break;
+        }
+        std::ignore = goalBoundedFirst(bodyEntry, bodyOut, haltOp);
+        ++iterations;
+      }
+      return {iterations};
+    }
   }
   auto it = routineBindings_.find(fnOp);
   if (it != routineBindings_.end()) {
@@ -2928,6 +2999,907 @@ void VortexStdLib::buildLogicModule(CellRef mod) {
     predBridgeEdge_ = createPredicate("bridge_edge");
     exportSymbol(mod, "bridge_edge", predBridgeEdge_);
   }
+}
+
+// -- Module 15: std:goal ------------------------------------------------------
+//
+// Icon's goal-directed evaluation over Vlog's choice-point frame
+// (design/vicon-goal-directed-language.md section 7), assembled per the
+// emission idioms pinned in design/vicon-implementation.md. Every export is
+// an entry opcode whose operand cells take the cell-arg convention: the
+// caller (call(), a test, or a compiled program's prologue) writes argument
+// values -- and refs where an operand names an op -- spawns a cursor at the
+// entry, and the graph obeys the shared suspension protocol:
+//
+//   produce: write the result into the `out` operand, Jump to the op the
+//            `cont` operand names (prefilled with goalHalt_)
+//   resume:  land the cursor on a #Fail op (goalFail_) -- backtrack pops the
+//            generator's top ChoicePoint, releases its Mark, and continues
+//            at the recorded altOp
+//   exhaust: a #Fail finding no choice point -- the driver reads nullopt
+//
+// The vicon compiler emits the same graphs inline; these routines are the
+// canonical forms the symbols resolve to for import()/reflection.
+void VortexStdLib::buildGoalModule(CellRef mod) {
+  goalHalt_     = vm_.mintOpcode(OpcodeKind::Halt, "#GOAL_HALT");
+  goalFail_     = vm_.mintOpcode(OpcodeKind::Fail, "#GOAL_FAIL");
+  goalSentinel_ = vm_.mintOpcode(OpcodeKind::Halt, "#GOAL_SENTINEL");
+
+  const auto lit = [this](const std::int64_t v) {
+    return core_.arena().makeScalarCell(v);
+  };
+  // A Jump/Branch/Choice target travels as an operand cell's *value*: the VM
+  // renders the cell and takes the integer as the op to run -- the same
+  // idiom vortex_logic_test.cpp drives #Choice with.
+  const auto opref = [this](const CellRef target) {
+    return core_.arena().makeScalarCell(static_cast<std::int64_t>(target));
+  };
+  const auto spin = [this](const CellRef a, const CellRef b) {
+    zigzag::expectWritten(
+        core_.arena().link(a, core_.dims().spin, DimVector::POS, b));
+  };
+  const auto operand = [this] { return core_.arena().makeCell(); };
+  // A `cont` operand prefilled with the module's shared halt op keeps every
+  // graph self-contained: produce suspends on it until a caller overwrites
+  // the operand with its own continuation's ref.
+  const auto contCell = [this] {
+    return core_.arena().makeScalarCell(static_cast<std::int64_t>(goalHalt_));
+  };
+
+  const CellRef zero   = lit(0);
+  const CellRef one    = lit(1);
+  const CellRef negOne = lit(-1);
+
+  // to: `i to j by k` -- the bounded retry-idiom generator.
+  // in: lo, hi, step, out, cont.
+  {
+    CellRef lo     = operand();
+    CellRef hi     = operand();
+    CellRef stepIn = operand();
+    CellRef out    = operand();
+    CellRef cont   = contCell();
+
+    CellRef cur = operand(); // the live scalar, stepped per resume
+    CellRef dir = operand(); // step >= 0
+    CellRef t   = operand(); // exhausted flag
+    CellRef ok  = operand(); // in-range flag
+
+    CellRef entry   = vm_.mintOpcode(OpcodeKind::Choice, "#GOAL_TO");
+    CellRef init    = vm_.mintOpcode(OpcodeKind::Add, "#GOAL_TO_INIT");
+    CellRef prod    = vm_.mintOpcode(OpcodeKind::Value, "#GOAL_TO_PRODUCE");
+    CellRef susp    = vm_.mintOpcode(OpcodeKind::Jump, "#GOAL_TO_SUSPEND");
+    CellRef next    = vm_.mintOpcode(OpcodeKind::Add, "#GOAL_TO_STEP");
+    CellRef dirTest = vm_.mintOpcode(OpcodeKind::Gte, "#GOAL_TO_DIR");
+    CellRef dirBr   = vm_.mintOpcode(OpcodeKind::Branch, "#GOAL_TO_DIRBR");
+    CellRef negTest = vm_.mintOpcode(OpcodeKind::Lt, "#GOAL_TO_NEG");
+    CellRef joinJ   = vm_.mintOpcode(OpcodeKind::Jump, "#GOAL_TO_JOIN");
+    CellRef posTest = vm_.mintOpcode(OpcodeKind::Lt, "#GOAL_TO_POS");
+    CellRef test    = vm_.mintOpcode(OpcodeKind::Not, "#GOAL_TO_TEST");
+    CellRef againBr = vm_.mintOpcode(OpcodeKind::Branch, "#GOAL_TO_AGAIN");
+    CellRef fail    = vm_.mintOpcode(OpcodeKind::Fail, "#GOAL_TO_FAIL");
+    CellRef again   = vm_.mintOpcode(OpcodeKind::Choice, "#GOAL_TO_RECHOICE");
+    CellRef prod2   = vm_.mintOpcode(OpcodeKind::Value, "#GOAL_TO_PRODUCE2");
+    CellRef susp2   = vm_.mintOpcode(OpcodeKind::Jump, "#GOAL_TO_SUSPEND2");
+
+    spin(entry, init);
+    spin(init, prod);
+    spin(prod, susp);
+    spin(susp, next);
+    spin(next, dirTest);
+    spin(dirTest, dirBr);
+    spin(dirBr, negTest);
+    spin(negTest, joinJ);
+    spin(joinJ, posTest);
+    spin(posTest, test);
+    spin(test, againBr);
+    spin(againBr, fail);
+    spin(fail, again);
+    spin(again, prod2);
+    spin(prod2, susp2);
+
+    // entry: Choice NEXT -- the resume path steps and tests before produce.
+    core_.bindInput(entry, opref(next));
+    // cur := lo
+    core_.bindInput(init, lo);
+    core_.bindInput(init, zero);
+    core_.bindOutput(init, cur);
+    // produce: out := cur, then suspend on `cont`.
+    core_.bindInput(prod, out);
+    core_.bindInput(prod, zero);
+    core_.bindInput(prod, negOne);
+    core_.bindInput(prod, cur);
+    core_.bindInput(susp, cont);
+    // next: cur += step.
+    core_.bindInput(next, cur);
+    core_.bindInput(next, stepIn);
+    core_.bindOutput(next, cur);
+    // dir := (step >= 0): the bound check differs per walking direction.
+    core_.bindInput(dirTest, stepIn);
+    core_.bindInput(dirTest, zero);
+    core_.bindOutput(dirTest, dir);
+    core_.bindInput(dirBr, dir);
+    core_.bindInput(dirBr, opref(posTest));
+    // Descending: exhausted once cur < hi.
+    core_.bindInput(negTest, cur);
+    core_.bindInput(negTest, hi);
+    core_.bindOutput(negTest, t);
+    core_.bindInput(joinJ, opref(test));
+    // Ascending: exhausted once hi < cur.
+    core_.bindInput(posTest, hi);
+    core_.bindInput(posTest, cur);
+    core_.bindOutput(posTest, t);
+    core_.bindInput(test, t);
+    core_.bindOutput(test, ok);
+    core_.bindInput(againBr, ok);
+    core_.bindInput(againBr, opref(again));
+    // Re-push the identical frame, produce, suspend (the contract's retry
+    // idiom: a resume consumes the frame and immediately replaces it).
+    core_.bindInput(again, opref(next));
+    core_.bindInput(prod2, out);
+    core_.bindInput(prod2, zero);
+    core_.bindInput(prod2, negOne);
+    core_.bindInput(prod2, cur);
+    core_.bindInput(susp2, cont);
+
+    routineBindings_[entry] = {.inputParams  = {lo, hi, stepIn, out, cont},
+                               .outputParams = {out}};
+    exportSymbol(mod, "to", entry);
+  }
+
+  // from: `i by k` forever -- the unbounded integer sequence; `seq` is the
+  // same generator under the contract's other name for it.
+  // in: lo, step, out, cont.
+  {
+    CellRef lo     = operand();
+    CellRef stepIn = operand();
+    CellRef out    = operand();
+    CellRef cont   = contCell();
+    CellRef cur    = operand();
+
+    CellRef entry = vm_.mintOpcode(OpcodeKind::Choice, "#GOAL_FROM");
+    CellRef init  = vm_.mintOpcode(OpcodeKind::Add, "#GOAL_FROM_INIT");
+    CellRef prod  = vm_.mintOpcode(OpcodeKind::Value, "#GOAL_FROM_PRODUCE");
+    CellRef susp  = vm_.mintOpcode(OpcodeKind::Jump, "#GOAL_FROM_SUSPEND");
+    CellRef next  = vm_.mintOpcode(OpcodeKind::Add, "#GOAL_FROM_STEP");
+    CellRef again = vm_.mintOpcode(OpcodeKind::Choice, "#GOAL_FROM_RECHOICE");
+    CellRef prod2 = vm_.mintOpcode(OpcodeKind::Value, "#GOAL_FROM_PRODUCE2");
+    CellRef susp2 = vm_.mintOpcode(OpcodeKind::Jump, "#GOAL_FROM_SUSPEND2");
+
+    spin(entry, init);
+    spin(init, prod);
+    spin(prod, susp);
+    spin(susp, next);
+    spin(next, again);
+    spin(again, prod2);
+    spin(prod2, susp2);
+
+    core_.bindInput(entry, opref(next));
+    core_.bindInput(init, lo);
+    core_.bindInput(init, zero);
+    core_.bindOutput(init, cur);
+    core_.bindInput(prod, out);
+    core_.bindInput(prod, zero);
+    core_.bindInput(prod, negOne);
+    core_.bindInput(prod, cur);
+    core_.bindInput(susp, cont);
+    core_.bindInput(next, cur);
+    core_.bindInput(next, stepIn);
+    core_.bindOutput(next, cur);
+    core_.bindInput(again, opref(next));
+    core_.bindInput(prod2, out);
+    core_.bindInput(prod2, zero);
+    core_.bindInput(prod2, negOne);
+    core_.bindInput(prod2, cur);
+    core_.bindInput(susp2, cont);
+
+    routineBindings_[entry] = {.inputParams  = {lo, stepIn, out, cont},
+                               .outputParams = {out}};
+    exportSymbol(mod, "from", entry);
+    exportSymbol(mod, "seq", entry);
+  }
+
+  // repeat: produce `in` forever -- the frame re-pushes itself as its own
+  // altOp, so every resume republishes the same value.
+  // in: in, out, cont.
+  {
+    CellRef in   = operand();
+    CellRef out  = operand();
+    CellRef cont = contCell();
+
+    CellRef entry = vm_.mintOpcode(OpcodeKind::Choice, "#GOAL_REPEAT");
+    CellRef prod  = vm_.mintOpcode(OpcodeKind::Value, "#GOAL_REPEAT_PRODUCE");
+    CellRef susp  = vm_.mintOpcode(OpcodeKind::Jump, "#GOAL_REPEAT_SUSPEND");
+    CellRef again = vm_.mintOpcode(OpcodeKind::Choice, "#GOAL_REPEAT_RECHOICE");
+    CellRef prod2 = vm_.mintOpcode(OpcodeKind::Value, "#GOAL_REPEAT_PRODUCE2");
+    CellRef susp2 = vm_.mintOpcode(OpcodeKind::Jump, "#GOAL_REPEAT_SUSPEND2");
+
+    spin(entry, prod);
+    spin(prod, susp);
+    spin(susp, again);
+    spin(again, prod2);
+    spin(prod2, susp2);
+
+    core_.bindInput(entry, opref(again));
+    core_.bindInput(prod, out);
+    core_.bindInput(prod, zero);
+    core_.bindInput(prod, negOne);
+    core_.bindInput(prod, in);
+    core_.bindInput(susp, cont);
+    core_.bindInput(again, opref(again));
+    core_.bindInput(prod2, out);
+    core_.bindInput(prod2, zero);
+    core_.bindInput(prod2, negOne);
+    core_.bindInput(prod2, in);
+    core_.bindInput(susp2, cont);
+
+    routineBindings_[entry] = {.inputParams  = {in, out, cont},
+                               .outputParams = {out}};
+    exportSymbol(mod, "repeat", entry);
+  }
+
+  // write: produce `in` once, then the sequence is dry -- Icon's write
+  // returns its argument; printing happens at the driver's render boundary.
+  // in: in, out, cont.
+  {
+    CellRef in   = operand();
+    CellRef out  = operand();
+    CellRef cont = contCell();
+
+    CellRef entry = vm_.mintOpcode(OpcodeKind::Choice, "#GOAL_WRITE");
+    CellRef prod  = vm_.mintOpcode(OpcodeKind::Value, "#GOAL_WRITE_PRODUCE");
+    CellRef susp  = vm_.mintOpcode(OpcodeKind::Jump, "#GOAL_WRITE_SUSPEND");
+    CellRef dead  = vm_.mintOpcode(OpcodeKind::Fail, "#GOAL_WRITE_DEAD");
+
+    spin(entry, prod);
+    spin(prod, susp);
+    spin(susp, dead);
+
+    core_.bindInput(entry, opref(dead));
+    core_.bindInput(prod, out);
+    core_.bindInput(prod, zero);
+    core_.bindInput(prod, negOne);
+    core_.bindInput(prod, in);
+    core_.bindInput(susp, cont);
+
+    routineBindings_[entry] = {.inputParams  = {in, out, cont},
+                               .outputParams = {out}};
+    exportSymbol(mod, "write", entry);
+  }
+
+  // writeSeq: `!s` for a string subject -- every one-character quoting cell
+  // value(subject, i, 1) for i in [1, len], each produce an ephemeral cell
+  // ref (spec section 5.2). in: subject, len, out, cont.
+  {
+    CellRef subj = operand();
+    CellRef len  = operand();
+    CellRef out  = operand();
+    CellRef cont = contCell();
+
+    CellRef idx = operand();
+    CellRef t   = operand();
+
+    CellRef entry = vm_.mintOpcode(OpcodeKind::Choice, "#GOAL_WRITESEQ");
+    CellRef init  = vm_.mintOpcode(OpcodeKind::Add, "#GOAL_WRITESEQ_INIT");
+    CellRef prod  = vm_.mintOpcode(OpcodeKind::Value, "#GOAL_WRITESEQ_PRODUCE");
+    CellRef susp  = vm_.mintOpcode(OpcodeKind::Jump, "#GOAL_WRITESEQ_SUSPEND");
+    CellRef next  = vm_.mintOpcode(OpcodeKind::Add, "#GOAL_WRITESEQ_STEP");
+    CellRef test  = vm_.mintOpcode(OpcodeKind::Lte, "#GOAL_WRITESEQ_TEST");
+    CellRef br    = vm_.mintOpcode(OpcodeKind::Branch, "#GOAL_WRITESEQ_BR");
+    CellRef fail  = vm_.mintOpcode(OpcodeKind::Fail, "#GOAL_WRITESEQ_FAIL");
+    CellRef again =
+        vm_.mintOpcode(OpcodeKind::Choice, "#GOAL_WRITESEQ_RECHOICE");
+    CellRef prod2 =
+        vm_.mintOpcode(OpcodeKind::Value, "#GOAL_WRITESEQ_PRODUCE2");
+    CellRef susp2 = vm_.mintOpcode(OpcodeKind::Jump, "#GOAL_WRITESEQ_SUSPEND2");
+
+    spin(entry, init);
+    spin(init, prod);
+    spin(prod, susp);
+    spin(susp, next);
+    spin(next, test);
+    spin(test, br);
+    spin(br, fail);
+    spin(fail, again);
+    spin(again, prod2);
+    spin(prod2, susp2);
+
+    core_.bindInput(entry, opref(next));
+    // &pos convention: positions are 1-based.
+    core_.bindInput(init, one);
+    core_.bindInput(init, zero);
+    core_.bindOutput(init, idx);
+    // #Value read form: out := the quoting cell for subject[idx:1].
+    core_.bindInput(prod, subj);
+    core_.bindInput(prod, idx);
+    core_.bindInput(prod, one);
+    core_.bindOutput(prod, out);
+    core_.bindInput(susp, cont);
+    core_.bindInput(next, idx);
+    core_.bindInput(next, one);
+    core_.bindOutput(next, idx);
+    core_.bindInput(test, idx);
+    core_.bindInput(test, len);
+    core_.bindOutput(test, t);
+    core_.bindInput(br, t);
+    core_.bindInput(br, opref(again));
+    core_.bindInput(again, opref(next));
+    core_.bindInput(prod2, subj);
+    core_.bindInput(prod2, idx);
+    core_.bindInput(prod2, one);
+    core_.bindOutput(prod2, out);
+    core_.bindInput(susp2, cont);
+
+    routineBindings_[entry] = {.inputParams  = {subj, len, out, cont},
+                               .outputParams = {out}};
+    exportSymbol(mod, "writeSeq", entry);
+  }
+
+  // limit: `e \ n` -- the kill-flag counter. A resume cannot be intercepted
+  // once a choice point sits on the stack, so the inner generator's stale
+  // frames are poisoned instead (vicon-implementation.md): `limit_gate` is
+  // the produce continuation a compiled `e` jumps to after writing its
+  // result into `limit_result`, and every resume path inside `e` branches
+  // on `limit_killflag` toward `limit_killop`. When the counter hits zero
+  // the flag stands and each live `e` frame pops exactly once, sees it, and
+  // fails through -- O(live frames) cheap pops, so `\` on an infinite
+  // generator still terminates. Those wiring cells ride along as extra
+  // symbols because an opcode graph can only write cells bound at assembly
+  // time: callers discover them with resolve(), not guesses.
+  // in: eEntry, n, out, cont.
+  {
+    CellRef eEntry = operand();
+    CellRef n      = operand();
+    CellRef out    = operand();
+    CellRef cont   = contCell();
+
+    CellRef cnt  = operand();
+    CellRef kill = operand();
+    CellRef eRes = operand(); // the shared result cell `e` produces into
+    CellRef t    = operand();
+    CellRef t0   = operand();
+
+    CellRef entry   = vm_.mintOpcode(OpcodeKind::Choice, "#GOAL_LIMIT");
+    CellRef preTest = vm_.mintOpcode(OpcodeKind::Lte, "#GOAL_LIMIT_PRE");
+    CellRef preBr   = vm_.mintOpcode(OpcodeKind::Branch, "#GOAL_LIMIT_PREBR");
+    CellRef init    = vm_.mintOpcode(OpcodeKind::Add, "#GOAL_LIMIT_INIT");
+    CellRef initK   = vm_.mintOpcode(OpcodeKind::Value, "#GOAL_LIMIT_KILLCLR");
+    CellRef goE     = vm_.mintOpcode(OpcodeKind::Jump, "#GOAL_LIMIT_GO");
+    CellRef gate    = vm_.mintOpcode(OpcodeKind::Sub, "#GOAL_LIMIT_GATE");
+    CellRef cntTest = vm_.mintOpcode(OpcodeKind::Lte, "#GOAL_LIMIT_CNT");
+    CellRef killBr  = vm_.mintOpcode(OpcodeKind::Branch, "#GOAL_LIMIT_KILLBR");
+    CellRef delivJ  = vm_.mintOpcode(OpcodeKind::Jump, "#GOAL_LIMIT_DELIVJ");
+    CellRef setKill = vm_.mintOpcode(OpcodeKind::Value, "#GOAL_LIMIT_KILLSET");
+    CellRef deliv   = vm_.mintOpcode(OpcodeKind::Value, "#GOAL_LIMIT_DELIVER");
+    CellRef susp    = vm_.mintOpcode(OpcodeKind::Jump, "#GOAL_LIMIT_SUSPEND");
+    CellRef killOp  = vm_.mintOpcode(OpcodeKind::Fail, "#GOAL_LIMIT_KILL");
+    CellRef exit    = vm_.mintOpcode(OpcodeKind::Fail, "#GOAL_LIMIT_EXIT");
+
+    spin(entry, preTest);
+    spin(preTest, preBr);
+    spin(preBr, init);
+    spin(init, initK);
+    spin(initK, goE);
+    spin(goE, gate);
+    spin(gate, cntTest);
+    spin(cntTest, killBr);
+    spin(killBr, delivJ);
+    spin(delivJ, setKill);
+    spin(setKill, deliv);
+    spin(deliv, susp);
+    spin(susp, killOp);
+    spin(killOp, exit);
+
+    // The entry frame's altOp is the failure propagator: when `e` exhausts
+    // naturally its #Fail lands here and the failure walks outward.
+    core_.bindInput(entry, opref(exit));
+    // e \ 0 fails before e is entered.
+    core_.bindInput(preTest, n);
+    core_.bindInput(preTest, zero);
+    core_.bindOutput(preTest, t0);
+    core_.bindInput(preBr, t0);
+    core_.bindInput(preBr, opref(exit));
+    // cnt := n; kill := 0.
+    core_.bindInput(init, n);
+    core_.bindInput(init, zero);
+    core_.bindOutput(init, cnt);
+    core_.bindInput(initK, kill);
+    core_.bindInput(initK, zero);
+    core_.bindInput(initK, negOne);
+    core_.bindInput(initK, zero);
+    core_.bindInput(goE, eEntry);
+    // gate: one produce survived; cnt -= 1 and arm the poison when it is
+    // spent.
+    core_.bindInput(gate, cnt);
+    core_.bindInput(gate, one);
+    core_.bindOutput(gate, cnt);
+    core_.bindInput(cntTest, cnt);
+    core_.bindInput(cntTest, zero);
+    core_.bindOutput(cntTest, t);
+    core_.bindInput(killBr, t);
+    core_.bindInput(killBr, opref(setKill));
+    core_.bindInput(delivJ, opref(deliv));
+    core_.bindInput(setKill, kill);
+    core_.bindInput(setKill, zero);
+    core_.bindInput(setKill, negOne);
+    core_.bindInput(setKill, one);
+    // deliver: out := eResult, then the produce suspends on `cont`.
+    core_.bindInput(deliv, out);
+    core_.bindInput(deliv, zero);
+    core_.bindInput(deliv, negOne);
+    core_.bindInput(deliv, eRes);
+    core_.bindInput(susp, cont);
+
+    routineBindings_[entry] = {.inputParams  = {eEntry, n, out, cont},
+                               .outputParams = {out}};
+    exportSymbol(mod, "limit", entry);
+    exportSymbol(mod, "limit_gate", gate);
+    exportSymbol(mod, "limit_killflag", kill);
+    exportSymbol(mod, "limit_killop", killOp);
+    exportSymbol(mod, "limit_result", eRes);
+  }
+
+  // cmp: the goal-directed comparison -- produces `right` when `left op
+  // right` holds, else fails (spec section 2: a comparison is a generator
+  // of its right operand). in: op, left, right, out, cont; `op` is the
+  // selector string "<", "<=", "=", "~=", ">", ">=".
+  {
+    CellRef opSel = operand();
+    CellRef left  = operand();
+    CellRef right = operand();
+    CellRef out   = operand();
+    CellRef cont  = contCell();
+
+    CellRef sel = operand(); // selector match flag
+    CellRef t   = operand(); // comparison result
+
+    CellRef entry = vm_.mintOpcode(OpcodeKind::Choice, "#GOAL_CMP");
+    CellRef unkJ  = vm_.mintOpcode(OpcodeKind::Jump, "#GOAL_CMP_UNKNOWN");
+    CellRef test  = vm_.mintOpcode(OpcodeKind::Branch, "#GOAL_CMP_TEST");
+    CellRef fail  = vm_.mintOpcode(OpcodeKind::Fail, "#GOAL_CMP_FAIL");
+    CellRef prod  = vm_.mintOpcode(OpcodeKind::Value, "#GOAL_CMP_PRODUCE");
+    CellRef susp  = vm_.mintOpcode(OpcodeKind::Jump, "#GOAL_CMP_SUSPEND");
+    CellRef dead  = vm_.mintOpcode(OpcodeKind::Fail, "#GOAL_CMP_DEAD");
+    core_.bindInput(entry, opref(dead));
+
+    // One Eq/Branch pair per selector; a non-match falls through to the next
+    // pair, and the cascade's tail Jump fails on an unknown selector. Each
+    // comparison arm lives behind the cascade on the spin chain and lands on
+    // `test` through its own Jump, so no arm is reachable by fall-through.
+    constexpr std::string_view kSelectors[] = {"<", "<=", "=", "~=", ">", ">="};
+    constexpr OpcodeKind kOps[]             = {OpcodeKind::Lt, OpcodeKind::Lte,
+                                               OpcodeKind::Eq, OpcodeKind::Neq,
+                                               OpcodeKind::Gt, OpcodeKind::Gte};
+    std::vector<CellRef> arms;
+    CellRef prev = entry;
+    for (std::size_t i = 0; i < std::size(kSelectors); ++i) {
+      CellRef selCell = core_.arena().makeCell(kSelectors[i]);
+      CellRef eqOp    = vm_.mintOpcode(OpcodeKind::Eq, "#GOAL_CMP_SEL");
+      CellRef brOp    = vm_.mintOpcode(OpcodeKind::Branch, "#GOAL_CMP_SELBR");
+      CellRef doOp    = vm_.mintOpcode(kOps[i], "#GOAL_CMP_DO");
+      CellRef join    = vm_.mintOpcode(OpcodeKind::Jump, "#GOAL_CMP_JOIN");
+      spin(prev, eqOp);
+      spin(eqOp, brOp);
+      prev = brOp;
+      core_.bindInput(eqOp, opSel);
+      core_.bindInput(eqOp, selCell);
+      core_.bindOutput(eqOp, sel);
+      core_.bindInput(brOp, sel);
+      core_.bindInput(brOp, opref(doOp));
+      core_.bindInput(doOp, left);
+      core_.bindInput(doOp, right);
+      core_.bindOutput(doOp, t);
+      core_.bindInput(join, opref(test));
+      // Arm region: doOp -> join -> test. Chained only for introspection;
+      // execution reaches doOp solely through its selector's Branch.
+      arms.push_back(doOp);
+      arms.push_back(join);
+    }
+    spin(prev, unkJ);
+    for (const CellRef arm : arms) {
+      spin(prev, arm);
+      prev = arm;
+    }
+    spin(prev, test);
+    spin(test, fail);
+    spin(fail, prod);
+    spin(prod, susp);
+    spin(susp, dead);
+
+    core_.bindInput(unkJ, opref(dead));
+    core_.bindInput(test, t);
+    core_.bindInput(test, opref(prod));
+    core_.bindInput(prod, out);
+    core_.bindInput(prod, zero);
+    core_.bindInput(prod, negOne);
+    core_.bindInput(prod, right);
+    core_.bindInput(susp, cont);
+
+    routineBindings_[entry] = {.inputParams  = {opSel, left, right, out, cont},
+                               .outputParams = {out}};
+    exportSymbol(mod, "cmp", entry);
+  }
+
+  // alt: `e1 | e2` -- the two-arm choice. Fall-through runs e1; when e1's
+  // own frames are exhausted the #Fail pops this frame and lands on e2.
+  // in: e1Entry, e2Entry.
+  {
+    CellRef e1Entry = operand();
+    CellRef e2Entry = operand();
+
+    CellRef entry  = vm_.mintOpcode(OpcodeKind::Choice, "#GOAL_ALT");
+    CellRef goE1   = vm_.mintOpcode(OpcodeKind::Jump, "#GOAL_ALT_FIRST");
+    CellRef altArm = vm_.mintOpcode(OpcodeKind::Jump, "#GOAL_ALT_SECOND");
+
+    spin(entry, goE1);
+    spin(goE1, altArm);
+
+    core_.bindInput(entry, opref(altArm));
+    core_.bindInput(goE1, e1Entry);
+    core_.bindInput(altArm, e2Entry);
+
+    routineBindings_[entry] = {.inputParams  = {e1Entry, e2Entry},
+                               .outputParams = {}};
+    exportSymbol(mod, "alt", entry);
+  }
+
+  // fail: #Fail alone -- the exhausted generator as a symbol.
+  routineBindings_[goalFail_] = {.inputParams = {}, .outputParams = {}};
+  exportSymbol(mod, "fail", goalFail_);
+
+  // succeed: produce &null once -- the bare cell, an empty result.
+  // in: out, cont.
+  {
+    CellRef out  = operand();
+    CellRef cont = contCell();
+
+    CellRef entry = vm_.mintOpcode(OpcodeKind::Choice, "#GOAL_SUCCEED");
+    CellRef prod  = vm_.mintOpcode(OpcodeKind::Value, "#GOAL_SUCCEED_PROD");
+    CellRef susp  = vm_.mintOpcode(OpcodeKind::Jump, "#GOAL_SUCCEED_SUSP");
+    CellRef dead  = vm_.mintOpcode(OpcodeKind::Fail, "#GOAL_SUCCEED_DEAD");
+    CellRef nullV = core_.arena().makeCell("");
+
+    spin(entry, prod);
+    spin(prod, susp);
+    spin(susp, dead);
+
+    core_.bindInput(entry, opref(dead));
+    core_.bindInput(prod, out);
+    core_.bindInput(prod, zero);
+    core_.bindInput(prod, negOne);
+    core_.bindInput(prod, nullV);
+    core_.bindInput(susp, cont);
+
+    routineBindings_[entry] = {.inputParams  = {out, cont},
+                               .outputParams = {out}};
+    exportSymbol(mod, "succeed", entry);
+  }
+
+  // -- d.scan: the scanning environment ---------------------------------------
+  // A scanning cursor is a cell on home's +d.scan rank whose content is &pos
+  // (1-based) and whose +d.grab is the subject cell; the posward-most cursor
+  // is current. The routine below keeps one fixed cursor cell because an
+  // opcode stream cannot write through a runtime ref -- every produce target
+  // must be a cell bound at assembly time. That cell predates any mark a
+  // generator inside `e` takes, so its &pos writes are trailed and an inner
+  // failure restores them for free (spec section 6.2); when `e` drains, the
+  // #Fail that pops the scan frame releases its Mark and the whole push --
+  // rank link, &pos, subject grab -- unwinds with it.
+  CellRef scanCursorCell = operand();
+  CellRef scanSubjCell   = operand();
+  {
+    CellRef subj   = operand();
+    CellRef eEntry = operand();
+
+    const CellRef scanDimCell =
+        lit(static_cast<std::int64_t>(core_.dims().scan));
+    const CellRef grabDimCell =
+        lit(static_cast<std::int64_t>(core_.dims().grab));
+
+    CellRef entry   = vm_.mintOpcode(OpcodeKind::Choice, "#GOAL_SCAN");
+    CellRef push    = vm_.mintOpcode(OpcodeKind::New, "#GOAL_SCAN_PUSH");
+    CellRef posSet  = vm_.mintOpcode(OpcodeKind::Value, "#GOAL_SCAN_POS");
+    CellRef recSub  = vm_.mintOpcode(OpcodeKind::Value, "#GOAL_SCAN_SUBJ");
+    CellRef linkSub = vm_.mintOpcode(OpcodeKind::Link, "#GOAL_SCAN_GRAB");
+    CellRef goE     = vm_.mintOpcode(OpcodeKind::Jump, "#GOAL_SCAN_GO");
+    CellRef exit    = vm_.mintOpcode(OpcodeKind::Fail, "#GOAL_SCAN_EXIT");
+
+    spin(entry, push);
+    spin(push, posSet);
+    spin(posSet, recSub);
+    spin(recSub, linkSub);
+    spin(linkSub, goE);
+    spin(goE, exit);
+
+    core_.bindInput(entry, opref(exit));
+    // Push the cursor onto home's +d.scan rank (New links the bound output
+    // cell posward of its anchor).
+    core_.bindInput(push, core_.home());
+    core_.bindInput(push, scanDimCell);
+    core_.bindInput(push, one);
+    core_.bindOutput(push, scanCursorCell);
+    // &pos := 1 (Icon positions are 1-based).
+    core_.bindInput(posSet, scanCursorCell);
+    core_.bindInput(posSet, zero);
+    core_.bindInput(posSet, negOne);
+    core_.bindInput(posSet, one);
+    // &subject bookkeeping for the subject routine: the cursor's +d.grab is
+    // the subject operand cell; a content copy tracks it for producers.
+    core_.bindInput(recSub, scanSubjCell);
+    core_.bindInput(recSub, zero);
+    core_.bindInput(recSub, negOne);
+    core_.bindInput(recSub, subj);
+    core_.bindInput(linkSub, scanCursorCell);
+    core_.bindInput(linkSub, grabDimCell);
+    core_.bindInput(linkSub, one);
+    core_.bindInput(linkSub, subj);
+    core_.bindInput(goE, eEntry);
+
+    routineBindings_[entry] = {.inputParams  = {subj, eEntry},
+                               .outputParams = {}};
+    exportSymbol(mod, "scan", entry);
+  }
+
+  // subject: produce &subject once -- the subject content the open `scan`
+  // recorded. in: out, cont.
+  {
+    CellRef out  = operand();
+    CellRef cont = contCell();
+
+    CellRef entry = vm_.mintOpcode(OpcodeKind::Choice, "#GOAL_SUBJECT");
+    CellRef prod  = vm_.mintOpcode(OpcodeKind::Value, "#GOAL_SUBJECT_PROD");
+    CellRef susp  = vm_.mintOpcode(OpcodeKind::Jump, "#GOAL_SUBJECT_SUSP");
+    CellRef dead  = vm_.mintOpcode(OpcodeKind::Fail, "#GOAL_SUBJECT_DEAD");
+
+    spin(entry, prod);
+    spin(prod, susp);
+    spin(susp, dead);
+
+    core_.bindInput(entry, opref(dead));
+    core_.bindInput(prod, out);
+    core_.bindInput(prod, zero);
+    core_.bindInput(prod, negOne);
+    core_.bindInput(prod, scanSubjCell);
+    core_.bindInput(susp, cont);
+
+    routineBindings_[entry] = {.inputParams  = {out, cont},
+                               .outputParams = {out}};
+    exportSymbol(mod, "subject", entry);
+  }
+
+  // pos: produce &pos once -- the open scan cursor's content.
+  // in: out, cont.
+  {
+    CellRef out  = operand();
+    CellRef cont = contCell();
+
+    CellRef entry = vm_.mintOpcode(OpcodeKind::Choice, "#GOAL_POS");
+    CellRef prod  = vm_.mintOpcode(OpcodeKind::Value, "#GOAL_POS_PROD");
+    CellRef susp  = vm_.mintOpcode(OpcodeKind::Jump, "#GOAL_POS_SUSP");
+    CellRef dead  = vm_.mintOpcode(OpcodeKind::Fail, "#GOAL_POS_DEAD");
+
+    spin(entry, prod);
+    spin(prod, susp);
+    spin(susp, dead);
+
+    core_.bindInput(entry, opref(dead));
+    core_.bindInput(prod, out);
+    core_.bindInput(prod, zero);
+    core_.bindInput(prod, negOne);
+    core_.bindInput(prod, scanCursorCell);
+    core_.bindInput(susp, cont);
+
+    routineBindings_[entry] = {.inputParams  = {out, cont},
+                               .outputParams = {out}};
+    exportSymbol(mod, "pos", entry);
+  }
+
+  // Host-driven routines: the synchronous forms of the control structures
+  // the compiler emits inline, dispatched by label inside call() -- the
+  // same style as #ZZ_/#ARRAY_. Their operand cells carry entry-op and
+  // result-cell refs as integer values.
+  const auto hostRoutine =
+      [this, mod](std::string_view symbol, std::string_view label,
+                  std::initializer_list<CellRef> ins, CellRef outCell) {
+        CellRef op = vm_.mintOpcode(OpcodeKind::Nop, label);
+        for (const CellRef in : ins) {
+          core_.bindInput(op, in);
+        }
+        core_.bindOutput(op, outCell);
+        routineBindings_[op] = {.inputParams  = std::vector<CellRef>(ins),
+                                .outputParams = {outCell}};
+        exportSymbol(mod, symbol, op);
+      };
+
+  // every: genEntry, genOut, halt -> list of every produce.
+  hostRoutine("every", "#GOAL_EVERY", {operand(), operand(), operand()},
+              operand());
+  // bang: !x -- head, dim -> list of element refs (eager rank walk).
+  hostRoutine("bang", "#GOAL_BANG", {operand(), operand()}, operand());
+  // if: condEntry, condOut, thenEntry, thenOut, elseEntry, elseOut, halt.
+  hostRoutine("if", "#GOAL_IF",
+              {operand(), operand(), operand(), operand(), operand(), operand(),
+               operand()},
+              operand());
+  // while/until: condEntry, condOut, bodyEntry, bodyOut, halt -> iteration
+  // count.
+  hostRoutine("while", "#GOAL_WHILE",
+              {operand(), operand(), operand(), operand(), operand()},
+              operand());
+  hostRoutine("until", "#GOAL_UNTIL",
+              {operand(), operand(), operand(), operand(), operand()},
+              operand());
+
+  GLEDITOR_LOG_DEBUG("vortex.stdlib",
+                     "std:goal woven: generators, limit, cmp, scan plumbing");
+}
+
+std::optional<CellRef> VortexStdLib::goalProduce(const CellRef entryOp,
+                                                 const CellRef haltOp,
+                                                 const std::string_view name) {
+  if (entryOp == noCell || haltOp == noCell ||
+      !core_.arena().contains(entryOp)) {
+    return std::nullopt;
+  }
+  const std::size_t base = vm_.choiceDepth();
+  const CellRef cursor   = vm_.spawnCursor(entryOp, name);
+  // The sentinel frame sits beneath the generator's own: when the sequence
+  // runs dry the drain lands on it -- a Halt -- instead of consuming choice
+  // points that are not this activation's.
+  vm_.pushChoicePoint(cursor, goalSentinel_);
+  const auto res = vm_.run(cursor);
+  if (res.success && vm_.getCursorOpcode(cursor) == haltOp) {
+    return cursor;
+  }
+  // Failed activation: unwind what it left so the write trail replays and
+  // the stack is back where the caller found it.
+  while (vm_.choiceDepth() > base && vm_.backtrack(cursor)) {
+  }
+  return std::nullopt;
+}
+
+std::optional<CellRef> VortexStdLib::goalResume(const CellRef cursor,
+                                                const CellRef failOp,
+                                                const CellRef haltOp) {
+  if (cursor == noCell || failOp == noCell) {
+    return std::nullopt;
+  }
+  // Landing on a #Fail is Icon's resumption: backtrack pops the top choice
+  // point, releases its Mark, and continues at the recorded altOp.
+  vm_.setCursorOpcode(cursor, failOp);
+  const auto res = vm_.run(cursor);
+  if (res.success && vm_.getCursorOpcode(cursor) == haltOp) {
+    return cursor;
+  }
+  return std::nullopt;
+}
+
+std::optional<CellValue> VortexStdLib::goalBoundedFirst(const CellRef entryOp,
+                                                        const CellRef outCell,
+                                                        const CellRef haltOp) {
+  if (entryOp == noCell || !core_.arena().contains(entryOp)) {
+    return std::nullopt;
+  }
+  const std::size_t base = vm_.choiceDepth();
+  const CellRef cursor   = vm_.spawnCursor(entryOp, "goal.bounded");
+  vm_.pushChoicePoint(cursor, goalSentinel_);
+  const auto res = vm_.run(cursor);
+  if (res.success && vm_.getCursorOpcode(cursor) == haltOp) {
+    const CellValue v =
+        outCell != noCell ? core_.render(outCell) : CellValue{true};
+    // Bounded evaluation commits its first result: the choice points are
+    // discarded and the produce write stands (spec section 4.4).
+    vm_.cut(base);
+    return v;
+  }
+  while (vm_.choiceDepth() > base && vm_.backtrack(cursor)) {
+  }
+  return std::nullopt;
+}
+
+std::vector<CellValue> VortexStdLib::goalResults(const CellRef entryOp,
+                                                 const CellRef outCell,
+                                                 const CellRef haltOp) {
+  std::vector<CellValue> results;
+  if (entryOp == noCell || !core_.arena().contains(entryOp)) {
+    return results;
+  }
+  const std::size_t base = vm_.choiceDepth();
+  const CellRef cursor   = vm_.spawnCursor(entryOp, "goal.every");
+  vm_.pushChoicePoint(cursor, goalSentinel_);
+  for (;;) {
+    const auto res = vm_.run(cursor);
+    if (!res.success) {
+      break;
+    }
+    const CellRef pc = vm_.getCursorOpcode(cursor);
+    if (pc == goalSentinel_ || pc != haltOp) {
+      break; // drained to the sentinel, or finished without producing
+    }
+    results.push_back(outCell != noCell ? core_.render(outCell)
+                                        : CellValue{true});
+    // Resume: land on the shared #Fail, which backtracks into the next
+    // alternative -- or onto the sentinel when the generator is dry.
+    vm_.setCursorOpcode(cursor, goalFail_);
+  }
+  while (vm_.choiceDepth() > base && vm_.backtrack(cursor)) {
+  }
+  return results;
+}
+
+std::span<const CellRef>
+VortexStdLib::routineInputs(const CellRef entryOp) const {
+  const auto it = routineBindings_.find(entryOp);
+  return it == routineBindings_.end()
+             ? std::span<const CellRef>{}
+             : std::span<const CellRef>{it->second.inputParams};
+}
+
+std::span<const CellRef>
+VortexStdLib::routineOutputs(const CellRef entryOp) const {
+  const auto it = routineBindings_.find(entryOp);
+  return it == routineBindings_.end()
+             ? std::span<const CellRef>{}
+             : std::span<const CellRef>{it->second.outputParams};
+}
+
+CellRef VortexStdLib::scanPush(const CellRef subject) {
+  if (!core_.arena().contains(subject)) {
+    return noCell;
+  }
+  // &pos is 1-based; appended at the tail, so the posward-most cursor is
+  // the current one (spec section 6.1).
+  const CellRef cursor =
+      core_.arena().makeScalarCell(static_cast<std::int64_t>(1));
+  zigzag::expectWritten(core_.arena().link(
+      zigzag::rankTail(core_.arena(), core_.home(), core_.dims().scan),
+      core_.dims().scan, DimVector::POS, cursor));
+  zigzag::expectWritten(
+      core_.arena().link(cursor, core_.dims().grab, DimVector::POS, subject));
+  return cursor;
+}
+
+void VortexStdLib::scanPop(const CellRef cursor) {
+  if (cursor == noCell || !core_.arena().contains(cursor)) {
+    return;
+  }
+  const auto prev =
+      zigzag::step(core_.arena(), cursor, core_.dims().scan, DimVector::NEG);
+  const auto next =
+      zigzag::step(core_.arena(), cursor, core_.dims().scan, DimVector::POS);
+  zigzag::expectWritten(
+      core_.arena().unlink(cursor, core_.dims().scan, DimVector::NEG));
+  zigzag::expectWritten(
+      core_.arena().unlink(cursor, core_.dims().scan, DimVector::POS));
+  // Heal the gap so the enclosing scan's cursor is reachable again.
+  if (prev.has_value() && next.has_value()) {
+    zigzag::expectWritten(
+        core_.arena().link(*prev, core_.dims().scan, DimVector::POS, *next));
+  }
+}
+
+std::optional<CellRef> VortexStdLib::scanCursor() const {
+  const CellRef tail =
+      zigzag::rankTail(core_.arena(), core_.home(), core_.dims().scan);
+  return tail != core_.home() ? std::optional<CellRef>{tail} : std::nullopt;
+}
+
+std::optional<CellRef> VortexStdLib::scanSubject() const {
+  return scanCursor().and_then(zigzag::hop(core_.arena(), core_.dims().grab));
+}
+
+std::optional<std::int64_t> VortexStdLib::scanPos() const {
+  return scanCursor().and_then(
+      [this](const CellRef cursor) { return core_.arena().asInt64(cursor); });
+}
+
+bool VortexStdLib::scanSetPos(const std::int64_t pos) {
+  return scanCursor()
+      .and_then([this, pos](const CellRef cursor) {
+        // Trailed under any live mark taken inside the scan, so an
+        // inner #Fail restores &pos for free (spec section 6.2).
+        return core_.value(cursor, 0, -1, pos);
+      })
+      .has_value();
 }
 
 void VortexStdLib::buildArrayModule(CellRef mod) {
@@ -3978,8 +4950,8 @@ bool VortexStdLib::exportStandardLibraryToStore(
 }
 
 CellRef VortexStdLib::importModuleFromStore(const xanadu::Store &srcStore) {
-  auto ver = srcStore.allVersions().empty() ? xanadu::MicroversionId{}
-                                            : srcStore.primaryCurrentVersion();
+  auto ver         = srcStore.allVersions().empty() ? xanadu::MicroversionId{}
+                                                    : srcStore.primaryCurrentVersion();
   auto srcManifold = srcStore.rebuildManifold(ver);
   if (srcManifold.cellCount() == 0) {
     return noCell;
@@ -4069,9 +5041,9 @@ bool VortexStdLib::bridgeCellToDoc(xanadu::Store &store, CellRef cell,
     return false;
   }
   std::string text = core_.arena().textOf(cell);
-  auto parent = store.allVersions().empty() ? xanadu::MicroversionId{}
-                                            : store.primaryCurrentVersion();
-  auto newVer = store.insert(parent, docOffset, text);
+  auto parent      = store.allVersions().empty() ? xanadu::MicroversionId{}
+                                                 : store.primaryCurrentVersion();
+  auto newVer      = store.insert(parent, docOffset, text);
   store.repointCurrentVersion(newVer);
   return true;
 }
@@ -4079,8 +5051,8 @@ bool VortexStdLib::bridgeCellToDoc(xanadu::Store &store, CellRef cell,
 CellRef VortexStdLib::bridgeDocToCell(xanadu::Store &store,
                                       std::uint32_t docOffset,
                                       std::uint32_t length) {
-  auto ver = store.allVersions().empty() ? xanadu::MicroversionId{}
-                                         : store.primaryCurrentVersion();
+  auto ver            = store.allVersions().empty() ? xanadu::MicroversionId{}
+                                                    : store.primaryCurrentVersion();
   std::string docText = store.textOf(ver);
   if (docOffset >= docText.size()) {
     return core_.arena().makeCell("");

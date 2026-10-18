@@ -60,8 +60,12 @@ void VortexCore::initGenesis() {
   dims_.name           = mintNamedDimension("d.name", lastDim);
   dims_.stdlib         = mintNamedDimension("d.stdlib", lastDim);
   dims_.clause         = mintNamedDimension("d.clause", lastDim);
-  dims_.stores         = mintNamedDimension("d.stores", lastDim);
-  dims_.role           = mintNamedDimension("d.role", lastDim);
+  // d.scan is the one dimension vicon adds: a scanning cursor is a cell on
+  // it, so minting is the same MakeCell-plus-SetLink genesis every system
+  // dimension gets -- data, not a name the core learns (spec section 8.1).
+  dims_.scan   = mintNamedDimension("d.scan", lastDim);
+  dims_.stores = mintNamedDimension("d.stores", lastDim);
+  dims_.role   = mintNamedDimension("d.role", lastDim);
 }
 
 CellRef VortexCore::mintDimension(std::string_view name) {

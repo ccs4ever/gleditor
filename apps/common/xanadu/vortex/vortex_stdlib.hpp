@@ -16,6 +16,8 @@
  * 7. std:string     (split, join, starts_with, ends_with, to_upper, to_lower,
  * trim)
  * 8. std:logic      (unification, terms, variables, choice points, resolution)
+ * 9. std:goal       (vicon's goal-directed evaluation: generators, outcomes,
+ * alternation, limitation, and the d.scan string-scanning environment)
  */
 #ifndef COMMON_XANADU_VORTEX_STDLIB_HPP
 #define COMMON_XANADU_VORTEX_STDLIB_HPP
@@ -323,6 +325,82 @@ public:
   static bool bridgeCellUnlock(xanadu::ZigzagPresentationSurface &surface,
                                CellRef cell);
 
+  // -- Module 15: std:goal (vicon goal-directed evaluation) -------------------
+  //
+  // design/vicon-implementation.md's export table, over the suspension
+  // protocol it pins: a generator produces by writing its `out` operand cell
+  // and jumping to the op its `cont` operand names (prefilled with
+  // goalHaltOp()); resuming lands the cursor on a #Fail op (goalFailOp()),
+  // which pops the generator's top choice point, releases its Mark, and
+  // continues at the recorded altOp; exhaustion is a #Fail finding no choice
+  // point, answered as std::nullopt -- Icon failure as a value, never an
+  // error (spec section 4.1).
+
+  /// The shared suspension point every std:goal producer's `cont` operand
+  /// names by default: run() stops on it without executing, which *is*
+  /// Icon's suspension.
+  [[nodiscard]] CellRef goalHaltOp() const noexcept { return goalHalt_; }
+  /// The shared resume op: landing a suspended cursor on it backtracks into
+  /// the generator's top choice point.
+  [[nodiscard]] CellRef goalFailOp() const noexcept { return goalFail_; }
+  /// The Halt a host-driven activation pushes beneath its generator's frames
+  /// so a drained sequence lands on it instead of consuming choice points
+  /// that are not its own.
+  [[nodiscard]] CellRef goalSentinelOp() const noexcept {
+    return goalSentinel_;
+  }
+
+  /// Spawn a cursor at @p entryOp, guard it with goalSentinelOp(), and run
+  /// to the first produce -- PC == @p haltOp -- or to exhaustion. The live
+  /// cursor on produce (its `out` operand holds the result, and the cursor
+  /// may be resumed); nullopt is Icon failure, not an error.
+  [[nodiscard]] std::optional<CellRef>
+  goalProduce(CellRef entryOp, CellRef haltOp, std::string_view name = {});
+  /// Resume @p cursor's generator once: land it on @p failOp and run to the
+  /// next produce (PC == @p haltOp). nullopt when the #Fail found nothing --
+  /// the sequence ran dry.
+  [[nodiscard]] std::optional<CellRef>
+  goalResume(CellRef cursor, CellRef failOp, CellRef haltOp);
+
+  /// Bounded first produce of the generator at @p entryOp: on produce the
+  /// result is read from @p outCell and the live choice points are committed
+  /// (discarded, keeping the writes); on exhaustion the activation is
+  /// unwound. This is section 4.4's bounded expression as a host call.
+  [[nodiscard]] std::optional<CellValue>
+  goalBoundedFirst(CellRef entryOp, CellRef outCell, CellRef haltOp);
+  /// Every produce of @p entryOp, collected eagerly -- the synchronous form
+  /// of `every e` (spec section 5.1). The lazy resume-per-result form is what
+  /// the vicon compiler emits inline.
+  [[nodiscard]] std::vector<CellValue>
+  goalResults(CellRef entryOp, CellRef outCell, CellRef haltOp);
+
+  /// The operand cells bound for routine @p entryOp: the argument cells
+  /// call() writes, in contract order. Empty for an unregistered op.
+  [[nodiscard]] std::span<const CellRef> routineInputs(CellRef entryOp) const;
+  /// Its result cells (what call() and goal drivers read back).
+  [[nodiscard]] std::span<const CellRef> routineOutputs(CellRef entryOp) const;
+
+  // -- d.scan: the &subject/&pos scanning environment (spec section 6.1) ------
+  /// Push a scanning cursor for @p subject onto the tail of home's +d.scan
+  /// rank -- the posward-most cursor is the current one. The cursor's content
+  /// is &pos (1-based, as Icon); its +d.grab is the subject cell. Answers the
+  /// cursor, or noCell when @p subject is not in the arena.
+  CellRef scanPush(CellRef subject);
+  /// Drop @p cursor out of the d.scan rank, healing the gap so the enclosing
+  /// scan's cursor becomes current again.
+  void scanPop(CellRef cursor);
+  /// The current scanning cursor: the posward-most cell on home's +d.scan
+  /// rank, or nullopt when no scan is open.
+  [[nodiscard]] std::optional<CellRef> scanCursor() const;
+  /// &subject: the current cursor's +d.grab cell.
+  [[nodiscard]] std::optional<CellRef> scanSubject() const;
+  /// &pos: the current cursor's content as a 1-based position.
+  [[nodiscard]] std::optional<std::int64_t> scanPos() const;
+  /// Set &pos on the current cursor. A write under a live mark is trailed,
+  /// so an enclosing #Fail restores it (spec section 6.2). false when no
+  /// scan is open.
+  bool scanSetPos(std::int64_t pos);
+
   // -- Sovereign Store Library Packaging (Zero YAML) --------------------------
   bool exportModuleToStore(std::string_view modulePath,
                            xanadu::Store &destStore) const;
@@ -360,6 +438,7 @@ private:
   void buildFunctionalModule(CellRef mod);
   void buildCollectionsModule(CellRef mod);
   void buildLogicModule(CellRef mod);
+  void buildGoalModule(CellRef mod);
   void buildArrayModule(CellRef mod);
   void buildZigzagModule(CellRef mod);
   void buildGCModule(CellRef mod);
@@ -381,6 +460,11 @@ private:
     std::vector<CellRef> outputParams;
   };
   std::unordered_map<CellRef, RoutineBinding> routineBindings_;
+
+  // std:goal's shared suspension plumbing, minted by buildGoalModule().
+  CellRef goalHalt_{noCell};     ///< the produce-side Jump target
+  CellRef goalFail_{noCell};     ///< the resume-side backtrack entry
+  CellRef goalSentinel_{noCell}; ///< activation floor for host-driven drains
 
   CellRef predEqual_{noCell};
   CellRef predUnify_{noCell};

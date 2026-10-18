@@ -136,7 +136,24 @@ private:
   zigzag::CellRef mintOp(zigzag::vortex::OpcodeKind kind,
                          std::string_view label = {});
   zigzag::CellRef mintScalar(std::int64_t v);
+  zigzag::CellRef opref(zigzag::CellRef target);
   void spin(zigzag::CellRef from, zigzag::CellRef to);
+
+  /// The produce contract: `Value produceOut_ := src; Jump produceCont_`.
+  /// Emits the two-op fragment and returns its entry.
+  zigzag::CellRef emitProduce(zigzag::CellRef srcCell);
+  /// emitExpr under a produce context ({out, cont}) that differs from the
+  /// enclosing one; the previous context is restored on return.
+  std::expected<zigzag::CellRef, CompileFailure>
+  emitInto(const Expr &e, zigzag::CellRef out, zigzag::CellRef cont);
+  /// Emit a statement list / expression sequence: earlier elements produce
+  /// into scratch and fall through to the next; the last produces outward.
+  std::expected<zigzag::CellRef, CompileFailure>
+  emitSequence(const std::vector<ExprPtr> &exprs);
+  /// Guard @p alt with every active `e \ n` kill flag: returns @p alt when
+  /// no limit is being emitted, else the head of a `Branch kill -> KILL`
+  /// chain falling through to @p alt (design's poisoned-resume idiom).
+  zigzag::CellRef guardedAlt(zigzag::CellRef alt);
 
   zigzag::vortex::VortexCore &core_;
   zigzag::vortex::VortexVM vm_;
@@ -144,6 +161,39 @@ private:
   std::vector<LoopContext> loopStack_;
   std::unordered_map<std::string, zigzag::CellRef> procedures_;
   zigzag::CellRef scanSubject_{zigzag::noCell};
+
+  // -- Per-program emission state --------------------------------------------
+  // Produce context: emitExpr threads the current fragment's result sink
+  // through these members because the emit* signatures return only the
+  // fragment's entry op (the header contract fixed in I1).
+  zigzag::CellRef produceOut_{zigzag::noCell};
+  zigzag::CellRef produceCont_{zigzag::noCell};
+  zigzag::CellRef resultCell_{zigzag::noCell}; ///< top-level produce sink
+  zigzag::CellRef haltOp_{zigzag::noCell};     ///< shared suspension point
+  zigzag::CellRef failOp_{zigzag::noCell};     ///< shared resume/fail op
+  zigzag::CellRef nullCell_{zigzag::noCell};   ///< &null
+  zigzag::CellRef scratchCell_{zigzag::noCell};
+  zigzag::CellRef zero_{zigzag::noCell};
+  zigzag::CellRef one_{zigzag::noCell};
+  zigzag::CellRef negOne_{zigzag::noCell};
+  // Procedure call plumbing: every call site binds __vicon_ret to its own
+  // produce-continuation op and jumps through a per-procedure indirection
+  // cell, patched once the body is emitted (forward refs and recursion).
+  zigzag::CellRef retResolve_{zigzag::noCell};
+  zigzag::CellRef retTmp_{zigzag::noCell};
+  zigzag::CellRef procRes_{zigzag::noCell};
+  bool insideProc_{false};
+  /// name -> scalar cell whose value is patched to the body's entry op.
+  std::unordered_map<std::string, zigzag::CellRef> procTargets_;
+  /// name -> emitted entry op, for CompiledProgram::procedures.
+  std::unordered_map<std::string, zigzag::CellRef> procEntries_;
+  /// name -> declared parameter names, bound at each call site.
+  std::unordered_map<std::string, std::vector<std::string>> procParams_;
+  /// name -> the cell the body's produce writes before returning.
+  std::unordered_map<std::string, zigzag::CellRef> procResultCells_;
+  /// Active `e \ n` sites: every resume path emitted inside an `e` checks
+  /// each flag and fails through to the site's kill op (design §limit).
+  std::vector<std::pair<zigzag::CellRef, zigzag::CellRef>> killGuards_;
 };
 
 } // namespace xanadu::vicon

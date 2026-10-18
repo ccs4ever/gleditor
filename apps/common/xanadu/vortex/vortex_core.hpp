@@ -50,6 +50,9 @@ struct SystemDimensions {
   DimRef dims{noCell};           ///< Dimension directory rank off home
   DimRef stdlib{noCell}; ///< Standard library module directory rank off home
   DimRef clause{noCell}; ///< Clause database rank off predicate cells (Vlog)
+  DimRef scan{noCell};   ///< String-scanning cursor rank off home; a cursor's
+                         ///< content is &pos, its +d.grab &subject (vicon
+                         ///< std:goal, spec section 6.1)
   DimRef stores{noCell}; ///< Multi-store connection rank off home
 };
 

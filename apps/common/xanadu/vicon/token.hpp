@@ -36,6 +36,7 @@ enum class TokenKind : std::uint8_t {
   CloseBrace,   ///< "}"
   Comma,        ///< ","
   Semicolon,    ///< ";" or a significant newline (statement separator)
+  Colon,        ///< ":" (slice separator, case-arm separator)
 
   // Reserved words
   If,        ///< "if"

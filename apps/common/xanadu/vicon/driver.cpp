@@ -1,6 +1,12 @@
 /**
  * @file driver.cpp
- * @brief Iteration-1 stub: start() surfaces the front-end's refusal.
+ * @brief The vicon resume loop over the compiled generator.
+ *
+ * The suspension protocol is std:goal's: the first resume spawns the cursor
+ * under a sentinel choice point and runs to the first produce (PC ==
+ * program_.haltOp); each later resume lands the cursor on program_.failOp,
+ * which backtracks into the generator's top choice point. Exhaustion drains
+ * to the sentinel — a Halt that is not haltOp — and answers nullopt.
  */
 #include "common/xanadu/vicon/driver.hpp"
 
@@ -17,15 +23,32 @@ std::expected<void, DriverError> Driver::start(std::string_view source) {
                                        .phase  = "compile"});
   }
   program_   = *program;
-  cursor_    = program_.entry;
+  cursor_    = zigzag::noCell; // spawned lazily by the first resume()
   started_   = true;
   exhausted_ = false;
   return {};
 }
 
 std::optional<zigzag::CellRef> Driver::resume() {
-  exhausted_ = true;
-  return std::nullopt;
+  if (!started_ || exhausted_) {
+    return std::nullopt;
+  }
+  if (cursor_ == zigzag::noCell) {
+    auto cur = compiler_.stdlib().goalProduce(program_.entry, program_.haltOp,
+                                              "vicon");
+    if (!cur) {
+      exhausted_ = true;
+      return std::nullopt;
+    }
+    cursor_ = *cur;
+    return program_.resultCell;
+  }
+  if (!compiler_.stdlib().goalResume(cursor_, program_.failOp,
+                                     program_.haltOp)) {
+    exhausted_ = true;
+    return std::nullopt;
+  }
+  return program_.resultCell;
 }
 
 Driver &

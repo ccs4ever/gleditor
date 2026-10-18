@@ -72,8 +72,8 @@ private:
   const Token &advance();
   [[nodiscard]] bool at(TokenKind k) const;
   [[nodiscard]] bool accept(TokenKind k);
-  std::expected<const Token &, ParseFailure> expect(TokenKind k, ParseError err,
-                                                    std::string_view what);
+  std::expected<Token, ParseFailure> expect(TokenKind k, ParseError err,
+                                            std::string_view what);
   /// Skip optional Semicolons between statements.
   void skipSeparators();
 
