@@ -15,4 +15,4 @@
   ```
 
 - Always ensure headless flags/environment variables are set when running automated test suites
-  (`gleditor_test`, `xudu_test`, etc.).
+  (`gleditor_test`, `xuzz_test`, etc.).

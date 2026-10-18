@@ -20,8 +20,8 @@ initializations use equivalent explicit construction to avoid GCC 16 diagnostics
 Initial evidence root: `/tmp/publication-journeys-20261004`. The initial artifacts are no longer
 present in this resumed session; their outcomes below are the previously recorded results. Fresh
 infrastructure evidence is available under `resume/`. Four independent profiles had distinct XDG
-data/config paths and disposable OpenPGP signing keys. Alice's local publishing action also minted
-an Ed25519 identity. No mock Oracle adapter was available, so no approved/pending/rejected verifier
+data/config paths and disposable signing keys. Alice's local publishing action also minted an
+Ed25519 identity. No mock Oracle adapter was available, so no approved/pending/rejected verifier
 test was performed. No four-user swarm or bootstrap topology started successfully during the initial
 run.
 
@@ -69,12 +69,13 @@ that they independently failed. Missing affordances are corroborated by source i
 1. **Same-store creation.** `apps/xuzz/xuzz_app.cpp` registers New slice by first calling
    `views.newDocument()`, allocating another store. Offer an explicit current-store structure
    creation path and prove both structures survive save/reopen before preparing P1's fixture.
-1. **Publication review and network completion.** `apps/xudu/views.cpp` asks only for name, title,
-   author, email, signing key, passphrase, rights and note. `Session::publishDocument()` writes a
-   local manifest and seals history, without seeding/announcing the complete dependency closure. Add
-   store/scroll/permascroll scope review, topic metadata, real seeding, mutable announcements and a
-   user-visible completion state. The local diagnostic used a real temporary signing key; GPG
-   verification passed. It is not evidence of whole-store globalization.
+1. **Publication review and network completion.** `apps/common/ui/xanadoc/views.cpp` asks only for
+   name, title, author, email, signing key, passphrase, rights and note.
+   `Session::publishDocument()` writes a local manifest and seals history, without
+   seeding/announcing the complete dependency closure. Add store/scroll/permascroll scope review,
+   topic metadata, real seeding, mutable announcements and a user-visible completion state. The
+   local diagnostic used a real temporary signing key; cryptographic verification passed. It is not
+   evidence of whole-store globalization.
 1. **Search input edits the document.** The search-bar pick reports overlay tag `14006`, but typing
    `Ideas` changes the underlying store's text and leaves the displayed `#hypertext author:nelson`
    query unchanged. Route text/keyboard input to `SwarmTelescopeOverlay` while its search field is
@@ -202,8 +203,8 @@ transport/mutable-name checks passed separately from the full publication restor
 first opposite-namespace reader attempt timed out on metadata with a wildcard publisher interface;
 the final fixture binds its explicit namespace address and passes. DHT safeguards are unchanged.
 Three UI publications passed signed topics, durable sequence advancement, incremental permascroll
-seals, actual GPG signature/digest verification, zero-filled private ranges, edition controls and
-retry. Temporary signing keys were removed by the driver.
+seals, actual signature/digest verification, zero-filled private ranges, edition controls and retry.
+Temporary signing keys were removed by the driver.
 
 The rebuilt `gleditor-swarm-test:local` image passed 78 build-time smoke checks, including complete
 inventory restoration. Its image ID is
@@ -272,9 +273,9 @@ is a remaining presentation finding. Native SDL message boxes are suppressed by 
 so the rejection message is validated on stderr rather than through a visible/accessibility dialog;
 platform message-box delivery remains unverified.
 
-Docker excludes generated `publication-state` directories as well as GPG homes, so temporary fixture
-device keys do not enter the image context. Only immutable public carriers are retained with the
-native sample stores.
+Docker excludes generated `publication-state` directories as well as private key homes, so temporary
+fixture device keys do not enter the image context. Only immutable public carriers are retained with
+the native sample stores.
 
 Final native outcomes: `engine-verified.log` ran 1,243 tests with 1,241 passes, one optional video
 skip and one throughput-threshold failure during concurrent UI/model checks. The cache-hit benchmark

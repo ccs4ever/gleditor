@@ -276,6 +276,43 @@ void Canvas::addRect(const float left, const float bottom, const float width,
            colour, colour, 0, 0.0F, 0.0F, true);
 }
 
+void Canvas::addRoundedRect(const float left, const float bottom,
+                            const float width, const float height,
+                            const float radius, const std::uint32_t colour) {
+  if (width <= 0.0F || height <= 0.0F) {
+    return;
+  }
+  const float r = std::min(radius, std::min(width * 0.5F, height * 0.5F));
+  if (r <= 0.5F) {
+    addRect(left, bottom, width, height, colour);
+    return;
+  }
+  // Central column
+  addRect(left + r, bottom, width - 2.0F * r, height, colour);
+  // Left and right side strips
+  addRect(left, bottom + r, r, height - 2.0F * r, colour);
+  addRect(left + width - r, bottom + r, r, height - 2.0F * r, colour);
+  // Corner stepped quads approximating the quarter circle arc
+  const int steps   = std::max(2, static_cast<int>(std::ceil(r)));
+  const float stepH = r / static_cast<float>(steps);
+  for (int i = 0; i < steps; ++i) {
+    const float y0   = static_cast<float>(i) * stepH;
+    const float yMid = y0 + stepH * 0.5F;
+    const float dy   = r - yMid;
+    const float dx   = r - std::sqrt(std::max(0.0F, r * r - dy * dy));
+    const float w    = r - dx;
+    if (w <= 0.0F) continue;
+    // Bottom-left corner
+    addRect(left + dx, bottom + y0, w, stepH, colour);
+    // Bottom-right corner
+    addRect(left + width - r, bottom + y0, w, stepH, colour);
+    // Top-left corner
+    addRect(left + dx, bottom + height - y0 - stepH, w, stepH, colour);
+    // Top-right corner
+    addRect(left + width - r, bottom + height - y0 - stepH, w, stepH, colour);
+  }
+}
+
 void Canvas::addLine(const float fromX, const float fromY, const float toX,
                      const float toY, const float thickness,
                      const std::uint32_t colour) {
@@ -488,7 +525,11 @@ Canvas::addText(RenderState &state, const ui::Rect box,
   }
   result.box = {box.left, box.bottom + box.height - fitConstraints.maxHeightPx,
                 fitConstraints.maxWidthPx, fitConstraints.maxHeightPx};
-  addText(state, result.box, result.fitted, colour, background);
+  const ScopedClip clip(*this, result.box);
+  if (result.box.width > 0.0F && result.box.height > 0.0F) {
+    drawText(state, result.box.left, result.box.bottom + result.box.height,
+             result.fitted.shaping, colour, background);
+  }
   return result;
 }
 
@@ -496,10 +537,42 @@ void Canvas::addText(RenderState &state, const ui::Rect box,
                      const text::FittedText &fitted, const std::uint32_t colour,
                      const std::uint32_t background) {
   const ScopedClip clip(*this, box);
-  if (box.width > 0.0F && box.height > 0.0F) {
-    drawText(state, box.left, box.bottom + box.height, fitted.shaping, colour,
-             background);
+  if (box.width <= 0.0F || box.height <= 0.0F) {
+    return;
   }
+  const auto font = text::FontManager::instance().getFont(fontName);
+  if (!font) {
+    return;
+  }
+  const auto &fm = font->metrics();
+  const float capHeight =
+      fm.capHeight > 0.0F ? fm.capHeight : fm.ascent * 0.72F;
+  const float xHeight = fm.xHeight > 0.0F ? fm.xHeight : fm.ascent * 0.52F;
+  static_cast<void>(xHeight);
+  bool hasDescender = false;
+  for (const auto &g : fitted.shaping.glyphs) {
+    if (!g.chr.empty() &&
+        (g.chr[0] == 'g' || g.chr[0] == 'j' || g.chr[0] == 'p' ||
+         g.chr[0] == 'q' || g.chr[0] == 'y')) {
+      hasDescender = true;
+      break;
+    }
+  }
+  // Baseline calculation in Y-up canvas coordinates:
+  float drawTop  = box.bottom + box.height;
+  float drawLeft = box.left;
+  if (box.height > capHeight) {
+    const float baselineY =
+        hasDescender
+            ? box.bottom +
+                  std::round((box.height - (fm.ascent + std::abs(fm.descent))) *
+                                 0.5F +
+                             std::abs(fm.descent))
+            : box.bottom + std::round((box.height - capHeight) * 0.5F);
+    drawTop  = baselineY + fm.ascent;
+    drawLeft = box.left + std::round((box.width - fitted.widthPx) * 0.5F);
+  }
+  drawText(state, drawLeft, drawTop, fitted.shaping, colour, background);
 }
 
 void Canvas::commit() {

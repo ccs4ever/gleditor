@@ -64,15 +64,14 @@ only that one file) — i.e. it is already tested exclusively from the device-li
 from `tests/xudu/`.
 
 Putting either file under `apps/common/xanadu/` as `COMMON_XANADU_SRCS` (`Makefile:603`) would make
-it part of `XUDU_CORE_OBJS` (`Makefile:605,622`), which is linked into `xudu_test`, `xuzz_test`,
-`vquery`, `vpl`, `vprolog`, `vqueryc`, `vplc`, `xudu-swarm-peer`, and all three fuzz targets —
-**none of which link `$(LIBLINK)`/`$(APP_LDFLAGS)`**
-(`Makefile:894-895,898-899,969-990,952-953,931-934`). The Makefile's own comment at
-`Makefile:888-892` says this link line *is* the architectural boundary check ("if a rule ... ever
-needed a renderer, this would stop linking"). Moving either file there as specified would not "fail
-the architecture review" — it would fail to **link**, across ten targets at once, the first time any
-of them pulled in a symbol `GlyphCache::upload*`, `Doc::VBORow`, or `Session::store()` actually
-needs resolved (which, given the methods above, is immediately).
+it part of `XUDU_CORE_OBJS` (`Makefile:605,622`), which is linked into `xuzz_test`, `vquery`, `vpl`,
+`vprolog`, `vqueryc`, `vplc`, `xudu-swarm-peer`, and all three fuzz targets — **none of which link
+`$(LIBLINK)`/`$(APP_LDFLAGS)`** (`Makefile:894-895,898-899,969-990,952-953,931-934`). The Makefile's
+own comment at `Makefile:888-892` says this link line *is* the architectural boundary check ("if a
+rule ... ever needed a renderer, this would stop linking"). Moving either file there as specified
+would not "fail the architecture review" — it would fail to **link**, across ten targets at once,
+the first time any of them pulled in a symbol `GlyphCache::upload*`, `Doc::VBORow`, or
+`Session::store()` actually needs resolved (which, given the methods above, is immediately).
 
 **Corrected destination table for step 1** — everything in both directories, no exceptions:
 
@@ -205,10 +204,10 @@ are removed from it).
 
 Fuzz and tool targets that link `XUDU_CORE_OBJS` and would have broken had
 `unified_transclusion_engine` landed there as literally specified (now moot under the corrected
-table, but worth knowing *why* they are not accidentally safe): `Makefile:894-899` (`xudu_test`,
-`xuzz_test`), `Makefile:915,921` (`FUZZ_CORE_OBJS`), `Makefile:934` (fuzz link line),
-`Makefile:952-953` (`xudu-swarm-peer`), `Makefile:969-990` (`vqueryc`, `vquery`, `vprolog`, `vplc`,
-`vpl`). None of these need editing under the corrected destination table — they keep linking exactly
+table, but worth knowing *why* they are not accidentally safe): `Makefile:894-899` (`xuzz_test`),
+`Makefile:915,921` (`FUZZ_CORE_OBJS`), `Makefile:934` (fuzz link line), `Makefile:952-953`
+(`xudu-swarm-peer`), `Makefile:969-990` (`vqueryc`, `vquery`, `vprolog`, `vplc`, `vpl`). None of
+these need editing under the corrected destination table — they keep linking exactly
 `$(XUDU_CORE_OBJS)` = `$(COMMON_XANADU_OBJS)`, unchanged in membership.
 
 `Makefile:1009-1020` (`xudu-dump`) is untouched either way: it already names individual
@@ -277,7 +276,7 @@ Install/clean/dist (`Makefile:1427-1452,1508-1523,1531-1540`): all keyed to the 
   this script as part of (or shortly after) step 1, and pointing its decoupling check at the real
   new boundary (`apps/common/xanadu/**` must not `#include` anything under `apps/common/ui/`) —
   which is precisely the check that would have caught §1.1's two mis-placements automatically.
-- `.github/workflows/c-cpp.yml` references `xudu_test`/`zigzag_test` only as **binary/target names**
+- `.github/workflows/c-cpp.yml` references `xuzz_test`/`zigzag_test` only as **binary/target names**
   (`:202,207-208,238,244`) — unaffected by step 1 itself. They become relevant only if/when VU6's
   rename happens (§2 below).
 
@@ -462,8 +461,8 @@ ______________________________________________________________________
 no build deps per the `NO_SDL_GOALS` exemption in `AGENTS.md`'s Makefile-gotchas section), `nix`
 (`nixfmt`/`nix-linter`, `:50-69`), `build` (matrix `sdl: [2, 3]`, fail-fast off, `:70-220` —
 installs deps, `make -j$(nproc) GLEDITOR_SDL=N GLEDITOR_ENABLE_VULKAN=1`, then `make ... test/all`,
-then (SDL2 only) the C++26-fallback rebuild+rerun of `gleditor_test`/`xudu_test`/`zigzag_test`, then
-`xvfb-run ... ./tools/compare-backends.sh`), `swarm` (builds only `xudu_test xudu-swarm-peer`, then
+then (SDL2 only) the C++26-fallback rebuild+rerun of `gleditor_test`/`xuzz_test`/`zigzag_test`, then
+`xvfb-run ... ./tools/compare-backends.sh`), `swarm` (builds only `xuzz_test xudu-swarm-peer`, then
 `sudo tools/swarm-netns-test.sh`, `:222-250`). No job in this file sets `timeout-minutes` (confirmed
 by grep), so each uses GitHub's default ceiling, not a project-chosen one.
 `.github/workflows/packaging.yml` separately builds Debian/Fedora/Arch/Nix/macOS/ Windows/WASM
@@ -571,11 +570,11 @@ Ranked by how much of the tree each one can break at once, with mitigations:
 
 1. **Highest — misplacing `unified_transclusion_engine.*` or `link_context.*` into
    `apps/common/xanadu/` exactly as `design/view-system.md:2880-2889` currently specifies.** Breaks
-   **linking** (not compiling, not formatting) of `xudu_test`, `xuzz_test`, `vquery`, `vpl`,
-   `vprolog`, `vqueryc`, `vplc`, `xudu-swarm-peer`, and all three fuzz targets simultaneously — ten
-   targets from one wrong `git mv`. Mitigation: §1.1's corrected table (both files go to
-   `apps/common/ui/`); add the grep-based device-header guard from §2.1 to `make lint` so this class
-   of mistake fails fast and by name instead of as a wall of undefined-reference errors.
+   **linking** (not compiling, not formatting) of `xuzz_test`, `vquery`, `vpl`, `vprolog`,
+   `vqueryc`, `vplc`, `xudu-swarm-peer`, and all three fuzz targets simultaneously — ten targets
+   from one wrong `git mv`. Mitigation: §1.1's corrected table (both files go to `apps/common/ui/`);
+   add the grep-based device-header guard from §2.1 to `make lint` so this class of mistake fails
+   fast and by name instead of as a wall of undefined-reference errors.
 1. **Silent empty-glob masking.** `find`-based source lists (`Makefile:600-608`) do not error on a
    stray leftover file; a file accidentally left behind in `apps/xudu/`/`apps/zigzag/` (or dropped
    during a manual merge conflict) keeps compiling into the old location with no Makefile complaint.

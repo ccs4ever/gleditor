@@ -3,7 +3,7 @@
 An architectural specification and design document defining the fundamental distinction between
 explicit xanalinks and emergent transclusions, their geometric computation, 3D/2D optical
 visualization pipelines, and algorithmic optimizations for multi-megabyte documents across
-`gleditor`, `xudu`, and `zigzag`.
+`gleditor`, `xuzz`, and `zigzag`.
 
 ______________________________________________________________________
 
@@ -12,7 +12,7 @@ ______________________________________________________________________
 In conventional computing and the World Wide Web, the concept of a "link" is conflated with all
 inter-document relationships, and quotation is achieved through lossy, uncredited copy-pasting.
 
-In Project Xanadu and the `xudu` architecture, **Links** and **Transclusions** are completely
+In Project Xanadu and the `xanadu` architecture, **Links** and **Transclusions** are completely
 distinct mathematical and operational primitives:
 
 ```
@@ -52,7 +52,7 @@ ______________________________________________________________________
 
 ## 2. Mathematical Computation of Transclusions
 
-Transclusion is never recorded as a database entry. When multiple documents are opened in `xudu` or
+Transclusion is never recorded as a database entry. When multiple documents are opened in `xuzz` or
 projected in `zigzag`, the engine evaluates the geometric overlap of their Edit Decision Lists.
 
 ```mermaid
@@ -73,8 +73,8 @@ graph TD
 
 ### 1. EDL Piece Table Intersection (`placeTransclusions`)
 
-In [`apps/xudu/core/link_layout.cpp`](apps/xudu/core/link_layout.cpp), `placeTransclusions()`
-compares the piece tables of all active document views:
+In [`apps/common/xanadu/link_layout.cpp`](apps/common/xanadu/link_layout.cpp),
+`placeTransclusions()` compares the piece tables of all active document views:
 
 ```cpp
 void placeTransclusions(const std::vector<const Version *> &views,
@@ -158,8 +158,8 @@ ______________________________________________________________________
 
 ### 1. Volumetric Transclusion Prisms (`LinkBeams::band`)
 
-In [`apps/xudu/beams.cpp`](apps/xudu/beams.cpp), transclusions are drawn as multi-strand volumetric
-ribbons:
+In [`apps/common/ui/xanadoc/beams.cpp`](apps/common/ui/xanadoc/beams.cpp), transclusions are drawn
+as multi-strand volumetric ribbons:
 
 - **Default Appearance**: Pure **Identity Gold** (`0xFFD700FF`).
 - **Withheld / Redacted Spans**: **Obsidian Redaction Beams** (`0x1F2937FF`).
@@ -190,7 +190,7 @@ ______________________________________________________________________
 ## 4. Scalability Architecture & Optimizations for Massive Documents
 
 When rendering and computing transclusions across documents with hundreds of thousands of pages and
-multi-megabyte primedia spools, naive algorithms would trigger catastrophic $O(N^2)$ stalls. `xudu`
+multi-megabyte primedia spools, naive algorithms would trigger catastrophic $O(N^2)$ stalls. `xuzz`
 and `gleditor` implement a multi-tiered optimization pipeline:
 
 ```
@@ -243,7 +243,7 @@ Because EDL pieces in a `Version` are ordered along concatext offsets:
 
 ### 3. Zero-Copy `mmap(MAP_FIXED)` Memory Arena
 
-In [`apps/xudu/core/virtual_memory_arena.cpp`](apps/xudu/core/virtual_memory_arena.cpp):
+In [`apps/common/xanadu/virtual_memory_arena.cpp`](apps/common/xanadu/virtual_memory_arena.cpp):
 
 - A 512 MB virtual memory window is reserved with `PROT_NONE`.
 - Sealed torrent segments and active spools are mapped with `MAP_FIXED`.
@@ -264,11 +264,11 @@ ______________________________________________________________________
 
 | Component                   | Source Files                                                                                                                                                                                           | Description                                                               |
 | :-------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------ |
-| **Transclusion Geometry**   | [`apps/xudu/core/link_layout.hpp/.cpp`](apps/xudu/core/link_layout.hpp)                                                                                                                                | `placeTransclusions()`, `placeLinks()`, and span intersection algebra     |
-| **Ribbon Optical Pipeline** | [`apps/xudu/beams.hpp/.cpp`](apps/xudu/beams.hpp)                                                                                                                                                      | `LinkBeams`, `band()`, anchor stub brackets, and phase pulses             |
+| **Transclusion Geometry**   | [`apps/common/xanadu/link_layout.hpp/.cpp`](apps/common/xanadu/link_layout.hpp)                                                                                                                        | `placeTransclusions()`, `placeLinks()`, and span intersection algebra     |
+| **Ribbon Optical Pipeline** | [`apps/common/ui/xanadoc/beams.hpp/.cpp`](apps/common/ui/xanadoc/beams.hpp)                                                                                                                            | `LinkBeams`, `band()`, anchor stub brackets, and phase pulses             |
 | **GPU Beam Renderer**       | [`include/gleditor/beams.hpp`](include/gleditor/beams.hpp), [`src/beams.cpp`](src/beams.cpp)                                                                                                           | 48-byte `Beams::Row` instance geometry and optical shaders                |
 | **Text Layout & Slicing**   | [`src/text/layout.cpp`](src/text/layout.cpp), [`include/gleditor/text/layout.hpp`](include/gleditor/text/layout.hpp)                                                                                   | $O(1)$ height-budgeted pagination and Unicode cluster mapping             |
 | **Glyph Atlas & Multiband** | [`src/glyphcache/cache.cpp`](src/glyphcache/cache.cpp), [`include/gleditor/doc.hpp`](include/gleditor/doc.hpp)                                                                                         | Multi-layer texture atlas and 24-byte `Doc::VBORow` instance quads        |
-| **Virtual Memory Spools**   | [`apps/xudu/core/virtual_memory_arena.hpp/.cpp`](apps/xudu/core/virtual_memory_arena.hpp)                                                                                                              | 512 MB virtual memory arena with `MAP_FIXED` zero-copy paging             |
-| **Zigzag Projection**       | [`apps/zigzag/core/unified_transclusion_engine.hpp/.cpp`](apps/zigzag/core/unified_transclusion_engine.hpp)                                                                                            | `d.transclude` rank construction and zero-copy GPU staging                |
-| **Unit Test Suites**        | [`tests/xudu/beams.cpp`](tests/xudu/beams.cpp), [`tests/lib/beams.cpp`](tests/lib/beams.cpp), [`tests/zigzag/test_unified_transclusion_engine.cpp`](tests/zigzag/test_unified_transclusion_engine.cpp) | Tests covering span intersection, ribbon framing, and interactive staging |
+| **Virtual Memory Spools**   | [`apps/common/xanadu/virtual_memory_arena.hpp/.cpp`](apps/common/xanadu/virtual_memory_arena.hpp)                                                                                                      | 512 MB virtual memory arena with `MAP_FIXED` zero-copy paging             |
+| **Zigzag Projection**       | [`apps/common/ui/slice/unified_transclusion_engine.hpp/.cpp`](apps/common/ui/slice/unified_transclusion_engine.hpp)                                                                                    | `d.transclude` rank construction and zero-copy GPU staging                |
+| **Unit Test Suites**        | [`tests/xuzz/beams.cpp`](tests/xuzz/beams.cpp), [`tests/lib/beams.cpp`](tests/lib/beams.cpp), [`tests/zigzag/test_unified_transclusion_engine.cpp`](tests/zigzag/test_unified_transclusion_engine.cpp) | Tests covering span intersection, ribbon framing, and interactive staging |

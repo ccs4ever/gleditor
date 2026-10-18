@@ -5,13 +5,36 @@
 #ifndef XANADU_STORE_LOADER_HPP
 #define XANADU_STORE_LOADER_HPP
 
+#include <expected>
 #include <filesystem>
 #include <memory>
+#include <optional>
+#include <span>
+#include <string>
 
+#include "common/xanadu/link_package.hpp"
+#include "common/xanadu/session_container.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/user_permascroll.hpp"
 
 namespace xanadu {
+
+struct ImportStorePackageOptions {
+  std::optional<std::string> expectedMasterFingerprint{std::nullopt};
+  bool verifySignature{true};
+  std::optional<std::span<const std::uint8_t, 32>> masterPubKey{std::nullopt};
+  std::string passphrase{};
+  bool adoptIncludedLinkPackages{true};
+  ProminenceTier linkPackageTier{ProminenceTier::Public};
+};
+
+struct ImportedStoreResult {
+  std::unique_ptr<Store> store;
+  SessionPackage package;
+  std::size_t materializedFragments{0};
+  std::size_t adoptedLinkPackages{0};
+  std::size_t adoptedLinksCount{0};
+};
 
 /**
  * @brief Load an on-disk store into an existing Store instance.
@@ -45,6 +68,24 @@ loadStore(const std::filesystem::path &path,
 importFileStore(const std::filesystem::path &source,
                 std::shared_ptr<UserPermascroll> permascroll,
                 const std::filesystem::path &destination = {});
+
+/**
+ * @brief Import a self-contained session package or fat store package into a
+ * station.
+ *
+ * Writes ops.nodes (with 64 KiB OpsSegmentHeader) and store.tables to
+ * destinationDir, loads the Store, materializes local/external scroll fragments
+ * with zero coordinate shift, and optionally adopts bundled LinkPackages.
+ */
+[[nodiscard]] std::expected<ImportedStoreResult, SessionValidationError>
+importStorePackage(const std::filesystem::path &packagePath,
+                   const std::filesystem::path &destinationDir,
+                   const ImportStorePackageOptions &options = {});
+
+[[nodiscard]] std::expected<ImportedStoreResult, SessionValidationError>
+importStorePackage(const SessionPackage &pkg,
+                   const std::filesystem::path &destinationDir,
+                   const ImportStorePackageOptions &options = {});
 
 } // namespace xanadu
 

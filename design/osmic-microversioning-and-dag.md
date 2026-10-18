@@ -2,7 +2,7 @@
 
 An architectural specification and design document for the non-destructive OSMIC versioning model,
 bijective base-26 hypertime branching, 64-byte cache-aligned operation DAGs, and virtual memory
-spool management across `xudu` and `gleditor`.
+spool management across `xuzz` and `gleditor`.
 
 ______________________________________________________________________
 
@@ -44,7 +44,7 @@ ______________________________________________________________________
 
 ## 2. Microversion Nomenclature and Hypertime Branching
 
-In `xudu`, version identity is encapsulated by
+In the `xanadu` engine, version identity is encapsulated by
 [`MicroversionId`](apps/common/xanadu/microversion.hpp).
 
 ### Bijective Base-26 Branching
@@ -137,7 +137,7 @@ ______________________________________________________________________
 
 ## 4. Hyperops: The Non-Destructive Edit Set
 
-`xudu` implements Nelson's formal OSMIC hyper-operations:
+The `xanadu` engine implements Nelson's formal OSMIC hyper-operations:
 
 | Hyperop (`OpKind`)   | Description                                        | Semantic Invariant                                                                                    |
 | :------------------- | :------------------------------------------------- | :---------------------------------------------------------------------------------------------------- |
@@ -150,7 +150,7 @@ ______________________________________________________________________
 
 ### The sixth hyperop, and what `PageBreak` turns out to be
 
-OSMIC names six. The five above are the five `xudu` has always implemented; the sixth —
+OSMIC names six. The five above are the five the `xanadu` engine has always implemented; the sixth —
 **MAKE/CHANGE STRUCTURE MAP** — had never been implemented anywhere, including in Udanax. It is the
 operation that says where a piece of content *sits* in a structure that is not the document's own
 reading order: a rank, an axis, a dimension.
@@ -328,4 +328,4 @@ ______________________________________________________________________
 | **Version Model**            | [`apps/common/xanadu/version.hpp/.cpp`](apps/common/xanadu/version.hpp)                            | Edit Decision List (EDL) piece table, splits, and coalescing    |
 | **Store Engine**             | [`apps/common/xanadu/store.hpp/.cpp`](apps/common/xanadu/store.hpp)                                | Transactional store, operation replay, and delta forward paths  |
 | **Binary Ops Serialization** | [`apps/common/xanadu/binary_ops.hpp/.cpp`](apps/common/xanadu/binary_ops.hpp)                      | LEB128 varint binary format for sealed operations               |
-| **Unit Tests**               | [`tests/xudu/store.cpp`](tests/xudu/store.cpp), [`tests/xudu/version.cpp`](tests/xudu/version.cpp) | Test suites covering branching, replay, and serialization       |
+| **Unit Tests**               | [`tests/xuzz/store.cpp`](tests/xuzz/store.cpp), [`tests/xuzz/version.cpp`](tests/xuzz/version.cpp) | Test suites covering branching, replay, and serialization       |

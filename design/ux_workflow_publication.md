@@ -26,9 +26,9 @@ transfer. Record actual listen addresses and ports rather than guessing startup 
 [two-peer runner](../tools/swarm-netns-test.sh) is a starting point, not a runner for these
 four-user journeys. Namespace or veth unavailability is a blocked run, never a pass.
 
-Each profile has its own temporary `GNUPGHOME`, XDG data/config directories, download cache, catalog
-index, publication sequence state and permascroll. Generate disposable OpenPGP signing keys and
-distinct Ed25519 publishing/device keys. Retain public keys and fingerprints in the evidence; keep
+Each profile has its own isolated XDG data/config directories, download cache, catalog index,
+publication sequence state and permascroll. Generate disposable Ed25519 master and device signing
+keys with X.509 delegation certificates. Retain public keys and fingerprints in the evidence; keep
 private keys inside the fixture. Restarting a user reuses that user's keys. The bootstrap nodes
 carry no user's private keys and provide no preloaded publication metadata.
 
@@ -37,10 +37,10 @@ Run graphical clients with `SDL_VIDEODRIVER=offscreen`, `SDL_AUDIODRIVER=dummy` 
 profiles, keys and network endpoints is fixture setup. Creating content, choosing publication
 metadata, following authors, searching, subscribing and toggling packages are user steps.
 
-The mock verifier returns an explicit fixture attestation binding a display name, OpenPGP
+The mock verifier returns an explicit fixture attestation binding a display name, 64-hex author
 fingerprint and device public key to this run. Support approved, pending and rejected outcomes.
 Display **Test verification — mock Oracle**; never a production verified badge. Mock approval must
-not bypass OpenPGP provenance verification, Ed25519 manifest/DHT signatures or piece hashes.
+not bypass provenance verification, Ed25519 manifest/DHT signatures or piece hashes.
 Pending/rejected enrollment must prevent announcing new publications and explain the state. Approval
 must allow retry without creating another identity or duplicate publication.
 
@@ -275,7 +275,7 @@ This inventory comes from source inspection, not an executed swarm/UX validation
 
 | Area                 | Existing implementation or tests                                                                      | Remaining acceptance boundary                                         |
 | -------------------- | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| Sealing/global spans | `publication.cpp`, `tests/xudu/publication.cpp`                                                       | Actual remote dependency closure and local-scroll orchestration       |
+| Sealing/global spans | `publication.cpp`, `tests/xuzz/publication.cpp`                                                       | Actual remote dependency closure and local-scroll orchestration       |
 | V5 Structure/history | `BinaryOpsTest.aPublishedSliceFoldsWithItsLinksIntact`, `sealedHistoryUsesTheSameAddressLocalization` | Whole-store metadata and network reconstruction                       |
 | UI publishing        | `Session::publishDocument()` seals history and writes a signed `.xanadoc` locally                     | Seeder/DHT/catalog/topic announcement and durable sequence allocation |
 | Core convenience API | `xanadu::publishDocument()` seals user primedia and calls `publish()` without ops segments            | Must not substitute for complete store/history publication            |

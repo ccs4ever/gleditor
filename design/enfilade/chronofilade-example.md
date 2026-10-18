@@ -205,7 +205,7 @@ ______________________________________________________________________
 
 ## 5. Performance and Benchmark Measurements
 
-From `tests/xudu/chronofilade_benchmark_test.cpp`:
+From `tests/xuzz/chronofilade_benchmark_test.cpp`:
 
 ```text
 [ BENCHMARK ] Operations: 500 | Raw Replay: 4.29 us | Chronofilade: 0.29 us | Speedup: 14.8x

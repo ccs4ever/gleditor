@@ -155,9 +155,9 @@ struct TranscopyrightDescriptor {
   /// Fee calculation model: true = flat rate for the span; false = per-byte
   bool flatFee{true};
 
-  /// Author settlement destination (40-char OpenPGP v4 fingerprint)
+  /// Author settlement destination (40-char identity fingerprint)
   identity::Fingerprint authorWallet;
-  /// 32-byte Ed25519 PubKey
+  /// Author public key
   identity::PubKey32 authorPubKey;
 
   /// 32-byte Blake3/SHA-256 identifier of the Content Encryption Key (CEK)

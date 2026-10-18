@@ -53,9 +53,9 @@ Who writes Structure operations today, outside tests: `system_docs.cpp` (the dom
 calls), `zz_xudu_projector.cpp`'s `sliceToStore()`, `unified_transclusion_engine.cpp`,
 `arena_manifold.cpp`'s `promote()` (the one road from ephemeral to persistent),
 `vortex_host.cpp::promoteAndAttachToStore()`, the VQL and VPL compilers' persist paths,
-`dimension_registry.cpp`, and `apps/xudu/batch_orchestrator.cpp`. **Xudu the editor itself emits
-none** — the xanadoc editor is text-ops only, which is worth knowing before proposing anything that
-assumes a document's structure is authored in xudu.
+`dimension_registry.cpp`, and `apps/common/ui/xanadoc/batch_orchestrator.cpp`. **Xanadu the text
+editor itself emits none** — the xanadoc editor is text-ops only, which is worth knowing before
+proposing anything that assumes a document's structure is authored in the text editor.
 
 ## 2. What already exists, so it is not proposed again
 
@@ -71,17 +71,17 @@ Structure operations — **and it has a production caller**, the zigzag VQL pale
 a `d.stores` rank, re-minting every foreign cell as a fresh ephemeral ref. Hypertime projected into
 cells: `ZigzagVisualizer::adoptDocument` hands the projector's DTO to `sliceToStore`, so
 `d.doc`/`d.transclude`/`d.link`/`d.version` cells are minted as persistent operations into an
-in-memory store. (`apps/xudu/hypertime_graph.cpp` only *renders*; its one `Structure` mention is a
-glyph.)
+in-memory store. (`apps/common/ui/hypertime_graph.cpp` only *renders*; its one `Structure` mention
+is a glyph.)
 
 **Built elsewhere, on purpose.** All five enfilades — Spanfilade (who quotes this span, across
 documents and cells), Layoutfilade, Chronofilade with the `EdlTransform` monoid, Holefilade,
 Arrayfilade — are ephemeral replay products that mint no operations (R8; their banners say so). The
 butterfly `Link` records (type, tier, owner, curator, left and right spans) live in `store.tables`;
-an `OpKind::Link` operation carries only the link id. GPG-signed `AUTHORSHIP.tsv` (`provenance.hpp`)
-with a scroll-level `quotes` list. `GlobalSpan`/`globalise`/`localise` for content and
-`GlobalOpRef{scroll, produces}`/`opRefOf()`/`localiseOpRef()` for operations (`publication.hpp`).
-Identity, the Merkle ledger, transcopyright holes.
+an `OpKind::Link` operation carries only the link id. Ed25519-signed `AUTHORSHIP.tsv`
+(`provenance.hpp`) with a scroll-level `quotes` list. `GlobalSpan`/`globalise`/`localise` for
+content and `GlobalOpRef{scroll, produces}`/`opRefOf()`/`localiseOpRef()` for operations
+(`publication.hpp`). Identity, the Merkle ledger, transcopyright holes.
 
 **Refused already.** R8: only a user-generated update persists; navigation, cursors and view state
 never earn a hypertime name; no persistent-side GC. R6 and Non-Goal 2: no canonical scroll of
@@ -110,7 +110,7 @@ and `value` — **and never `op.source`**, where the `Transclude` case one scree
 
 So a published slice arrives as isolated cells with no links, and the only trace is `refusedOps()`.
 It has gone unnoticed for two reasons: `MakeCell` reads no chain, so a genesis-only slice
-round-trips perfectly; and the one round-trip test (`tests/xudu/binary_ops.cpp:390–425`) builds its
+round-trips perfectly; and the one round-trip test (`tests/xuzz/binary_ops.cpp:390–425`) builds its
 `SetLink` with `source` left default-zero and asserts on the other fields, so it passes vacuously.
 Nothing in the tree publishes a Structure operation and folds a `Manifold` on the ingested side. The
 OSMIC *text* encoding is unaffected (`writeOsmicTextOpsSpool` emits `source`, `at` and `length` as

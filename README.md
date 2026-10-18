@@ -343,11 +343,11 @@ out of your personal directories. For a binary run outside Make, set these expli
 ```sh
 SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1 \
   XDG_DATA_HOME="$PWD/build/xdg/data" XDG_CONFIG_HOME="$PWD/build/xdg/config" \
-  XDG_CACHE_HOME="$PWD/build/xdg/cache" ./build/xudu_test
+  XDG_CACHE_HOME="$PWD/build/xdg/cache" ./build/xuzz_test
 ```
 
 ```sh
-make -j$(nproc) test                 # four gtest binaries, then rootless swarm tests
+make -j$(nproc) test                 # three gtest binaries, then rootless swarm tests
 make test TEST_FILTER='MediaTest.*'  # focused gtest filter
 make test/e2e-orchestration          # whole-program xuzz orchestration
 make -j$(nproc) test/publication-local # three local UI publications with disposable signing keys
@@ -357,10 +357,10 @@ make -j$(nproc) shaders              # shader validation
 make profile                         # library test coverage
 ```
 
-`gleditor_test` links the real shared library; `xudu_test` and `xuzz_test` exercise the engine
-without a graphics device; `zigzag_test` covers the slice model and transclusion engine. The swarm
-step uses rootless network namespaces and needs the `veth` kernel module. If it ends with
-`Error: Unknown device type.`, inspect the four gtest summaries before diagnosing the failure. Run
+`gleditor_test` links the real shared library; `xuzz_test` exercises the engine without a graphics
+device; `zigzag_test` covers the slice model and transclusion engine. The swarm step uses rootless
+network namespaces and needs the `veth` kernel module. If it ends with
+`Error: Unknown device type.`, inspect the three gtest summaries before diagnosing the failure. Run
 `xvfb-run -s "-screen 0 1024x768x24" ./tools/compare-backends.sh` for the backend image and picking
 comparison.
 

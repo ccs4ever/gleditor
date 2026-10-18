@@ -123,7 +123,25 @@ inline constexpr std::string_view kDimSchemas        = "d.schemas";
 inline constexpr std::string_view kDimAlternates     = "d.alternates";
 inline constexpr std::string_view kDimDefault        = "d.default";
 
+namespace palette {
+// WCAG AAA OkLCH Palette constants
+inline constexpr std::uint32_t kIdentityGold   = 0xE5C07BFFU;
+inline constexpr std::uint32_t kCelestialCyan  = 0x38BDF8FFU;
+inline constexpr std::uint32_t kAmethystPurple = 0xC084FCFFU;
+inline constexpr std::uint32_t kEmeraldMint    = 0x34D399FFU;
+inline constexpr std::uint32_t kCoralCrimson   = 0xFB7185FFU;
+} // namespace palette
+
 namespace settings {
+// WCAG AAA OkLCH Palette Tokens
+inline constexpr std::string_view kPaletteIdentityGold = "palette.identityGold";
+inline constexpr std::string_view kPaletteCelestialCyan =
+    "palette.celestialCyan";
+inline constexpr std::string_view kPaletteAmethystPurple =
+    "palette.amethystPurple";
+inline constexpr std::string_view kPaletteEmeraldMint  = "palette.emeraldMint";
+inline constexpr std::string_view kPaletteCoralCrimson = "palette.coralCrimson";
+
 inline constexpr std::string_view kUiScale           = "ui.scale";
 inline constexpr std::string_view kUiFontScale       = "ui.fontScale";
 inline constexpr std::string_view kUiSafeMarginShare = "ui.safeMarginShare";
@@ -356,87 +374,96 @@ inline constexpr std::string_view kLinkPanelChosenHighlightColour =
 inline constexpr std::string_view kLinkPanelMemberHighlightColour =
     "linkPanel.memberHighlightColour";
 
-// Keymap - Xudu Core Actions (Sovereign Vortex Function Calls)
-inline constexpr std::string_view kKeymapQuit        = "std:xudu/quit";
-inline constexpr std::string_view kKeymapSave        = "std:xudu/save";
-inline constexpr std::string_view kKeymapClose       = "std:xudu/close";
-inline constexpr std::string_view kKeymapNextDoc     = "std:xudu/next_doc";
-inline constexpr std::string_view kKeymapPrevDoc     = "std:xudu/prev_doc";
-inline constexpr std::string_view kKeymapDoc1        = "std:xudu/doc_1";
-inline constexpr std::string_view kKeymapDoc2        = "std:xudu/doc_2";
-inline constexpr std::string_view kKeymapDoc3        = "std:xudu/doc_3";
-inline constexpr std::string_view kKeymapDoc4        = "std:xudu/doc_4";
-inline constexpr std::string_view kKeymapDoc5        = "std:xudu/doc_5";
-inline constexpr std::string_view kKeymapDoc6        = "std:xudu/doc_6";
-inline constexpr std::string_view kKeymapDoc7        = "std:xudu/doc_7";
-inline constexpr std::string_view kKeymapDoc8        = "std:xudu/doc_8";
-inline constexpr std::string_view kKeymapDoc9        = "std:xudu/doc_9";
-inline constexpr std::string_view kKeymapBack        = "std:xudu/back";
-inline constexpr std::string_view kKeymapNewDoc      = "std:xudu/new_doc";
-inline constexpr std::string_view kKeymapForward     = "std:xudu/forward";
-inline constexpr std::string_view kKeymapOpenDoc     = "std:xudu/open_doc";
-inline constexpr std::string_view kKeymapOnionSkin   = "std:xudu/onion_skin";
-inline constexpr std::string_view kKeymapPouchToggle = "std:xudu/pouch_toggle";
+// Keymap - Xuzz Core Actions (Sovereign Vortex Function Calls)
+inline constexpr std::string_view kKeymapQuit        = "std:xuzz/quit";
+inline constexpr std::string_view kKeymapSave        = "std:xuzz/save";
+inline constexpr std::string_view kKeymapClose       = "std:xuzz/close";
+inline constexpr std::string_view kKeymapNextDoc     = "std:xuzz/next_doc";
+inline constexpr std::string_view kKeymapPrevDoc     = "std:xuzz/prev_doc";
+inline constexpr std::string_view kKeymapDoc1        = "std:xuzz/doc_1";
+inline constexpr std::string_view kKeymapDoc2        = "std:xuzz/doc_2";
+inline constexpr std::string_view kKeymapDoc3        = "std:xuzz/doc_3";
+inline constexpr std::string_view kKeymapDoc4        = "std:xuzz/doc_4";
+inline constexpr std::string_view kKeymapDoc5        = "std:xuzz/doc_5";
+inline constexpr std::string_view kKeymapDoc6        = "std:xuzz/doc_6";
+inline constexpr std::string_view kKeymapDoc7        = "std:xuzz/doc_7";
+inline constexpr std::string_view kKeymapDoc8        = "std:xuzz/doc_8";
+inline constexpr std::string_view kKeymapDoc9        = "std:xuzz/doc_9";
+inline constexpr std::string_view kKeymapBack        = "std:xuzz/back";
+inline constexpr std::string_view kKeymapNewDoc      = "std:xuzz/new_doc";
+inline constexpr std::string_view kKeymapForward     = "std:xuzz/forward";
+inline constexpr std::string_view kKeymapOpenDoc     = "std:xuzz/open_doc";
+inline constexpr std::string_view kKeymapOnionSkin   = "std:xuzz/onion_skin";
+inline constexpr std::string_view kKeymapPouchToggle = "std:xuzz/pouch_toggle";
 inline constexpr std::string_view kKeymapPouchToggleF2 =
-    "std:xudu/pouch_toggle_f2";
+    "std:xuzz/pouch_toggle_f2";
 inline constexpr std::string_view kKeymapTelescopeToggle =
-    "std:xudu/telescope_toggle";
+    "std:xuzz/telescope_toggle";
 inline constexpr std::string_view kKeymapTelescopeToggleF3 =
-    "std:xudu/telescope_toggle_f3";
+    "std:xuzz/telescope_toggle_f3";
 inline constexpr std::string_view kKeymapTensionPhysicsToggle =
-    "std:xudu/tension_physics_toggle";
+    "std:xuzz/tension_physics_toggle";
 inline constexpr std::string_view kKeymapUnlockTranscopyrightF5 =
-    "std:xudu/unlock_transcopyright_f5";
+    "std:xuzz/unlock_transcopyright_f5";
 inline constexpr std::string_view kKeymapUnlockTranscopyrightCtrlU =
-    "std:xudu/unlock_transcopyright_ctrl_u";
+    "std:xuzz/unlock_transcopyright_ctrl_u";
 inline constexpr std::string_view kKeymapScrubForward =
-    "std:xudu/scrub_forward";
+    "std:xuzz/scrub_forward";
 inline constexpr std::string_view kKeymapScrubBackward =
-    "std:xudu/scrub_backward";
-inline constexpr std::string_view kKeymapTransclude = "std:xudu/transclude";
-inline constexpr std::string_view kKeymapXanalink   = "std:xudu/xanalink";
+    "std:xuzz/scrub_backward";
+inline constexpr std::string_view kKeymapTransclude = "std:xuzz/transclude";
+inline constexpr std::string_view kKeymapXanalink   = "std:xuzz/xanalink";
 inline constexpr std::string_view kKeymapCancelQuotation =
     "std:edit/cancel_quotation";
-inline constexpr std::string_view kKeymapCancelLink = "std:xudu/cancel_link";
-inline constexpr std::string_view kKeymapBeams      = "std:xudu/beams";
-inline constexpr std::string_view kKeymapSworph     = "std:xudu/sworph";
-inline constexpr std::string_view kKeymapPublish    = "std:xudu/publish";
+inline constexpr std::string_view kKeymapCancelLink = "std:xuzz/cancel_link";
+inline constexpr std::string_view kKeymapBeams      = "std:xuzz/beams";
+inline constexpr std::string_view kKeymapSworph     = "std:xuzz/sworph";
+inline constexpr std::string_view kKeymapPublish    = "std:xuzz/publish";
 inline constexpr std::string_view kKeymapPublicationStatus =
-    "std:xudu/publication_status";
+    "std:xuzz/publication_status";
 inline constexpr std::string_view kKeymapPublicationDiscovery =
-    "std:xudu/publication_discovery";
+    "std:xuzz/publication_discovery";
 inline constexpr std::string_view kKeymapLinkPackagePublish =
-    "std:xudu/link_package_publish";
+    "std:xuzz/link_package_publish";
 inline constexpr std::string_view kKeymapLinksResponses =
-    "std:xudu/links_responses";
+    "std:xuzz/links_responses";
 inline constexpr std::string_view kKeymapPublicationUpdates =
-    "std:xudu/publication_updates";
-inline constexpr std::string_view kKeymapHistory   = "std:xudu/history";
-inline constexpr std::string_view kKeymapDelete    = "std:xudu/delete";
-inline constexpr std::string_view kKeymapPageBreak = "std:xudu/page_break";
+    "std:xuzz/publication_updates";
+inline constexpr std::string_view kKeymapHistory   = "std:xuzz/history";
+inline constexpr std::string_view kKeymapDelete    = "std:xuzz/delete";
+inline constexpr std::string_view kKeymapPageBreak = "std:xuzz/page_break";
 inline constexpr std::string_view kKeymapHypertimeMap =
-    "std:xudu/hypertime_map";
-inline constexpr std::string_view kKeymapRadialMenu = "std:xudu/radial_menu";
-inline constexpr std::string_view kKeymapFormatBold = "std:xudu/format_bold";
+    "std:xuzz/hypertime_map";
+inline constexpr std::string_view kKeymapRadialMenu = "std:xuzz/radial_menu";
+inline constexpr std::string_view kKeymapFormatBold = "std:xuzz/format_bold";
 inline constexpr std::string_view kKeymapFormatItalic =
-    "std:xudu/format_italic";
+    "std:xuzz/format_italic";
 inline constexpr std::string_view kKeymapFormatUnderline =
-    "std:xudu/format_underline";
+    "std:xuzz/format_underline";
 inline constexpr std::string_view kKeymapFormatStrikethrough =
-    "std:xudu/format_strikethrough";
+    "std:xuzz/format_strikethrough";
 inline constexpr std::string_view kKeymapFormatSuperscript =
-    "std:xudu/format_superscript";
+    "std:xuzz/format_superscript";
 inline constexpr std::string_view kKeymapFormatSubscript =
-    "std:xudu/format_subscript";
-inline constexpr std::string_view kKeymapSaveDocument =
-    "std:xudu/save_document";
-inline constexpr std::string_view kKeymapExportOsmic = "std:xudu/export_osmic";
-inline constexpr std::string_view kKeymapInsertBreak = "std:xudu/insert_break";
-inline constexpr std::string_view kKeymapClearBench  = "std:xudu/clear_bench";
+    "std:xuzz/format_subscript";
+inline constexpr std::string_view kKeymapSaveDocument = "std:xuzz/save";
+inline constexpr std::string_view kKeymapExportOsmic  = "std:xuzz/export_osmic";
+inline constexpr std::string_view kKeymapInsertBreak  = "std:xuzz/page_break";
+inline constexpr std::string_view kKeymapClearBench   = "std:xuzz/clear_bench";
 inline constexpr std::string_view kKeymapQuotationToggle =
-    "std:xudu/quotation_toggle";
+    "std:xuzz/quotation_toggle";
 inline constexpr std::string_view kKeymapQuotationToggleF9 =
-    "std:xudu/quotation_toggle_f9";
+    "std:xuzz/quotation_toggle_f9";
+
+// Keymap - Branch Convergence Assistant Actions
+inline constexpr std::string_view kKeymapConvergenceToggle =
+    "std:xuzz/convergence_toggle";
+inline constexpr std::string_view kKeymapConvergenceAdoptSpan =
+    "std:xuzz/convergence_adopt_span";
+inline constexpr std::string_view kKeymapConvergenceRetainEditions =
+    "std:xuzz/convergence_retain_editions";
+inline constexpr std::string_view kKeymapConvergenceSynthesizeEdition =
+    "std:xuzz/convergence_synthesize_edition";
 
 // Keymap - Zigzag Visualizer & Pure Vortex Actions
 inline constexpr std::string_view kKeymapViewModeContent1 =
@@ -573,12 +600,16 @@ inline constexpr std::string_view kKeymapLinkOccurrenceNext =
     "std:xuzz/link_occurrence_next";
 inline constexpr std::string_view kKeymapLinkOccurrencePrevious =
     "std:xuzz/link_occurrence_previous";
-inline constexpr std::string_view kKeymapLinkCross   = "std:xuzz/link_cross";
-inline constexpr std::string_view kKeymapLinkEnter   = "std:xuzz/link_enter";
+inline constexpr std::string_view kKeymapLinkCross  = "std:xuzz/link_cross";
+inline constexpr std::string_view kKeymapLinkEnter  = "std:xuzz/link_enter";
+inline constexpr std::string_view kKeymapLinkFollow = "std:nav/link_follow";
+inline constexpr std::string_view kKeymapLeaderMode = "std:nav/leader_mode";
+inline constexpr std::string_view kKeymapRestoreDismissed =
+    "std:nav/restore_dismissed";
 inline constexpr std::string_view kKeymapLinkOrigin  = "std:xuzz/link_origin";
 inline constexpr std::string_view kKeymapLinkDismiss = "std:xuzz/link_dismiss";
 inline constexpr std::string_view kKeymapOverviewToggle =
-    "std:xudu/overview_toggle";
+    "std:xuzz/overview_toggle";
 inline constexpr std::string_view kKeymapActivityBack =
     "std:xuzz/activity_back";
 inline constexpr std::string_view kKeymapActivityForward =
@@ -630,20 +661,20 @@ inline constexpr std::string_view kKeymapDeleteForward =
 inline constexpr std::string_view kKeymapNewSlice = "std:xuzz/new_slice";
 inline constexpr std::string_view kKeymapNewSliceInStore =
     "std:xuzz/new_slice_in_store";
-inline constexpr std::string_view kKeymapPouchDrop = "std:xudu/pouch_drop";
+inline constexpr std::string_view kKeymapPouchDrop = "std:xuzz/pouch_drop";
 inline constexpr std::string_view kKeymapPouchDropToLinkLeft =
-    "std:xudu/pouch_drop_to_link_left";
+    "std:xuzz/pouch_drop_to_link_left";
 inline constexpr std::string_view kKeymapPouchDropToLinkRight =
-    "std:xudu/pouch_drop_to_link_right";
+    "std:xuzz/pouch_drop_to_link_right";
 inline constexpr std::string_view kKeymapPouchDropNotes =
-    "std:xudu/pouch_drop_notes";
+    "std:xuzz/pouch_drop_notes";
 inline constexpr std::string_view kKeymapPouchDropScratch =
-    "std:xudu/pouch_drop_scratch";
+    "std:xuzz/pouch_drop_scratch";
 inline constexpr std::string_view kKeymapPouchDropLeft =
-    "std:xudu/pouch_drop_left";
+    "std:xuzz/pouch_drop_left";
 inline constexpr std::string_view kKeymapPouchDropRight =
-    "std:xudu/pouch_drop_right";
-inline constexpr std::string_view kKeymapForgeClasp = "std:xudu/forge_clasp";
+    "std:xuzz/pouch_drop_right";
+inline constexpr std::string_view kKeymapForgeClasp = "std:xuzz/forge_clasp";
 inline constexpr std::string_view kKeymapEditCell   = "std:zigzag/edit_cell";
 inline constexpr std::string_view kKeymapMarkCell   = "std:zigzag/mark_cell";
 inline constexpr std::string_view kKeymapLinkMarkedXPos =
@@ -935,7 +966,7 @@ inline constexpr std::string_view kModalGlobalCommands =
 }
 
 struct KeymapConfig {
-  std::vector<std::string> modalGlobalCommands{"std:xudu/quit"};
+  std::vector<std::string> modalGlobalCommands{"std:xuzz/quit"};
   std::vector<std::pair<std::string, std::string>> bindings;
   [[nodiscard]] std::optional<std::string>
   bindingFor(std::string_view action) const;

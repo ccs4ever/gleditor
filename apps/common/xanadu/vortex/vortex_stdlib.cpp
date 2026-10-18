@@ -1412,6 +1412,7 @@ void VortexStdLib::bootstrap() {
   CellRef modUI          = getOrCreateModule("std:ui");
   CellRef modNav         = getOrCreateModule("std:nav");
   CellRef modBridge      = getOrCreateModule("std:bridge");
+  CellRef modXuzz        = getOrCreateModule("std:xuzz");
   CellRef modXudu        = getOrCreateModule("std:xudu");
 
   buildMathModule(modMath);
@@ -1428,6 +1429,7 @@ void VortexStdLib::bootstrap() {
   buildUiModule(modUI);
   buildNavModule(modNav);
   buildBridgeModule(modBridge);
+  buildXuzzModule(modXuzz);
   buildXuduModule(modXudu);
 }
 
@@ -3980,6 +3982,62 @@ std::optional<xanadu::TranscopyrightDescriptor> VortexStdLib::bridgeCellRoyalty(
 bool VortexStdLib::bridgeCellUnlock(xanadu::ZigzagPresentationSurface &surface,
                                     const CellRef cell) {
   return surface.unlockCell(cell);
+}
+
+void VortexStdLib::buildXuzzModule(CellRef mod) {
+  constexpr std::pair<std::string_view, std::string_view> kXuzzActions[] = {
+      {"quit", "#XUZZ_QUIT"},
+      {"save", "#XUZZ_SAVE"},
+      {"close", "#XUZZ_CLOSE"},
+      {"next_doc", "#XUZZ_NEXT_DOC"},
+      {"prev_doc", "#XUZZ_PREV_DOC"},
+      {"doc_1", "#XUZZ_DOC_1"},
+      {"doc_2", "#XUZZ_DOC_2"},
+      {"doc_3", "#XUZZ_DOC_3"},
+      {"doc_4", "#XUZZ_DOC_4"},
+      {"doc_5", "#XUZZ_DOC_5"},
+      {"doc_6", "#XUZZ_DOC_6"},
+      {"doc_7", "#XUZZ_DOC_7"},
+      {"doc_8", "#XUZZ_DOC_8"},
+      {"doc_9", "#XUZZ_DOC_9"},
+      {"back", "#XUZZ_BACK"},
+      {"new_doc", "#XUZZ_NEW_DOC"},
+      {"forward", "#XUZZ_FORWARD"},
+      {"open_doc", "#XUZZ_OPEN_DOC"},
+      {"close_doc", "#XUZZ_CLOSE_DOC"},
+      {"onion_skin", "#XUZZ_ONION_SKIN"},
+      {"pouch_toggle", "#XUZZ_POUCH_TOGGLE"},
+      {"pouch_toggle_f2", "#XUZZ_POUCH_TOGGLE_F2"},
+      {"telescope_toggle", "#XUZZ_TELESCOPE_TOGGLE"},
+      {"telescope_toggle_f3", "#XUZZ_TELESCOPE_TOGGLE_F3"},
+      {"tension_physics_toggle", "#XUZZ_TENSION_PHYSICS_TOGGLE"},
+      {"unlock_transcopyright", "#XUZZ_UNLOCK_TRANSCOPYRIGHT"},
+      {"unlock_transcopyright_f5", "#XUZZ_UNLOCK_TRANSCOPYRIGHT_F5"},
+      {"unlock_transcopyright_ctrl_u", "#XUZZ_UNLOCK_TRANSCOPYRIGHT_CTRL_U"},
+      {"scrub_forward", "#XUZZ_SCRUB_FORWARD"},
+      {"scrub_backward", "#XUZZ_SCRUB_BACKWARD"},
+      {"transclude", "#XUZZ_TRANSCLUDE"},
+      {"xanalink", "#XUZZ_XANALINK"},
+      {"cancel_link", "#XUZZ_CANCEL_LINK"},
+      {"beams", "#XUZZ_BEAMS"},
+      {"sworph", "#XUZZ_SWORPH"},
+      {"publish", "#XUZZ_PUBLISH"},
+      {"history", "#XUZZ_HISTORY"},
+      {"delete", "#XUZZ_DELETE"},
+      {"page_break", "#XUZZ_PAGE_BREAK"},
+      {"hypertime_map", "#XUZZ_HYPERTIME_MAP"},
+      {"map", "#XUZZ_MAP"},
+      {"scrub_back", "#XUZZ_SCRUB_BACK"},
+      {"radial_menu", "#XUZZ_RADIAL_MENU"},
+  };
+
+  for (const auto &[name, opcode] : kXuzzActions) {
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, opcode);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {.inputParams = {}, .outputParams = {out}};
+    exportSymbol(mod, name, op);
+  }
 }
 
 void VortexStdLib::buildXuduModule(CellRef mod) {

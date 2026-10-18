@@ -199,12 +199,12 @@ jobs:
         XDG_CONFIG_HOME: ${{ github.workspace }}/build/xdg/config
       run: |
         make -j$(nproc) GLEDITOR_SDL=2 GLEDITOR_ENABLE_VULKAN=1 \
-          GLEDITOR_CPP26_FORCE_FALLBACK=1 xudu gleditor_test xudu_test zigzag_test
+          GLEDITOR_CPP26_FORCE_FALLBACK=1 xudu gleditor_test xuzz_test zigzag_test
         # Whole suites, not a filter: optional references now carry the
         # manifold's slot lookup, page lookup and most engine finds, so the
         # fallback path is exercised by nearly every test.
         ./build/gleditor_test
-        ./build/xudu_test
+        ./build/xuzz_test
         ./build/zigzag_test
     # Render the sample document through each backend and require that they
     # agree. A backend that silently stops drawing still exits zero, so the
@@ -235,13 +235,13 @@ jobs:
           libgl-dev libgmock-dev pkg-config \
           libtorrent-rasterbar-dev libssl-dev liblmdb-dev libspdlog-dev iproute2
     - name: build
-      run: make -j$(nproc) GLEDITOR_SDL=2 xudu_test xudu-swarm-peer
+      run: make -j$(nproc) GLEDITOR_SDL=2 xuzz_test xudu-swarm-peer
     # Fails rather than skips if libtorrent went missing: this job exists to
     # exercise the swarm, so a silent skip would be the failure it is meant to
     # catch.
     - name: check the swarm was compiled in
       run: |
-        ./build/xudu_test --gtest_filter=SwarmTest.* --gtest_list_tests > /dev/null
+        ./build/xuzz_test --gtest_filter=SwarmTest.* --gtest_list_tests > /dev/null
         pkg-config --exists libtorrent-rasterbar
     - name: swarm tests across network namespaces
       run: sudo tools/swarm-netns-test.sh

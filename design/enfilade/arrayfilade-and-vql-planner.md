@@ -184,7 +184,7 @@ ______________________________________________________________________
 
 ## 6. Empirical Verification & Benchmarks
 
-From `tests/xudu/arrayfilade_benchmark_test.cpp` on 10,000 cells:
+From `tests/xuzz/arrayfilade_benchmark_test.cpp` on 10,000 cells:
 
 - **Subscripting (2,000 random lookups)**: 11.2x speedup ($O(\log N)$ descent).
 - **Parallel Reduction (`+/A`, `⌊/A`)**: Instantaneous $O(1)$ query (5 ns latency).
@@ -192,4 +192,4 @@ From `tests/xudu/arrayfilade_benchmark_test.cpp` on 10,000 cells:
   inspection).
 
 All 5 frontiers of the Grand Enfilade are now fully realized, algebraically closed, and
-architecturally verified across gleditor, xudu, and zigzag.
+architecturally verified across gleditor, xuzz, and zigzag.

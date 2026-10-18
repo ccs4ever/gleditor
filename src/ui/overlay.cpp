@@ -288,7 +288,7 @@ bool ScreenOverlay::pointerEvent(const PointerEvent &event) {
       pressedNode_ = 0;
       return true;
     }
-    const auto *hit = scene_->layout.hitTest(
+    const auto *hit = scene_->hitTest(
         event.x, static_cast<float>(metrics_.screenHeight) - event.y);
     const auto *visual = hit ? scene_->find(hit->id) : nullptr;
     if (event.phase == PointerPhase::Wheel) {
@@ -376,8 +376,16 @@ void ScreenOverlay::rebuildCanvas(RenderState &state,
           : visual.accessibilityRole == a11y::Role::Button
               ? theme_.colours.buttonSurface.value_or(theme_.colours.surface)
               : theme_.colours.surface);
-      background_->addRect(box->rect.left, box->rect.bottom, box->rect.width,
-                           box->rect.height, fill);
+      if (visual.accessibilityRole == a11y::Role::Button) {
+        const float radius =
+            std::min(box->rect.height * 0.5F, metrics_.px(6.0F));
+        background_->addRoundedRect(box->rect.left, box->rect.bottom,
+                                    box->rect.width, box->rect.height, radius,
+                                    fill);
+      } else {
+        background_->addRect(box->rect.left, box->rect.bottom, box->rect.width,
+                             box->rect.height, fill);
+      }
     }
     if (visual.scrubber) {
       background_->setTag(render::tagKindOverlay, visual.pickingId);

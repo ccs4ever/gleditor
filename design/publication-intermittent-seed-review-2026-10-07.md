@@ -44,7 +44,7 @@ The UI writes `build/publication-download/network-ui/download.log` and `queued.p
 removed, so the failing dependency's actual file size and complete exception suffix were not
 retained.
 
-The integration journey is in `tests/xudu/publication_outbox_test.cpp`, in the named test above. The
+The integration journey is in `tests/xuzz/publication_outbox_test.cpp`, in the named test above. The
 relevant implementation is `apps/common/xanadu/publication_inbox.cpp` (`DownloadTransport::fetch`
 and dependency review) and `apps/common/xanadu/publication_outbox.cpp` (`checkedSeed`).
 

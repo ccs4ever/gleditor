@@ -36,7 +36,7 @@ Holm Nelson diagnosed in conventional computing:
              +-------------------------+-------------------------+--> Pouches / Drop Zones
 ```
 
-In `gleditor` and `xudu`, **anything customizable is a System Xanadoc**. A **System Xanadoc** is an
+In `gleditor` and `xuzz`, **anything customizable is a System Xanadoc**. A **System Xanadoc** is an
 append-only, content-addressed, microversioned document (`Store`) whose concatext and links encode
 metasystem state. Changing a keybinding, resizing UI text, repositioning notification toasts, or
 docking a drawer is not an ephemeral mutation of a struct in memory: it is an OSMIC operation
@@ -47,7 +47,7 @@ ______________________________________________________________________
 
 ## 2. The Core System Xanadocs & Schemas
 
-`xudu` organizes metasystem state into five canonical System Xanadocs:
+`xuzz` organizes metasystem state into five canonical System Xanadocs:
 
 ```
 +-------------------+-------------------------------------------------------------------+
@@ -63,15 +63,16 @@ ______________________________________________________________________
 
 ### 2.1 `system://keymap` (Command & Keyboard Actions)
 
-Traditional keymap tables are statically compiled or read from static JSON. In `xudu`, the keymap is
-a live xanadoc.
+Traditional keymap tables are statically compiled or read from static JSON. In `xuzz`, all keymaps
+across the application (and its compatibility entry points) are merged into the sovereign
+`system://keymap` live xanadoc.
 
 #### Canonical Format
 
 The concatext is human-readable, standard OSMIC declarative text:
 
 ```yaml
-# Xudu Sovereign Keymap Specification
+# Xuzz Sovereign Keymap Specification
 quit: Ctrl+Q # save and close
 new-doc: Ctrl+N # create new sovereign document bound to permascroll
 open-doc: Ctrl+O # spatial document open palette
@@ -110,7 +111,7 @@ Controls the typographic hierarchy and visual aesthetics across the entire rende
 #### Canonical Format
 
 ```yaml
-# Xudu Typographic & Theme Settings
+# Xuzz Typographic & Theme Settings
 ui.font.family: Sans
 ui.font.size: 11
 ui.font.tab_bar: Sans 10
@@ -209,14 +210,14 @@ ______________________________________________________________________
 
 ### 3.1 The OSMIC Advantage for Configuration
 
-| Capability            | Classical Config Files (`.json`/`.yaml`) | System Xanadocs (`system://`)                        |
-| :-------------------- | :--------------------------------------- | :--------------------------------------------------- |
-| **History & Undo**    | None (overwritten in place)              | Full OSMIC DAG (every microversion preserved)        |
-| **Branching**         | Manual Git branch of dotfiles            | Native hypertime branching (try experimental keymap) |
-| **Recovery**          | Delete file and hope for defaults        | Step backward in hypertime (`session.scrubBackward`) |
-| **Multi-Device Sync** | Third-party cloud sync / conflict files  | BitTorrent v2 Merkle piece stability via BEP 46      |
-| **Collaboration**     | Complex merge conflicts                  | Zero-copy span transclusions and format links        |
-| **Provenance**        | File modification timestamp              | OpenPGP signature + author fingerprint               |
+| Capability            | Classical Config Files (`.json`/`.yaml`) | System Xanadocs (`system://`)                             |
+| :-------------------- | :--------------------------------------- | :-------------------------------------------------------- |
+| **History & Undo**    | None (overwritten in place)              | Full OSMIC DAG (every microversion preserved)             |
+| **Branching**         | Manual Git branch of dotfiles            | Native hypertime branching (try experimental keymap)      |
+| **Recovery**          | Delete file and hope for defaults        | Step backward in hypertime (`session.scrubBackward`)      |
+| **Multi-Device Sync** | Third-party cloud sync / conflict files  | BitTorrent v2 Merkle piece stability via BEP 46           |
+| **Collaboration**     | Complex merge conflicts                  | Zero-copy span transclusions and format links             |
+| **Provenance**        | File modification timestamp              | Ed25519 signature + author fingerprint (X.509 delegation) |
 
 ### 3.2 Hypertime Scrubbing of Settings
 
@@ -235,7 +236,7 @@ if (history.size() >= 4) {
 ### 3.3 Author-Selectable Current Versions & Head Repointing
 
 In classical version control (like Git), "HEAD" is a single pointer, while branches are named refs.
-In classical Xudu, `Store::latest()` fell back to the chronological tip with the greatest
+In classical Xanadu, `Store::latest()` fell back to the chronological tip with the greatest
 MicroversionId. However, an author often maintains **multiple parallel states considered current**
 (e.g. English Edition and French Edition, or Draft vs. Published Edition).
 
@@ -342,7 +343,7 @@ was a `versions.yaml` until migration step 13; the YAML below describes the fiel
 carries rather than a file on disk, and `xudu-dump --section=versions` is what renders them:
 
 ```yaml
-# Xudu Microversion Annotations & Aliases
+# Xuzz Microversion Annotations & Aliases
 version: "1.0"
 alias: "genesis"
 description: "Initial author seeding from permascroll"
@@ -365,7 +366,7 @@ tag: "keymap-preset"
      alias instead of raw microversion numbers.
 1. **Context-Rich Spatial Open Palette (`Ctrl+O`)**:
    - The palette displays discovered stores with their active alias and description:
-     `"Xudu Keymap [vim-keys] - Vim modal navigation profile (12 versions, 1.8 KB)"`
+     `"Xuzz Keymap [vim-keys] - Vim modal navigation profile (12 versions, 1.8 KB)"`
      `"Project Alpha [release-1.0] - Official publication edition (42 versions, 15.6 KB)"`
 1. **Tab Bar & Document Titles**:
    - When an open version carries an alias, `DocumentSwitcher` renders the human-readable alias
@@ -385,14 +386,14 @@ xanadoc:
 
 - Example: Alice publishes `vim_bindings.xanadoc` (salt: `vim-keys`).
 
-- Bob wants Vim bindings in `xudu`. In Bob's `system://keymap`, rather than copying and pasting
+- Bob wants Vim bindings in `xuzz`. In Bob's `system://keymap`, rather than copying and pasting
   text, Bob **transcludes** the keymap from Alice's scroll:
 
   ```math
   \text{transclude}(\text{dest}=\text{Bob's } system://keymap, \text{src}=\text{Alice's } vim\text{-keys})
   ```
 
-- If Alice publishes an improvement to `vim-keys`, Bob's `xudu` automatically receives the update
+- If Alice publishes an improvement to `vim-keys`, Bob's `xuzz` automatically receives the update
   via BitTorrent swarm!
 
 - If Bob wants to override a single key (e.g. keep `Ctrl+Q` for quit instead of `:q`), Bob inserts
@@ -405,10 +406,10 @@ ______________________________________________________________________
 
 ### 5.1 `SystemDocKind` & `SystemDocRegistry`
 
-In `apps/xudu/session.hpp`:
+In `apps/common/ui/xanadoc/session.hpp`:
 
 ```cpp
-namespace xudu {
+namespace xanadu {
 
 enum class SystemDocKind : std::uint8_t {
   Keymap,
@@ -430,13 +431,13 @@ constexpr std::string_view systemDocUri(SystemDocKind kind) {
   }
 }
 
-} // namespace xudu
+} // namespace xanadu
 ```
 
 ### 5.2 Storage & Memory Model
 
-- System Xanadocs reside on disk in `$XDG_DATA_HOME/xudu/system/<name>.xanadoc/` (e.g.
-  `~/.local/share/xudu/system/keymap.xanadoc/`).
+- System Xanadocs reside on disk in `$XDG_DATA_HOME/xuzz/system/<name>.xanadoc/` (e.g.
+  `~/.local/share/xuzz/system/keymap.xanadoc/`).
 - If no system store exists on disk, `Session` automatically initializes one using the author's
   `UserPermascroll` and writes default canonical primedia and initial ops.
 - System stores are loaded into `Session::stores` with `isSystem = true` so they do not appear in
@@ -446,7 +447,7 @@ constexpr std::string_view systemDocUri(SystemDocKind kind) {
 
 ### 5.3 `Store` Current Versions & Version Annotations API
 
-In `apps/xudu/core/store.hpp`:
+In `apps/common/xanadu/store.hpp`:
 
 ```cpp
 struct VersionAnnotation {
@@ -503,19 +504,19 @@ ______________________________________________________________________
 
 ## 6. Sovereign System Store Architecture
 
-### 6.1 Retired: The Xudu ⟷ Zigzag Bridge (`zz_system_projector`)
+### 6.1 Retired: The Xanadoc ⟷ Zigzag Bridge (`zz_system_projector`)
 
 An earlier design (Stage 3 of the roadmap in §7) projected system configuration through a **Zigzag
 multidimensional slice** (`d.config`/`d.schema`/`d.notes` ranks in a `ZzStructureDocument`) as the
-declared "canonical spatial ground truth," with a 3-page Xudu document (config text, schema text,
-notes text, joined by "butterfly" comment links) as its linearized projection --
+declared "canonical spatial ground truth," with a 3-page xanadoc (config text, schema text, notes
+text, joined by "butterfly" comment links) as its linearized projection --
 `zigzag::projectSystemSliceToStore`/`projectSystemStoreToSlice`
 (`apps/common/xanadu/zigzag/zz_system_projector.hpp/.cpp`), driven by a hand-rolled `key: "value"`
 line parser reading Page 1's text back into settings.
 
 Removed 2026-09-17: an audit found this bridge had no caller anywhere in the running application
-(not `apps/xudu`, not `apps/zigzag`, not any CLI tool) -- `initializeSystemStoreFromSlice`, its one
-wrapper in `system_docs.cpp`, was itself called only by the projector's own dedicated test. The
+(not `apps/xuzz`, not any CLI tool) -- `initializeSystemStoreFromSlice`, its one wrapper in
+`system_docs.cpp`, was itself called only by the projector's own dedicated test. The
 `SystemStoreModel`/10-dimension cell mechanism described in §6.2 below had already fully superseded
 it as the actual settings implementation; the bridge was leftover scaffolding from before that
 mechanism existed, never wired up to anything once it did, and its design section here was never
@@ -626,7 +627,7 @@ ______________________________________________________________________
 | :---------------------- | :------------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------- |
 | **System Docs Header**  | [`apps/common/xanadu/system_docs.hpp`](apps/common/xanadu/system_docs.hpp) | 10-dimension constants, `namespace settings`, `SettingSpec`, `SystemStoreModel`, store-only configs |
 | **System Docs Impl**    | [`apps/common/xanadu/system_docs.cpp`](apps/common/xanadu/system_docs.cpp) | Genesis topology, setting population, schema validation, `fromStore` loaders, C++ API               |
-| **Comprehensive Tests** | [`tests/xudu/system_docs_test.cpp`](tests/xudu/system_docs_test.cpp)       | 10-dimension geometry, genesis topology, schema validation, store-exclusive loaders                 |
+| **Comprehensive Tests** | [`tests/xuzz/system_docs_test.cpp`](tests/xuzz/system_docs_test.cpp)       | 10-dimension geometry, genesis topology, schema validation, store-exclusive loaders                 |
 
 ______________________________________________________________________
 

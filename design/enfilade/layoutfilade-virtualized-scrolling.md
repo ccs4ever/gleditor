@@ -154,7 +154,7 @@ ______________________________________________________________________
 
 ## 6. Performance Benchmarks
 
-Benchmarks executed on Linux x86_64 (`tests/xudu/layoutfilade_benchmark_test.cpp`):
+Benchmarks executed on Linux x86_64 (`tests/xuzz/layoutfilade_benchmark_test.cpp`):
 
 ### 6.1 Coordinate Descent vs Linear Scan ((N = 10,000) lines, 10,000 queries)
 

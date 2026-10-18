@@ -135,7 +135,7 @@ receipt is recorded in an append-only cryptographic ledger:
 - `receiptId`: Monotonic transaction identifier.
 - `scroll`, `offset`, `length`: Exact primedia coordinate unlocked.
 - `amountAtomicUnits`: Microcent payment in nano-xu.
-- `payerWallet`, `payeeWallet`: 40-char OpenPGP fingerprints.
+- `payerWallet`, `payeeWallet`: 64-hex Ed25519 public key fingerprints (SHA-256).
 - `keyId`: Content Encryption Key identifier.
 - `signature`: Authorizing cryptographic signature.
 
@@ -165,7 +165,7 @@ ______________________________________________________________________
 
 ## 6. Performance Benchmarks
 
-Benchmarks executed on Linux x86_64 (`tests/xudu/holefilade_benchmark_test.cpp`):
+Benchmarks executed on Linux x86_64 (`tests/xuzz/holefilade_benchmark_test.cpp`):
 
 ### 6.1 Span Decomposition vs Linear Scan ((N = 10,000) spans, 10,000 queries)
 

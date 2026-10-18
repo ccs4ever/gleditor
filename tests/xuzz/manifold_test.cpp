@@ -1550,17 +1550,17 @@ private:
 
 xanadu::Provenance sampleProv() {
   xanadu::Provenance record;
-  record.author.name   = "Ada Lovelace";
-  record.author.email  = "ada@example.org";
-  record.author.gpgKey = "ada@example.org";
-  record.title         = "Notes: on the Analytical Engine";
-  record.salt          = "notes";
-  record.publisher     = std::string(64, 'a');
-  record.permascroll   = "btpk:" + std::string(64, 'a') + ":permascroll";
-  record.version       = "2a4";
-  record.published     = 1700000000;
-  record.contentLength = 4096;
-  record.contentDigest = std::string(64, 'b');
+  record.author.name       = "Ada Lovelace";
+  record.author.email      = "ada@example.org";
+  record.author.signingKey = "ada@example.org";
+  record.title             = "Notes: on the Analytical Engine";
+  record.salt              = "notes";
+  record.publisher         = std::string(64, 'a');
+  record.permascroll       = "btpk:" + std::string(64, 'a') + ":permascroll";
+  record.version           = "2a4";
+  record.published         = 1700000000;
+  record.contentLength     = 4096;
+  record.contentDigest     = std::string(64, 'b');
   record.extra.emplace_back("custom_field", "custom_val");
   return record;
 }

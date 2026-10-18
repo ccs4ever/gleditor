@@ -371,7 +371,10 @@ std::string Provenance::toTsv() const {
   };
   put("author", author.name);
   put("email", author.email);
-  put("gpg_key", author.gpgKey);
+  if (!author.signingKey.empty()) {
+    put("signing_key", author.signingKey);
+    put("gpg_key", author.signingKey);
+  }
   put("title", title);
   put("salt", salt);
   put("publisher", publisher);
@@ -566,9 +569,9 @@ SignedProvenance signProvenance(const Provenance &record,
     argv.insert(argv.end(),
                 {"--pinentry-mode", "loopback", "--passphrase-fd", "0"});
   }
-  if (!record.author.gpgKey.empty()) {
+  if (!record.author.signingKey.empty()) {
     argv.emplace_back("--local-user");
-    argv.push_back(record.author.gpgKey);
+    argv.push_back(record.author.signingKey);
   }
   argv.emplace_back("--output");
   argv.push_back(signature.name());
@@ -579,8 +582,8 @@ SignedProvenance signProvenance(const Provenance &record,
   if (!ran.ok()) {
     throw std::runtime_error(std::format(
         "gpg would not sign the authorship record{}: {}",
-        record.author.gpgKey.empty() ? std::string{}
-                                     : " as " + record.author.gpgKey,
+        record.author.signingKey.empty() ? std::string{}
+                                         : " as " + record.author.signingKey,
         ran.complaint()));
   }
   out.signature = signature.read();
@@ -718,8 +721,8 @@ std::optional<Provenance> parseProvenance(const std::string_view text) {
       sawAuthor       = true;
     } else if ("email" == key) {
       out.author.email = *value;
-    } else if ("gpg_key" == key) {
-      out.author.gpgKey = *value;
+    } else if ("signing_key" == key || "gpg_key" == key) {
+      out.author.signingKey = *value;
     } else if ("title" == key) {
       out.title = *value;
     } else if ("salt" == key) {
@@ -775,7 +778,7 @@ void AuthorCatalog::recordWork(std::string infoHash,
   work.publisherKey   = prov->publisher;
   work.authorName     = prov->author.name;
   work.authorEmail    = prov->author.email;
-  work.gpgFingerprint = prov->author.gpgKey;
+  work.gpgFingerprint = prov->author.signingKey;
   work.contentLength  = prov->contentLength;
   work.contentSha256  = prov->contentDigest;
   work.published      = prov->published;

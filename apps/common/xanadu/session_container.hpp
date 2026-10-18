@@ -12,6 +12,7 @@
 #include <cstring>
 #include <expected>
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <span>
 #include <string>
@@ -20,6 +21,7 @@
 #include <vector>
 
 #include "compact_op.hpp"
+#include "link_package.hpp"
 #include "ops.hpp"
 
 namespace xanadu {
@@ -49,7 +51,8 @@ enum class SessionValidationError : std::uint8_t {
   SerializationError,
   MissingDecryptionKey,
   DecryptionFailed,
-  PayloadHashMismatch
+  PayloadHashMismatch,
+  CorruptStoreTables
 };
 
 using ValidationError = SessionValidationError;
@@ -89,7 +92,7 @@ validationErrorToString(SessionValidationError err) noexcept {
   case SessionValidationError::InvalidDeviceKey:
     return "Invalid device public key";
   case SessionValidationError::InvalidSignature:
-    return "Ed25519 signature verification failed";
+    return "Digital signature verification failed";
   case SessionValidationError::InvalidDeviceCert:
     return "Invalid X.509 device delegation certificate";
   case SessionValidationError::CorruptOpsNodes:
@@ -107,9 +110,77 @@ validationErrorToString(SessionValidationError err) noexcept {
            "ciphertext";
   case SessionValidationError::PayloadHashMismatch:
     return "Payload cryptographic hash does not match manifest commitment";
+  case SessionValidationError::CorruptStoreTables:
+    return "store.tables corrupted or unreadable";
   }
   return "Unknown error";
 }
+
+/// Minimal contiguous byte interval within a scroll.
+struct ScrollInterval {
+  ScrollId scrollId{localScroll};
+  std::uint64_t start{0};
+  std::uint64_t length{0};
+
+  [[nodiscard]] std::uint64_t end() const noexcept { return start + length; }
+  auto operator<=>(const ScrollInterval &) const = default;
+  bool operator==(const ScrollInterval &) const  = default;
+};
+
+/// Frequency tracking for a primedia span across operations and link records.
+struct SpanFrequencyEntry {
+  PrimediaSpan span;
+  std::uint64_t count{0};
+  auto operator<=>(const SpanFrequencyEntry &) const = default;
+  bool operator==(const SpanFrequencyEntry &) const  = default;
+};
+
+/// Result of span frequency and dependency analysis across ops and links.
+struct SpanDependencyAnalysis {
+  /// Disjoint, non-overlapping minimal intervals needed per scroll ID.
+  std::map<ScrollId, std::vector<ScrollInterval>> intervals;
+  /// Frequency count of each referenced primedia span.
+  std::vector<SpanFrequencyEntry> frequencies;
+  /// Total unique spans analyzed.
+  std::size_t totalSpans{0};
+  /// Total bytes across all required scroll intervals.
+  std::uint64_t totalBytes{0};
+
+  [[nodiscard]] std::vector<ScrollInterval>
+  intervalsFor(const ScrollId scroll) const {
+    const auto it = intervals.find(scroll);
+    return it != intervals.end() ? it->second : std::vector<ScrollInterval>{};
+  }
+
+  [[nodiscard]] bool requiresScroll(const ScrollId scroll) const noexcept {
+    return intervals.contains(scroll);
+  }
+
+  bool operator==(const SpanDependencyAnalysis &) const = default;
+};
+
+/// Sliced primedia fragment for a scroll interval packaged in .xuzzpkg.
+struct ScrollFragment {
+  ScrollId scrollId{localScroll};
+  std::uint64_t start{0};
+  std::uint64_t length{0};
+  std::vector<std::uint8_t> bytes;
+  std::string sha256; // 64-hex SHA-256 of bytes
+
+  [[nodiscard]] std::uint64_t end() const noexcept { return start + length; }
+  [[nodiscard]] std::string filename() const {
+    return "scroll_" + std::to_string(scrollId) + "_" + std::to_string(start) +
+           "_" + std::to_string(length) + ".slice";
+  }
+
+  bool operator==(const ScrollFragment &) const = default;
+};
+
+/// Extract minimal span dependency intervals and frequency distribution.
+[[nodiscard]] SpanDependencyAnalysis
+analyzeSpanDependencies(std::span<const CompactOpNode> ops,
+                        const std::map<zigzag::CellRef, Link> &links = {},
+                        std::span<const LinkPackage> linkPackages    = {});
 
 /// Parsed metadata representing canonical MANIFEST.tsv
 struct SessionManifest {
@@ -134,6 +205,14 @@ struct SessionManifest {
   std::string primediaSha256;   // 64-hex
   std::string opsSha256;        // 64-hex
   std::string deviceCertSha256; // 64-hex
+
+  // Fat store side-tables, fragments, and link packages
+  std::string storeTablesSha256; // 64-hex SHA-256 of store.tables
+  std::uint64_t scrollFragmentCount{0};
+  std::vector<std::string>
+      scrollFragmentEntries; // <scrollId>:<start>:<length>:<sha256>
+  std::uint64_t linkPackageCount{0};
+  std::vector<std::string> linkPackageEntries; // <sha256>:<curatorHex>:<salt>
 
   std::vector<std::pair<std::string, std::string>> extraFields;
 
@@ -182,6 +261,12 @@ struct SessionPackage {
   std::vector<CompactOpNode> opsNodes;
   std::string deviceCert; // Base64 DER X.509 delegation cert
   std::array<std::uint8_t, 64> signature{};
+
+  // Fat store side tables, minimal scroll fragments, and link packages
+  std::vector<std::uint8_t> storeTables;
+  std::string storeTablesSha256;
+  std::vector<ScrollFragment> scrollFragments;
+  std::vector<LinkPackage> linkPackages;
 
   // Preserved raw manifest bytes when imported
   std::string rawManifest;
@@ -344,7 +429,73 @@ struct SessionPackage {
     return this;
   }
 
+  SessionPackage *setStoreTables(std::vector<std::uint8_t> tables) noexcept {
+    storeTables = std::move(tables);
+    return this;
+  }
+
+  SessionPackage *setStoreTablesBytes(std::span<const std::uint8_t> bytes) {
+    storeTables.assign(bytes.begin(), bytes.end());
+    return this;
+  }
+
+  SessionPackage *setStoreTablesSha256(std::string hash) noexcept {
+    storeTablesSha256 = std::move(hash);
+    return this;
+  }
+
+  SessionPackage *addScrollFragment(ScrollFragment fragment) {
+    scrollFragments.push_back(std::move(fragment));
+    return this;
+  }
+
+  SessionPackage *
+  setScrollFragments(std::vector<ScrollFragment> fragments) noexcept {
+    scrollFragments = std::move(fragments);
+    return this;
+  }
+
+  SessionPackage *addLinkPackage(LinkPackage pkg) {
+    linkPackages.push_back(std::move(pkg));
+    return this;
+  }
+
+  SessionPackage *setLinkPackages(std::vector<LinkPackage> pkgs) noexcept {
+    linkPackages = std::move(pkgs);
+    return this;
+  }
+
   // Accessors & helpers
+  [[nodiscard]] bool isFatPackage() const noexcept {
+    return !storeTables.empty() || !scrollFragments.empty() ||
+           !linkPackages.empty();
+  }
+
+  [[nodiscard]] const std::vector<ScrollFragment> &
+  getScrollFragments() const noexcept {
+    return scrollFragments;
+  }
+
+  [[nodiscard]] const std::vector<LinkPackage> &
+  getLinkPackages() const noexcept {
+    return linkPackages;
+  }
+
+  [[nodiscard]] std::span<const std::uint8_t> getStoreTables() const noexcept {
+    return storeTables;
+  }
+
+  [[nodiscard]] const ScrollFragment *
+  findFragment(const ScrollId scroll,
+               const std::uint64_t offset) const noexcept {
+    for (const auto &frag : scrollFragments) {
+      if (frag.scrollId == scroll && offset >= frag.start &&
+          offset < frag.end()) {
+        return &frag;
+      }
+    }
+    return nullptr;
+  }
   [[nodiscard]] std::string serializeManifest() const;
   [[nodiscard]] std::span<const std::uint8_t> opsNodesBytes() const noexcept {
     return {reinterpret_cast<const std::uint8_t *>(opsNodes.data()),
@@ -398,11 +549,32 @@ importPackage(
     std::string_view passphrase = {});
 
 // Utility helpers for keys and X.509 delegation certs
+[[nodiscard]] std::string computeSha256Hex(std::span<const std::uint8_t> data);
+[[nodiscard]] std::string computeSha256Hex(std::string_view data);
+
 [[nodiscard]] std::expected<std::string, SessionValidationError>
 createX509DelegationCertificate(std::span<const std::uint8_t, 32> devicePubKey,
                                 std::span<const std::uint8_t, 32> masterPrivKey,
                                 std::string_view deviceId,
                                 std::uint64_t validSeconds = 365ULL * 86400ULL);
+
+class Store;
+
+/// Package a complete store, its side tables, minimal primedia scroll
+/// fragments, and optional link packages into a self-contained fat session
+/// package.
+[[nodiscard]] std::expected<SessionPackage, SessionValidationError>
+createFatStorePackage(
+    const Store &store, std::string_view deviceId,
+    std::span<const std::uint8_t, 32> devicePrivateKey,
+    std::optional<std::string_view> masterFingerprint = std::nullopt,
+    std::string_view baseVersion = {}, std::string_view headVersion = {},
+    bool encrypted = false, std::string_view passphrase = {},
+    std::span<const LinkPackage> selectedLinkPackages  = {},
+    std::optional<std::string_view> existingDeviceCert = std::nullopt,
+    std::optional<std::span<const std::uint8_t, 32>> masterPrivateKey =
+        std::nullopt,
+    std::span<const CompactOpNode> explicitOps = {});
 
 } // namespace xanadu
 

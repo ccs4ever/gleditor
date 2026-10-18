@@ -61,6 +61,17 @@ inline const identity::StandardCryptoEngine &authorMasterEngine() {
   return engine;
 }
 
+inline const identity::PubKey32 &authorMasterPublicKey() {
+  static const auto pk = authorMasterEngine().publicKey();
+  return pk;
+}
+
+inline identity::PubKey32 impostorMasterPublicKey() {
+  identity::PubKey32 pk;
+  pk.bytes.fill(0x99);
+  return pk;
+}
+
 inline DeviceDelegation
 fixtureDelegation(PublicKey devicePublicKey     = PublicKey{},
                   std::string deviceName        = "thinkpad-laptop",

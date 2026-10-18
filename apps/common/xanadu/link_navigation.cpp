@@ -163,6 +163,33 @@ void selectSingletonMembers(SelectedLink &link) {
 
 } // namespace
 
+void autoSettleCursors(SelectedLink &link) {
+  if (!link.occurrences) {
+    return;
+  }
+  for (const auto side : {LinkSide::Left, LinkSide::Right}) {
+    auto &cursor        = link.cursor(side);
+    const auto &members = link.occurrences->members(side);
+    if (!members.empty()) {
+      if (!cursor.member) {
+        cursor.member = 0;
+      }
+      if (*cursor.member < members.size()) {
+        const auto &member = members[*cursor.member];
+        if (!cursor.occurrence && !member.occurrences.empty()) {
+          cursor.occurrence = 0;
+        }
+      }
+    }
+  }
+}
+
+void LinkNavigator::autoSettle() {
+  if (selected && selected->occurrences) {
+    autoSettleCursors(*selected);
+  }
+}
+
 gleditor::cpp26::optional<const SelectedLink &>
 LinkNavigator::selection() const noexcept {
   return gleditor::refOf(selected ? &*selected : nullptr);
@@ -195,6 +222,12 @@ NavigationResult LinkNavigator::dispatch(const NavigationCommand &command) {
           return activityForward(c.child);
         } else if constexpr (std::is_same_v<Command, nav::ReturnToOrigin>) {
           return returnToOrigin();
+        } else if constexpr (std::is_same_v<Command, nav::FollowLink>) {
+          return follow();
+        } else if constexpr (std::is_same_v<Command, nav::RestoreDismissed>) {
+          return restoreDismissed();
+        } else if constexpr (std::is_same_v<Command, nav::LeaderMode>) {
+          return leaderMode();
         } else {
           static_assert(std::is_same_v<Command, nav::Dismiss>);
           return dismiss();
@@ -488,10 +521,83 @@ NavigationResult LinkNavigator::returnToOrigin() {
   return NavigationEffect{.focus = origin->target, .visit = current};
 }
 
+NavigationResult LinkNavigator::follow() {
+  const auto link = resolved();
+  if (!link) {
+    return std::unexpected(link.error());
+  }
+  auto &selection     = **link;
+  selection.active    = opposite(selection.active);
+  auto &cursor        = selection.cursor(selection.active);
+  const auto &members = membersOf(selection, selection.active);
+  if (members.empty()) {
+    return std::unexpected(NavigationError::MemberOutOfRange);
+  }
+  if (!cursor.member) {
+    cursor.member = 0;
+  }
+  if (*cursor.member >= members.size()) {
+    return std::unexpected(NavigationError::MemberOutOfRange);
+  }
+  const auto &member = members[*cursor.member];
+  if (member.occurrences.empty()) {
+    return std::unexpected(NavigationError::MemberNotInView);
+  }
+  if (!cursor.occurrence) {
+    cursor.occurrence = 0;
+  }
+  if (*cursor.occurrence >= member.occurrences.size()) {
+    return std::unexpected(NavigationError::OccurrenceOutOfRange);
+  }
+  const auto &target = member.occurrences[*cursor.occurrence].site;
+  current            = activity.append(
+      Visit{.parent  = current,
+            .target  = target,
+            .arrival = Arrival::EnteredEndpoint,
+            .link    = LinkVisitContext{.key    = selection.key,
+                                        .active = selection.active,
+                                        .left   = selection.left,
+                                        .right  = selection.right,
+                                        .origin = selection.origin}});
+  return NavigationEffect{.focus = target, .visit = current};
+}
+
 NavigationResult LinkNavigator::dismiss() {
   const bool had = selected.has_value();
+  if (had) {
+    if (lastDismissed_.size() >= kMaxDismissedRingSize) {
+      lastDismissed_.pop_front();
+    }
+    lastDismissed_.push_back(LinkVisitContext{
+        .key    = selected->key,
+        .active = selected->active,
+        .left   = selected->left,
+        .right  = selected->right,
+        .origin = selected->origin,
+    });
+  }
   selected.reset();
   return NavigationEffect{.dismissed = had};
+}
+
+NavigationResult LinkNavigator::restoreDismissed() {
+  if (lastDismissed_.empty()) {
+    return std::unexpected(NavigationError::NoLinkSelected);
+  }
+  const auto saved = lastDismissed_.back();
+  lastDismissed_.pop_back();
+  selected = SelectedLink{
+      .key        = saved.key,
+      .generation = ++generations,
+      .active     = saved.active,
+      .left       = saved.left,
+      .right      = saved.right,
+      .origin     = saved.origin,
+  };
+  return NavigationEffect{
+      .resolve =
+          ResolveRequest{.key = saved.key, .generation = selected->generation},
+  };
 }
 
 std::string_view name(const NavigationError error) noexcept {
@@ -537,7 +643,10 @@ std::string_view name(const NavigationCommand &command) noexcept {
                                                "activity back",
                                                "activity forward",
                                                "return to origin",
-                                               "dismiss"};
+                                               "dismiss",
+                                               "follow link",
+                                               "restore dismissed",
+                                               "leader mode"};
   static_assert(std::size(names) == std::variant_size_v<NavigationCommand>);
   return names[command.index()];
 }
@@ -570,6 +679,15 @@ commandForAction(const std::string_view action) {
   }
   if (kKeymapLinkCross == action) {
     return nav::Cross{};
+  }
+  if (kKeymapLinkFollow == action) {
+    return nav::FollowLink{};
+  }
+  if (kKeymapLeaderMode == action) {
+    return nav::LeaderMode{};
+  }
+  if (kKeymapRestoreDismissed == action) {
+    return nav::RestoreDismissed{};
   }
   if (kKeymapLinkEnter == action) {
     return nav::Enter{};

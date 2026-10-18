@@ -347,20 +347,59 @@ LinkContext::viewIndexOf(const xanadu::DocumentSite &site) const {
 }
 
 std::string LinkContext::describe(const xanadu::OccurrenceSite &site) const {
-  return std::visit(
-      [this]<typename Site>(const Site &at) {
-        const auto bytes = "bytes " + std::to_string(at.range.start) + " to " +
-                           std::to_string(at.range.end);
+  auto linkType = LinkType::Quotation;
+  if (const auto selected = navigator.selection()) {
+    if (selected->occurrences) {
+      linkType = selected->occurrences->link.type;
+    } else if (const auto rec = recordOf(selected->key.id)) {
+      linkType = rec->type;
+    }
+  }
+  std::string docTitle;
+  std::string excerpt;
+
+  std::visit(
+      [this, &docTitle, &excerpt]<typename Site>(const Site &at) {
         if constexpr (std::is_same_v<Site, xanadu::DocumentSite>) {
           if (const auto view = viewIndexOf(at)) {
-            return "document " + std::to_string(*view) + ", " + bytes;
+            docTitle = "document " + std::to_string(*view);
+            if (*view < session.views().size()) {
+              const auto &openView = session.views()[*view];
+              if (const auto src = session.sourceFor(openView.version,
+                                                     openView.storeIndex)) {
+                if (!src->name().empty()) {
+                  docTitle = src->name();
+                }
+                const auto fullText = src->text();
+                if (at.range.start < fullText.size()) {
+                  const auto len =
+                      std::min<std::size_t>(at.range.end > at.range.start
+                                                ? at.range.end - at.range.start
+                                                : 32,
+                                            fullText.size() - at.range.start);
+                  excerpt = fullText.substr(at.range.start, len);
+                }
+              }
+            }
+          } else {
+            docTitle = "closed version";
           }
-          return "a closed version, " + bytes;
         } else {
-          return "cell " + std::to_string(at.cell) + ", " + bytes;
+          docTitle = "cell " + std::to_string(at.cell);
+          if (manifold && manifoldStoreIndex < session.storeCount()) {
+            const auto text =
+                manifold->textOf(at.cell, session.store(manifoldStoreIndex));
+            if (!text.empty()) {
+              excerpt = text.substr(0, std::min<std::size_t>(text.size(), 32));
+            }
+          }
         }
       },
       site);
+
+  const auto anchor =
+      makeSemanticPassageAnchor(site, linkType, docTitle, excerpt);
+  return formatSemanticPassageAnchor(anchor);
 }
 
 void LinkContext::focus(const xanadu::OccurrenceSite &site) {

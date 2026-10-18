@@ -81,14 +81,15 @@ Elsewhere published(const std::uint64_t from   = 100,
   return out;
 }
 
-/// A stand-in for the OpenPGP-signed authorship record. What sealing insists
-/// on is that there be one; whether gpg made it is provenance.cpp's business,
-/// and needing a keyring would make every test here need one.
+/// A stand-in for the signed authorship record. What sealing insists
+/// on is that there be one; whether a full cryptographic engine made it is
+/// provenance.cpp's business, and needing a keyring would make every test here
+/// need one.
 xanadu::SignedProvenance signedBy(const std::string &name) {
   xanadu::Provenance record;
   record.author.name  = name;
   record.author.email = name + "@example.org";
-  return {record.toTsv(), "-----BEGIN PGP SIGNATURE-----\n(for the test)\n"};
+  return {record.toTsv(), "ed25519-sig:dummy-test-signature\n"};
 }
 
 std::vector<const Version *> viewing(const std::vector<Version> &versions) {

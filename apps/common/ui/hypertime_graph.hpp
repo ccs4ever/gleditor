@@ -115,6 +115,7 @@ public:
   HypertimeGraph *setVisible(bool);
   HypertimeGraph *toggle() { return setVisible(!visible_.load()); }
   [[nodiscard]] bool isVisible() const noexcept { return visible_.load(); }
+  HypertimeGraph *setComparisonPage(bool comp);
   void scroll(float horizontal, float vertical, bool zoom, bool shift,
               float pointerX, float pointerY);
   HypertimeGraph *setCurrent(const MicroversionId &);

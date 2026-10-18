@@ -216,12 +216,12 @@ temporarily restored and comparing against the fix: with the old gate, the beam 
 of frames (an artifact of the background document not yet being in `state.docs` when the first
 couple of frames ran) and then stopped completely until the whole 8-9 second run settled; with the
 fix, the beam drew on every sampled frame continuously from ~250ms through to settling.
-`tests/xudu/beam_progressive_loading_test.cpp` is the permanent regression test for this scenario:
+`tests/xuzz/beam_progressive_loading_test.cpp` is the permanent regression test for this scenario:
 since asserting the *timing* of when a beam first appears needs instrumentation `--profile` does not
 currently report (Stage 4 is where adding that is planned), the test instead locks down what is
 unit-testable today — the whole scene, camera alignment included, still settles correctly and within
 a generous bound rather than hanging, which is exactly what a wrong `anyStrandStillLoading` could
-break. Full `xudu_test`/`gleditor_test`/`zigzag_test` suites pass with no new failures (three
+break. Full `xuzz_test`/`gleditor_test`/`zigzag_test` suites pass with no new failures (three
 pre-existing, unrelated `AnimationTransclusionTest` failures reproduce identically on unpatched
 `HEAD`).
 
@@ -239,11 +239,11 @@ pre-existing, unrelated `AnimationTransclusionTest` failures reproduce identical
   priority target pages} rather than the camera alone — so the existing catch-up multiplier hurries
   toward whatever a beam needs, still building in document order.
 - Wire `LinkBeams` to push its ribbon-crossing offsets: `LinkBeams::updatePriorityOffsets()`
-  (`apps/xudu/beams.cpp`), called from `drawFrame()` right after `resolveAnchors()`. For each strand
-  and transclusion strand with at least one still-unresolved document endpoint, it resolves both
-  ends to approximate world points (`approximateAnchorFor()` + `Doc::worldPoint()` for a document
-  end still waiting on its page, the exact anchor's `worldPoint()` for one that has resolved,
-  `CellAnchor::position` for a cell end), and calls the new static
+  (`apps/common/ui/xanadoc/beams.cpp`), called from `drawFrame()` right after `resolveAnchors()`.
+  For each strand and transclusion strand with at least one still-unresolved document endpoint, it
+  resolves both ends to approximate world points (`approximateAnchorFor()` + `Doc::worldPoint()` for
+  a document end still waiting on its page, the exact anchor's `worldPoint()` for one that has
+  resolved, `CellAnchor::position` for a cell end), and calls the new static
   `LinkBeams::ribbonMaybeOnScreen()` — a box test built on `outsideFrustum()`
   (`include/gleditor/draw_budget.hpp`), centred on the segment's midpoint and inflated by one page
   height (`approximateAnchorFor()`'s own accuracy contract) in every direction to absorb the
@@ -268,9 +268,9 @@ offset instead of a moved camera), `PageIndexForOffsetAnswersBeforeAnyPageIsBuil
 answers before `buildPendingPages()` has ever run, cross-checked against `anchorFor()` once building
 catches up), and `ApproximateAnchorAgreesWithAnchorOncePageIsBuilt` (the approximate and exact
 anchors name the same page and land within about one page height of each other in world space).
-`tests/xudu/beam_priority_offset_test.cpp` is the Stage 1 analogue of Stage 0's own binary-driven
+`tests/xuzz/beam_priority_offset_test.cpp` is the Stage 1 analogue of Stage 0's own binary-driven
 regression test: a beam whose far end is five bytes from the end of a 1000+-page document, driven
-through the real `xudu` binary, asserted to settle correctly and within a generous bound — the same
+through the real `xuzz` binary, asserted to settle correctly and within a generous bound — the same
 "does not hang" property Stage 0 guards, now for the priority channel rather than the settling
 condition.
 
@@ -313,7 +313,7 @@ including the page it is about to read from — unreachable by clicking (which r
 drawn) but reachable by automation typing at an arbitrary offset once out-of-order building exists.
 
 **Build order stays document order** — behaviour-preserving and proven as such: the full
-`gleditor_test`/`xudu_test`/`zigzag_test` suites pass unchanged (one pre-existing, load-sensitive
+`gleditor_test`/`xuzz_test`/`zigzag_test` suites pass unchanged (one pre-existing, load-sensitive
 `ArrayfiladeBenchmarkTest` timing threshold aside, confirmed flaky independent of this work), and
 `compare-backends.sh`'s `opengl`/`opengles` frames stay byte-identical (0 of 1,440,000 bytes differ,
 before and after this stage).
@@ -383,7 +383,7 @@ original 512 KB fixture (~100 pages) finish entirely within one catch-up-widened
 orderings, which would make "a page between the two tiers is still unbuilt" trivially true for the
 wrong reason.
 
-**Verified**: the full `gleditor_test`/`xudu_test`/`zigzag_test` suites pass (the same pre-existing,
+**Verified**: the full `gleditor_test`/`xuzz_test`/`zigzag_test` suites pass (the same pre-existing,
 load-sensitive `ArrayfiladeBenchmarkTest` case aside), `compare-backends.sh`'s `opengl`/`opengles`
 frames stay byte-identical, and a manual `kjv.txt` run still renders its first page in well under a
 second with `--profile`, confirming the degeneration path (no camera movement, no priority offsets
@@ -512,7 +512,7 @@ channel (Stage 0/3), and Stage 5 changes nothing about what that channel does wi
 target page is simply banked, rather than eventually-built-via-P2, until the moment a strand names
 it.
 
-**Verified**: the full `gleditor_test` (514/514, the two new tests above included)/`xudu_test`
+**Verified**: the full `gleditor_test` (514/514, the two new tests above included)/`xuzz_test`
 (944/944, excluding the pre-existing unrelated `AnimationTransclusionTest` hang)/`zigzag_test`
 (90/90) suites pass, and `compare-backends.sh`'s `opengl`/`opengles` frames stay byte-identical --
 the hard requirement per "Determinism is a hard constraint" above.

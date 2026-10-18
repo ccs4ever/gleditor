@@ -28,7 +28,6 @@ inline constexpr std::string_view kMasterFingerprint = "master_fingerprint";
 inline constexpr std::string_view kDevicePublicKey   = "device_public_key";
 inline constexpr std::string_view kDeviceName        = "device_name";
 inline constexpr std::string_view kIssuedTimestamp   = "issued_timestamp";
-inline constexpr std::string_view kGpgSignature      = "gpg_signature";
 inline constexpr std::string_view kCertificateB64    = "certificate_b64";
 
 std::filesystem::path resolveDefaultStorageDir(std::string_view subDir) {
@@ -250,20 +249,6 @@ bool DeviceDelegation::verify(const identity::PubKey32 &masterPubKey,
   return res.has_value();
 }
 
-bool DeviceDelegation::verify(
-    const std::string_view masterPublicKeyArmored) const {
-  if (!masterFingerprint.isValid() || devicePublicKey.isZero() ||
-      certificate.empty()) {
-    return false;
-  }
-  auto pkOpt = identity::StandardCryptoEngine::publicKeyFromAnyFormat(
-      masterPublicKeyArmored);
-  if (pkOpt) {
-    return verify(*pkOpt, issuedTimestamp);
-  }
-  return false;
-}
-
 std::string DeviceDelegation::toTsv() const {
   std::string out;
   common::tsv::write(out, kMasterFingerprint, masterFingerprint.toString());
@@ -274,9 +259,6 @@ std::string DeviceDelegation::toTsv() const {
     common::tsv::write(
         out, kCertificateB64,
         identity::StandardCryptoEngine::certificateToBase64Der(certificate));
-  }
-  if (!gpgSignatureArmored.empty()) {
-    common::tsv::write(out, kGpgSignature, gpgSignatureArmored);
   }
   return out;
 }
@@ -319,8 +301,6 @@ DeviceDelegation::fromTsv(const std::string_view tsv) {
         return std::nullopt;
       }
       cert.certificate = std::move(*certRes);
-    } else if (entry.key == kGpgSignature) {
-      cert.gpgSignatureArmored = entry.value;
     }
   }
 
@@ -586,7 +566,11 @@ UserPermascroll::registerSubscroll(std::string_view deviceId,
     const auto targetPath = deviceActivePrimediaPath(deviceId);
     std::error_code ec;
     std::filesystem::create_directories(targetPath.parent_path(), ec);
-    if (!std::filesystem::equivalent(primediaPath, targetPath, ec)) {
+    std::filesystem::create_directories(targetPath.parent_path() / "segments",
+                                        ec);
+    if (!std::filesystem::exists(targetPath, ec) ||
+        !std::filesystem::equivalent(primediaPath, targetPath, ec)) {
+      ec.clear();
       std::filesystem::copy_file(
           primediaPath, targetPath,
           std::filesystem::copy_options::overwrite_existing, ec);
@@ -613,10 +597,13 @@ Scroll UserPermascroll::ingestSubscroll(std::string_view deviceId,
     const auto targetPath = deviceActivePrimediaPath(deviceId);
     std::error_code ec;
     std::filesystem::create_directories(targetPath.parent_path(), ec);
+    std::filesystem::create_directories(targetPath.parent_path() / "segments",
+                                        ec);
     std::ofstream out(targetPath, std::ios::binary | std::ios::trunc);
     if (out && !data.empty()) {
       out.write(reinterpret_cast<const char *>(data.data()),
                 static_cast<std::streamsize>(data.size()));
+      out.flush();
     }
   }
 

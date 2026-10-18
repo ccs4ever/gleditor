@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <gleditor/color.hpp>
+#include <gleditor/ui/button_metrics.hpp>
 #include <glm/ext/vector_float4.hpp>
 #include <optional>
 #include <string>
@@ -48,6 +49,7 @@ struct Theme {
                                               {"Sans Bold", 18.0F},
                                               {"Monospace", 12.0F}}};
   ThemeColours colours;
+  ButtonMetrics buttonMetrics;
   TypeScale type;
   float paddingEm{0.75F};
   float gapEm{0.5F};

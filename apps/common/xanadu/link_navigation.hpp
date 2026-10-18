@@ -20,6 +20,7 @@
 
 #include <compare>
 #include <cstdint>
+#include <deque>
 #include <expected>
 #include <optional>
 #include <string_view>
@@ -76,6 +77,10 @@ struct Visit {
   OccurrenceSite target;
   Arrival arrival{Arrival::Opened};
   std::optional<LinkVisitContext> link{};
+  float pixelScrollOffset{0.0F};
+  float cameraZoom{1.0F};
+  uint8_t multiPaneLayoutMode{0};
+  bool foldedState{false};
 
   bool operator==(const Visit &) const = default;
 };
@@ -202,6 +207,18 @@ struct ReturnToOrigin {
 struct Dismiss {
   bool operator==(const Dismiss &) const = default;
 };
+/// Cross side and enter counterpart occurrence atomically.
+struct FollowLink {
+  bool operator==(const FollowLink &) const = default;
+};
+/// Restore the most recently dismissed link from the 5-item stash ring.
+struct RestoreDismissed {
+  bool operator==(const RestoreDismissed &) const = default;
+};
+/// Leader mode chord (,l).
+struct LeaderMode {
+  bool operator==(const LeaderMode &) const = default;
+};
 
 } // namespace nav
 
@@ -209,7 +226,8 @@ using NavigationCommand =
     std::variant<nav::SelectLink, nav::StepLink, nav::SelectMember,
                  nav::StepMember, nav::SelectOccurrence, nav::StepOccurrence,
                  nav::Cross, nav::Enter, nav::EnterAt, nav::ActivityBack,
-                 nav::ActivityForward, nav::ReturnToOrigin, nav::Dismiss>;
+                 nav::ActivityForward, nav::ReturnToOrigin, nav::Dismiss,
+                 nav::FollowLink, nav::RestoreDismissed, nav::LeaderMode>;
 
 enum class NavigationError : std::uint8_t {
   NoLinkSelected,
@@ -284,6 +302,10 @@ struct SelectedLink {
   }
 };
 
+/// Auto-settle independent bilateral endset cursors to Member 0, Occurrence 0
+/// if unset.
+void autoSettleCursors(SelectedLink &selected);
+
 using NavigationResult = std::expected<NavigationEffect, NavigationError>;
 
 class LinkNavigator {
@@ -292,6 +314,28 @@ public:
       : activity(activity), current(activity.current()) {}
 
   NavigationResult dispatch(const NavigationCommand &command);
+
+  /// Cross side and enter counterpart occurrence atomically (Alt+Return).
+  NavigationResult follow();
+
+  /// Dismiss the current link, stashing its context in lastDismissed_.
+  NavigationResult dismiss();
+
+  /// Restore the most recently dismissed link context from lastDismissed_
+  /// (Alt+Shift+Z).
+  NavigationResult restoreDismissed();
+
+  /// Handle leader mode (,l).
+  NavigationResult leaderMode() { return NavigationEffect{}; }
+
+  /// Auto-settle cursors on both endsets to Member 0, Occurrence 0.
+  void autoSettle();
+
+  /// Stash ring of dismissed links (max 5 items).
+  [[nodiscard]] const std::deque<LinkVisitContext> &
+  lastDismissed() const noexcept {
+    return lastDismissed_;
+  }
 
   /// Rebuild the saved link context after the host has reopened its views.
   /// The returned resolution request changes no reading place or visit.
@@ -336,7 +380,6 @@ private:
   NavigationResult activityBack();
   NavigationResult activityForward(VisitId child);
   NavigationResult returnToOrigin();
-  NavigationResult dismiss();
 
   /// The selection, once its occurrences have been supplied.
   std::expected<SelectedLink *, NavigationError> resolved();
@@ -347,6 +390,8 @@ private:
   std::optional<VisitId> current;
   std::vector<LinkKey> candidates;
   std::uint64_t generations{};
+  static constexpr std::size_t kMaxDismissedRingSize = 5;
+  std::deque<LinkVisitContext> lastDismissed_;
 };
 
 // -- input adapters --------------------------------------------------------

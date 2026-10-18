@@ -87,6 +87,7 @@ struct Tooltip {
 /// Bounds and children correspond by index; off-panel children are culled.
 struct PositionedPanel {
   std::vector<Rect> childBounds;
+  bool background{false};
 };
 struct Panel {
   std::string title;
@@ -135,8 +136,10 @@ struct WidgetScene {
   LayoutResult layout;
   std::vector<WidgetVisual> visuals;
   std::shared_ptr<const std::vector<WidgetId>> pickingTargets;
+  float virtualHitTargetMinPx{36.0F};
   [[nodiscard]] const WidgetVisual *find(WidgetId) const;
   [[nodiscard]] std::optional<WidgetId> resolvePickingId(std::uint32_t) const;
+  [[nodiscard]] const LayoutBox *hitTest(float x, float y) const;
 };
 /// The same pixel boxes are used by drawing, hit testing, and accessibility.
 /// IDs must be nonzero and unique, including tabs and list rows.

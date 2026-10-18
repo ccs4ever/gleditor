@@ -5,6 +5,10 @@
  */
 #include "session_container.hpp"
 #include "identity/standard_crypto_engine.hpp"
+#include "link_package.hpp"
+#include "store.hpp"
+#include "store_tables.hpp"
+#include "user_permascroll.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -62,6 +66,10 @@ SessionPackage::SessionPackage(SessionPackage &&other) noexcept
       primediaSlice(std::move(other.primediaSlice)),
       opsNodes(std::move(other.opsNodes)),
       deviceCert(std::move(other.deviceCert)), signature(other.signature),
+      storeTables(std::move(other.storeTables)),
+      storeTablesSha256(std::move(other.storeTablesSha256)),
+      scrollFragments(std::move(other.scrollFragments)),
+      linkPackages(std::move(other.linkPackages)),
       rawManifest(std::move(other.rawManifest)) {}
 
 SessionPackage &SessionPackage::operator=(SessionPackage &&other) noexcept {
@@ -92,6 +100,10 @@ SessionPackage &SessionPackage::operator=(SessionPackage &&other) noexcept {
     opsNodes          = std::move(other.opsNodes);
     deviceCert        = std::move(other.deviceCert);
     signature         = other.signature;
+    storeTables       = std::move(other.storeTables);
+    storeTablesSha256 = std::move(other.storeTablesSha256);
+    scrollFragments   = std::move(other.scrollFragments);
+    linkPackages      = std::move(other.linkPackages);
     rawManifest       = std::move(other.rawManifest);
   }
   return *this;
@@ -127,6 +139,10 @@ SessionPackage &SessionPackage::operator=(const SessionPackage &other) {
     opsNodes          = other.opsNodes;
     deviceCert        = other.deviceCert;
     signature         = other.signature;
+    storeTables       = other.storeTables;
+    storeTablesSha256 = other.storeTablesSha256;
+    scrollFragments   = other.scrollFragments;
+    linkPackages      = other.linkPackages;
     rawManifest       = other.rawManifest;
   }
   return *this;
@@ -183,7 +199,7 @@ using X509NamePtr = std::unique_ptr<X509_NAME, decltype(&X509_NAME_free)>;
 }
 
 [[nodiscard]] std::optional<std::vector<std::uint8_t>>
-fromHex(std::string_view hex) {
+decodeHexBytes(std::string_view hex) {
   if (hex.size() % 2 != 0) return std::nullopt;
   std::vector<std::uint8_t> out;
   out.reserve(hex.size() / 2);
@@ -234,16 +250,20 @@ computePackageAad(std::string_view masterFingerprint, std::string_view deviceId,
          "ops_hash:" + std::string(opsSha256) + "\n";
 }
 
-[[nodiscard]] std::string computeSha256Hex(std::span<const std::uint8_t> data) {
+} // namespace
+
+std::string computeSha256Hex(std::span<const std::uint8_t> data) {
   std::array<std::uint8_t, 32> hash{};
   SHA256(data.data(), data.size(), hash.data());
   return toHex(hash);
 }
 
-[[nodiscard]] std::string computeSha256Hex(std::string_view data) {
+std::string computeSha256Hex(std::string_view data) {
   return computeSha256Hex(std::span<const std::uint8_t>(
       reinterpret_cast<const std::uint8_t *>(data.data()), data.size()));
 }
+
+namespace {
 
 struct SensitiveCleanseGuard {
   std::span<std::uint8_t> mem;
@@ -651,7 +671,122 @@ decompressIfZstd(std::span<const std::uint8_t> data) {
   return out;
 }
 
+void packInnerPayload(std::vector<std::uint8_t> &innerTar,
+                      const SessionPackage &pkg) {
+  innerTar.reserve(pkg.primediaSlice.size() + pkg.opsNodesBytes().size() +
+                   pkg.storeTables.size() + 4096);
+  appendTarEntry(innerTar, "primedia.slice", pkg.primediaSlice, pkg.timestamp);
+  appendTarEntry(innerTar, "ops.nodes", pkg.opsNodesBytes(), pkg.timestamp);
+  if (!pkg.storeTables.empty()) {
+    appendTarEntry(innerTar, "store.tables", pkg.storeTables, pkg.timestamp);
+  }
+  for (const auto &frag : pkg.scrollFragments) {
+    appendTarEntry(innerTar, frag.filename(), frag.bytes, pkg.timestamp);
+  }
+  for (std::size_t i = 0; i < pkg.linkPackages.size(); ++i) {
+    const auto encoded = encodeLinkPackage(pkg.linkPackages[i]);
+    std::span<const std::uint8_t> bencBytes(
+        reinterpret_cast<const std::uint8_t *>(encoded.data()), encoded.size());
+    appendTarEntry(innerTar, "linkpkg_" + std::to_string(i) + ".benc",
+                   bencBytes, pkg.timestamp);
+  }
+  innerTar.insert(innerTar.end(), 1024, 0);
+}
+
 } // namespace
+
+SpanDependencyAnalysis
+analyzeSpanDependencies(std::span<const CompactOpNode> ops,
+                        const std::map<zigzag::CellRef, Link> &links,
+                        std::span<const LinkPackage> linkPackages) {
+  SpanDependencyAnalysis analysis;
+  std::map<PrimediaSpan, std::uint64_t> spanCounts;
+
+  for (const auto &op : ops) {
+    if (!isReservedScroll(op.scrollId) && op.spanLength > 0) {
+      spanCounts[op.span()]++;
+    }
+  }
+
+  for (const auto &[cell, link] : links) {
+    for (const auto &span : link.left) {
+      if (!isReservedScroll(span.scroll) && span.length > 0) {
+        spanCounts[span]++;
+      }
+    }
+    for (const auto &span : link.right) {
+      if (!isReservedScroll(span.scroll) && span.length > 0) {
+        spanCounts[span]++;
+      }
+    }
+  }
+
+  for (const auto &pkg : linkPackages) {
+    for (const auto &glink : pkg.links) {
+      for (const auto &span : glink.left) {
+        if ((span.scroll.empty() || span.scroll == "0") && span.length > 0) {
+          spanCounts[PrimediaSpan{.scroll = localScroll,
+                                  .start  = span.start,
+                                  .length = span.length}]++;
+        }
+      }
+      for (const auto &span : glink.right) {
+        if ((span.scroll.empty() || span.scroll == "0") && span.length > 0) {
+          spanCounts[PrimediaSpan{.scroll = localScroll,
+                                  .start  = span.start,
+                                  .length = span.length}]++;
+        }
+      }
+    }
+  }
+
+  analysis.totalSpans = spanCounts.size();
+  analysis.frequencies.reserve(spanCounts.size());
+
+  std::map<ScrollId, std::vector<ScrollInterval>> rawIntervals;
+
+  for (const auto &[span, count] : spanCounts) {
+    analysis.frequencies.push_back(
+        SpanFrequencyEntry{.span = span, .count = count});
+    rawIntervals[span.scroll].push_back(ScrollInterval{
+        .scrollId = span.scroll, .start = span.start, .length = span.length});
+  }
+
+  // Sort frequencies descending by count, then by span
+  std::ranges::sort(analysis.frequencies, [](const auto &a, const auto &b) {
+    if (a.count != b.count) return a.count > b.count;
+    return a.span < b.span;
+  });
+
+  // Merge intervals per scroll ID
+  for (auto &[scrollId, list] : rawIntervals) {
+    std::ranges::sort(list, [](const auto &a, const auto &b) {
+      if (a.start != b.start) return a.start < b.start;
+      return a.length > b.length;
+    });
+
+    std::vector<ScrollInterval> merged;
+    for (const auto &item : list) {
+      if (merged.empty()) {
+        merged.push_back(item);
+      } else {
+        auto &last = merged.back();
+        if (item.start <= last.end()) {
+          const auto newEnd = std::max(last.end(), item.end());
+          last.length       = newEnd - last.start;
+        } else {
+          merged.push_back(item);
+        }
+      }
+    }
+    for (const auto &m : merged) {
+      analysis.totalBytes += m.length;
+    }
+    analysis.intervals[scrollId] = std::move(merged);
+  }
+
+  return analysis;
+}
 
 std::string SessionManifest::serialize() const {
   std::string out;
@@ -688,6 +823,28 @@ std::string SessionManifest::serialize() const {
   }
   if (!deviceCertSha256.empty()) {
     out += "device_cert_sha256\t" + deviceCertSha256 + "\n";
+  }
+  if (!storeTablesSha256.empty()) {
+    out += "store_tables_sha256\t" + storeTablesSha256 + "\n";
+  }
+  if (scrollFragmentCount > 0 || !scrollFragmentEntries.empty()) {
+    const auto count = !scrollFragmentEntries.empty()
+                           ? scrollFragmentEntries.size()
+                           : scrollFragmentCount;
+    out += "scroll_fragment_count\t" + std::to_string(count) + "\n";
+    for (std::size_t i = 0; i < scrollFragmentEntries.size(); ++i) {
+      out += "scroll_fragment_" + std::to_string(i) + "\t" +
+             scrollFragmentEntries[i] + "\n";
+    }
+  }
+  if (linkPackageCount > 0 || !linkPackageEntries.empty()) {
+    const auto count = !linkPackageEntries.empty() ? linkPackageEntries.size()
+                                                   : linkPackageCount;
+    out += "link_package_count\t" + std::to_string(count) + "\n";
+    for (std::size_t i = 0; i < linkPackageEntries.size(); ++i) {
+      out += "link_package_" + std::to_string(i) + "\t" +
+             linkPackageEntries[i] + "\n";
+    }
   }
   for (const auto &[k, v] : extraFields) {
     out += k + "\t" + v + "\n";
@@ -847,6 +1004,31 @@ SessionManifest::parse(std::string_view tsvContent) {
         return std::unexpected(SessionValidationError::InvalidFieldFormat);
       }
       manifest.deviceCertSha256 = std::string(val);
+    } else if (key == "store_tables_sha256") {
+      if (val.size() != 64 || !isAllHex(val)) {
+        return std::unexpected(SessionValidationError::InvalidFieldFormat);
+      }
+      manifest.storeTablesSha256 = std::string(val);
+    } else if (key == "scroll_fragment_count") {
+      std::uint64_t v = 0;
+      const auto [ptr, ec] =
+          std::from_chars(val.data(), val.data() + val.size(), v);
+      if (ec != std::errc{} || ptr != val.data() + val.size()) {
+        return std::unexpected(SessionValidationError::InvalidFieldFormat);
+      }
+      manifest.scrollFragmentCount = v;
+    } else if (key.starts_with("scroll_fragment_")) {
+      manifest.scrollFragmentEntries.emplace_back(std::string(val));
+    } else if (key == "link_package_count") {
+      std::uint64_t v = 0;
+      const auto [ptr, ec] =
+          std::from_chars(val.data(), val.data() + val.size(), v);
+      if (ec != std::errc{} || ptr != val.data() + val.size()) {
+        return std::unexpected(SessionValidationError::InvalidFieldFormat);
+      }
+      manifest.linkPackageCount = v;
+    } else if (key.starts_with("link_package_")) {
+      manifest.linkPackageEntries.emplace_back(std::string(val));
     } else {
       manifest.extraFields.emplace_back(std::string(key), std::string(val));
     }
@@ -887,7 +1069,34 @@ std::string SessionPackage::serializeManifest() const {
   manifest.primediaSha256    = primediaSha256;
   manifest.opsSha256         = opsSha256;
   manifest.deviceCertSha256  = deviceCertSha256;
-  manifest.extraFields       = extraFields;
+
+  if (!storeTables.empty()) {
+    manifest.storeTablesSha256 = !storeTablesSha256.empty()
+                                     ? storeTablesSha256
+                                     : computeSha256Hex(storeTables);
+  } else if (!storeTablesSha256.empty()) {
+    manifest.storeTablesSha256 = storeTablesSha256;
+  }
+  if (!scrollFragments.empty()) {
+    manifest.scrollFragmentCount = scrollFragments.size();
+    for (const auto &frag : scrollFragments) {
+      const auto sha =
+          !frag.sha256.empty() ? frag.sha256 : computeSha256Hex(frag.bytes);
+      manifest.scrollFragmentEntries.push_back(
+          std::to_string(frag.scrollId) + ":" + std::to_string(frag.start) +
+          ":" + std::to_string(frag.length) + ":" + sha);
+    }
+  }
+  if (!linkPackages.empty()) {
+    manifest.linkPackageCount = linkPackages.size();
+    for (const auto &lp : linkPackages) {
+      const auto encoded = encodeLinkPackage(lp);
+      manifest.linkPackageEntries.push_back(computeSha256Hex(encoded) + ":" +
+                                            lp.curator.hex() + ":" + lp.salt);
+    }
+  }
+
+  manifest.extraFields = extraFields;
   return manifest.serialize();
 }
 
@@ -897,21 +1106,10 @@ std::expected<void, SessionValidationError> SessionPackage::signWithDeviceKey(
     return std::unexpected(SessionValidationError::InvalidFieldFormat);
   }
 
-  EvpPkeyPtr pkey(EVP_PKEY_new_raw_private_key(EVP_PKEY_ED25519, nullptr,
-                                               devicePrivateKey.data(),
-                                               devicePrivateKey.size()),
-                  &EVP_PKEY_free);
-  if (!pkey) {
-    return std::unexpected(SessionValidationError::InvalidDeviceKey);
-  }
-
-  std::array<std::uint8_t, 32> pub{};
-  std::size_t pubLen = 32;
-  if (EVP_PKEY_get_raw_public_key(pkey.get(), pub.data(), &pubLen) <= 0 ||
-      pubLen != 32) {
-    return std::unexpected(SessionValidationError::InvalidDeviceKey);
-  }
-  if (isSmallOrderPoint(pub)) {
+  identity::StandardCryptoEngine signer;
+  signer.setPrivateKeyRaw(devicePrivateKey);
+  const auto pub = signer.publicKey().bytes;
+  if (signer.publicKey().isZero() || isSmallOrderPoint(pub)) {
     return std::unexpected(SessionValidationError::InvalidDeviceKey);
   }
   deviceKey      = toHex(pub);
@@ -922,6 +1120,14 @@ std::expected<void, SessionValidationError> SessionPackage::signWithDeviceKey(
   opsSha256      = computeSha256Hex(opsNodesBytes());
   if (!deviceCert.empty()) {
     deviceCertSha256 = computeSha256Hex(deviceCert);
+  }
+  if (!storeTables.empty() && storeTablesSha256.empty()) {
+    storeTablesSha256 = computeSha256Hex(storeTables);
+  }
+  for (auto &frag : scrollFragments) {
+    if (frag.sha256.empty()) {
+      frag.sha256 = computeSha256Hex(frag.bytes);
+    }
   }
 
   if (encrypted) {
@@ -944,8 +1150,8 @@ std::expected<void, SessionValidationError> SessionPackage::signWithDeviceKey(
       encryptionNonce = toHex(nonceBytes);
     }
 
-    auto saltVec  = fromHex(encryptionSalt);
-    auto nonceVec = fromHex(encryptionNonce);
+    auto saltVec  = decodeHexBytes(encryptionSalt);
+    auto nonceVec = decodeHexBytes(encryptionNonce);
     if (!saltVec || saltVec->size() != 16 || !nonceVec ||
         nonceVec->size() != 12) {
       return std::unexpected(SessionValidationError::InvalidFieldFormat);
@@ -953,10 +1159,7 @@ std::expected<void, SessionValidationError> SessionPackage::signWithDeviceKey(
 
     // Pack inner payload
     std::vector<std::uint8_t> innerTar;
-    innerTar.reserve(primediaSlice.size() + opsNodesBytes().size() + 2048);
-    appendTarEntry(innerTar, "primedia.slice", primediaSlice, timestamp);
-    appendTarEntry(innerTar, "ops.nodes", opsNodesBytes(), timestamp);
-    innerTar.insert(innerTar.end(), 1024, 0);
+    packInnerPayload(innerTar, *this);
 
     const std::string aad =
         computePackageAad(masterFingerprint, deviceId, baseVersion, headVersion,
@@ -975,24 +1178,13 @@ std::expected<void, SessionValidationError> SessionPackage::signWithDeviceKey(
 
   rawManifest = serializeManifest();
 
-  EvpMdCtxPtr ctx(EVP_MD_CTX_new(), &EVP_MD_CTX_free);
-  if (!ctx) {
+  auto sigRes = signer.sign(std::span<const std::uint8_t>(
+      reinterpret_cast<const std::uint8_t *>(rawManifest.data()),
+      rawManifest.size()));
+  if (!sigRes) {
     return std::unexpected(SessionValidationError::SerializationError);
   }
-
-  if (EVP_DigestSignInit(ctx.get(), nullptr, nullptr, nullptr, pkey.get()) <=
-      0) {
-    return std::unexpected(SessionValidationError::SerializationError);
-  }
-
-  std::size_t sigLen = signature.size();
-  if (EVP_DigestSign(
-          ctx.get(), signature.data(), &sigLen,
-          reinterpret_cast<const unsigned char *>(rawManifest.data()),
-          rawManifest.size()) <= 0 ||
-      sigLen != 64) {
-    return std::unexpected(SessionValidationError::SerializationError);
-  }
+  std::ranges::copy(sigRes->bytes, signature.begin());
 
   return {};
 }
@@ -1003,7 +1195,7 @@ SessionPackage::verifySignature() const {
     return std::unexpected(SessionValidationError::InvalidDeviceKey);
   }
 
-  auto pubBytes = fromHex(deviceKey);
+  auto pubBytes = decodeHexBytes(deviceKey);
   if (!pubBytes || pubBytes->size() != 32) {
     return std::unexpected(SessionValidationError::InvalidDeviceKey);
   }
@@ -1013,37 +1205,22 @@ SessionPackage::verifySignature() const {
     return std::unexpected(SessionValidationError::InvalidDeviceKey);
   }
 
-  std::span<const std::uint8_t, 32> sSpan(signature.data() + 32, 32);
-  if (!isCanonicalEd25519Scalar(sSpan)) {
-    return std::unexpected(SessionValidationError::InvalidSignature);
-  }
-
-  EvpPkeyPtr vkey(EVP_PKEY_new_raw_public_key(EVP_PKEY_ED25519, nullptr,
-                                              pubSpan.data(), 32),
-                  &EVP_PKEY_free);
-  if (!vkey) {
-    return std::unexpected(SessionValidationError::InvalidDeviceKey);
-  }
-
-  EvpMdCtxPtr vctx(EVP_MD_CTX_new(), &EVP_MD_CTX_free);
-  if (!vctx) {
-    return std::unexpected(SessionValidationError::SerializationError);
-  }
-
-  if (EVP_DigestVerifyInit(vctx.get(), nullptr, nullptr, nullptr, vkey.get()) <=
-      0) {
-    return std::unexpected(SessionValidationError::SerializationError);
-  }
-
   const std::string manifestContent =
       !rawManifest.empty() ? rawManifest : serializeManifest();
 
-  const int rc = EVP_DigestVerify(
-      vctx.get(), signature.data(), signature.size(),
-      reinterpret_cast<const unsigned char *>(manifestContent.data()),
-      manifestContent.size());
+  identity::PubKey32 pk;
+  std::ranges::copy(pubSpan, pk.bytes.begin());
+  identity::Signature64 sig;
+  std::ranges::copy(signature, sig.bytes.begin());
 
-  if (rc != 1) {
+  identity::StandardCryptoEngine verifier;
+  auto vres = verifier.verify(
+      pk,
+      std::span<const std::uint8_t>(
+          reinterpret_cast<const std::uint8_t *>(manifestContent.data()),
+          manifestContent.size()),
+      sig);
+  if (!vres) {
     return std::unexpected(SessionValidationError::InvalidSignature);
   }
   return {};
@@ -1090,7 +1267,7 @@ std::expected<void, SessionValidationError> SessionPackage::verifyDeviceCert(
     return std::unexpected(SessionValidationError::InvalidDeviceCert);
   }
 
-  auto devKeyBytes = fromHex(deviceKey);
+  auto devKeyBytes = decodeHexBytes(deviceKey);
   if (!devKeyBytes || devKeyBytes->size() != 32) {
     return std::unexpected(SessionValidationError::InvalidDeviceKey);
   }
@@ -1103,14 +1280,14 @@ std::expected<void, SessionValidationError> SessionPackage::verifyDeviceCert(
     if (isSmallOrderPoint(*masterPubKey)) {
       return std::unexpected(SessionValidationError::InvalidDeviceCert);
     }
-    EvpPkeyPtr caKey(EVP_PKEY_new_raw_public_key(EVP_PKEY_ED25519, nullptr,
-                                                 masterPubKey->data(), 32),
-                     &EVP_PKEY_free);
-    if (!caKey) {
-      return std::unexpected(SessionValidationError::InvalidDeviceCert);
-    }
-    const int verifyRes = X509_verify(x.get(), caKey.get());
-    if (verifyRes <= 0) {
+    identity::PubKey32 caPub;
+    std::ranges::copy(*masterPubKey, caPub.bytes.begin());
+    identity::X509Certificate x509Cert;
+    x509Cert.setDer(*der);
+
+    identity::StandardCryptoEngine engine;
+    auto valRes = engine.verifyDelegation(x509Cert, caPub, 0);
+    if (!valRes) {
       return std::unexpected(SessionValidationError::InvalidDeviceCert);
     }
   }
@@ -1153,20 +1330,15 @@ exportPackage(const SessionPackage &pkg) {
       return std::unexpected(SessionValidationError::MissingDecryptionKey);
     }
 
-    auto saltVec  = fromHex(pkg.encryptionSalt);
-    auto nonceVec = fromHex(pkg.encryptionNonce);
+    auto saltVec  = decodeHexBytes(pkg.encryptionSalt);
+    auto nonceVec = decodeHexBytes(pkg.encryptionNonce);
     if (!saltVec || saltVec->size() != 16 || !nonceVec ||
         nonceVec->size() != 12) {
       return std::unexpected(SessionValidationError::InvalidFieldFormat);
     }
 
     std::vector<std::uint8_t> innerTar;
-    innerTar.reserve(pkg.primediaSlice.size() + pkg.opsNodesBytes().size() +
-                     2048);
-    appendTarEntry(innerTar, "primedia.slice", pkg.primediaSlice,
-                   pkg.timestamp);
-    appendTarEntry(innerTar, "ops.nodes", pkg.opsNodesBytes(), pkg.timestamp);
-    innerTar.insert(innerTar.end(), 1024, 0);
+    packInnerPayload(innerTar, pkg);
 
     const std::string aad = computePackageAad(
         pkg.masterFingerprint, pkg.deviceId, pkg.baseVersion, pkg.headVersion,
@@ -1200,6 +1372,20 @@ exportPackage(const SessionPackage &pkg) {
     appendTarEntry(tar, "MANIFEST.tsv", manifestBytes, pkg.timestamp);
     appendTarEntry(tar, "primedia.slice", pkg.primediaSlice, pkg.timestamp);
     appendTarEntry(tar, "ops.nodes", pkg.opsNodesBytes(), pkg.timestamp);
+    if (!pkg.storeTables.empty()) {
+      appendTarEntry(tar, "store.tables", pkg.storeTables, pkg.timestamp);
+    }
+    for (const auto &frag : pkg.scrollFragments) {
+      appendTarEntry(tar, frag.filename(), frag.bytes, pkg.timestamp);
+    }
+    for (std::size_t i = 0; i < pkg.linkPackages.size(); ++i) {
+      const auto encoded = encodeLinkPackage(pkg.linkPackages[i]);
+      std::span<const std::uint8_t> bencBytes(
+          reinterpret_cast<const std::uint8_t *>(encoded.data()),
+          encoded.size());
+      appendTarEntry(tar, "linkpkg_" + std::to_string(i) + ".benc", bencBytes,
+                     pkg.timestamp);
+    }
   }
 
   std::span<const std::uint8_t> certBytes(
@@ -1332,6 +1518,7 @@ importPackage(std::span<const std::uint8_t> archiveBytes,
     return std::unexpected(certRes.error());
   }
 
+  std::map<std::string, std::vector<std::uint8_t>> decryptedEntries;
   if (manifest.encrypted) {
     if (!entries.contains("payload.enc")) {
       return std::unexpected(SessionValidationError::CorruptArchive);
@@ -1345,8 +1532,8 @@ importPackage(std::span<const std::uint8_t> archiveBytes,
       return std::unexpected(SessionValidationError::MissingDecryptionKey);
     }
 
-    auto saltVec  = fromHex(manifest.encryptionSalt);
-    auto nonceVec = fromHex(manifest.encryptionNonce);
+    auto saltVec  = decodeHexBytes(manifest.encryptionSalt);
+    auto nonceVec = decodeHexBytes(manifest.encryptionNonce);
     if (!saltVec || saltVec->size() != 16 || !nonceVec ||
         nonceVec->size() != 12) {
       return std::unexpected(SessionValidationError::InvalidFieldFormat);
@@ -1370,61 +1557,176 @@ importPackage(std::span<const std::uint8_t> archiveBytes,
     if (!innerEntriesRes) {
       return std::unexpected(innerEntriesRes.error());
     }
-    const auto &innerEntries = *innerEntriesRes;
+    decryptedEntries = std::move(*innerEntriesRes);
+  }
 
-    if (!innerEntries.contains("primedia.slice")) {
-      return std::unexpected(SessionValidationError::MissingPrimedia);
-    }
-    if (!innerEntries.contains("ops.nodes")) {
-      return std::unexpected(SessionValidationError::MissingOps);
-    }
+  const auto &targetEntries = manifest.encrypted ? decryptedEntries : entries;
 
-    const auto &primediaBytes = innerEntries.at("primedia.slice");
-    if (primediaBytes.size() != manifest.primediaLength) {
-      return std::unexpected(SessionValidationError::PrimediaLengthMismatch);
+  if (!targetEntries.contains("primedia.slice")) {
+    return std::unexpected(SessionValidationError::MissingPrimedia);
+  }
+  if (!targetEntries.contains("ops.nodes")) {
+    return std::unexpected(SessionValidationError::MissingOps);
+  }
+
+  const auto &primediaBytes = targetEntries.at("primedia.slice");
+  if (primediaBytes.size() != manifest.primediaLength) {
+    return std::unexpected(SessionValidationError::PrimediaLengthMismatch);
+  }
+  if (!manifest.primediaSha256.empty() &&
+      computeSha256Hex(primediaBytes) != manifest.primediaSha256) {
+    return std::unexpected(SessionValidationError::PayloadHashMismatch);
+  }
+  pkg.primediaSlice = primediaBytes;
+
+  const auto &opsBytes = targetEntries.at("ops.nodes");
+  if (opsBytes.size() % sizeof(CompactOpNode) != 0) {
+    return std::unexpected(SessionValidationError::CorruptOpsNodes);
+  }
+  if (!manifest.opsSha256.empty() &&
+      computeSha256Hex(opsBytes) != manifest.opsSha256) {
+    return std::unexpected(SessionValidationError::PayloadHashMismatch);
+  }
+  pkg.setOpsNodesBytes(opsBytes);
+
+  // Unpack fat store components if present
+  if (!manifest.storeTablesSha256.empty()) {
+    if (!targetEntries.contains("store.tables")) {
+      return std::unexpected(SessionValidationError::CorruptStoreTables);
     }
-    if (!manifest.primediaSha256.empty() &&
-        computeSha256Hex(primediaBytes) != manifest.primediaSha256) {
+    const auto &tablesBytes = targetEntries.at("store.tables");
+    if (computeSha256Hex(tablesBytes) != manifest.storeTablesSha256) {
       return std::unexpected(SessionValidationError::PayloadHashMismatch);
     }
-    pkg.primediaSlice = primediaBytes;
+    try {
+      (void)deserializeStoreTables(tablesBytes);
+    } catch (const StoreTablesUnreadable &) {
+      return std::unexpected(SessionValidationError::CorruptStoreTables);
+    }
+    pkg.storeTables       = tablesBytes;
+    pkg.storeTablesSha256 = manifest.storeTablesSha256;
+  } else if (targetEntries.contains("store.tables")) {
+    const auto &tablesBytes = targetEntries.at("store.tables");
+    try {
+      (void)deserializeStoreTables(tablesBytes);
+    } catch (const StoreTablesUnreadable &) {
+      return std::unexpected(SessionValidationError::CorruptStoreTables);
+    }
+    pkg.storeTables       = tablesBytes;
+    pkg.storeTablesSha256 = computeSha256Hex(tablesBytes);
+  }
 
-    const auto &opsBytes = innerEntries.at("ops.nodes");
-    if (opsBytes.size() % sizeof(CompactOpNode) != 0) {
-      return std::unexpected(SessionValidationError::CorruptOpsNodes);
+  if (!manifest.scrollFragmentEntries.empty()) {
+    for (const auto &entryStr : manifest.scrollFragmentEntries) {
+      const auto p1 = entryStr.find(':');
+      const auto p2 = p1 != std::string::npos ? entryStr.find(':', p1 + 1)
+                                              : std::string::npos;
+      const auto p3 = p2 != std::string::npos ? entryStr.find(':', p2 + 1)
+                                              : std::string::npos;
+      if (p1 == std::string::npos || p2 == std::string::npos ||
+          p3 == std::string::npos) {
+        return std::unexpected(SessionValidationError::InvalidFieldFormat);
+      }
+      std::uint64_t sId   = 0;
+      std::uint64_t start = 0;
+      std::uint64_t len   = 0;
+      const auto [ptr1, ec1] =
+          std::from_chars(entryStr.data(), entryStr.data() + p1, sId);
+      const auto [ptr2, ec2] = std::from_chars(entryStr.data() + p1 + 1,
+                                               entryStr.data() + p2, start);
+      const auto [ptr3, ec3] =
+          std::from_chars(entryStr.data() + p2 + 1, entryStr.data() + p3, len);
+      if (ec1 != std::errc{} || ec2 != std::errc{} || ec3 != std::errc{}) {
+        return std::unexpected(SessionValidationError::InvalidFieldFormat);
+      }
+      const std::string sha = entryStr.substr(p3 + 1);
+      const std::string fn = "scroll_" + std::to_string(sId) + "_" +
+                             std::to_string(start) + "_" + std::to_string(len) +
+                             ".slice";
+      if (!targetEntries.contains(fn)) {
+        return std::unexpected(SessionValidationError::CorruptArchive);
+      }
+      const auto &fragBytes = targetEntries.at(fn);
+      if (fragBytes.size() != len) {
+        return std::unexpected(SessionValidationError::CorruptArchive);
+      }
+      if (!sha.empty() && computeSha256Hex(fragBytes) != sha) {
+        return std::unexpected(SessionValidationError::PayloadHashMismatch);
+      }
+      pkg.scrollFragments.push_back(
+          ScrollFragment{.scrollId = static_cast<ScrollId>(sId),
+                         .start    = start,
+                         .length   = len,
+                         .bytes    = fragBytes,
+                         .sha256   = sha});
     }
-    if (!manifest.opsSha256.empty() &&
-        computeSha256Hex(opsBytes) != manifest.opsSha256) {
-      return std::unexpected(SessionValidationError::PayloadHashMismatch);
-    }
-    pkg.setOpsNodesBytes(opsBytes);
   } else {
-    if (!entries.contains("primedia.slice")) {
-      return std::unexpected(SessionValidationError::MissingPrimedia);
+    for (const auto &[fname, fbytes] : targetEntries) {
+      if (fname.starts_with("scroll_") && fname.ends_with(".slice") &&
+          fname != "primedia.slice") {
+        const auto inner = fname.substr(7, fname.size() - 7 - 6);
+        const auto p1    = inner.find('_');
+        const auto p2    = p1 != std::string::npos ? inner.find('_', p1 + 1)
+                                                   : std::string::npos;
+        if (p1 != std::string::npos && p2 != std::string::npos) {
+          std::uint64_t sId = 0, start = 0, len = 0;
+          std::from_chars(inner.data(), inner.data() + p1, sId);
+          std::from_chars(inner.data() + p1 + 1, inner.data() + p2, start);
+          std::from_chars(inner.data() + p2 + 1, inner.data() + inner.size(),
+                          len);
+          if (fbytes.size() == len) {
+            pkg.scrollFragments.push_back(
+                ScrollFragment{.scrollId = static_cast<ScrollId>(sId),
+                               .start    = start,
+                               .length   = len,
+                               .bytes    = fbytes,
+                               .sha256   = computeSha256Hex(fbytes)});
+          }
+        }
+      }
     }
-    if (!entries.contains("ops.nodes")) {
-      return std::unexpected(SessionValidationError::MissingOps);
-    }
+  }
 
-    const auto &primediaBytes = entries.at("primedia.slice");
-    if (primediaBytes.size() != manifest.primediaLength) {
-      return std::unexpected(SessionValidationError::PrimediaLengthMismatch);
+  if (!manifest.linkPackageEntries.empty()) {
+    for (std::size_t i = 0; i < manifest.linkPackageEntries.size(); ++i) {
+      const std::string fn = "linkpkg_" + std::to_string(i) + ".benc";
+      if (!targetEntries.contains(fn)) {
+        return std::unexpected(SessionValidationError::CorruptArchive);
+      }
+      const auto &bencBytes = targetEntries.at(fn);
+      const auto colon      = manifest.linkPackageEntries[i].find(':');
+      const std::string expectedSha =
+          colon != std::string::npos
+              ? manifest.linkPackageEntries[i].substr(0, colon)
+              : manifest.linkPackageEntries[i];
+      if (!expectedSha.empty() && computeSha256Hex(bencBytes) != expectedSha) {
+        return std::unexpected(SessionValidationError::PayloadHashMismatch);
+      }
+      const std::string bencStr(
+          reinterpret_cast<const char *>(bencBytes.data()), bencBytes.size());
+      auto lpRes = decodeLinkPackage(bencStr);
+      if (!lpRes) {
+        return std::unexpected(SessionValidationError::SerializationError);
+      }
+      pkg.linkPackages.push_back(std::move(*lpRes));
     }
-    if (!manifest.primediaSha256.empty() &&
-        computeSha256Hex(primediaBytes) != manifest.primediaSha256) {
-      return std::unexpected(SessionValidationError::PayloadHashMismatch);
+  } else {
+    std::size_t idx = 0;
+    while (true) {
+      const std::string fn = "linkpkg_" + std::to_string(idx) + ".benc";
+      if (!targetEntries.contains(fn)) {
+        break;
+      }
+      const auto &bencBytes = targetEntries.at(fn);
+      const std::string bencStr(
+          reinterpret_cast<const char *>(bencBytes.data()), bencBytes.size());
+      auto lpRes = decodeLinkPackage(bencStr);
+      if (!lpRes) {
+        return std::unexpected(SessionValidationError::SerializationError);
+      }
+      pkg.linkPackages.push_back(std::move(*lpRes));
+      ++idx;
     }
-    pkg.primediaSlice = primediaBytes;
-
-    const auto &opsBytes = entries.at("ops.nodes");
-    if (opsBytes.size() % sizeof(CompactOpNode) != 0) {
-      return std::unexpected(SessionValidationError::CorruptOpsNodes);
-    }
-    if (!manifest.opsSha256.empty() &&
-        computeSha256Hex(opsBytes) != manifest.opsSha256) {
-      return std::unexpected(SessionValidationError::PayloadHashMismatch);
-    }
-    pkg.setOpsNodesBytes(opsBytes);
   }
 
   return pkg;
@@ -1472,90 +1774,178 @@ createX509DelegationCertificate(std::span<const std::uint8_t, 32> devicePubKey,
     return std::unexpected(SessionValidationError::InvalidDeviceKey);
   }
 
-  EvpPkeyPtr devKey(EVP_PKEY_new_raw_public_key(EVP_PKEY_ED25519, nullptr,
-                                                devicePubKey.data(), 32),
-                    &EVP_PKEY_free);
-  if (!devKey) {
+  identity::PubKey32 devPk;
+  std::ranges::copy(devicePubKey, devPk.bytes.begin());
+
+  identity::StandardCryptoEngine masterSigner;
+  masterSigner.setPrivateKeyRaw(masterPrivKey);
+  if (masterSigner.publicKey().isZero()) {
     return std::unexpected(SessionValidationError::InvalidDeviceKey);
   }
 
-  EvpPkeyPtr caKey(EVP_PKEY_new_raw_private_key(EVP_PKEY_ED25519, nullptr,
-                                                masterPrivKey.data(), 32),
-                   &EVP_PKEY_free);
-  if (!caKey) {
+  identity::CertificateConstraints constraints;
+  constraints.deviceId  = std::string(deviceId);
+  const auto now        = static_cast<std::uint64_t>(std::time(nullptr));
+  constraints.notBefore = now > 10 ? now - 10 : 0;
+  const uint64_t adjSec = static_cast<std::uint64_t>(
+      std::min<std::uint64_t>(validSeconds, 315360000ULL));
+  constraints.notAfter =
+      constraints.notBefore + (adjSec > 0 ? adjSec : 31536000ULL);
+  constraints.serialNumber = 1;
+
+  identity::StandardCryptoEngine engine;
+  auto certRes =
+      engine.createDelegationCertificate(masterSigner, devPk, constraints);
+  if (!certRes) {
+    if (certRes.error() == identity::ValidationError::CorruptKey) {
+      return std::unexpected(SessionValidationError::InvalidDeviceKey);
+    }
+    return std::unexpected(SessionValidationError::SerializationError);
+  }
+
+  return base64Encode(certRes->der);
+}
+
+std::expected<SessionPackage, SessionValidationError> createFatStorePackage(
+    const Store &store, std::string_view deviceId,
+    std::span<const std::uint8_t, 32> devicePrivateKey,
+    std::optional<std::string_view> masterFingerprint,
+    std::string_view baseVersion, std::string_view headVersion, bool encrypted,
+    std::string_view passphrase,
+    std::span<const LinkPackage> selectedLinkPackages,
+    std::optional<std::string_view> existingDeviceCert,
+    std::optional<std::span<const std::uint8_t, 32>> masterPrivateKey,
+    std::span<const CompactOpNode> explicitOps) {
+  if (!isValidDeviceId(deviceId)) {
+    return std::unexpected(SessionValidationError::InvalidFieldFormat);
+  }
+
+  identity::StandardCryptoEngine devEngine;
+  devEngine.setPrivateKeyRaw(devicePrivateKey);
+  if (devEngine.publicKey().isZero() ||
+      isSmallOrderPoint(devEngine.publicKey().bytes)) {
     return std::unexpected(SessionValidationError::InvalidDeviceKey);
   }
+  const auto pubKey = devEngine.publicKey().bytes;
 
-  X509Ptr x509(X509_new(), &X509_free);
-  if (!x509) {
-    return std::unexpected(SessionValidationError::SerializationError);
+  const std::string devKeyHex = toHex(pubKey);
+  const std::string masterFp  = masterFingerprint && !masterFingerprint->empty()
+                                    ? std::string(*masterFingerprint)
+                                    : computeSha256Hex(pubKey);
+
+  std::string cert;
+  if (existingDeviceCert && !existingDeviceCert->empty()) {
+    cert = std::string(*existingDeviceCert);
+  } else if (masterPrivateKey) {
+    auto certRes =
+        createX509DelegationCertificate(pubKey, *masterPrivateKey, deviceId);
+    if (!certRes) {
+      return std::unexpected(certRes.error());
+    }
+    cert = std::move(*certRes);
+  } else {
+    auto certRes =
+        createX509DelegationCertificate(pubKey, devicePrivateKey, deviceId);
+    if (!certRes) {
+      return std::unexpected(certRes.error());
+    }
+    cert = std::move(*certRes);
   }
 
-  if (X509_set_version(x509.get(), 2) <= 0) {
-    return std::unexpected(SessionValidationError::SerializationError);
-  }
-  ASN1_INTEGER_set(X509_get_serialNumber(x509.get()), 1);
-  X509_gmtime_adj(X509_get_notBefore(x509.get()), 0);
-  const long adjSec =
-      static_cast<long>(std::min<std::uint64_t>(validSeconds, 315360000ULL));
-  X509_gmtime_adj(X509_get_notAfter(x509.get()), adjSec);
-  if (X509_set_pubkey(x509.get(), devKey.get()) <= 0) {
-    return std::unexpected(SessionValidationError::SerializationError);
-  }
-
-  X509_NAME *name = X509_get_subject_name(x509.get());
-  X509_NAME_add_entry_by_txt(
-      name, "CN", MBSTRING_ASC,
-      reinterpret_cast<const unsigned char *>(deviceId.data()),
-      static_cast<int>(deviceId.size()), -1, 0);
-
-  X509NamePtr issuer(X509_NAME_new(), &X509_NAME_free);
-  if (!issuer) {
-    return std::unexpected(SessionValidationError::SerializationError);
-  }
-  X509_NAME_add_entry_by_txt(
-      issuer.get(), "CN", MBSTRING_ASC,
-      reinterpret_cast<const unsigned char *>("Xanadu Master Identity"), -1, -1,
-      0);
-  if (X509_set_issuer_name(x509.get(), issuer.get()) <= 0) {
-    return std::unexpected(SessionValidationError::SerializationError);
+  std::vector<CompactOpNode> opsNodes;
+  if (!explicitOps.empty()) {
+    opsNodes.assign(explicitOps.begin(), explicitOps.end());
+  } else {
+    const auto &spool = store.segmentedOps();
+    std::span<const CompactOpNode> opsSpan;
+    if (spool.size() > 0) {
+      opsSpan =
+          std::span<const CompactOpNode>(spool.rawOps() + 1, spool.size());
+    }
+    opsNodes.assign(opsSpan.begin(), opsSpan.end());
   }
 
-  X509V3_CTX v3ctx;
-  X509V3_set_ctx_nodb(&v3ctx);
-  X509V3_set_ctx(&v3ctx, x509.get(), x509.get(), nullptr, nullptr, 0);
+  const std::string head =
+      !headVersion.empty()
+          ? std::string(headVersion)
+          : (!store.latest().isZero() ? store.latest().str() : "1");
+  const std::string base =
+      !baseVersion.empty() ? std::string(baseVersion) : "0";
 
-  X509_EXTENSION *extBc = X509V3_EXT_conf_nid(
-      nullptr, &v3ctx, NID_basic_constraints, "critical,CA:FALSE");
-  if (extBc) {
-    X509_add_ext(x509.get(), extBc, -1);
-    X509_EXTENSION_free(extBc);
+  const auto tables      = store.storeTables();
+  const auto tablesBytes = serializeStoreTables(tables);
+  const auto tablesSha   = computeSha256Hex(tablesBytes);
+
+  const auto analysis =
+      store.analyzeSpanDependencies(selectedLinkPackages, explicitOps);
+
+  std::vector<ScrollFragment> fragments;
+  for (const auto &[scrollId, intervals] : analysis.intervals) {
+    for (const auto &interval : intervals) {
+      ScrollFragment frag;
+      frag.scrollId = scrollId;
+      frag.start    = interval.start;
+      frag.length   = interval.length;
+      if (interval.length > 0) {
+        PrimediaSpan span;
+        span.scroll      = scrollId;
+        span.start       = interval.start;
+        span.length      = interval.length;
+        std::string text = store.read(span);
+        frag.bytes.assign(text.begin(), text.end());
+      }
+      frag.sha256 = computeSha256Hex(frag.bytes);
+      fragments.push_back(std::move(frag));
+    }
   }
 
-  X509_EXTENSION *extKu =
-      X509V3_EXT_conf_nid(nullptr, &v3ctx, NID_key_usage,
-                          "critical,digitalSignature,nonRepudiation");
-  if (extKu) {
-    X509_add_ext(x509.get(), extKu, -1);
-    X509_EXTENSION_free(extKu);
+  SessionPackage pkg;
+  pkg.setManifestVersion(1)
+      ->setMasterFingerprint(masterFp)
+      ->setDeviceId(std::string(deviceId))
+      ->setDeviceKey(devKeyHex)
+      ->setBaseVersion(base)
+      ->setHeadVersion(head)
+      ->setTimestamp(static_cast<std::uint64_t>(std::time(nullptr)))
+      ->setOpsNodes(std::move(opsNodes))
+      ->setDeviceCert(std::move(cert))
+      ->setStoreTables(tablesBytes)
+      ->setStoreTablesSha256(tablesSha);
+
+  const auto localIntervals = analysis.intervalsFor(localScroll);
+  if (localIntervals.size() == 1) {
+    for (const auto &frag : fragments) {
+      if (frag.scrollId == localScroll &&
+          frag.start == localIntervals[0].start) {
+        pkg.setPrimediaOffset(frag.start);
+        pkg.setPrimediaLength(frag.bytes.size());
+        pkg.setPrimediaSlice(frag.bytes);
+        break;
+      }
+    }
+  } else {
+    pkg.setPrimediaOffset(0);
+    pkg.setPrimediaLength(0);
+    pkg.setPrimediaSlice(std::span<const std::uint8_t>{});
   }
 
-  if (X509_sign(x509.get(), caKey.get(), nullptr) <= 0) {
-    return std::unexpected(SessionValidationError::SerializationError);
+  pkg.setScrollFragments(std::move(fragments));
+
+  std::vector<LinkPackage> linkPkgs(selectedLinkPackages.begin(),
+                                    selectedLinkPackages.end());
+  pkg.setLinkPackages(std::move(linkPkgs));
+
+  if (encrypted) {
+    pkg.setEncrypted(true);
+    pkg.setPassphrase(std::string(passphrase));
   }
 
-  const int len = i2d_X509(x509.get(), nullptr);
-  if (len <= 0) {
-    return std::unexpected(SessionValidationError::SerializationError);
+  auto signRes = pkg.signWithDeviceKey(devicePrivateKey);
+  if (!signRes) {
+    return std::unexpected(signRes.error());
   }
 
-  std::vector<std::uint8_t> der(len);
-  unsigned char *p = der.data();
-  if (i2d_X509(x509.get(), &p) <= 0) {
-    return std::unexpected(SessionValidationError::SerializationError);
-  }
-
-  return base64Encode(der);
+  return pkg;
 }
 
 } // namespace xanadu

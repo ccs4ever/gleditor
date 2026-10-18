@@ -2347,8 +2347,8 @@ TEST(E2EBinaryOrchestrationTest,
       " XDG_DATA_HOME=" + (testRoot / "data").string() + " timeout 120 " +
       xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
       " --backend " + activeBackend() + " --profile --version-id " + v0.str() +
-      " --select 0,18 --do std:xudu/pouch_drop_left" +
-      " --select 36,54 --do std:xudu/pouch_drop_right" +
+      " --select 0,18 --do std:xuzz/pouch_drop_left" +
+      " --select 36,54 --do std:xuzz/pouch_drop_right" +
       " --do pouch-toggle --dump-a11y --click-label \"Forge Clasp\"" +
       " --key escape --do save-document " + storePath.string();
 
@@ -3090,10 +3090,11 @@ TEST(E2EBinaryOrchestrationTest, GroupedLinkKeepsIndependentEndsetCursors) {
     return " --capture " + (root / (std::string(name) + ".ppm")).string();
   };
   const auto result = executeProcess(
-      "XDG_DATA_HOME=" + (root / "data").string() +
-      " XDG_CONFIG_HOME=" + (root / "config").string() + " timeout 120 " +
-      binary.string() + " --backend " + activeBackend() +
-      " --strict-diagnostics --profile " + (root / "left").string() +
+      "XDG_DATA_HOME=" + (root / "data").string() + " XDG_CONFIG_HOME=" +
+      (root / "config").string() + " timeout 120 " + binary.string() +
+      permascrollFlag(root / "data/xudu/permascroll/default") + " --backend " +
+      activeBackend() + " --strict-diagnostics --profile " +
+      (root / "left").string() +
       " --chord Ctrl+Alt+1 --chord Ctrl+O --chord Tab --type '" +
       (root / "right").string() + "' --chord Return" + capture("both") +
       " --select 0,0 --chord Alt+Shift+N --dump-a11y" + capture("selected") +
@@ -3127,4 +3128,112 @@ TEST(E2EBinaryOrchestrationTest, GroupedLinkKeepsIndependentEndsetCursors) {
     ASSERT_TRUE(fs::exists(path));
     exportToPng(path, path.parent_path() / (std::string(name) + ".png"));
   }
+}
+
+TEST(E2EBinaryOrchestrationTest, SessionExportAndImportRoundTripThroughCli) {
+  const auto binary = findXuduBinary();
+  ASSERT_TRUE(fs::exists(binary));
+
+  const auto root = fs::current_path() / "build" / "e2e_session_cli_test";
+  fs::remove_all(root);
+  fs::create_directories(root);
+
+  const auto permaPath = root / "permascroll";
+  const auto perma     = permascrollAt(permaPath);
+  const auto origStore = root / "orig_station";
+
+  // Create original store with text and edition
+  Store store(perma);
+  const auto v1 = store.insert(MicroversionId{}, 0, "First paragraph draft.\n");
+  const auto vDraft = store.designateEdition(v1, "draft", v1);
+  const auto v2     = store.insert(vDraft, 23, "Second paragraph thesis.\n");
+  store.setCurrentVersions({v2});
+  store.save(origStore.string());
+  const auto totalOps = store.opCount();
+  ASSERT_GT(totalOps, 0U);
+
+  // 1. Full Export (default: everything)
+  const auto fullPkg              = root / "full.xuzzpkg";
+  const std::string exportFullCmd = binary.string() + " session export" +
+                                    permascrollFlag(permaPath) + " --store " +
+                                    origStore.string() + " --out " +
+                                    fullPkg.string() + " --headless";
+  const auto resFullExport        = executeProcess(exportFullCmd);
+  ASSERT_EQ(resFullExport.exitCode, 0) << resFullExport.output;
+  ASSERT_TRUE(fs::exists(fullPkg));
+  EXPECT_GT(fs::file_size(fullPkg), 0U);
+
+  // 1b. Import full package
+  const auto destFull             = root / "imported_full";
+  const std::string importFullCmd = binary.string() + " session import" +
+                                    permascrollFlag(permaPath) + " --in " +
+                                    fullPkg.string() + " --station " +
+                                    destFull.string() + " --headless";
+  const auto resFullImport        = executeProcess(importFullCmd);
+  ASSERT_EQ(resFullImport.exitCode, 0) << resFullImport.output;
+  ASSERT_TRUE(fs::exists(destFull / "ops.nodes"));
+  ASSERT_TRUE(fs::exists(destFull / "store.tables"));
+
+  Store loadedFull(perma);
+  loadedFull.load(destFull.string());
+  EXPECT_EQ(loadedFull.opCount(), totalOps);
+  const auto manifoldFull = loadedFull.rebuildManifold(loadedFull.latest());
+  EXPECT_TRUE(manifoldFull.editionNamed("draft").has_value());
+
+  // 2. Targeted export by edition (--editions draft)
+  const auto draftPkg = root / "draft.xuzzpkg";
+  const std::string exportDraftCmd =
+      binary.string() + " session export" + permascrollFlag(permaPath) +
+      " --store " + origStore.string() + " --out " + draftPkg.string() +
+      " --editions draft --headless";
+  const auto resDraftExport = executeProcess(exportDraftCmd);
+  ASSERT_EQ(resDraftExport.exitCode, 0) << resDraftExport.output;
+  ASSERT_TRUE(fs::exists(draftPkg));
+
+  // 2b. Import draft package
+  const auto destDraft             = root / "imported_draft";
+  const std::string importDraftCmd = binary.string() + " session import" +
+                                     permascrollFlag(permaPath) + " --in " +
+                                     draftPkg.string() + " --station " +
+                                     destDraft.string() + " --headless";
+  const auto resDraftImport        = executeProcess(importDraftCmd);
+  ASSERT_EQ(resDraftImport.exitCode, 0) << resDraftImport.output;
+
+  Store loadedDraft(perma);
+  loadedDraft.load(destDraft.string());
+  EXPECT_LT(loadedDraft.opCount(), totalOps);
+  const auto manifoldDraft = loadedDraft.rebuildManifold(loadedDraft.latest());
+  EXPECT_TRUE(manifoldDraft.editionNamed("draft").has_value());
+
+  // 3. Encrypted export and import
+  const auto encPkg = root / "enc.xuzzpkg";
+  const std::string exportEncCmd =
+      binary.string() + " session export" + permascrollFlag(permaPath) +
+      " --store " + origStore.string() + " --out " + encPkg.string() +
+      " --password CorrectPassphrase99! --headless";
+  const auto resEncExport = executeProcess(exportEncCmd);
+  ASSERT_EQ(resEncExport.exitCode, 0) << resEncExport.output;
+  ASSERT_TRUE(fs::exists(encPkg));
+
+  // 3b. Import without password fails
+  const auto destEncFail          = root / "imported_enc_fail";
+  const std::string importFailCmd = binary.string() + " session import" +
+                                    permascrollFlag(permaPath) + " --in " +
+                                    encPkg.string() + " --station " +
+                                    destEncFail.string() + " --headless";
+  const auto resFailImport        = executeProcess(importFailCmd);
+  EXPECT_NE(resFailImport.exitCode, 0);
+
+  // 3c. Import with password succeeds
+  const auto destEncOk = root / "imported_enc_ok";
+  const std::string importOkCmd =
+      binary.string() + " session import" + permascrollFlag(permaPath) +
+      " --in " + encPkg.string() + " --station " + destEncOk.string() +
+      " --password CorrectPassphrase99! --headless";
+  const auto resOkImport = executeProcess(importOkCmd);
+  ASSERT_EQ(resOkImport.exitCode, 0) << resOkImport.output;
+
+  Store loadedEnc(perma);
+  loadedEnc.load(destEncOk.string());
+  EXPECT_EQ(loadedEnc.opCount(), totalOps);
 }

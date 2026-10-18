@@ -248,6 +248,41 @@ WidgetScene::resolvePickingId(std::uint32_t pickingId) const {
     return std::nullopt;
   return (*pickingTargets)[pickingId - 1];
 }
+const LayoutBox *WidgetScene::hitTest(float x, float y) const {
+  if (const auto *direct = layout.hitTest(x, y)) {
+    if (direct->focusable && direct->enabled) {
+      return direct;
+    }
+  }
+  const float minHit    = virtualHitTargetMinPx;
+  const LayoutBox *best = nullptr;
+  float bestDistSq      = std::numeric_limits<float>::max();
+  for (auto it = layout.boxes.rbegin(); it != layout.boxes.rend(); ++it) {
+    if (!it->focusable || !it->enabled || it->rect.width <= 0.0F ||
+        it->rect.height <= 0.0F) {
+      continue;
+    }
+    const float padX = std::max(0.0F, (minHit - it->rect.width) * 0.5F);
+    const float padY = std::max(0.0F, (minHit - it->rect.height) * 0.5F);
+    const float l    = it->rect.left - padX;
+    const float b    = it->rect.bottom - padY;
+    const float r    = it->rect.left + it->rect.width + padX;
+    const float t    = it->rect.bottom + it->rect.height + padY;
+    if (x >= l && x < r && y >= b && y < t) {
+      const float cx     = it->rect.left + it->rect.width * 0.5F;
+      const float cy     = it->rect.bottom + it->rect.height * 0.5F;
+      const float distSq = (x - cx) * (x - cx) + (y - cy) * (y - cy);
+      if (distSq < bestDistSq) {
+        bestDistSq = distSq;
+        best       = &*it;
+      }
+    }
+  }
+  if (best) {
+    return best;
+  }
+  return layout.hitTest(x, y);
+}
 namespace {
 class WidgetBuilder {
 public:
@@ -257,8 +292,9 @@ public:
     collect(root);
   }
   WidgetScene build(const Widget &root, Rect bounds) {
-    scene_.layout.bounds = bounds;
-    const auto size      = natural(root, bounds.width);
+    scene_.layout.bounds         = bounds;
+    scene_.virtualHitTargetMinPx = theme_.buttonMetrics.virtualHitTargetMinPx;
+    const auto size              = natural(root, bounds.width);
     if (root.preferred.width > 0)
       bounds.width = std::min(bounds.width, metrics_.px(root.preferred.width));
     if (root.preferred.height > 0)
@@ -354,9 +390,16 @@ private:
       if (label->purpose == TextPurpose::Description)
         size.height = line(w.fontRole) * w.maxLines;
     } else if (const auto *button = std::get_if<Button>(&w.model)) {
-      size = measure(button->text, w.fontRole);
-      size.width += 2 * p;
-      size.height = std::max(touch(), size.height + 2 * p);
+      size                = measure(button->text, w.fontRole);
+      const auto fontLine = font(w.fontRole)->metrics().lineHeight;
+      const auto hPad =
+          fontLine *
+          std::min(theme_.buttonMetrics.paddingHorizontalEm, theme_.paddingEm);
+      size.width += 2 * hPad;
+      const float btnHeight = metrics_.touchModality
+                                  ? theme_.buttonMetrics.heightTouchPx
+                                  : theme_.buttonMetrics.heightStandardPx;
+      size.height           = metrics_.px(btnHeight);
     } else if (const auto *badge = std::get_if<Badge>(&w.model)) {
       size = measure(badge->text, FontRole::Caption);
       size.width += 2 * p;
@@ -415,25 +458,33 @@ private:
                ? list.rowHeightPx
                : std::max(touch(), line(w.fontRole) + pad(w.fontRole));
   }
-  LayoutBox box(WidgetId id, WidgetId parent, Rect rect, float padding,
-                bool focusable, bool enabled) {
+  struct InteractionFlags {
+    bool focusable{false};
+    bool enabled{true};
+  };
+  LayoutBox box(WidgetId id, WidgetId parent, Rect rect, float paddingX,
+                float paddingY, InteractionFlags flags) {
     const auto original = rect;
     rect                = clampToSafeArea(metrics_.rounded(rect), original);
-    const auto p        = std::max(
-        0.0F, std::min({padding, rect.width * .5F, rect.height * .5F}));
+    const auto px       = std::max(0.0F, std::min(paddingX, rect.width * 0.5F));
+    const auto py = std::max(0.0F, std::min(paddingY, rect.height * 0.5F));
     LayoutBox result{id,
                      parent,
                      rect,
-                     metrics_.rounded({rect.left + p, rect.bottom + p,
-                                       std::max(0.0F, rect.width - 2 * p),
-                                       std::max(0.0F, rect.height - 2 * p)}),
-                     focusable,
-                     enabled};
+                     metrics_.rounded({rect.left + px, rect.bottom + py,
+                                       std::max(0.0F, rect.width - 2 * px),
+                                       std::max(0.0F, rect.height - 2 * py)}),
+                     flags.focusable,
+                     flags.enabled};
     result.contentRect = clampToSafeArea(result.contentRect, rect);
     scene_.layout.boxes.push_back(result);
-    if (focusable && enabled && rect.width > 0 && rect.height > 0)
+    if (flags.focusable && flags.enabled && rect.width > 0 && rect.height > 0)
       scene_.layout.focusOrder.push_back(id);
     return result;
+  }
+  LayoutBox box(WidgetId id, WidgetId parent, Rect rect, float padding,
+                InteractionFlags flags) {
+    return box(id, parent, rect, padding, padding, flags);
   }
   void visual(const Widget &w, LayoutBox geometry, std::string text,
               TextPurpose purpose, a11y::Role role, bool background = false,
@@ -481,9 +532,31 @@ private:
     const bool scrubber     = std::holds_alternative<Scrubber>(w.model);
     const auto *buttonModel = std::get_if<Button>(&w.model);
     const bool enabled      = !buttonModel || buttonModel->enabled;
-    const auto p = std::holds_alternative<Label>(w.model) ? 0 : pad(w.fontRole);
+    const auto p            = pad(w.fontRole);
+    float padX              = p;
+    float padY              = p;
+    if (buttonModel) {
+      const auto fontLine = font(w.fontRole)->metrics().lineHeight;
+      const auto measured = measure(buttonModel->text, w.fontRole);
+      const float hPad =
+          fontLine *
+          std::min(theme_.buttonMetrics.paddingHorizontalEm, theme_.paddingEm);
+      const float vPad =
+          fontLine *
+          std::min(theme_.buttonMetrics.paddingVerticalEm, theme_.paddingEm);
+      padX = rect.width >= measured.width + 2 * hPad
+                 ? hPad
+                 : std::max(0.0F, (rect.width - measured.width) * 0.5F - 0.5F);
+      padY = rect.height >= fontLine + 2 * vPad
+                 ? vPad
+                 : std::max(0.0F, (rect.height - fontLine) * 0.5F - 0.5F);
+    } else if (std::holds_alternative<Label>(w.model)) {
+      padX = 0.0F;
+      padY = 0.0F;
+    }
     auto geometry =
-        box(w.id, parent, rect, p, button || field || scrubber, enabled);
+        box(w.id, parent, rect, padX, padY,
+            {.focusable = button || field || scrubber, .enabled = enabled});
     scene_.layout.boxes.back().textInput     = field;
     scene_.layout.boxes.back().defaultAction = w.defaultAction;
     if (parent && button) scene_.layout.boxes.back().focusGroup = parent;
@@ -630,10 +703,11 @@ private:
         if (top - bottom < textHeight &&
             geometry.contentRect.height >= textHeight)
           continue;
-        row.bottom       = bottom;
-        row.height       = top - bottom;
-        const auto entry = box(list->rows[i].id, w.id, row, p * .5F, true,
-                               list->rows[i].enabled);
+        row.bottom = bottom;
+        row.height = top - bottom;
+        const auto entry =
+            box(list->rows[i].id, w.id, row, p * .5F,
+                {.focusable = true, .enabled = list->rows[i].enabled});
         scene_.layout.boxes.back().focusGroup = w.id;
         visual(w, entry, list->rows[i].text, list->rows[i].purpose,
                a11y::Role::ListItem, true, list->rows[i].action);
@@ -668,7 +742,8 @@ private:
       if (positioned->childBounds.size() != w.children.size())
         throw std::invalid_argument(
             "Positioned panel bounds must match children");
-      visual(w, geometry, {}, TextPurpose::Label, a11y::Role::Group);
+      visual(w, geometry, {}, TextPurpose::Label, a11y::Role::Group,
+             positioned->background);
       for (std::size_t i = 0; i < w.children.size(); ++i) {
         const auto &bounds = positioned->childBounds[i];
         if (!std::isfinite(bounds.left) || !std::isfinite(bounds.bottom) ||

@@ -273,15 +273,7 @@ TEST_PKGS := gmock_main
 # whose documents cannot leave the machine that wrote them, which is the one
 # thing this program is for. Better to fail at configure time than to ship a
 # xanadoc editor that quietly cannot publish.
-#
-# librnp is required for the same kind of reason. It is what checks that an
-# armored key really is the key its fingerprint claims to name, and what
-# verifies the OpenPGP signature delegating authority to a device key -- so it
-# is the root of every trust decision the identity ledger makes. Made optional,
-# the absent-RNP build would have to decide what an unverifiable identity
-# means, and the only safe answer refuses every peer, which is not a build
-# worth having. RNP rather than GnuPG's gpgme because it is a library first
-# and links the same way on every platform this ships to.
+# OpenSSL is required for in-process Ed25519 signing and X.509 v3 device delegation.
 XUDU_PKGS := libtorrent-rasterbar openssl lmdb libmagic sqlite3 spdlog libzstd
 ifneq (,$(filter-out $(NO_SDL_GOALS),$(or $(MAKECMDGOALS),all)))
 ifneq ($(shell pkg-config --exists libtorrent-rasterbar && echo 1),1)
@@ -600,7 +592,6 @@ COMMON_UI_SRCS     := $(shell find apps/common/ui -name '*.cpp' 2>/dev/null)
 XUDU_CORE_SRCS := $(COMMON_XANADU_SRCS)
 XUZZ_SRCS      := $(shell find apps/xuzz -name '*.cpp' 2>/dev/null)
 LIB_TEST_SRCS  := $(shell find tests/lib -name '*.cpp' 2>/dev/null)
-XUDU_TEST_SRCS := $(shell find tests/xudu -name '*.cpp' 2>/dev/null)
 ZIGZAG_TEST_SRCS := $(shell find tests/zigzag -name '*.cpp' 2>/dev/null)
 XUZZ_TEST_SRCS := $(shell find tests/xuzz -name '*.cpp' 2>/dev/null)
 
@@ -615,9 +606,9 @@ COMMON_UI_OBJS     := $(call obj,$(COMMON_UI_SRCS))
 XUDU_CORE_OBJS  := $(COMMON_XANADU_OBJS)
 XUZZ_OBJS       := $(call obj,$(XUZZ_SRCS))
 LIB_TEST_OBJS   := $(call obj,$(LIB_TEST_SRCS))
-XUDU_TEST_OBJS  := $(call obj,$(XUDU_TEST_SRCS))
 ZIGZAG_TEST_OBJS := $(call obj,$(ZIGZAG_TEST_SRCS))
 XUZZ_TEST_OBJS  := $(call obj,$(XUZZ_TEST_SRCS))
+XUDU_TEST_OBJS  := $(XUZZ_TEST_OBJS)
 SWARM_PEER_OBJS := $(call obj,tools/xudu-swarm-peer.cpp)
 UI_TEXT_BASELINE_OBJS := $(call obj,tools/ui-text-baseline.cpp)
 VQUERYC_SRCS    := $(shell find apps/vqueryc -name '*.cpp' 2>/dev/null)
@@ -728,7 +719,7 @@ endif
 GLSL_SOURCES := $(wildcard assets/shaders/*.glsl)
 SPIRV := $(patsubst assets/shaders/%.glsl,assets/shaders/vulkan/%.spv,$(GLSL_SOURCES))
 
-all: lib gleditor xudu xuzz zigzag store-dump xudu-dump vqueryc vquery vprolog vplc vpl gleditor_test xudu_test xuzz_test zigzag_test $(OBJDIR)/compile_commands.json
+all: lib gleditor xudu xuzz zigzag store-dump xudu-dump vqueryc vquery vprolog vplc vpl gleditor_test xuzz_test xudu_test zigzag_test $(OBJDIR)/compile_commands.json
 ifdef GLEDITOR_ENABLE_VULKAN
 all: shaders
 endif
@@ -866,7 +857,7 @@ sanitize/memory/run: sanitize/memory
 	MSAN_OPTIONS=check_initialization_order=1:detect_leaks=1:strict_string_checks=1 $(OBJDIR)/gleditor
 
 
-.PHONY: gleditor_test xudu_test xuzz_test zigzag_test
+.PHONY: gleditor_test xuzz_test xudu_test zigzag_test
 TEST_LIBS = $(shell pkg-config $(STATIC) --libs $(TEST_PKGS))
 
 # The library's own tests, linked against the library the programs link
@@ -881,13 +872,13 @@ $(OBJDIR)/gleditor_test: $(LIB_TEST_OBJS) $(OBJDIR)/apps/gleditor/editor_config.
 # merely asserted: if a rule about versions, links or content addresses ever
 # needed a renderer, this would stop linking. Focus arbitration is also
 # device-independent and is shared with the modal adapter contract tests.
-xudu_test: $(OBJDIR)/xudu_test
-$(OBJDIR)/xudu_test: $(XUDU_TEST_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o
-	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
-
 xuzz_test: $(OBJDIR)/xuzz_test
 $(OBJDIR)/xuzz_test: $(XUZZ_TEST_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
+
+xudu_test: $(OBJDIR)/xudu_test
+$(OBJDIR)/xudu_test: $(OBJDIR)/xuzz_test
+	ln -sf xuzz_test $@
 
 zigzag_test: $(OBJDIR)/zigzag_test
 $(OBJDIR)/zigzag_test: $(ZIGZAG_TEST_OBJS) $(ZIGZAG_SHARED_CORE_OBJS) $(COMMON_UI_OBJS) $(LIBLINK)
@@ -930,9 +921,11 @@ $(eval $(call fuzz-target,link_package))
 # The BEP 10 identity decoders parse bytes from a peer that has not yet
 # authenticated, which makes them the outermost attack surface here.
 $(eval $(call fuzz-target,identity_wire))
+$(eval $(call fuzz-target,session_package))
+$(eval $(call fuzz-target,x509_delegation))
 
 .PHONY: fuzz
-fuzz: fuzz_binary_ops fuzz_link_package fuzz_identity_wire
+fuzz: fuzz_binary_ops fuzz_link_package fuzz_identity_wire fuzz_session_package fuzz_x509_delegation
 
 # The other end of the swarm tests: a peer that offers a torrent's content and
 # waits to be asked. A separate program because the two peers are meant to be
@@ -941,6 +934,11 @@ fuzz: fuzz_binary_ops fuzz_link_package fuzz_identity_wire
 .PHONY: xudu-swarm-peer
 xudu-swarm-peer: $(OBJDIR)/xudu-swarm-peer
 $(OBJDIR)/xudu-swarm-peer: $(OBJDIR)/tools/xudu-swarm-peer.o $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o
+	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
+
+.PHONY: generate-seed-corpora
+generate-seed-corpora: $(OBJDIR)/generate-seed-corpora
+$(OBJDIR)/generate-seed-corpora: $(OBJDIR)/tools/generate_seed_corpora.o $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
 # All compilation happens inside the image, so the host needs only git and
@@ -1075,12 +1073,12 @@ sample-xanadocs: $(OBJDIR)/xudu
 # The swarm tests proper, with the two peers on separate network stacks via
 # unprivileged user namespaces (unshare -Urnm).
 .PHONY: test/swarm
-test/swarm: $(OBJDIR)/xudu-swarm-peer $(OBJDIR)/xudu_test $(OBJDIR)/xuzz
+test/swarm: $(OBJDIR)/xudu-swarm-peer $(OBJDIR)/xuzz_test $(OBJDIR)/xuzz
 	tools/swarm-netns-test.sh
 	XUDU_SWARM_TEST_FILTER='PublicationOutboxNetworkTest.*' tools/swarm-netns-test.sh
 
 .PHONY: test/publication-swarm
-test/publication-swarm: $(OBJDIR)/xudu-swarm-peer $(OBJDIR)/xudu_test $(OBJDIR)/xuzz
+test/publication-swarm: $(OBJDIR)/xudu-swarm-peer $(OBJDIR)/xuzz_test $(OBJDIR)/xuzz
 	XUDU_SWARM_TEST_FILTER='PublicationOutboxNetworkTest.*' tools/swarm-netns-test.sh
 
 .PHONY: test/publication-local
@@ -1088,7 +1086,7 @@ test/publication-local: $(OBJDIR)/xuzz
 	python3 tools/publication-local-test.py --binary $(OBJDIR)/xuzz --output $(OBJDIR)/publication-local
 
 # Network namespace suites that require two peers on separate network stacks.
-# Standalone xudu_test skips these; tools/swarm-netns-test.sh runs them.
+# Standalone xuzz_test skips these; tools/swarm-netns-test.sh runs them.
 SWARM_NETNS_TESTS := SwarmTest.*:MutableNameTest.*:PublicationOutboxNetworkTest.*
 TEST_FILTER ?= -$(SWARM_NETNS_TESTS)
 
@@ -1099,9 +1097,8 @@ TEST_PROGRAMS := $(addprefix $(OBJDIR)/,gleditor xudu xuzz zigzag xudu-dump \
 	xudu-swarm-peer vquery vpl vplc vprolog)
 
 .PHONY: test test/all test/integration test/e2e-orchestration
-test: $(TEST_PROGRAMS) $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test $(OBJDIR)/xuzz_test $(OBJDIR)/zigzag_test
+test: $(TEST_PROGRAMS) $(OBJDIR)/gleditor_test $(OBJDIR)/xuzz_test $(OBJDIR)/zigzag_test
 	$(OBJDIR)/gleditor_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
-	$(OBJDIR)/xudu_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
 	$(OBJDIR)/xuzz_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
 	$(OBJDIR)/zigzag_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
 	@if [ -z "$(TEST_FILTER)" ] || [ "$(TEST_FILTER)" = "-$(SWARM_NETNS_TESTS)" ] || echo "$(TEST_FILTER)" | grep -qE 'Swarm|MutableName|PublicationOutboxNetwork|\*'; then \
@@ -1113,7 +1110,7 @@ test/all: test
 
 
 test/integration: test/e2e-orchestration
-test/e2e-orchestration: $(OBJDIR)/xudu $(OBJDIR)/xudu_test
+test/e2e-orchestration: $(OBJDIR)/xuzz $(OBJDIR)/xuzz_test
 	tools/xudu-e2e-orchestration.sh
 
 # produces gleditor_test.prof (a human-readable code coverage report) and
@@ -1133,29 +1130,31 @@ profile: gleditor_test
 	llvm-cov export $(OBJDIR)/gleditor_test --format=lcov --instr-profile=$${data} > coverage.lcov; \
 	$(RM) -f $${raw} $${data};
 
+.PHONY: profile/xuzz profile/xudu
+profile/xuzz: profile/xudu
 profile/xudu: CXXFLAGS += $(PROFILE_OPTS)
 profile/xudu: LDFLAGS += $(PROFILE_OPTS)
-profile/xudu: xudu_test
+profile/xudu: xuzz_test
 	set -e; \
-	raw=xudu_test.profraw; data=xudu_test.profdata; \
+	raw=xuzz_test.profraw; data=xuzz_test.profdata; \
 	trap "$(RM) -f $${raw} $${data}" EXIT HUP KILL TERM; \
-	LLVM_PROFILE_FILE=$${raw} $(OBJDIR)/xudu_test 2>&1 >/dev/null; \
+	LLVM_PROFILE_FILE=$${raw} $(OBJDIR)/xuzz_test 2>&1 >/dev/null; \
 	llvm-profdata merge -sparse $${raw} -o $${data}; \
-	llvm-cov show $(OBJDIR)/xudu_test -instr-profile=$${data} \
-		-show-line-counts-or-regions -show-branches=count -show-expansions > xudu_test.prof; \
-	llvm-cov export $(OBJDIR)/xudu_test --format=lcov --instr-profile=$${data} > xudu_coverage.lcov; \
+	llvm-cov show $(OBJDIR)/xuzz_test -instr-profile=$${data} \
+		-show-line-counts-or-regions -show-branches=count -show-expansions > xuzz_test.prof; \
+	llvm-cov export $(OBJDIR)/xuzz_test --format=lcov --instr-profile=$${data} > xuzz_coverage.lcov; \
 	$(RM) -f $${raw} $${data};
 
 profile/all: CXXFLAGS += $(PROFILE_OPTS)
 profile/all: LDFLAGS += $(PROFILE_OPTS)
-profile/all: gleditor_test xudu_test
+profile/all: gleditor_test xuzz_test
 	set -e; \
-	raw_gl=gleditor_test.profraw; raw_xu=xudu_test.profraw; data=all.profdata; \
+	raw_gl=gleditor_test.profraw; raw_xu=xuzz_test.profraw; data=all.profdata; \
 	trap "$(RM) -f $${raw_gl} $${raw_xu} $${data}" EXIT HUP KILL TERM; \
 	LLVM_PROFILE_FILE=$${raw_gl} $(OBJDIR)/gleditor_test 2>&1 >/dev/null; \
-	LLVM_PROFILE_FILE=$${raw_xu} $(OBJDIR)/xudu_test 2>&1 >/dev/null; \
+	LLVM_PROFILE_FILE=$${raw_xu} $(OBJDIR)/xuzz_test 2>&1 >/dev/null; \
 	llvm-profdata merge -sparse $${raw_gl} $${raw_xu} -o $${data}; \
-	llvm-cov report $(OBJDIR)/xudu_test -instr-profile=$${data}; \
+	llvm-cov report $(OBJDIR)/xuzz_test -instr-profile=$${data}; \
 	$(RM) -f $${raw_gl} $${raw_xu} $${data};
 
 profile/main: CXXFLAGS += $(PROFILE_OPTS)

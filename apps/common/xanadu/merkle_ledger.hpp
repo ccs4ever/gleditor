@@ -1,21 +1,22 @@
 /**
  * @file merkle_ledger.hpp
- * @brief Append-only Merkle ledger for verified GPG keys and email addresses.
+ * @brief Append-only Merkle ledger for verified Ed25519 keys and email
+ * addresses.
  *
- * An author's claim of provenance binds a document to an OpenPGP key. But a
- * key alone does not answer who owns that key or whether an associated email
- * address was verified.
+ * An author's claim of provenance binds a document to a cryptographic identity.
+ * But a key alone does not answer who owns that key or whether an associated
+ * email address was verified.
  *
- * This Merkle ledger acts as an append-only log of linked GPG keys and verified
- * email addresses. Using microsoft/merklecpp, every entry is hashed into an
- * incremental Merkle tree, allowing any client to verify inclusion proofs
- * (paths) against a published Merkle root.
+ * This Merkle ledger acts as an append-only log of linked Ed25519 keys and
+ * verified email addresses. Using microsoft/merklecpp, every entry is hashed
+ * into an incremental Merkle tree, allowing any client to verify inclusion
+ * proofs (paths) against a published Merkle root.
  *
  * The ledger can be sealed into a BitTorrent metainfo archive and served via
  * system-managed swarms or announced on the DHT via BEP 46 mutable links.
  */
-#ifndef XUDU_MERKLE_LEDGER_HPP
-#define XUDU_MERKLE_LEDGER_HPP
+#ifndef XANADU_MERKLE_LEDGER_HPP
+#define XANADU_MERKLE_LEDGER_HPP
 
 #include <array>
 #include <cstddef>
@@ -32,19 +33,21 @@
 
 namespace xanadu {
 
-/// A single entry in the append-only ledger linking an OpenPGP key to a
+/// A single entry in the append-only ledger linking an identity key to a
 /// verified email address.
-struct GpgKeyLink {
-  /// Primary OpenPGP key fingerprint (40 hex digits, normalized).
+struct IdentityKeyLink {
+  /// Primary identity key fingerprint (40 hex digits or 64 hex, normalized).
   std::string fingerprint;
   /// Human-readable identity, e.g. "Ada Lovelace <ada@example.org>".
   std::string identity;
   /// Normalized verified email address, e.g. "ada@example.org".
   std::string email;
-  /// Optional short or long GPG key ID (e.g. "0x9B8C7D6E5F4A3B2C").
-  std::string gpgKeyId;
-  /// Optional ASCII-armored OpenPGP public key block.
+  /// Optional key ID (e.g. "0x9B8C7D6E5F4A3B2C" or hex identity).
+  std::string keyId;
+  /// Optional public key block (ASCII-armored, PEM, or hex).
   std::string publicKeyArmored;
+  /// Cryptographic algorithm (e.g. "Ed25519", or empty for default).
+  std::string algorithm;
   /// Unix timestamp when this key link was verified and registered.
   std::uint64_t timestamp{};
   /// Whether this association was revoked by a subsequent revocation entry.
@@ -63,8 +66,11 @@ struct GpgKeyLink {
   /// Lowercase hex representation of the leaf hash.
   [[nodiscard]] std::string leafHashHex() const;
 
-  bool operator==(const GpgKeyLink &) const = default;
+  bool operator==(const IdentityKeyLink &) const = default;
 };
+
+using Ed25519KeyLink = IdentityKeyLink;
+using GpgKeyLink     = IdentityKeyLink;
 
 /// A cryptographic inclusion proof (Merkle audit path) for a specific ledger
 /// entry.
@@ -111,7 +117,7 @@ public:
   MerkleLedger &operator=(MerkleLedger &&) noexcept;
 
   /**
-   * @brief Append a verified GPG key and email link to the ledger.
+   * @brief Append a verified Ed25519 key and email link to the ledger.
    *
    * Assigns the next sequential index, hashes the canonical entry, inserts it
    * into the Merkle tree, and updates internal lookup indices.
@@ -120,7 +126,7 @@ public:
    * @return Pair of {sequence_number, new_merkle_root}.
    */
   std::pair<std::uint64_t, std::array<std::uint8_t, 32>>
-  appendKey(GpgKeyLink entry);
+  appendKey(IdentityKeyLink entry);
 
   /// The current 32-byte SHA-256 Merkle root of the ledger.
   [[nodiscard]] std::array<std::uint8_t, 32> root() const;
@@ -136,10 +142,10 @@ public:
 
   /// Retrieve entry at @p index.
   /// @throws std::out_of_range if index >= size().
-  [[nodiscard]] const GpgKeyLink &entry(std::size_t index) const;
+  [[nodiscard]] const IdentityKeyLink &entry(std::size_t index) const;
 
   /// Full list of entries in sequential append order.
-  [[nodiscard]] const std::vector<GpgKeyLink> &entries() const;
+  [[nodiscard]] const std::vector<IdentityKeyLink> &entries() const;
 
   /// Generate a Merkle inclusion proof for the entry at @p index.
   /// @throws std::out_of_range if index >= size().
@@ -150,15 +156,15 @@ public:
    * under @p expectedRoot using @p proof.
    */
   [[nodiscard]] static bool
-  verifyInclusion(const GpgKeyLink &entry, const MerkleProof &proof,
+  verifyInclusion(const IdentityKeyLink &entry, const MerkleProof &proof,
                   const std::array<std::uint8_t, 32> &expectedRoot);
 
-  /// Find active (non-revoked) key link by GPG fingerprint.
-  [[nodiscard]] const GpgKeyLink *
+  /// Find active (non-revoked) key link by identity fingerprint.
+  [[nodiscard]] const IdentityKeyLink *
   findByFingerprint(std::string_view fingerprint) const;
 
   /// Find all key links associated with an email address.
-  [[nodiscard]] std::vector<const GpgKeyLink *>
+  [[nodiscard]] std::vector<const IdentityKeyLink *>
   findByEmail(std::string_view email) const;
 
   /// Serialize the entire ledger to canonical TSV.
@@ -180,7 +186,7 @@ public:
    * Produces a torrent containing LEDGER.tsv, ROOT.hex, and KEYS.pub.
    */
   [[nodiscard]] MadeTorrent
-  sealToTorrent(std::string_view name     = "gpg_identity_ledger",
+  sealToTorrent(std::string_view name     = "identity_ledger",
                 std::uint64_t pieceLength = 32ULL * 1024ULL) const;
 
   /**
@@ -209,4 +215,4 @@ fromHex32(std::string_view hex);
 
 } // namespace xanadu
 
-#endif // XUDU_MERKLE_LEDGER_HPP
+#endif // XANADU_MERKLE_LEDGER_HPP

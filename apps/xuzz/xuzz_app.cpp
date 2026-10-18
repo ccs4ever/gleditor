@@ -51,9 +51,11 @@
 #include "common/xanadu/zigzag/zzcore.hpp"
 
 #include "common/ui/hypertime_graph.hpp"
+#include "common/ui/link_directory_dialog.hpp"
 #include "common/ui/slice/zigzag_commands.hpp"
 #include "common/ui/xanadoc/batch_orchestrator.hpp"
 #include "common/ui/xanadoc/beams.hpp"
+#include "common/ui/xanadoc/branch_convergence_overlay.hpp"
 #include "common/ui/xanadoc/bridge_coordinator.hpp"
 #include "common/ui/xanadoc/kinetic_tether_overlay.hpp"
 #include "common/ui/xanadoc/link_context.hpp"
@@ -69,6 +71,8 @@
 #include "common/xanadu/link_navigation.hpp"
 #include "common/xanadu/link_panel.hpp"
 #include "common/xanadu/reading_place.hpp"
+#include "common/xanadu/session_container.hpp"
+#include "common/xanadu/store_loader.hpp"
 #include <gleditor/caret_motion.hpp>
 #include <gleditor/logging.hpp>
 
@@ -313,6 +317,174 @@ int XuzzApp::executeRaster(const std::string &slicePath,
   }
 }
 
+int XuzzApp::executeSessionExport(const CliOptions &opts) {
+  const fs::path outPath = opts.sessionExportPath;
+  if (outPath.empty()) {
+    std::cerr << "xuzz session export: missing output package path (--out)\n";
+    return 1;
+  }
+
+  std::shared_ptr<xanadu::UserPermascroll> userPermascroll;
+  if (!opts.permascrollPath.empty()) {
+    xanadu::UserPermascroll::Config cfg;
+    cfg.storageDir  = opts.permascrollPath;
+    userPermascroll = std::make_shared<xanadu::UserPermascroll>(std::move(cfg));
+  } else {
+    userPermascroll = xanadu::PermascrollRegistry::instance().defaultUser();
+  }
+
+  fs::path storeDir = opts.storePath;
+  if (!fs::exists(storeDir) && !opts.sessionDoc.empty()) {
+    storeDir = xanadu::xanadocsDirectory() / opts.sessionDoc;
+  }
+  if (!fs::exists(storeDir) &&
+      fs::exists(xanadu::xanadocsDirectory() / opts.storePath)) {
+    storeDir = xanadu::xanadocsDirectory() / opts.storePath;
+  }
+
+  auto storePtr = xanadu::loadStore(storeDir, userPermascroll);
+  if (!storePtr) {
+    std::cerr << "xuzz session export: failed to load store at " << storeDir
+              << "\n";
+    return 1;
+  }
+  auto &store = *storePtr;
+  if (store.opCount() == 0) {
+    std::cerr << "xuzz session export: store at " << storeDir
+              << " has no operations\n";
+    return 1;
+  }
+
+  const auto &pConfig = userPermascroll->config();
+  std::string deviceId =
+      pConfig.deviceId.empty() ? "export_device" : pConfig.deviceId;
+  if (deviceId == "main") {
+    deviceId = "export_device";
+  }
+
+  std::string masterFp = std::string(pConfig.masterIdentity.view());
+  if (masterFp.empty() || masterFp.size() != 64) {
+    masterFp = xanadu::computeSha256Hex(pConfig.deviceKeys.publicKey.bytes);
+  }
+
+  std::span<const std::uint8_t, 32> privKey(
+      pConfig.deviceKeys.secretKey.bytes.data(), 32);
+
+  std::vector<xanadu::CompactOpNode> explicitOps;
+  if (!opts.sessionVersions.empty() || !opts.sessionEditions.empty()) {
+    const auto targets =
+        store.resolveVersionTargets(opts.sessionVersions, opts.sessionEditions);
+    if (!targets.empty()) {
+      explicitOps = store.opsInAncestryOf(targets);
+    }
+  }
+
+  std::vector<xanadu::LinkPackage> selectedLinkPackages;
+  if (!opts.sessionLinks.empty()) {
+    for (const auto &item : opts.sessionLinks) {
+      if (std::filesystem::exists(item)) {
+        std::ifstream f(item, std::ios::binary);
+        if (f) {
+          std::string content((std::istreambuf_iterator<char>(f)),
+                              std::istreambuf_iterator<char>());
+          if (auto pkg = xanadu::decodeLinkPackage(content)) {
+            selectedLinkPackages.push_back(std::move(*pkg));
+          }
+        }
+      } else if (auto pkg = xanadu::decodeLinkPackage(item)) {
+        selectedLinkPackages.push_back(std::move(*pkg));
+      }
+    }
+  }
+
+  const bool encrypt = !opts.sessionPassword.empty();
+  auto fatPkgRes     = xanadu::createFatStorePackage(
+      store, deviceId, privKey, masterFp,
+      /*baseVersion=*/{}, /*headVersion=*/{}, encrypt, opts.sessionPassword,
+      selectedLinkPackages,
+      /*existingDeviceCert=*/std::nullopt,
+      /*masterPrivateKey=*/std::nullopt, explicitOps);
+
+  if (!fatPkgRes) {
+    std::cerr << "xuzz session export failed: createFatStorePackage error\n";
+    return 1;
+  }
+
+  auto exportBytesRes = xanadu::exportPackage(*fatPkgRes);
+  if (!exportBytesRes) {
+    std::cerr << "xuzz session export failed: exportPackage packaging error\n";
+    return 1;
+  }
+
+  if (outPath.has_parent_path()) {
+    std::error_code ec;
+    fs::create_directories(outPath.parent_path(), ec);
+  }
+  std::ofstream out(outPath, std::ios::binary | std::ios::trunc);
+  if (!out) {
+    std::cerr << "xuzz session export failed: cannot write to " << outPath
+              << "\n";
+    return 1;
+  }
+  out.write(reinterpret_cast<const char *>(exportBytesRes->data()),
+            static_cast<std::streamsize>(exportBytesRes->size()));
+
+  if (!opts.quiet) {
+    std::cout << "xuzz: exported session package to " << outPath.string()
+              << " (" << exportBytesRes->size() << " bytes, "
+              << (explicitOps.empty() ? store.opCount() : explicitOps.size())
+              << " ops)\n";
+  }
+  return 0;
+}
+
+int XuzzApp::executeSessionImport(CliOptions &opts, int /*argc*/,
+                                  char ** /*argv*/) {
+  const fs::path pkgPath = opts.sessionImportPath;
+  if (!fs::exists(pkgPath)) {
+    std::cerr << "xuzz session import: package file not found: " << pkgPath
+              << "\n";
+    return 1;
+  }
+
+  fs::path destDir = opts.sessionStationDir;
+  if (destDir.empty()) {
+    auto stem = pkgPath.stem().string();
+    if (stem.ends_with(".tar")) {
+      stem = stem.substr(0, stem.size() - 4);
+    }
+    destDir = xanadu::xanadocsDirectory() / stem;
+  }
+
+  std::shared_ptr<xanadu::UserPermascroll> userPermascroll;
+  if (!opts.permascrollPath.empty()) {
+    xanadu::UserPermascroll::Config cfg;
+    cfg.storageDir  = opts.permascrollPath;
+    userPermascroll = std::make_shared<xanadu::UserPermascroll>(std::move(cfg));
+  } else {
+    userPermascroll = xanadu::PermascrollRegistry::instance().defaultUser();
+  }
+
+  xanadu::ImportStorePackageOptions importOpts;
+  importOpts.passphrase = opts.sessionPassword;
+
+  auto importedRes = xanadu::importStorePackage(pkgPath, destDir, importOpts);
+  if (!importedRes) {
+    std::cerr << "xuzz session import failed: "
+              << xanadu::validationErrorToString(importedRes.error()) << "\n";
+    return 1;
+  }
+
+  if (!opts.quiet) {
+    std::cout << "xuzz: imported session package into station: "
+              << destDir.string() << "\n";
+  }
+
+  opts.storePath        = destDir.string();
+  opts.hasExplicitStore = true;
+  return 0;
+}
+
 int XuzzApp::run(const int argc, char **argv) {
   const auto state    = std::make_shared<AppState>();
   const bool detailed = CliParser::wantsEveryOption(argc, argv);
@@ -342,6 +514,17 @@ int XuzzApp::run(const int argc, char **argv) {
 
   if (opts.rasterMode) {
     return executeRaster(opts.slicePath, opts.storePath);
+  }
+
+  if (opts.isSessionExport) {
+    return executeSessionExport(opts);
+  }
+
+  if (opts.isSessionImport) {
+    const int rc = executeSessionImport(opts, argc, argv);
+    if (rc != 0 || opts.headless) {
+      return rc;
+    }
   }
 
   // 1. Initialize sovereign Permascroll
@@ -497,6 +680,10 @@ int XuzzApp::run(const int argc, char **argv) {
         }
       }
     }
+  }
+
+  if (opts.compareDiff) {
+    map.setComparisonPage(true);
   }
 
   xanadu::ImageOverlay images{std::string{}};
@@ -709,8 +896,8 @@ int XuzzApp::run(const int argc, char **argv) {
         } else if (id == "info:author") {
           std::string authorStr = "Local Sovereign Author";
           if (const auto *ps = session->userPermascroll()) {
-            authorStr = std::format("Author OpenPGP: {}",
-                                    ps->config().masterIdentity.view());
+            authorStr =
+                std::format("Author: {}", ps->config().masterIdentity.view());
           }
           std::cout << "xuzz: " << authorStr << "\n";
         }
@@ -781,6 +968,42 @@ int XuzzApp::run(const int argc, char **argv) {
   links.setLinkContext(&linkContext);
 
   xanadu::LinkPanelOverlay linkPanel(linkContext, *session);
+  xanadu::ui::LinkDirectoryDialog linkDirectory(linkContext,
+                                                state->defaultFontName);
+  if (opts.linkDirectoryDrawer) {
+    linkDirectory.setDisplayMode(
+        xanadu::ui::DirectoryDisplayMode::DockedDrawer);
+  }
+  if (!opts.linkDirectorySearch.empty()) {
+    linkDirectory.setSearchQuery(opts.linkDirectorySearch);
+  }
+  if (!opts.linkDirectoryFilter.empty()) {
+    if (opts.linkDirectoryFilter == "quotation") {
+      linkDirectory.setTypeFilter(xanadu::LinkType::Quotation);
+    } else if (opts.linkDirectoryFilter == "comment") {
+      linkDirectory.setTypeFilter(xanadu::LinkType::Comment);
+    } else if (opts.linkDirectoryFilter == "illustration") {
+      linkDirectory.setTypeFilter(xanadu::LinkType::Illustration);
+    } else if (opts.linkDirectoryFilter == "disagreement") {
+      linkDirectory.setTypeFilter(xanadu::LinkType::Disagreement);
+    }
+  }
+  if (!opts.linkDirectoryBalance.empty()) {
+    if (opts.linkDirectoryBalance == "1:1") {
+      linkDirectory.setBalanceFilter(xanadu::ui::BalanceFilter::OneToOne);
+    } else if (opts.linkDirectoryBalance == "1:N") {
+      linkDirectory.setBalanceFilter(xanadu::ui::BalanceFilter::OneToMany);
+    } else if (opts.linkDirectoryBalance == "N:M") {
+      linkDirectory.setBalanceFilter(xanadu::ui::BalanceFilter::ManyToMany);
+    }
+  }
+  if (opts.linkDirectoryAdvanced) {
+    linkDirectory.setAdvancedPrimediaOpen(true);
+  }
+  if (opts.linkDirectoryVisible || opts.linkDirectoryDrawer) {
+    linkDirectory.setVisible(true);
+  }
+
   const auto selectedPair = [&linkContext](const RenderState &rState,
                                            const auto &cellPoint)
       -> std::optional<xanadu::LinkPanelOverlay::AnchorPair> {
@@ -1166,6 +1389,19 @@ int XuzzApp::run(const int argc, char **argv) {
         return std::nullopt;
       });
 
+  xanadu::BranchConvergenceOverlay convergenceOverlay(&session->store(0));
+  convergenceOverlay.setViews(&views);
+  convergenceOverlay.setHypertimeGraph(&map);
+  convergenceOverlay.setLinkBeams(&links);
+  convergenceOverlay.setSession(session.get());
+  convergenceOverlay.setRenderer(renderer);
+  if (auto vHost = zigzagPresentation->vortexHost()) {
+    convergenceOverlay.bindVortexHost(*vHost);
+  }
+  if (session->store(0).currentVersions().size() > 1) {
+    convergenceOverlay.detectConcurrentEdits();
+  }
+
   renderer->addSpanDecorator(session.get());
   renderer->addFrameContributor(docSwitcher.get());
   renderer->addFrameContributor(&map);
@@ -1182,6 +1418,8 @@ int XuzzApp::run(const int argc, char **argv) {
   renderer->addPickObserver(&overview);
   // Link choices must remain above the overview at large UI scales.
   renderer->addFrameContributor(&linkPanel);
+  renderer->addFrameContributor(&linkDirectory);
+  renderer->addPickObserver(&linkDirectory);
   renderer->addFrameContributor(radialMenu.get());
   renderer->addFrameContributor(&publishForm);
   renderer->addFrameContributor(&pouchDrawer);
@@ -1189,6 +1427,9 @@ int XuzzApp::run(const int argc, char **argv) {
   renderer->addFrameContributor(&swarmTelescope);
   renderer->addFrameContributor(&quotationOverlay);
   renderer->addFrameContributor(&storeObjectManager);
+  renderer->addFrameContributor(&convergenceOverlay);
+  renderer->addPickObserver(&convergenceOverlay);
+  renderer->addSpanDecorator(&convergenceOverlay);
 
   state->accessibility->addSource(docSwitcher.get());
   state->accessibility->addSource(&links);
@@ -1196,6 +1437,7 @@ int XuzzApp::run(const int argc, char **argv) {
   state->accessibility->addSource(&kineticTetherOverlay);
   state->accessibility->addSource(&wireframeHullOverlay);
   state->accessibility->addSource(&linkPanel);
+  state->accessibility->addSource(&linkDirectory);
   state->accessibility->addSource(&overview);
   state->accessibility->addSource(&map);
   state->accessibility->addSource(&publishForm);
@@ -1204,6 +1446,7 @@ int XuzzApp::run(const int argc, char **argv) {
   state->accessibility->addSource(&pouchDrawer);
   state->accessibility->addSource(&storeObjectManager);
   state->accessibility->addSource(&swarmTelescope);
+  state->accessibility->addSource(&convergenceOverlay);
   state->accessibility->setToolkit("xuzz", TOSTRING(GLEDITOR_VERSION));
 
   const auto showMapVersion = [&views, &map, &renderer, &session,
@@ -1402,7 +1645,7 @@ int XuzzApp::run(const int argc, char **argv) {
            &quotationOverlay, &storeObjectManager, &pouchDrawer, &map,
            radialMenu.get()}) {
     modalScopes.push_back(state->focusManager.registerScope(
-        *scope, {.allowedCommands = {"quit", "std:xudu/quit"}}));
+        *scope, {.allowedCommands = {"quit", "std:xuzz/quit"}}));
   }
 
   renderer->addPickObserver(docSwitcher.get());
@@ -2069,6 +2312,37 @@ int XuzzApp::run(const int argc, char **argv) {
       "show or hide the links and transclusions between documents",
       [&links] { links.toggle(); });
   app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapConvergenceToggle),
+      "show or hide the branch convergence assistant banner",
+      [&convergenceOverlay] {
+        if (convergenceOverlay.isConvergenceActive()) {
+          convergenceOverlay.setConvergenceActive(false);
+          convergenceOverlay.setPaletteVisible(false);
+        } else if (convergenceOverlay.isBannerVisible()) {
+          convergenceOverlay.setBannerVisible(false);
+        } else {
+          convergenceOverlay.setBannerVisible(true);
+        }
+      });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapConvergenceAdoptSpan),
+      "adopt active span in branch convergence assistant",
+      [&convergenceOverlay] {
+        static_cast<void>(convergenceOverlay.adoptSelectedSpan());
+      });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapConvergenceRetainEditions),
+      "retain both branches as separate editions", [&convergenceOverlay] {
+        static_cast<void>(
+            convergenceOverlay.retainBothAsNamedEditions("main", "peer"));
+      });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapConvergenceSynthesizeEdition),
+      "synthesize unified edition from converged branches",
+      [&convergenceOverlay] {
+        static_cast<void>(convergenceOverlay.synthesizeNewEdition());
+      });
+  app.commands().registerAction(
       std::string(xanadu::settings::kKeymapSworph),
       "let a link coming into view bring its far document over",
       [&links] { links.setSworph(!links.sworphing()); });
@@ -2531,6 +2805,22 @@ int XuzzApp::run(const int argc, char **argv) {
         });
   }
 
+  app.commands().registerAction("std:xuzz/link_directory",
+                                "show or hide link directory dialog",
+                                [&linkDirectory] { linkDirectory.toggle(); });
+  app.commands().registerAction(
+      "std:xuzz/link_directory_drawer", "toggle link directory docked drawer",
+      [&linkDirectory] {
+        if (linkDirectory.displayMode() ==
+            xanadu::ui::DirectoryDisplayMode::Modal) {
+          linkDirectory.setDisplayMode(
+              xanadu::ui::DirectoryDisplayMode::DockedDrawer);
+        } else {
+          linkDirectory.setDisplayMode(xanadu::ui::DirectoryDisplayMode::Modal);
+        }
+        linkDirectory.setVisible(true);
+      });
+
   app.commands().registerAction(
       std::string(xanadu::settings::kKeymapOverviewToggle),
       "show or hide the overview of every open page", [&renderer, &overview] {
@@ -2909,8 +3199,8 @@ int XuzzApp::run(const int argc, char **argv) {
        &views, &overview, &storeObjectManager, &quotationOverlay,
        &swarmTelescope, &satelloidOverlay, &kineticTetherOverlay,
        &wireframeHullOverlay, readablePx, &session, zigzagPresentation,
-       &bridgeCoordinator, &showKeyHints, state, applyTypography](
-          const xanadu::SystemDocKind kind, const xanadu::Store &store) {
+       &bridgeCoordinator, &showKeyHints, state, applyTypography,
+       &opts](const xanadu::SystemDocKind kind, const xanadu::Store &store) {
         std::cout << "xuzz: system doc updated (" << xanadu::systemDocUri(kind)
                   << ")\n";
         const auto model = xanadu::SystemStoreModel::fromStore(store);
@@ -2968,7 +3258,7 @@ int XuzzApp::run(const int argc, char **argv) {
           swarmTelescope.setConfig(uiCfg.telescopeModal);
           map.setConfig(uiCfg.hypertimeModal);
           docSwitcher->setVisible(uiCfg.tabBarVisible);
-          map.setVisible(uiCfg.hypertimeMapVisible);
+          map.setVisible(opts.mapVisible || uiCfg.hypertimeMapVisible);
           break;
         }
         case xanadu::SystemDocKind::Pouches:
@@ -3011,7 +3301,7 @@ int XuzzApp::run(const int argc, char **argv) {
       swarmTelescope.setConfig(uiCfg.telescopeModal);
       map.setConfig(uiCfg.hypertimeModal);
       docSwitcher->setVisible(uiCfg.tabBarVisible);
-      map.setVisible(uiCfg.hypertimeMapVisible);
+      map.setVisible(opts.mapVisible || uiCfg.hypertimeMapVisible);
     }
     const auto loIdx = session->systemStoreIndex(xanadu::SystemDocKind::Layout);
     const auto &loStore = session->store(loIdx);

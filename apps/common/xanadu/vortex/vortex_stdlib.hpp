@@ -349,6 +349,7 @@ private:
   void buildUiModule(CellRef mod);
   void buildNavModule(CellRef mod);
   void buildBridgeModule(CellRef mod);
+  void buildXuzzModule(CellRef mod);
   void buildXuduModule(CellRef mod);
 
   VortexCore &core_;

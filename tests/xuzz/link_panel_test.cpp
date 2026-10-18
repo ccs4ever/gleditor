@@ -238,6 +238,7 @@ TEST(LinkPanelTest, ButtonsSendTheKeymapsCommands) {
 
   using namespace xanadu::settings;
   EXPECT_EQ(command("Cross"), xanadu::commandForAction(kKeymapLinkCross));
+  EXPECT_EQ(command("Follow"), xanadu::commandForAction(kKeymapLinkFollow));
   EXPECT_EQ(command("Enter"), xanadu::commandForAction(kKeymapLinkEnter));
   EXPECT_EQ(command("Origin"), xanadu::commandForAction(kKeymapLinkOrigin));
   EXPECT_EQ(command("Back"), xanadu::commandForAction(kKeymapActivityBack));
@@ -262,4 +263,161 @@ TEST(LinkPanelTest, EnterIsEnabledOnlyWithAChosenPlace) {
   EXPECT_FALSE(enterEnabled()) << "five places, none chosen";
   p.run(nav::StepOccurrence{.delta = 1});
   EXPECT_TRUE(enterEnabled());
+}
+
+TEST(LinkPanelTest, SemanticPassageAnchorEmitsFourTiersWithoutRawByteDumps) {
+  using xanadu::LinkType;
+  EXPECT_EQ(xanadu::valenceBadge(LinkType::Comment), "[~]");
+  EXPECT_EQ(xanadu::valenceBadge(LinkType::Illustration), "[=]");
+  EXPECT_EQ(xanadu::valenceBadge(LinkType::Disagreement), "[-]");
+  EXPECT_EQ(xanadu::valenceBadge(LinkType::Authorship), "[+]");
+  EXPECT_EQ(xanadu::valenceBadge(LinkType::Quotation), "[\"]");
+  EXPECT_EQ(xanadu::valenceBadge(LinkType::Format), "[*]");
+  EXPECT_EQ(xanadu::valenceBadge(LinkType::Dimension), "[d]");
+  EXPECT_EQ(xanadu::valenceBadge(LinkType::Other), "[·]");
+
+  const xanadu::DocumentSite site{
+      .store   = xanadu::DocumentId{},
+      .version = xanadu::MicroversionId::parse("2a1"),
+      .range   = {.start = 120, .end = 150},
+  };
+
+  const auto anchor = xanadu::makeSemanticPassageAnchor(
+      site, LinkType::Comment, "Literary Machines", "Nelsonian hypertext");
+
+  EXPECT_EQ(anchor.valenceBadge, "[~]");
+  EXPECT_EQ(anchor.documentTitle, "Literary Machines");
+  EXPECT_EQ(anchor.microversionTag, "v2a1");
+  EXPECT_EQ(anchor.excerpt, "Nelsonian hypertext");
+  EXPECT_TRUE(anchor.alphaFadeMask);
+  EXPECT_FLOAT_EQ(anchor.alphaFadeWidthPx, 12.0F);
+
+  const auto formatted = xanadu::formatSemanticPassageAnchor(anchor);
+  EXPECT_NE(formatted.find("[~]"), std::string::npos);
+  EXPECT_NE(formatted.find("Literary Machines"), std::string::npos);
+  EXPECT_NE(formatted.find("v2a1"), std::string::npos);
+  EXPECT_NE(formatted.find("Nelsonian hypertext..."), std::string::npos);
+
+  // Invariant: Zero raw byte dumps
+  EXPECT_EQ(formatted.find("bytes "), std::string::npos);
+  EXPECT_EQ(formatted.find("byte "), std::string::npos);
+}
+
+TEST(LinkPanelTest, AutoSettleIndependentBilateralEndsets) {
+  Panel p;
+  p.run(nav::SelectLink{.key = p.key()});
+
+  // Independent bilateral endsets start unsettled with multiple candidates
+  EXPECT_FALSE(p.selected().left.member.has_value());
+  EXPECT_FALSE(p.selected().right.member.has_value());
+
+  p.navigator.autoSettle();
+
+  // Auto-settles both sides to Member 0, Occurrence 0
+  EXPECT_EQ(p.selected().left.member, 0U);
+  EXPECT_EQ(p.selected().left.occurrence, 0U);
+  EXPECT_EQ(p.selected().right.member, 0U);
+  EXPECT_EQ(p.selected().right.occurrence, 0U);
+}
+
+TEST(LinkPanelTest, FollowLinkCrossesSideAndEntersAtomically) {
+  Panel p;
+  p.run(nav::SelectLink{.key = p.key()});
+
+  // Start on Left side
+  EXPECT_EQ(p.selected().active, LinkSide::Left);
+
+  // Follow flips to Right side and enters counterpart occurrence in one
+  // transition
+  p.run(nav::FollowLink{});
+
+  EXPECT_EQ(p.selected().active, LinkSide::Right);
+  EXPECT_EQ(p.selected().right.member, 0U);
+  EXPECT_EQ(p.selected().right.occurrence, 0U);
+
+  const auto visitId = p.navigator.currentVisit();
+  ASSERT_TRUE(visitId.has_value());
+  const auto visit = p.log.find(*visitId);
+  ASSERT_TRUE(visit.has_value());
+  EXPECT_EQ(visit->arrival, xanadu::Arrival::EnteredEndpoint);
+  ASSERT_TRUE(visit->link.has_value());
+  EXPECT_EQ(visit->link->active, LinkSide::Right);
+
+  // Following again flips back to Left and enters counterpart occurrence
+  p.run(nav::FollowLink{});
+
+  EXPECT_EQ(p.selected().active, LinkSide::Left);
+  EXPECT_EQ(p.selected().left.member, 0U);
+  EXPECT_EQ(p.selected().left.occurrence, 0U);
+
+  const auto nextVisitId = p.navigator.currentVisit();
+  ASSERT_TRUE(nextVisitId.has_value());
+  EXPECT_NE(*nextVisitId, *visitId);
+  const auto nextVisit = p.log.find(*nextVisitId);
+  ASSERT_TRUE(nextVisit.has_value());
+  EXPECT_EQ(nextVisit->arrival, xanadu::Arrival::EnteredEndpoint);
+  ASSERT_TRUE(nextVisit->link.has_value());
+  EXPECT_EQ(nextVisit->link->active, LinkSide::Left);
+}
+
+TEST(LinkPanelTest, DismissStashRingAndRestoration) {
+  Panel p;
+  p.run(nav::SelectLink{.key = p.key()});
+
+  ASSERT_TRUE(p.navigator.selection().has_value());
+  EXPECT_EQ(p.selected().key, p.key());
+
+  // Dismiss pushes context to lastDismissed_ ring
+  const auto dismissEffect = p.navigator.dispatch(nav::Dismiss{});
+  ASSERT_TRUE(dismissEffect.has_value());
+  EXPECT_TRUE(dismissEffect->dismissed);
+  EXPECT_FALSE(p.navigator.selection().has_value());
+
+  ASSERT_EQ(p.navigator.lastDismissed().size(), 1U);
+  EXPECT_EQ(p.navigator.lastDismissed().back().key, p.key());
+
+  // Alt+Shift+Z restores dismissed link from stash ring
+  p.run(nav::RestoreDismissed{});
+
+  ASSERT_TRUE(p.navigator.selection().has_value());
+  EXPECT_EQ(p.selected().key, p.key());
+  EXPECT_TRUE(p.navigator.lastDismissed().empty());
+}
+
+TEST(LinkPanelTest, DismissStashRingCapsAtFiveItems) {
+  Panel p;
+  xanadu::InMemoryActivityLog log;
+  xanadu::LinkNavigator nav(log);
+
+  // Stash empty initially; restore returns error
+  const auto emptyRestore = nav.dispatch(nav::RestoreDismissed{});
+  EXPECT_FALSE(emptyRestore.has_value());
+  EXPECT_EQ(emptyRestore.error(), xanadu::NavigationError::NoLinkSelected);
+
+  // Dismiss 6 distinct links
+  const xanadu::DocumentId docId;
+  for (std::uint32_t i = 1; i <= 6; ++i) {
+    const xanadu::LinkKey key{.authority = docId, .id = i};
+    std::ignore = nav.dispatch(nav::SelectLink{.key = key});
+    std::ignore = nav.dispatch(nav::Dismiss{});
+  }
+
+  // Ring capped at 5 items
+  EXPECT_EQ(nav.lastDismissed().size(), 5U);
+  // Oldest (key 1) was evicted; items 2 through 6 remain
+  EXPECT_EQ(nav.lastDismissed().front().key.id, 2U);
+  EXPECT_EQ(nav.lastDismissed().back().key.id, 6U);
+}
+
+TEST(LinkPanelTest, VisitSnapshotPreservesSpatialRestorationState) {
+  xanadu::Visit visit;
+  visit.pixelScrollOffset   = 124.5F;
+  visit.cameraZoom          = 1.25F;
+  visit.multiPaneLayoutMode = 2;
+  visit.foldedState         = true;
+
+  EXPECT_FLOAT_EQ(visit.pixelScrollOffset, 124.5F);
+  EXPECT_FLOAT_EQ(visit.cameraZoom, 1.25F);
+  EXPECT_EQ(visit.multiPaneLayoutMode, 2);
+  EXPECT_TRUE(visit.foldedState);
 }

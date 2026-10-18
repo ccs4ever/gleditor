@@ -227,14 +227,14 @@ TEST(PublicationTest, whatWasWrittenHereCanBeSealedAndThenPublished) {
                                              "An Essay", 1, 1700000000),
                std::runtime_error);
 
-  // Sealing insists on a signed record of who is doing it; whether gpg made
-  // that signature is provenance.cpp's business.
+  // Sealing insists on a signed record of who is doing it; whether the crypto
+  // engine made that signature is provenance.cpp's business.
   xanadu::Provenance who;
   who.author.name   = "Ada Lovelace";
   who.author.email  = "ada@example.org";
   const auto sealed = xanadu::sealLocalSpool(
       store, keys, "permascroll", "",
-      {who.toTsv(), "-----BEGIN PGP SIGNATURE-----\n(for the test)\n"});
+      {who.toTsv(), "ed25519-sig:dummy-test-signature\n"});
   EXPECT_EQ(sealed.scroll.length(), store.primedia().bytes().size());
   EXPECT_TRUE(sealed.scroll.isNamed());
   // A real torrent: it parses, and its info hash is the one sealing reported.

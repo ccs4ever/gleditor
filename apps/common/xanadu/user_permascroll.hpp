@@ -3,8 +3,8 @@
  * @brief Sovereign append-only permascroll bound to a verified cryptographic
  * identity.
  */
-#ifndef XUDU_USER_PERMASCROLL_HPP
-#define XUDU_USER_PERMASCROLL_HPP
+#ifndef XANADU_USER_PERMASCROLL_HPP
+#define XANADU_USER_PERMASCROLL_HPP
 
 #include <cstddef>
 #include <cstdint>
@@ -41,7 +41,6 @@ struct DeviceDelegation {
   std::string deviceName;
   std::uint64_t issuedTimestamp{0};
   identity::X509Certificate certificate;
-  std::string gpgSignatureArmored{};
 
   /// Fluent setters chaining `this`
   DeviceDelegation *setMasterFingerprint(identity::Fingerprint fp) noexcept {
@@ -82,8 +81,6 @@ struct DeviceDelegation {
    */
   [[nodiscard]] bool verify(const identity::PubKey32 &masterPubKey,
                             std::uint64_t currentTime = 0) const;
-
-  [[nodiscard]] bool verify(std::string_view masterPublicKeyArmored) const;
 
   [[nodiscard]] std::string toTsv() const;
   [[nodiscard]] static std::optional<DeviceDelegation>
@@ -289,4 +286,4 @@ private:
 
 } // namespace xanadu
 
-#endif // XUDU_USER_PERMASCROLL_HPP
+#endif // XANADU_USER_PERMASCROLL_HPP

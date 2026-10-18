@@ -281,7 +281,7 @@ public:
    *        to a device key, having checked that it really did.
    *
    * @param delegation The attestation, as published by the master.
-   * @param masterPublicKeyArmored The master's OpenPGP public key.
+   * @param masterPublicKeyArmored The master's Ed25519 public key.
    * @return false, changing nothing, when the delegation does not verify.
    *
    * This is the only way a device key becomes acceptable for peer
@@ -290,6 +290,8 @@ public:
    */
   bool trustDelegation(const DeviceDelegation &delegation,
                        std::string_view masterPublicKeyArmored);
+  bool trustDelegation(const DeviceDelegation &delegation,
+                       const PubKey32 &masterPubKey);
 
   /**
    * @brief Register a span this node sells, and the key that opens it.

@@ -94,8 +94,7 @@ Scroll decodeDeployment(const bencode::Value &value) {
 
 } // namespace
 
-void writeStoreTables(const std::filesystem::path &path,
-                      const StoreTables &tables) {
+std::vector<std::uint8_t> serializeStoreTables(const StoreTables &tables) {
   bencode::List local;
   local.reserve(tables.localSegments.size());
   for (const auto &segment : tables.localSegments) {
@@ -121,60 +120,70 @@ void writeStoreTables(const std::filesystem::path &path,
           })
           .encode();
 
+  std::vector<std::uint8_t> out;
+  out.reserve(storeTablesSignature.size() + sizeof(std::uint32_t) +
+              body.size());
+  out.insert(out.end(), storeTablesSignature.begin(),
+             storeTablesSignature.end());
+  const auto version = storeTablesFormatVersion;
+  const auto *vBytes = reinterpret_cast<const std::uint8_t *>(&version);
+  out.insert(out.end(), vBytes, vBytes + sizeof(version));
+  out.insert(out.end(), body.begin(), body.end());
+  return out;
+}
+
+void writeStoreTables(const std::filesystem::path &path,
+                      const StoreTables &tables) {
+  const auto bytes = serializeStoreTables(tables);
   std::ofstream out(path, std::ios::binary | std::ios::trunc);
   if (!out) {
     throw StoreTablesUnreadable("cannot write " + path.string());
   }
-  out.write(reinterpret_cast<const char *>(storeTablesSignature.data()),
-            static_cast<std::streamsize>(storeTablesSignature.size()));
-  const auto version = storeTablesFormatVersion;
-  out.write(reinterpret_cast<const char *>(&version), sizeof(version));
-  out.write(body.data(), static_cast<std::streamsize>(body.size()));
+  out.write(reinterpret_cast<const char *>(bytes.data()),
+            static_cast<std::streamsize>(bytes.size()));
   if (!out) {
     throw StoreTablesUnreadable("cannot write " + path.string());
   }
 }
 
-StoreTables readStoreTables(const std::filesystem::path &path) {
-  std::ifstream in(path, std::ios::binary);
-  const std::string bytes{std::istreambuf_iterator<char>(in),
-                          std::istreambuf_iterator<char>()};
-
+StoreTables deserializeStoreTables(std::span<const std::uint8_t> bytes) {
   constexpr auto prelude = storeTablesSignature.size() + sizeof(std::uint32_t);
   if (bytes.size() < prelude) {
-    throw StoreTablesUnreadable(path.string() + " is only " +
-                                std::to_string(bytes.size()) +
+    throw StoreTablesUnreadable("data is only " + std::to_string(bytes.size()) +
                                 " bytes long, which is too short to hold a "
                                 "store table header");
   }
   if (!std::equal(storeTablesSignature.begin(), storeTablesSignature.end(),
-                  reinterpret_cast<const std::uint8_t *>(bytes.data()))) {
+                  bytes.data())) {
     throw StoreTablesUnreadable(
-        path.string() +
-        " does not begin with the store table signature "
+        "data does not begin with the store table signature "
         "(\\x89XUDUTBL\\r\\n\\x1a\\n), so it is not a store's side tables");
   }
   std::uint32_t version = 0;
   std::memcpy(&version, bytes.data() + storeTablesSignature.size(),
               sizeof(version));
   if (version != storeTablesFormatVersion) {
-    throw StoreTablesUnreadable(
-        path.string() + " is store table format version " +
-        std::to_string(version) + " and this build reads version " +
-        std::to_string(storeTablesFormatVersion));
+    throw StoreTablesUnreadable("is store table format version " +
+                                std::to_string(version) +
+                                " and this build reads version " +
+                                std::to_string(storeTablesFormatVersion));
   }
 
   bencode::Value decoded;
   try {
-    decoded = bencode::decode(std::string_view{bytes}.substr(prelude));
+    const std::string_view sv(
+        reinterpret_cast<const char *>(bytes.data() + prelude),
+        bytes.size() - prelude);
+    decoded = bencode::decode(sv);
   } catch (const std::exception &e) {
     throw StoreTablesUnreadable(
-        path.string() +
-        " has a header but nothing readable after it: " + e.what());
+        std::string(
+            "store tables have a header but nothing readable after it: ") +
+        e.what());
   }
   if (!decoded.isDict()) {
-    throw StoreTablesUnreadable(path.string() +
-                                " has a header but nothing readable after it");
+    throw StoreTablesUnreadable(
+        "store tables have a header but nothing readable after it");
   }
 
   StoreTables tables;
@@ -182,16 +191,16 @@ StoreTables readStoreTables(const std::filesystem::path &path) {
   const auto local    = decoded.find(keyLocalSegments);
   if (!document || !document->isString() ||
       !DocumentId::fromBytes(document->asString(), tables.documentId))
-    throw StoreTablesUnreadable(path.string() +
-                                " has an invalid document identity");
+    throw StoreTablesUnreadable(
+        "store tables have an invalid document identity");
   if (!local || !local->isList())
-    throw StoreTablesUnreadable(path.string() +
-                                " has an invalid local segment table");
+    throw StoreTablesUnreadable(
+        "store tables have an invalid local segment table");
   for (const auto &item : local->asList()) {
     const auto segment = decodeRegistrySegment(item);
     if (!segment)
-      throw StoreTablesUnreadable(path.string() +
-                                  " has a local segment it cannot read");
+      throw StoreTablesUnreadable(
+          "store tables have a local segment they cannot read");
     tables.localSegments.push_back(*segment);
   }
   const auto deployment = decoded.find(keyDeployment);
@@ -200,19 +209,27 @@ StoreTables readStoreTables(const std::filesystem::path &path) {
       !binding->isInteger() || binding->asInteger() < 0 ||
       static_cast<std::uint64_t>(binding->asInteger()) >
           deployment->asList().size())
-    throw StoreTablesUnreadable(path.string() +
-                                " has an invalid deployment binding");
+    throw StoreTablesUnreadable(
+        "store tables have an invalid deployment binding");
   std::set<std::string> keys;
   for (const auto &item : deployment->asList()) {
     auto scroll    = decodeDeployment(item);
     const auto key = scrollKey(scroll);
     if (!key.empty() && !keys.insert(key).second)
-      throw StoreTablesUnreadable(path.string() +
-                                  " has duplicate deployed scrolls");
+      throw StoreTablesUnreadable(
+          "store tables have duplicate deployed scrolls");
     tables.deployedScrolls.push_back(std::move(scroll));
   }
   tables.publishedLocalScroll = static_cast<ScrollId>(binding->asInteger());
   return tables;
+}
+
+StoreTables readStoreTables(const std::filesystem::path &path) {
+  std::ifstream in(path, std::ios::binary);
+  const std::string bytes{std::istreambuf_iterator<char>(in),
+                          std::istreambuf_iterator<char>()};
+  return deserializeStoreTables(std::span<const std::uint8_t>(
+      reinterpret_cast<const std::uint8_t *>(bytes.data()), bytes.size()));
 }
 
 } // namespace xanadu

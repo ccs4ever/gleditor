@@ -50,7 +50,7 @@ hand-edit under `thirdparty/`; bump the submodule pointer and commit the gitlink
 Always `make -j$(nproc)`.
 
 ```sh
-make -j$(nproc)              # lib, every program above, the four test binaries, shaders, compile_commands.json
+make -j$(nproc)              # lib, every program above, the three test binaries, shaders, compile_commands.json
 make -j$(nproc) lib|gleditor|xudu|xuzz|zigzag|xudu-dump|vquery|vqueryc|vpl|vplc|vprolog|xudu-swarm-peer
 make -j$(nproc) shaders      # glslangValidator over every shader; SPIR-V when Vulkan is on
 make -j$(nproc) fuzz         # fuzz_binary_ops, fuzz_link_package, fuzz_identity_wire (sanitizer build of the engine)
@@ -102,7 +102,7 @@ xvfb-run -s "-screen 0 1024x768x24" <command>                                   
 xvfb-run -s "-screen 0 1024x768x24" ./tools/compare-backends.sh                        # 3. both; what compare-backends wants
 ```
 
-That covers `./build/xudu_test --gtest_filter=...`, the common case that bypasses make. `xuzz` (and
+That covers `./build/xuzz_test --gtest_filter=...`, the common case that bypasses make. `xuzz` (and
 the `xudu` / `zigzag` symlinks) also take `--headless`, which skips window creation entirely and is
 what `tools/create-sample-xanadocs.sh` uses; prefer it when driving them. If nothing above works for
 a new tool, add a way (a dummy driver, your own `Xvfb`, a `--no-window` flag) rather than opening a
@@ -111,28 +111,30 @@ window. When visual confirmation is the point, the user will say so.
 ### Running them
 
 ```sh
-make -j$(nproc) test                  # gleditor_test, xudu_test, xuzz_test, zigzag_test, then the rootless swarm tests
-make test TEST_FILTER='MediaTest.*'   # gtest filter applied to all four
+make -j$(nproc) test                  # gleditor_test, xuzz_test, zigzag_test, then the rootless swarm tests
+make test TEST_FILTER='MediaTest.*'   # gtest filter applied to all three
 make test/e2e-orchestration           # tools/xudu-e2e-orchestration.sh against build/xudu
 ```
 
-- `gleditor_test` links the real shared library (catches export-boundary bugs). `xudu_test` and
-  `xuzz_test` link only the xanalogical engine, no graphics device, on purpose. `zigzag_test` covers
-  the slice model and the transclusion engine.
+- `gleditor_test` links the real shared library (catches export-boundary bugs). `xuzz_test` (which
+  integrates the previous `xudu_test` suite) links only the xanalogical engine, no graphics device,
+  on purpose. `zigzag_test` covers the slice model and the transclusion engine.
 - **A test sits with its code, once.** Generic library behaviour is tested in `tests/lib/` and
   nowhere else; `xuzz_test` is kept to xuzz's own code and must not repeat the library's battery
   (font, scale and backend sweeps belong to `tests/lib/`).
 - `make test` ends with `tools/swarm-netns-test.sh` under `unshare -Urnm`. That needs the `veth`
   kernel module; without it the run ends in `Error: Unknown device type.` and a non-zero exit
-  **after all four gtest binaries passed**. `sudo modprobe veth` is the fix and it is the user's to
-  run. Read the four `[  PASSED  ]` lines before concluding anything is broken.
-- `E2EBinaryOrchestrationTest` and `AnimationTransclusionTest` shell out to `build/xudu`;
-  `xudu binary not found` means the app did not link, not a test regression.
+  **after all three gtest binaries passed**. `sudo modprobe veth` is the fix and it is the user's to
+  run. Read the three `[  PASSED  ]` lines before concluding anything is broken.
+- `E2EBinaryOrchestrationTest` and `AnimationTransclusionTest` shell out to `build/xuzz` (or the
+  `build/xudu` compatibility symlink); binary not found means the app did not link, not a test
+  regression.
 - `./tools/compare-backends.sh` renders a sample through every compiled-in backend and diffs the
   PNGs — the real check that a backend still draws, since one that draws nothing exits 0.
 
-Unit tests live in `tests/lib/`, `tests/xudu/`, `tests/xuzz/`, `tests/zigzag/` (GoogleTest/
-GoogleMock; match the style in place); fuzzers in `tests/fuzz/`.
+Unit tests live in `tests/lib/`, `tests/xuzz/` (incorporating all Xanadu engine tests previously
+under `tests/xudu/`), `tests/zigzag/` (GoogleTest/ GoogleMock; match the style in place); fuzzers in
+`tests/fuzz/`.
 
 ### Binary fixtures under `tests/samples/`
 
@@ -163,8 +165,8 @@ hand with its own `.permascroll` beside it.
 - Use the named spdlog categories in `<gleditor/logging.hpp>` for new diagnostic messages. Prefer a
   permanent `GLEDITOR_LOG_DEBUG` or `GLEDITOR_LOG_TRACE` call that can be enabled with
   `SPDLOG_LEVEL` over a temporary `std::cout`, `std::cerr`, or `printf` statement. Name the
-  subsystem in the category (for example, `text.layout`, `render.scene`, `xudu.edit`, or
-  `xudu.links`).
+  subsystem in the category (for example, `text.layout`, `render.scene`, `xanadu.edit`, or
+  `xuzz.links`).
 
 - Keep command results, REPL output, benchmark markers, and machine-readable protocol lines on their
   existing stdout streams. Do not log document text, credentials, or key material in routine
@@ -266,7 +268,9 @@ file `make lint` rejects; `tools/check-config-harmony.sh` (run by both targets) 
   and has no Xanadu reference by design). Everything xanalogical goes in `apps/common/`:
   `apps/common/xanadu/` if it needs no graphics device, `apps/common/ui/` if it draws or takes
   input. `apps/xuzz/` is for what is truly unique to the xuzz program, which should be rare.
-- There is no `apps/xudu/` or `apps/zigzag/`; do not create either.
+- There is no `apps/xudu/` or `apps/zigzag/`; do not create either. `xuzz` is the sovereign unified
+  hypermedia application integrating Xanadu hypertext and ZigZag multidimensional space, while
+  `xanadu` is the underlying xanalogical engine.
 - `apps/common/ui/xanadoc/` — xuzz's xanadoc UI components (`beams.cpp`, `session.cpp`,
   `bridge_coordinator.cpp`, `views.cpp`, overlays; in namespace `xanadu`). They emit no Structure
   operations directly (only `batch_orchestrator.cpp` does); the editor is text-ops only.
@@ -280,7 +284,7 @@ file `make lint` rejects; `tools/check-config-harmony.sh` (run by both targets) 
 - `apps/vquery`, `vqueryc`, `vpl`, `vplc`, `vprolog` — see the table at the top.
 - `assets/shaders/` — GLSL bodies; `vulkan/` holds generated SPIR-V. There is no `assets/zigzag/`
   any more: the YAML slice format is deleted and every slice is a store.
-- `tests/lib/`, `tests/xudu/`, `tests/xuzz/`, `tests/zigzag/`, `tests/fuzz/`, `tests/samples/`.
+- `tests/lib/`, `tests/xuzz/`, `tests/zigzag/`, `tests/fuzz/`, `tests/samples/`.
 - `tools/` — `compare-backends.sh`, `create-sample-xanadocs.sh`, `create-floating-image-sample.sh`,
   `swarm-netns-test.sh`, `xudu-e2e-orchestration.sh`, `check-config-harmony.sh`,
   `benchmark-kjv-load.{py,sh}`, `layout-latency-probe.cpp`, `shader_assemble.cpp`, `xudu-dump.cpp`,
@@ -313,8 +317,8 @@ file `make lint` rejects; `tools/check-config-harmony.sh` (run by both targets) 
   hypertime names.
 - `publication.hpp/.cpp` — publish/adopt, `GlobalSpan` ↔ `PrimediaSpan` (`globalise`/`localise`),
   `GlobalOpRef` ↔ op index (`opRefOf`/`localiseOpRef`), `historyFromSeal`. `provenance.hpp` — the
-  GPG-signed `AUTHORSHIP.tsv` sealed into a torrent. `merkle_ledger`, `managed_torrent`,
-  `transcopyright_*`, `swarm*` — identity and swarm.
+  Ed25519-signed provenance in `AUTHORSHIP.tsv` (with X.509 delegation certificates) sealed into a
+  torrent. `merkle_ledger`, `managed_torrent`, `transcopyright_*`, `swarm*` — identity and swarm.
 - `zigzag/manifold.{hpp,cpp}` — **the slice model**: cells folded from Structure operations, a
   `CellRef` is an ops index, links are per-cell CSR runs keyed by a dimension *cell*, a cell's
   content is a run of spans. `Store::rebuildManifold()` folds, `advance()` steps,
@@ -354,13 +358,14 @@ file `make lint` rejects; `tools/check-config-harmony.sh` (run by both targets) 
 ## Xanadulogical and identity architecture
 
 - **One permascroll per user.** All typing appends to one `UserPermascroll` bound to the author's
-  OpenPGP / BEP 46 identity, in 64 KiB page-aligned segments (Merkle piece stability, zero-copy
-  `mmap(MAP_FIXED)` growth). A `Store` is an edit decision list over slot 0 (local) or external
-  scrolls (`ScrollId > 0`). `DeviceDelegation` maps master GPG fingerprints to device-salted BEP 46
-  keys.
-- **Merkle identity ledger.** `MerkleLedger` (merklecpp) holds verified fingerprints and email
-  mappings; BEP 10 plugins `xudu_identity_lookup`, `xudu_oracle_vote`, `xudu_oracle_verify` do
-  challenge-response and peer gating; `HashcashEngine` PoW resists Sybil/DoS.
+  Ed25519 identity (anchored to the master identity fingerprint), in 64 KiB page-aligned segments
+  (Merkle piece stability, zero-copy `mmap(MAP_FIXED)` growth). A `Store` is an edit decision list
+  over slot 0 (local) or external scrolls (`ScrollId > 0`). `DeviceDelegation` maps master Ed25519
+  identities to device keys via standard X.509 v3 certificates (`StandardCryptoEngine`).
+- **Merkle identity ledger.** `MerkleLedger` (merklecpp) holds verified 64-hex SHA-256 digests of
+  Ed25519 public keys and email mappings; BEP 10 plugins `xanadu_identity_lookup`,
+  `xanadu_oracle_vote`, `xanadu_oracle_verify` do challenge-response and peer gating;
+  `HashcashEngine` PoW resists Sybil/DoS.
 - **Beams.** Emergent transclusion prisms (Identity Gold quads) versus explicit xanalinks
   (cyan/magenta ribbons); multi-span spines and hue shifts disambiguate dense hypertexts; margin
   anchor brackets support four overlapping anchor colours.
@@ -385,7 +390,7 @@ A store directory is exactly:
 | `ops.export`   | only with `--export-osmic`: the operations as OSMIC text or the compact binary wire format (`CompactBinaryV4`)    |
 
 **A store holds no primedia**, so it is not portable alone: it needs the permascroll it was written
-against (`$XDG_DATA_HOME/xudu/permascroll/<key>/active.primedia` or `--permascroll`). The retired
+against (`$XDG_DATA_HOME/xuzz/permascroll/<key>/active.primedia` or `--permascroll`). The retired
 files — `primedia.spool`, `ops.spool`, `current.yaml`, `versions.yaml`, `scrolls.spool`,
 `links.spool`, `origins.spool` — are **refused by name**, because loading one against the wrong
 permascroll renders a document that is not the document. `ops.spool` now names only the in-memory
@@ -482,9 +487,11 @@ arises when meaning is hidden in paragraph structure or embedded markup.
 
 ## Sovereign keymap and Vortex governance
 
-- Every key binding across `xuzz` is defined in `system://keymap`, never hardcoded; binding actions
-  are Vortex calls or registered Vortex routines/macros. `gleditor` is exempt and must share no code
-  or dependency with Xanadu, ZigZag or Xuzz.
+- All keymaps across the application (`xuzz`, and compatibility symlinks `xudu`/`zigzag`) are merged
+  into the sovereign `system://keymap` system store. Every key binding across `xuzz` is defined in
+  `system://keymap`, never hardcoded; binding actions are Vortex function calls or registered Vortex
+  routines/macros. `gleditor` is exempt and must share no code or dependency with Xanadu, ZigZag or
+  Xuzz.
 - New C++ must justify why it is not Vortex (hardware/driver interfacing, rendering intrinsics,
   allocator primitives, raw OS events).
 - New Vortex standard-library code reuses existing standard-library functions unless it cannot.

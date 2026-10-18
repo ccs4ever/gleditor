@@ -153,6 +153,9 @@ public:
   /// Bumped by every change a reader of selection() might care about.
   [[nodiscard]] std::uint64_t revision() const noexcept { return changes; }
 
+  [[nodiscard]] Session &sessionRef() noexcept { return session; }
+  [[nodiscard]] const Session &sessionRef() const noexcept { return session; }
+
 private:
   [[nodiscard]] PackageOccurrenceIndex
   packageIndex(std::optional<int> cellRadius) const;

@@ -63,6 +63,9 @@
 
 namespace xanadu {
 
+struct SpanDependencyAnalysis;
+struct LinkPackage;
+
 /**
  * @brief Classification of text spans during mathematical primedia identity
  * diffing.
@@ -1200,7 +1203,8 @@ public:
   /// invalid or tampered.
   void setProvenance(SignedProvenance prov, const SigningOptions &where = {});
 
-  /// Direct setter for already-verified provenance without invoking gpg.
+  /// Direct setter for already-verified provenance without invoking signature
+  /// verification.
   void setVerifiedProvenance(SignedProvenance prov) noexcept {
     provenance_ = std::move(prov);
   }
@@ -1216,6 +1220,23 @@ public:
    * place per author no matter how many documents quote it.
    */
   void save(const std::string &directory) const;
+
+  /// Construct the persistent side tables for this store.
+  [[nodiscard]] StoreTables storeTables() const;
+
+  /// Perform span frequency and minimal scroll interval dependency analysis.
+  [[nodiscard]] SpanDependencyAnalysis analyzeSpanDependencies(
+      std::span<const LinkPackage> linkPackages  = {},
+      std::span<const CompactOpNode> explicitOps = {}) const;
+
+  /// Trace all ancestor operations for a set of target microversions.
+  [[nodiscard]] std::vector<CompactOpNode>
+  opsInAncestryOf(std::span<const MicroversionId> targets) const;
+
+  /// Resolve target microversions from version/alias strings and edition names.
+  [[nodiscard]] std::vector<MicroversionId>
+  resolveVersionTargets(std::span<const std::string> versionOrAliasStrings = {},
+                        std::span<const std::string> editionNames = {}) const;
 
   /**
    * @brief Write the store to @p directory using canonical human-readable

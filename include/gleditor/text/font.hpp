@@ -26,6 +26,8 @@ struct FontMetrics {
   float descent{};    ///< Pixels below baseline (positive)
   float lineHeight{}; ///< Full line pitch in pixels
   float spaceWidth{}; ///< Advance width of the space character
+  float capHeight{};  ///< Pixels above baseline for uppercase letters
+  float xHeight{};    ///< Pixels above baseline for lowercase x
 };
 
 /**

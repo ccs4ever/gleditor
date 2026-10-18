@@ -11,6 +11,7 @@
 #include <atomic>
 #include <cstddef>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <string>
 #include <thread>
@@ -114,9 +115,8 @@ TEST(UserPermascrollTest, IncrementalSealing) {
   scroll.append("First segment content.");
 
   SignedProvenance prov1;
-  prov1.tsv = "title\tPermascroll Seg 1\n";
-  prov1.signature =
-      "-----BEGIN PGP SIGNATURE-----\ntest\n-----END PGP SIGNATURE-----\n";
+  prov1.tsv       = "title\tPermascroll Seg 1\n";
+  prov1.signature = "ed25519-sig:test-permascroll-seg-1\n";
 
   const auto seg1 = scroll.sealIncremental(tempDir, prov1);
   ASSERT_TRUE(seg1.has_value());
@@ -127,9 +127,8 @@ TEST(UserPermascrollTest, IncrementalSealing) {
   scroll.append(" Second segment content.");
 
   SignedProvenance prov2;
-  prov2.tsv = "title\tPermascroll Seg 2\n";
-  prov2.signature =
-      "-----BEGIN PGP SIGNATURE-----\ntest2\n-----END PGP SIGNATURE-----\n";
+  prov2.tsv       = "title\tPermascroll Seg 2\n";
+  prov2.signature = "ed25519-sig:test-permascroll-seg-2\n";
 
   const auto seg2 = scroll.sealIncremental(tempDir, prov2);
   ASSERT_TRUE(seg2.has_value());
@@ -337,13 +336,13 @@ TEST(UserPermascrollTest, ACertificateWithANonHexDeviceKeyIsRejected) {
 
 TEST(UserPermascrollTest, DeviceDelegationVerifiesAgainstItsMasterKey) {
   const auto cert = fixtureDelegation();
-  EXPECT_TRUE(cert.verify(xanadu::testing::kAuthorPublicKey));
+  EXPECT_TRUE(cert.verify(xanadu::testing::authorMasterPublicKey()));
 
   // Survives a round trip through TSV, which is how it reaches another
   // machine.
   const auto decoded = xanadu::DeviceDelegation::fromTsv(cert.toTsv());
   ASSERT_TRUE(decoded.has_value());
-  EXPECT_TRUE(decoded->verify(xanadu::testing::kAuthorPublicKey));
+  EXPECT_TRUE(decoded->verify(xanadu::testing::authorMasterPublicKey()));
 }
 
 // This case used to pass with the signature field set to the literal text
@@ -354,50 +353,52 @@ TEST(UserPermascrollTest, DeviceDelegationRejectsWhatItShould) {
 
   auto mockSignature            = good;
   mockSignature.certificate.der = {0x01, 0x02, 0x03};
-  EXPECT_FALSE(mockSignature.verify(xanadu::testing::kAuthorPublicKey))
+  EXPECT_FALSE(mockSignature.verify(xanadu::testing::authorMasterPublicKey()))
       << "a corrupt X.509 certificate must not verify";
 
   // A different key, with a real signature of its own, is still not this
   // delegation's master.
-  EXPECT_FALSE(good.verify(xanadu::testing::kImpostorPublicKey));
+  EXPECT_FALSE(good.verify(xanadu::testing::impostorMasterPublicKey()));
 
   // Every signed field is covered: changing any one invalidates the whole.
   auto renamed       = good;
   renamed.deviceName = "someone-elses-laptop";
-  EXPECT_FALSE(renamed.verify(xanadu::testing::kAuthorPublicKey));
+  EXPECT_FALSE(renamed.verify(xanadu::testing::authorMasterPublicKey()));
 
   // Temporal validity RFC 5280 check:
   // Before notBefore (1700000000)
   auto beforeNotBefore            = good;
   beforeNotBefore.issuedTimestamp = 1699999999;
-  EXPECT_FALSE(beforeNotBefore.verify(xanadu::testing::kAuthorPublicKey));
+  EXPECT_FALSE(
+      beforeNotBefore.verify(xanadu::testing::authorMasterPublicKey()));
 
   // After notAfter (1700000000 + 365 * 86400)
   auto afterNotAfter            = good;
   afterNotAfter.issuedTimestamp = 1700000000 + 365 * 86400 + 1;
-  EXPECT_FALSE(afterNotAfter.verify(xanadu::testing::kAuthorPublicKey));
+  EXPECT_FALSE(afterNotAfter.verify(xanadu::testing::authorMasterPublicKey()));
 
   // Valid timestamp within [notBefore, notAfter]
   auto withinWindow            = good;
   withinWindow.issuedTimestamp = 1700000000 + 1000;
-  EXPECT_TRUE(withinWindow.verify(xanadu::testing::kAuthorPublicKey));
+  EXPECT_TRUE(withinWindow.verify(xanadu::testing::authorMasterPublicKey()));
 
   // Master fingerprint mismatch must be rejected
   auto badMasterFp              = good;
   badMasterFp.masterFingerprint = *xanadu::identity::Fingerprint::fromString(
       xanadu::testing::kImpostorFingerprint);
-  EXPECT_FALSE(badMasterFp.verify(xanadu::testing::kAuthorPublicKey));
+  EXPECT_FALSE(badMasterFp.verify(xanadu::testing::authorMasterPublicKey()));
 
   auto swappedDevice = good;
   swappedDevice.devicePublicKey.bytes.fill(0x22);
-  EXPECT_FALSE(swappedDevice.verify(xanadu::testing::kAuthorPublicKey))
+  EXPECT_FALSE(swappedDevice.verify(xanadu::testing::authorMasterPublicKey()))
       << "a delegation was retargeted to a different device key";
 
   auto unsignedCert        = good;
   unsignedCert.certificate = {};
-  EXPECT_FALSE(unsignedCert.verify(xanadu::testing::kAuthorPublicKey));
+  EXPECT_FALSE(unsignedCert.verify(xanadu::testing::authorMasterPublicKey()));
 
-  EXPECT_FALSE(good.verify("")) << "no master key means no verification";
+  EXPECT_FALSE(good.verify(xanadu::identity::PubKey32{}))
+      << "zero master key means no verification";
 }
 
 TEST(UserPermascrollTest, MainDeviceIdIsProtectedAndBlockedInConfig) {
@@ -406,14 +407,153 @@ TEST(UserPermascrollTest, MainDeviceIdIsProtectedAndBlockedInConfig) {
   EXPECT_THROW(UserPermascroll scroll(cfg), std::invalid_argument);
 }
 
-TEST(UserPermascrollTest, SubscrollRejectsPrimaryOrEmptyDeviceId) {
+TEST(UserPermascrollTest, DeviceActivePrimediaPathHierarchy) {
+  const auto tempDir =
+      std::filesystem::temp_directory_path() / "xudu_dev_path_test";
+  std::error_code ec;
+  std::filesystem::remove_all(tempDir, ec);
+  std::filesystem::create_directories(tempDir, ec);
+
+  UserPermascroll::Config cfg;
+  cfg.storageDir = tempDir;
+  UserPermascroll scroll(cfg);
+
+  EXPECT_EQ(scroll.deviceActivePrimediaPath("laptop"),
+            tempDir / "devices" / "laptop" / "active.primedia");
+  EXPECT_EQ(scroll.deviceActivePrimediaPath("workstation_99"),
+            tempDir / "devices" / "workstation_99" / "active.primedia");
+  EXPECT_EQ(scroll.deviceActivePrimediaPath("mobile-device-1"),
+            tempDir / "devices" / "mobile-device-1" / "active.primedia");
+
+  EXPECT_EQ(scroll.deviceActivePrimediaPath(""), tempDir / "active.primedia");
+  EXPECT_EQ(scroll.deviceActivePrimediaPath("main"),
+            tempDir / "active.primedia");
+
+  EXPECT_EQ(scroll.deviceActivePrimediaPath("invalid/path"),
+            std::filesystem::path{});
+  EXPECT_EQ(scroll.deviceActivePrimediaPath("has space"),
+            std::filesystem::path{});
+
+  UserPermascroll inMemory;
+  EXPECT_TRUE(inMemory.deviceActivePrimediaPath("laptop").empty());
+
+  std::filesystem::remove_all(tempDir, ec);
+}
+
+TEST(UserPermascrollTest, IngestSubscrollWritesBytesAndCreatesHierarchy) {
+  const auto tempDir =
+      std::filesystem::temp_directory_path() / "xudu_ingest_subscroll_test";
+  std::error_code ec;
+  std::filesystem::remove_all(tempDir, ec);
+  std::filesystem::create_directories(tempDir, ec);
+
+  UserPermascroll::Config cfg;
+  cfg.storageDir = tempDir;
+  UserPermascroll scroll(cfg);
+
+  const std::string text = "Offline laptop keystrokes in subscroll";
+  const std::vector<std::uint8_t> data(text.begin(), text.end());
+
+  const auto expectedTarget =
+      tempDir / "devices" / "laptop" / "active.primedia";
+  EXPECT_FALSE(std::filesystem::exists(expectedTarget.parent_path()));
+
+  const auto subscroll = scroll.ingestSubscroll("laptop", data);
+
+  EXPECT_TRUE(std::filesystem::exists(expectedTarget.parent_path()));
+  EXPECT_TRUE(
+      std::filesystem::exists(expectedTarget.parent_path() / "segments"));
+  EXPECT_TRUE(std::filesystem::exists(expectedTarget));
+
+  std::ifstream in(expectedTarget, std::ios::binary);
+  ASSERT_TRUE(in.is_open());
+  std::string readContent((std::istreambuf_iterator<char>(in)),
+                          std::istreambuf_iterator<char>());
+  EXPECT_EQ(readContent, text);
+
+  EXPECT_EQ(subscroll.publisher, scroll.config().deviceKeys.publicKey);
+  EXPECT_EQ(subscroll.salt, "permascroll/laptop");
+  EXPECT_TRUE(subscroll.isNamed());
+  EXPECT_EQ(xanadu::scrollKey(subscroll),
+            "btpk:" + scroll.config().deviceKeys.publicKey.hex() +
+                ":permascroll/laptop");
+
+  std::filesystem::remove_all(tempDir, ec);
+}
+
+TEST(UserPermascrollTest,
+     RegisterSubscrollCopiesExistingPrimediaAndCreatesHierarchy) {
+  const auto tempDir =
+      std::filesystem::temp_directory_path() / "xudu_register_subscroll_test";
+  std::error_code ec;
+  std::filesystem::remove_all(tempDir, ec);
+  std::filesystem::create_directories(tempDir / "external", ec);
+
+  const auto externalFile = tempDir / "external" / "peer_laptop.primedia";
+  {
+    std::ofstream out(externalFile, std::ios::binary);
+    out << "Registered peer primedia stream";
+  }
+
+  UserPermascroll::Config cfg;
+  cfg.storageDir = tempDir;
+  UserPermascroll scroll(cfg);
+
+  const auto expectedTarget =
+      tempDir / "devices" / "peer-station" / "active.primedia";
+  EXPECT_FALSE(std::filesystem::exists(expectedTarget.parent_path()));
+
+  const auto subscroll = scroll.registerSubscroll("peer-station", externalFile);
+
+  EXPECT_TRUE(std::filesystem::exists(expectedTarget.parent_path()));
+  EXPECT_TRUE(
+      std::filesystem::exists(expectedTarget.parent_path() / "segments"));
+  EXPECT_TRUE(std::filesystem::exists(expectedTarget));
+
+  std::ifstream in(expectedTarget, std::ios::binary);
+  ASSERT_TRUE(in.is_open());
+  std::string readContent((std::istreambuf_iterator<char>(in)),
+                          std::istreambuf_iterator<char>());
+  EXPECT_EQ(readContent, "Registered peer primedia stream");
+
+  EXPECT_EQ(subscroll.publisher, scroll.config().deviceKeys.publicKey);
+  EXPECT_EQ(subscroll.salt, "permascroll/peer-station");
+  EXPECT_TRUE(subscroll.isNamed());
+  EXPECT_EQ(xanadu::scrollKey(subscroll),
+            "btpk:" + scroll.config().deviceKeys.publicKey.hex() +
+                ":permascroll/peer-station");
+
+  std::filesystem::remove_all(tempDir, ec);
+}
+
+TEST(UserPermascrollTest, SubscrollRejectsInvalidDeviceIds) {
   UserPermascroll scroll;
-  EXPECT_THROW(scroll.registerSubscroll("main", "/tmp/nonexistent"),
-               std::invalid_argument);
-  EXPECT_THROW(scroll.registerSubscroll("", "/tmp/nonexistent"),
-               std::invalid_argument);
-  EXPECT_THROW(scroll.ingestSubscroll("main", {}), std::invalid_argument);
-  EXPECT_THROW(scroll.ingestSubscroll("", {}), std::invalid_argument);
+
+  const std::vector<std::string> invalidIds = {"",
+                                               "main",
+                                               "laptop/nested",
+                                               "../traversal",
+                                               "device with spaces",
+                                               "device@domain",
+                                               "device:1",
+                                               "device.dot",
+                                               "device#hash",
+                                               "device!bad",
+                                               std::string(65, 'a')};
+
+  for (const auto &id : invalidIds) {
+    EXPECT_THROW(scroll.registerSubscroll(id, "/tmp/dummy.primedia"),
+                 std::invalid_argument)
+        << "Expected registerSubscroll to reject invalid device ID: '" << id
+        << "'";
+    EXPECT_THROW(scroll.ingestSubscroll(id, {}), std::invalid_argument)
+        << "Expected ingestSubscroll to reject invalid device ID: '" << id
+        << "'";
+  }
+
+  EXPECT_NO_THROW(scroll.ingestSubscroll("a", {}));
+  EXPECT_NO_THROW(scroll.ingestSubscroll("laptop_01-test", {}));
+  EXPECT_NO_THROW(scroll.ingestSubscroll(std::string(64, 'b'), {}));
 }
 
 TEST(UserPermascrollTest, UniqueUuidDeviceIdGeneration) {

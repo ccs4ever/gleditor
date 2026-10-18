@@ -27,9 +27,9 @@ includes `gleditor/doc.hpp`, `gleditor/glyphcache/cache.hpp` and `gleditor/rende
 directly, and its public API (`stageVisibleCells`, `stageIntoStreamBuffer`, lines 262-274) takes a
 `gleditor::GlyphCache&`. `apps/xudu/link_context.hpp:31,67-70` includes `xudu/session.hpp` and takes
 a `Session&` as its only non-trivial constructor argument. Routing either into `apps/common/xanadu/`
-(`COMMON_XANADU_SRCS`, `Makefile:603`) would put it in `XUDU_CORE_OBJS`, linked by `xudu_test`,
-`xuzz_test`, `vquery`, `vpl`, `vprolog`, `vqueryc`, `vplc`, `xudu-swarm-peer` and all three fuzz
-targets (`Makefile:605,622,894-899,915,921,934,952-953,969-990`) — **none of which link
+(`COMMON_XANADU_SRCS`, `Makefile:603`) would put it in `XUDU_CORE_OBJS`, linked by `xuzz_test`,
+`vquery`, `vpl`, `vprolog`, `vqueryc`, `vplc`, `xudu-swarm-peer` and all three fuzz targets
+(`Makefile:605,622,894-899,915,921,934,952-953,969-990`) — **none of which link
 `$(LIBLINK)`/`$(APP_LDFLAGS)`** (the Makefile's own comment at `Makefile:888-892` calls this link
 line the architecture check). This was independently confirmed by the build review (`03-build.md`
 §1.1).

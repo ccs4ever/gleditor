@@ -47,7 +47,7 @@ TEST_F(ManagedTorrentTest, RegisterAndSeedMerkleLedger) {
   SystemTorrentManager manager(opts);
 
   MerkleLedger ledger;
-  GpgKeyLink link;
+  IdentityKeyLink link;
   link.fingerprint = "1111222233334444555566667777888899990000";
   link.identity    = "Ada Lovelace";
   link.email       = "ada@example.org";
@@ -132,7 +132,7 @@ TEST_F(ManagedTorrentTest, PauseResumeAndRemove) {
   SystemTorrentManager manager(opts);
 
   MerkleLedger ledger;
-  GpgKeyLink link;
+  IdentityKeyLink link;
   link.fingerprint = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
   link.identity    = "Test User";
   link.email       = "user@test.org";

@@ -1,7 +1,7 @@
 # BEP 10 BitTorrent Wire Protocol Extensions Specification
 
 An architectural specification and reference document for all custom BEP 10 (BitTorrent Extension
-Protocol) extensions across the `gleditor`, `xudu`, and `zigzag` systems.
+Protocol) extensions across `gleditor`, `xuzz`, and the underlying `xanadu` engine.
 
 ______________________________________________________________________
 
@@ -9,7 +9,7 @@ ______________________________________________________________________
 
 In traditional decentralized systems, identity, collaborative live editing, and micropayments are
 delegated to separate network sidecars, HTTP servers, or blockchain RPC nodes. In the Xanadulogical
-architecture of `xudu` and `gleditor`, **the BitTorrent peer wire is the sole transport layer**.
+architecture of `xuzz` and `gleditor`, **the BitTorrent peer wire is the sole transport layer**.
 
 By building on **BEP 10 (Extension Protocol for BitTorrent)**:
 
@@ -163,7 +163,7 @@ sequenceDiagram
 
     PeerA->>PeerB: PeerAuthChallenge (nonce)
     PeerB->>PeerA: PeerAuthResponse (nonce, claimedFingerprint, signature)
-    PeerA->>PeerA: Verify Signature against PGP Key
+    PeerA->>PeerA: Verify Signature against Ed25519 Key
     PeerA->>PeerB: IdentityQuery (fingerprint / email)
     PeerB-->>PeerA: IdentityResponse (IdentityEntry, BlockHeader, LedgerMerkleProof)
     PeerA->>PeerA: Verify Merkle Audit Path against Quorum Root
@@ -181,7 +181,7 @@ Sent immediately after extension handshake to gate the connection.
 
 #### 2. `PeerAuthResponse` (`0x04`)
 
-Proves private key possession for the claimed PGP identity.
+Proves private key possession for the claimed Ed25519 identity (anchored via X.509 delegation).
 
 ```
 {
@@ -428,9 +428,9 @@ ______________________________________________________________________
 
 | Component                 | Files                                                                                                                                      | Description                                                            |
 | :------------------------ | :----------------------------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------- |
-| **Live Op Plugin**        | [`apps/xudu/core/swarm.cpp`](apps/xudu/core/swarm.cpp)                                                                                     | `XuduPeerPlugin` & `XuduTorrentPlugin` (`xudu_live_op`)                |
-| **Identity Controller**   | [`apps/xudu/core/identity/identity_network_controller.hpp/.cpp`](apps/xudu/core/identity/identity_network_controller.hpp)                  | `IdentityPeerPlugin` & `IdentityTorrentPlugin` (Extensions 2, 3, 4, 5) |
-| **Message Layouts**       | [`apps/xudu/core/identity/identity_layout.hpp`](apps/xudu/core/identity/identity_layout.hpp)                                               | Struct definitions for all wire messages                               |
-| **Bencode Serialization** | [`apps/xudu/core/identity/identity_serialization.hpp/.cpp`](apps/xudu/core/identity/identity_serialization.hpp)                            | Zero-copy encoders and decoders for all wire frames                    |
-| **PoW Engine**            | [`apps/xudu/core/identity/identity_validation.hpp/.cpp`](apps/xudu/core/identity/identity_validation.hpp)                                  | `HashcashEngine` verifier, miner, and anti-replay cache                |
-| **Unit Tests**            | [`tests/xudu/identity_test.cpp`](tests/xudu/identity_test.cpp), [`tests/xudu/transcopyright_test.cpp`](tests/xudu/transcopyright_test.cpp) | BEP 10 encoding, decoding, and network integration tests               |
+| **Live Op Plugin**        | [`apps/common/xanadu/swarm.cpp`](apps/common/xanadu/swarm.cpp)                                                                             | `XuduPeerPlugin` & `XuduTorrentPlugin` (`xudu_live_op`)                |
+| **Identity Controller**   | [`apps/common/xanadu/identity/identity_network_controller.hpp/.cpp`](apps/common/xanadu/identity/identity_network_controller.hpp)          | `IdentityPeerPlugin` & `IdentityTorrentPlugin` (Extensions 2, 3, 4, 5) |
+| **Message Layouts**       | [`apps/common/xanadu/identity/identity_layout.hpp`](apps/common/xanadu/identity/identity_layout.hpp)                                       | Struct definitions for all wire messages                               |
+| **Bencode Serialization** | [`apps/common/xanadu/identity/identity_serialization.hpp/.cpp`](apps/common/xanadu/identity/identity_serialization.hpp)                    | Zero-copy encoders and decoders for all wire frames                    |
+| **PoW Engine**            | [`apps/common/xanadu/identity/identity_validation.hpp/.cpp`](apps/common/xanadu/identity/identity_validation.hpp)                          | `HashcashEngine` verifier, miner, and anti-replay cache                |
+| **Unit Tests**            | [`tests/xuzz/identity_test.cpp`](tests/xuzz/identity_test.cpp), [`tests/xuzz/transcopyright_test.cpp`](tests/xuzz/transcopyright_test.cpp) | BEP 10 encoding, decoding, and network integration tests               |

@@ -366,7 +366,7 @@ dirty-node count; revise numeric budgets from measured data rather than presenti
 results. A software-rendered frame target must account for renderer baseline and cannot be assumed
 to meet 16.7 ms today.
 
-Meaningful tests belong in `tests/xudu/system_docs_test.cpp` and new graph/compiler suites, plus
+Meaningful tests belong in `tests/xuzz/system_docs_test.cpp` and new graph/compiler suites, plus
 Xuzz and ZigZag integration tests for hidden tabs, nested focus, modal isolation, exact pick
 routing, persistence, and accessibility order. Test window/DPI changes without changing the store
 version; a cached widget position keyed only by session generation is insufficient. Use the

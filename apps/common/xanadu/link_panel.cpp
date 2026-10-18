@@ -119,6 +119,85 @@ linkPanelLines(const SelectedLink &selected,
   return lines;
 }
 
+std::string_view valenceBadge(const LinkType type) noexcept {
+  switch (type) {
+  case LinkType::Comment:
+    return "[~]";
+  case LinkType::Illustration:
+    return "[=]";
+  case LinkType::Disagreement:
+    return "[-]";
+  case LinkType::Authorship:
+    return "[+]";
+  case LinkType::Quotation:
+    return "[\"]";
+  case LinkType::Format:
+    return "[*]";
+  case LinkType::Dimension:
+    return "[d]";
+  case LinkType::Other:
+    return "[·]";
+  }
+  return "[?]";
+}
+
+SemanticPassageAnchor
+makeSemanticPassageAnchor(const OccurrenceSite &site, const LinkType type,
+                          const std::string_view documentTitle,
+                          const std::string_view excerpt) {
+  SemanticPassageAnchor anchor;
+  anchor.valenceBadge = std::string(valenceBadge(type));
+
+  MicroversionId version;
+  std::string fallbackTitle;
+
+  std::visit(
+      [&](const auto &s) {
+        version        = s.version;
+        using SiteType = std::decay_t<decltype(s)>;
+        if constexpr (std::is_same_v<SiteType, CellSite>) {
+          fallbackTitle = std::format("cell {}", s.cell);
+        } else {
+          fallbackTitle = "document";
+        }
+      },
+      site);
+
+  if (!documentTitle.empty()) {
+    anchor.documentTitle = std::string(documentTitle);
+  } else {
+    anchor.documentTitle = std::move(fallbackTitle);
+  }
+
+  if (!version.isZero()) {
+    anchor.microversionTag = std::format("v{}", version.str());
+  } else {
+    anchor.microversionTag = "v0";
+  }
+
+  anchor.excerpt          = std::string(excerpt);
+  anchor.alphaFadeMask    = true;
+  anchor.alphaFadeWidthPx = 12.0F;
+  return anchor;
+}
+
+std::string formatSemanticPassageAnchor(const SemanticPassageAnchor &anchor) {
+  std::string result;
+  if (!anchor.valenceBadge.empty()) {
+    result += anchor.valenceBadge + " ";
+  }
+  result += anchor.documentTitle;
+  if (!anchor.microversionTag.empty()) {
+    result += std::format(" ({})", anchor.microversionTag);
+  }
+  if (!anchor.excerpt.empty()) {
+    const std::string_view fade =
+        (anchor.alphaFadeMask && !anchor.excerpt.ends_with("...")) ? "..." : "";
+    result += std::format(" · \"{}{}\"", anchor.excerpt, fade);
+  }
+  return result;
+}
+
 std::vector<PanelButton> linkPanelButtons(const SelectedLink &selected,
                                           const bool hasOrigin) {
   const bool resolved = selected.occurrences.has_value();
@@ -140,6 +219,7 @@ std::vector<PanelButton> linkPanelButtons(const SelectedLink &selected,
        .command = nav::StepOccurrence{.delta = 1},
        .enabled = places},
       {.label = "Cross", .command = nav::Cross{}, .enabled = resolved},
+      {.label = "Follow", .command = nav::FollowLink{}, .enabled = resolved},
       {.label   = "Enter",
        .command = nav::Enter{},
        .enabled = places && cursor.occurrence.has_value()},

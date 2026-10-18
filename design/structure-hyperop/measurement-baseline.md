@@ -1,18 +1,18 @@
 # Structure-hyperop pre-implementation measurements
 
 Measured on 2026-09-23 on an AMD Ryzen Threadripper 1950X (16 cores, 32 threads), using the
-repository's optimized `xudu_test` build. These numbers are local baselines and substrate models,
+repository's optimized `xuzz_test` build. These numbers are local baselines and substrate models,
 not performance claims for unimplemented federation or quotation code. The benchmark is a disabled
-GoogleTest in `tests/xudu/structure_hyperop_benchmark_test.cpp`, so normal CI does not turn timing
+GoogleTest in `tests/xuzz/structure_hyperop_benchmark_test.cpp`, so normal CI does not turn timing
 noise into a pass/fail gate.
 
 ## Reproduce
 
 ```sh
-make -j$(nproc) xudu_test
+make -j$(nproc) xuzz_test
 SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1 \
   XDG_DATA_HOME=$PWD/build/xdg/data XDG_CONFIG_HOME=$PWD/build/xdg/config \
-  ./build/xudu_test \
+  ./build/xuzz_test \
   --gtest_filter=StructureHyperopBenchmark.DISABLED_ColdFoldAndArenaSubstrate \
   --gtest_also_run_disabled_tests --gtest_repeat=5 --gtest_brief=1
 ```
