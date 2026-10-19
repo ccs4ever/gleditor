@@ -1,0 +1,106 @@
+{
+  "journey": "J2",
+  "stage": "native-menu-key-slice",
+  "driver": "native",
+  "program": "xuzz",
+  "profile": "J2",
+  "source_evidence": "build/ux-green-20261011/harness-j2-native/plan.json",
+  "notes": [
+    "Passed native menu Action then ordinary N/E/type/Return authoring and key repetition.",
+    "Cell #15 selector embeds a fixture-derived operation ID; prefer a unique text selector when authoring changes. Standalone profile, not after combined J1/J2 authoring.",
+    "The 4000 ms wait follows creation of two menu cells and allows the scene to settle before keyboard-mode repetition; no accepted exact state selector is established for that boundary. The final 60000 ms is the native-helper service window.",
+    "Retains the original 6000 ms startup/native-helper window; the visible menu or focused control is provided by the concurrent native workflow, so a pre-existing accessible label is not a safe completion gate."
+  ],
+  "plan": {
+    "launch_args": [
+      "--resize",
+      "1440,1000",
+      "--right-click",
+      "600,400",
+      "--wait-ms",
+      "6000",
+      "--chord",
+      "N",
+      "--chord",
+      "E",
+      "--type",
+      "Native menu alpha",
+      "--chord",
+      "Return",
+      "--chord",
+      "N",
+      "--chord",
+      "E",
+      "--type",
+      "Native menu beta",
+      "--chord",
+      "Return",
+      "--capture",
+      "${evidence}/menu.png",
+      "--wait-ms",
+      "4000",
+      "--chord",
+      "Ctrl+Alt+N",
+      "--chord",
+      "N",
+      "--chord",
+      "E",
+      "--type",
+      "Native key alpha",
+      "--chord",
+      "Return",
+      "--chord",
+      "N",
+      "--chord",
+      "E",
+      "--type",
+      "Native key beta",
+      "--chord",
+      "Return",
+      "--capture",
+      "${evidence}/key.png",
+      "--wait-ms",
+      "60000"
+    ],
+    "steps": [
+      {
+        "op": "action",
+        "name": "Documents and session",
+        "interface": "Action"
+      },
+      {
+        "op": "action",
+        "name": "New slice",
+        "interface": "Action"
+      },
+      {
+        "op": "wait_name",
+        "name_prefix": "Cell #15: Native menu beta",
+        "interface": "Action"
+      },
+      {
+        "op": "snapshot",
+        "file": "menu-native.json"
+      },
+      {
+        "op": "wait_name",
+        "name_prefix": "Cell #15: Native key beta",
+        "interface": "Action"
+      },
+      {
+        "op": "snapshot",
+        "file": "key-native.json"
+      },
+      {
+        "op": "wait_file",
+        "file": "key.png"
+      }
+    ]
+  },
+  "variables": {
+    "evidence": {
+      "description": "Run-specific evidence output directory.",
+      "example": "/tmp/ux-run/Jx/stage"
+    }
+  }
+}

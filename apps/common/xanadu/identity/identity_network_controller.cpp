@@ -4,6 +4,8 @@
  */
 #include "identity_network_controller.hpp"
 
+#include <gleditor/logging.hpp>
+
 #include <boost/system/error_code.hpp>
 #include <chrono>
 #include <cstring>
@@ -92,12 +94,22 @@ void IdentityPeerPlugin::add_handshake(libtorrent::entry &h) {
   m[kExtOracleVoteName]     = kExtOracleVoteMsgId;
   m[kExtOracleVerifyName]   = kExtOracleVerifyMsgId;
   m[kExtTranscopyrightName] = kExtTranscopyrightMsgId;
+  m[kExtVortexActorName]    = kExtVortexActorMsgId;
+  if (controller_ && controller_->directPort() > 0) {
+    h["xanadu_direct_port"] =
+        static_cast<std::int64_t>(controller_->directPort());
+  }
 }
 
 bool IdentityPeerPlugin::on_extension_handshake(
     const libtorrent::bdecode_node &node) {
   if (node.type() != libtorrent::bdecode_node::dict_t) {
     return true;
+  }
+  const auto directPortNode = node.dict_find_int("xanadu_direct_port");
+  if (directPortNode && directPortNode.int_value() > 0 &&
+      directPortNode.int_value() <= 65535) {
+    remoteDirectPort_ = static_cast<std::uint16_t>(directPortNode.int_value());
   }
   const auto m = node.dict_find_dict("m");
   if (!m) {
@@ -107,34 +119,27 @@ bool IdentityPeerPlugin::on_extension_handshake(
   const auto idNode = m.dict_find_int(kExtIdentityLookupName);
   if (idNode) {
     remoteIdentityLookupId_ = static_cast<int>(idNode.int_value());
-  } else if (const auto legacyIdNode =
-                 m.dict_find_int(kExtLegacyIdentityLookupName)) {
-    remoteIdentityLookupId_ = static_cast<int>(legacyIdNode.int_value());
   }
 
   const auto voteNode = m.dict_find_int(kExtOracleVoteName);
   if (voteNode) {
     remoteOracleVoteId_ = static_cast<int>(voteNode.int_value());
-  } else if (const auto legacyVoteNode =
-                 m.dict_find_int(kExtLegacyOracleVoteName)) {
-    remoteOracleVoteId_ = static_cast<int>(legacyVoteNode.int_value());
   }
 
   const auto verifyNode = m.dict_find_int(kExtOracleVerifyName);
   if (verifyNode) {
     remoteOracleVerifyId_ = static_cast<int>(verifyNode.int_value());
-  } else if (const auto legacyVerifyNode =
-                 m.dict_find_int(kExtLegacyOracleVerifyName)) {
-    remoteOracleVerifyId_ = static_cast<int>(legacyVerifyNode.int_value());
   }
 
   const auto tcNode = m.dict_find_int(kExtTranscopyrightName);
   if (tcNode) {
     remoteTranscopyrightId_ = static_cast<int>(tcNode.int_value());
-  } else if (const auto legacyTcNode =
-                 m.dict_find_int(kExtLegacyTranscopyrightName)) {
-    remoteTranscopyrightId_ = static_cast<int>(legacyTcNode.int_value());
   }
+  const auto actorNode = m.dict_find_int(kExtVortexActorName);
+  remoteVortexActorId_ =
+      actorNode && actorNode.int_value() > 0 && actorNode.int_value() <= 255
+          ? static_cast<int>(actorNode.int_value())
+          : 0;
 
   // Issue peer authentication challenge. The nonce has to be unpredictable:
   // a fixed pattern -- and this was 0xAA repeated -- means one captured
@@ -147,18 +152,38 @@ bool IdentityPeerPlugin::on_extension_handshake(
     return false;
   }
   pendingChallengeNonce_ = nonce;
-  sendAuthChallenge(nonce);
+  const bool sent        = sendAuthChallenge(nonce);
+  GLEDITOR_LOG_DEBUG(
+      "xanadu.identity",
+      "Peer extension handshake: identity {}, actor {}, challenge sent {}",
+      remoteIdentityLookupId_, remoteVortexActorId_, sent);
 
   return true;
 }
 
-bool IdentityPeerPlugin::on_extended(int length, int /*msg*/,
+bool IdentityPeerPlugin::on_extended(int length, int msg,
                                      libtorrent::span<char const> body) {
+  if (msg != kExtIdentityLookupMsgId && msg != kExtOracleVoteMsgId &&
+      msg != kExtOracleVerifyMsgId && msg != kExtTranscopyrightMsgId &&
+      msg != kExtVortexActorMsgId)
+    return false;
+  GLEDITOR_LOG_TRACE("xanadu.identity",
+                     "Peer extension frame: id {}, declared {}, received {}, "
+                     "type {}, isolated {}, authenticated {}",
+                     msg, length, body.size(),
+                     body.empty() ? -1 : static_cast<unsigned char>(body[0]),
+                     isIsolated_, isAuthenticated_);
   if (isIsolated_) {
     return false;
   }
-  if (static_cast<int>(body.size()) != length || length <= 0) {
+  if (length <= 0 || static_cast<std::size_t>(length) > kMaxPayloadBytes + 1 ||
+      static_cast<int>(body.size()) > length) {
     return false;
+  }
+  // Libtorrent supplies cumulative fragments. Claim our extension while
+  // waiting, or it treats the first fragment as an unsupported message.
+  if (static_cast<int>(body.size()) < length) {
+    return true;
   }
 
   const auto spanBytes = std::span<const std::uint8_t>(
@@ -170,6 +195,48 @@ bool IdentityPeerPlugin::on_extended(int length, int /*msg*/,
   }
 
   const auto &frame = *frameRes;
+  int owner         = 0;
+  switch (static_cast<unsigned>(frame.type) >> 4) {
+  case 0:
+    owner = kExtIdentityLookupMsgId;
+    break;
+  case 1:
+    owner = kExtOracleVoteMsgId;
+    break;
+  case 2:
+    owner = kExtOracleVerifyMsgId;
+    break;
+  case 3:
+    owner = kExtTranscopyrightMsgId;
+    break;
+  case 4:
+    owner = kExtVortexActorMsgId;
+    break;
+  default:
+    return false;
+  }
+  if (msg != owner) {
+    GLEDITOR_LOG_TRACE("xanadu.identity",
+                       "Peer extension type refused: local id {}, expected {}",
+                       msg, owner);
+    return false;
+  }
+
+  if (frame.type >= MessageType::ActorSpawn &&
+      frame.type <= MessageType::ActorSparkSteal) {
+    if (msg != kExtVortexActorMsgId || !isAuthenticated_ ||
+        !authenticatedIdentity_) {
+      return false;
+    }
+    const auto message = decodeActorMessage(spanBytes);
+    if (!message) return false;
+    if (actorHandler_) return actorHandler_(*authenticatedIdentity_, *message);
+    return controller_ &&
+           controller_->dispatchActorMessage(*authenticatedIdentity_, *message);
+  }
+  if (msg == kExtVortexActorMsgId) {
+    return false;
+  }
 
   switch (frame.type) {
   case MessageType::IdentityQuery: {
@@ -221,6 +288,10 @@ bool IdentityPeerPlugin::on_extended(int length, int /*msg*/,
   case MessageType::PeerAuthChallenge: {
     const auto chRes = decodePeerChallenge(frame.payload);
     if (!chRes || !controller_) {
+      GLEDITOR_LOG_TRACE(
+          "xanadu.identity",
+          "Authentication challenge refused: decoded {}, controller {}",
+          chRes.has_value(), controller_ != nullptr);
       return true;
     }
     const auto &opts = controller_->options();
@@ -228,11 +299,17 @@ bool IdentityPeerPlugin::on_extended(int length, int /*msg*/,
     // sent 0x55 repeated, which the far end accepted, so a node with nothing
     // configured authenticated as whatever fingerprint it named.
     if (!opts.localFingerprint || !opts.localDeviceKeys) {
+      GLEDITOR_LOG_TRACE(
+          "xanadu.identity",
+          "Authentication challenge has no local signing identity");
       return true;
     }
-    sendAuthResponse(chRes->nonce, *opts.localFingerprint,
-                     opts.localDeviceKeys->publicKey.bytes,
-                     signChallengeNonce(chRes->nonce, *opts.localDeviceKeys));
+    const bool sent = sendAuthResponse(
+        chRes->nonce, *opts.localFingerprint,
+        opts.localDeviceKeys->publicKey.bytes,
+        signChallengeNonce(chRes->nonce, *opts.localDeviceKeys));
+    GLEDITOR_LOG_TRACE("xanadu.identity", "Authentication response queued {}",
+                       sent);
     return true;
   }
 
@@ -286,6 +363,19 @@ bool IdentityPeerPlugin::on_extended(int length, int /*msg*/,
 
     isAuthenticated_       = true;
     authenticatedIdentity_ = respRes->claimedIdentity;
+    GLEDITOR_LOG_DEBUG("xanadu.identity", "Peer device authenticated");
+    if (remoteDirectPort_ > 0 && static_cast<bool>(pc_.native_handle())) {
+      try {
+        controller_->notifyDirectPeer(*authenticatedIdentity_,
+                                      pc_.remote().address().to_string(),
+                                      remoteDirectPort_);
+      } catch (...) { // NOLINT(bugprone-empty-catch)
+        // Best-effort direct side-channel endpoint notification.
+      }
+    }
+    // Completed content swarms can shed peers before the next tick. Flush
+    // queued control only after this connection has proved its device key.
+    controller_->pumpActorMessages(*this);
     return true;
   }
 
@@ -501,6 +591,20 @@ bool IdentityPeerPlugin::on_extended(int length, int /*msg*/,
   return false;
 }
 
+bool IdentityPeerPlugin::sendActorMessage(const ActorMessage &message) {
+  if (isIsolated_ || !isAuthenticated_ || !authenticatedIdentity_) {
+    return false;
+  }
+  const auto frame = encodeActorMessage(message);
+  return frame && sendExtendedRaw(remoteVortexActorId_, *frame);
+}
+
+void IdentityPeerPlugin::tick() {
+  if (controller_ && isAuthenticated_ && !isIsolated_) {
+    controller_->pumpActorMessages(*this);
+  }
+}
+
 bool IdentityPeerPlugin::beginTranscopyrightPurchase(
     const Hash32 &keyId, const std::uint64_t requestedBytes,
     const Fingerprint &payerWallet, std::string ticket) {
@@ -666,7 +770,8 @@ bool IdentityPeerPlugin::sendDeviceRevocationBroadcast(
   return sendExtendedRaw(remoteIdentityLookupId_, frame);
 }
 
-void IdentityPeerPlugin::isolateAndDisconnect(std::string_view /* reason*/) {
+void IdentityPeerPlugin::isolateAndDisconnect(std::string_view reason) {
+  GLEDITOR_LOG_DEBUG("xanadu.identity", "Peer isolated: {}", reason);
   isIsolated_ = true;
   // Same weak reference as in sendExtendedRaw: nothing below may touch the
   // connection once it has gone, and disconnect() does not check either.
@@ -771,6 +876,88 @@ IdentityNetworkController::IdentityNetworkController(Options options)
     : options_(options) {}
 
 IdentityNetworkController::~IdentityNetworkController() = default;
+
+IdentityNetworkController *
+IdentityNetworkController::setActorHandler(ActorHandler handler) {
+  std::scoped_lock lock(actorMutex_);
+  actorHandler_ = std::move(handler);
+  return this;
+}
+
+IdentityNetworkController *
+IdentityNetworkController::setDirectPeerHandler(DirectPeerHandler handler) {
+  std::scoped_lock lock(actorMutex_);
+  directPeerHandler_ = std::move(handler);
+  return this;
+}
+
+void IdentityNetworkController::notifyDirectPeer(
+    const Fingerprint &identity, const std::string_view address,
+    std::uint16_t directPort) const {
+  DirectPeerHandler handler;
+  {
+    std::scoped_lock lock(actorMutex_);
+    handler = directPeerHandler_;
+  }
+  if (handler) {
+    handler(identity, address, directPort);
+  }
+}
+
+bool IdentityNetworkController::dispatchActorMessage(
+    const Fingerprint &identity, const ActorMessage &message) const {
+  ActorHandler handler;
+  {
+    std::scoped_lock lock(actorMutex_);
+    handler = actorHandler_;
+  }
+  return handler && handler(identity, message);
+}
+
+bool IdentityNetworkController::sendActorMessage(const Fingerprint &identity,
+                                                 const ActorMessage &message) {
+  constexpr std::size_t maximumQueuedMessages = 1024;
+  constexpr std::size_t maximumQueuedPerPeer  = 128;
+  if (!identity.isValid() || !encodeActorMessage(message)) return false;
+  std::scoped_lock lock(actorMutex_);
+  if (actorOutgoingCount_ >= maximumQueuedMessages) return false;
+  auto &queue = actorOutgoing_[identity];
+  if (queue.size() >= maximumQueuedPerPeer) return false;
+  queue.push_back(message);
+  ++actorOutgoingCount_;
+  return true;
+}
+
+void IdentityNetworkController::pumpActorMessages(IdentityPeerPlugin &peer) {
+  if (!peer.isAuthenticated() || peer.isIsolated() ||
+      !peer.authenticatedIdentity())
+    return;
+  constexpr std::size_t maximumMessagesPerTick = 16;
+  const auto identity                          = *peer.authenticatedIdentity();
+  for (std::size_t i = 0; i < maximumMessagesPerTick; ++i) {
+    std::optional<ActorMessage> message;
+    {
+      std::scoped_lock lock(actorMutex_);
+      const auto queue = actorOutgoing_.find(identity);
+      if (queue == actorOutgoing_.end() || queue->second.empty()) return;
+      message = std::move(queue->second.front());
+      queue->second.pop_front();
+    }
+    const bool sent = peer.sendActorMessage(*message);
+    {
+      std::scoped_lock lock(actorMutex_);
+      if (!sent) {
+        actorOutgoing_[identity].push_front(std::move(*message));
+        return;
+      }
+      --actorOutgoingCount_;
+      const auto queue = actorOutgoing_.find(identity);
+      if (queue != actorOutgoing_.end() && queue->second.empty()) {
+        actorOutgoing_.erase(queue);
+      }
+    }
+  }
+}
 
 std::expected<void, ValidationError> IdentityNetworkController::onPiecePassed(
     const libtorrent::piece_finished_alert & /*alert*/,

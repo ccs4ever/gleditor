@@ -210,7 +210,8 @@ void ZigzagVisualizer::populateFallbackStructure() {
 
 void ZigzagVisualizer::adoptDocument(
     ZzStructureDocument &&doc, std::string sourcePath,
-    const std::unordered_map<CellID, XuduProjectionProvenance> *const origins) {
+    const std::unordered_map<CellID, XanaduProjectionProvenance> *const
+        origins) {
   structure_name_     = doc.meta.name.empty() ? sourcePath : doc.meta.name;
   current_slice_path_ = std::move(sourcePath);
   current_view_       = doc.view;
@@ -338,23 +339,24 @@ void ZigzagVisualizer::fitViewToHome() {
   }
 }
 
-void ZigzagVisualizer::adoptXuduStore(
+void ZigzagVisualizer::adoptXanaduStore(
     const xanadu::Store &store,
     const std::vector<xanadu::MicroversionId> &versions) {
   auto projected = projectStoreWithProvenance(store, versions);
-  adoptDocument(std::move(projected.document), "xudu_store",
+  adoptDocument(std::move(projected.document), "xanadu_store",
                 &projected.sourceByProjectedCell);
 }
 
-void ZigzagVisualizer::bindXuduStore(xanadu::Store &store,
-                                     const xanadu::MicroversionId &version) {
+void ZigzagVisualizer::bindXanaduStore(xanadu::Store &store,
+                                       const xanadu::MicroversionId &version) {
   engine_.reset();
   if (&store != store_) {
     ownedStore_.reset();
     store_ = &store;
   }
-  engine_         = std::make_unique<UnifiedTransclusionEngine>(store, version);
-  structure_name_ = "Xudu/Zigzag unified store";
+  engine_ = std::make_unique<UnifiedTransclusionEngine>(store, version);
+  engine_->setAuthoredCommitHandler(authoredCommitHandler_);
+  structure_name_ = "Xanadu/ZigZag unified store";
   current_slice_path_.clear();
 
   accursed_cell_focus_ = engine_->manifold().home();
@@ -376,13 +378,26 @@ void ZigzagVisualizer::bindXuduStore(xanadu::Store &store,
   invalidateAccessibility();
 }
 
+bool ZigzagVisualizer::advanceEditingHead(const xanadu::MicroversionId &parent,
+                                          const xanadu::MicroversionId &head) {
+  if (!engine_ || engine_->head() != parent ||
+      (head != parent && !parent.isAncestorOf(head))) {
+    return false;
+  }
+  engine_->syncTo(head);
+  refreshCellLayouts();
+  rebuildActiveViewTopology();
+  invalidateAccessibility();
+  return true;
+}
+
 void ZigzagVisualizer::reloadStoreVersion(const xanadu::MicroversionId &version,
                                           const zigzag::CellRef newFocus) {
   if (!store_) {
     return;
   }
   store_->setCurrentVersions({version});
-  bindXuduStore(*store_, version);
+  bindXanaduStore(*store_, version);
   if (newFocus != zigzag::noCell) {
     accursed_cell_focus_ = newFocus;
     rebuildActiveViewTopology();
@@ -390,10 +405,10 @@ void ZigzagVisualizer::reloadStoreVersion(const xanadu::MicroversionId &version,
   }
 }
 
-void ZigzagVisualizer::adoptXuduDocs(const std::vector<XuduDocInput> &docs,
-                                     const std::vector<xanadu::Link> &links) {
-  auto doc = projectXuduToZigzag(docs, links);
-  adoptDocument(std::move(doc), "xudu_documents");
+void ZigzagVisualizer::adoptXanaduDocs(const std::vector<XanaduDocInput> &docs,
+                                       const std::vector<xanadu::Link> &links) {
+  auto doc = projectXanaduToZigzag(docs, links);
+  adoptDocument(std::move(doc), "xanadu_documents");
 }
 
 ZzRasterResult ZigzagVisualizer::rasterize(const DimID &primaryDim,
@@ -843,6 +858,8 @@ std::string ZigzagVisualizer::cellBadge(const CellRef id,
     return "extern / unresolved";
   case xanadu::ValueKind::Timestamp:
     return "timestamp";
+  case xanadu::ValueKind::ForeignOpHandle:
+    return "foreign operation";
   case xanadu::ValueKind::None:
     return std::string(role);
   }
@@ -1703,6 +1720,7 @@ void ZigzagVisualizer::describeCellBounds(gleditor::a11y::Node &node,
 }
 
 void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
+  const render::RegionScope contentClip(*ctx.state.device, ctx.contentRegion);
   if (!presentation_visible_) {
     last_frame_time_ = std::chrono::steady_clock::now();
     return;
@@ -2069,8 +2087,9 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
   worldCanvas_->draw(ctx.state, vpPresentation, 1.F);
   ancillaryCanvas_->draw(ctx.state, vpPresentation, 1.F);
 
-  const auto width        = static_cast<float>(ctx.screenWidth);
-  const auto height       = static_cast<float>(ctx.screenHeight);
+  const auto width  = static_cast<float>(ctx.screenWidth);
+  const auto height = static_cast<float>(ctx.screenHeight);
+  ctx.state.device->setRegion(std::nullopt);
   const auto beforeChrome = ctx.chrome;
   const bool rebuildHud =
       hudRevision_ != revision_ || hudMetrics_ != uiMetrics_ ||
@@ -2546,6 +2565,7 @@ bool ZigzagVisualizer::performAction(const std::uint64_t nodeId,
         accessibilityDocument_ == documentId() &&
         accessibilityVersion_ == engine_->head() &&
         engine_->findCell(target->second)) {
+      if (accessibilityActivated) accessibilityActivated();
       navigateFocusTo(target->second);
       return true;
     }
@@ -2737,15 +2757,6 @@ ZigzagVisualizer *ZigzagVisualizer::setDimensionBundle(DimensionBundle bundle) {
   dimension_bundle_ = bundle;
   if (bundle != DimensionBundle::Custom) {
     current_view_ = dimensionBundleAxes(bundle);
-    if (engine_) {
-      for (const auto &dName :
-           {current_view_.x_dimension, current_view_.y_dimension,
-            current_view_.z_dimension}) {
-        if (!dName.empty()) {
-          std::ignore = engine_->dimensionFor(dName);
-        }
-      }
-    }
     refreshCellLayouts();
     rebuildActiveViewTopology();
     invalidateAccessibility();

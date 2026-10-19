@@ -7,6 +7,7 @@
 #define COMMON_XANADU_VORTEX_HOST_HPP
 
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -21,6 +22,8 @@
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_stdlib.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
+#include "common/xanadu/vortex/vortex_worker_pool.hpp"
+#include "common/xanadu/vortex/worker_context.hpp"
 #include "common/xanadu/vpl/vpl_engine.hpp"
 #include "common/xanadu/vprolog/compiler.hpp"
 #include "common/xanadu/vql/compiler.hpp"
@@ -41,6 +44,17 @@ struct VortexHostConfig {
   std::string commandPromptHotkey{":"};
   std::string paletteHotkey{"F4"};
   std::string defaultBundle{"Execution"};
+  /// Worker thread count for data-parallel execution; 0 probes
+  /// std::thread::hardware_concurrency(), 1 is caller-only (no threads).
+  std::size_t workerThreads{0};
+  /// Minimum element count before map/filter/fold fans across workers;
+  /// smaller arrays run serially.
+  std::size_t parallelThreshold{1024};
+
+  /// Opt-in: run vprolog OR-parallel logic search across worker contexts.
+  /// Default false; serial search is unchanged (vortex-multithreading-study.md
+  /// §6.4 / design/vicon-andor-parallelism.md).
+  bool orParallelSearch{false};
 
   [[nodiscard]] static VortexHostConfig fromStore(const xanadu::Store &store);
 };
@@ -65,14 +79,42 @@ public:
   void bindManifold(const Manifold *baseManifold);
   void bindStore(xanadu::Store *store);
 
-  [[nodiscard]] const ArenaManifold &arena() const noexcept { return arena_; }
-  [[nodiscard]] ArenaManifold &arena() noexcept { return arena_; }
-  [[nodiscard]] const VortexCore &core() const noexcept { return core_; }
-  [[nodiscard]] VortexCore &core() noexcept { return core_; }
-  [[nodiscard]] const VortexVM &vm() const noexcept { return vm_; }
-  [[nodiscard]] VortexVM &vm() noexcept { return vm_; }
-  [[nodiscard]] const VortexStdLib &stdlib() const noexcept { return stdlib_; }
-  [[nodiscard]] VortexStdLib &stdlib() noexcept { return stdlib_; }
+  [[nodiscard]] const ArenaManifold &arena() const noexcept {
+    return primary_.arena;
+  }
+  [[nodiscard]] ArenaManifold &arena() noexcept { return primary_.arena; }
+  [[nodiscard]] const VortexCore &core() const noexcept {
+    return primary_.core;
+  }
+  [[nodiscard]] VortexCore &core() noexcept { return primary_.core; }
+  [[nodiscard]] const VortexVM &vm() const noexcept { return primary_.vm; }
+  [[nodiscard]] VortexVM &vm() noexcept { return primary_.vm; }
+  [[nodiscard]] const VortexStdLib &stdlib() const noexcept {
+    return primary_.stdlib;
+  }
+  [[nodiscard]] VortexStdLib &stdlib() noexcept { return primary_.stdlib; }
+
+  // -- Stage 1: movable worker contexts ---------------------------------------
+  /// The host's primary worker context: the one the caller runs on today.
+  /// Every existing accessor above delegates to it, so single-context
+  /// behaviour is unchanged (vortex-multithreading-study.md §3.3).
+  [[nodiscard]] WorkerContext &primaryContext() noexcept { return primary_; }
+  [[nodiscard]] const WorkerContext &primaryContext() const noexcept {
+    return primary_;
+  }
+
+  /// Construct an additional worker context overlaying the SAME shared base
+  /// Manifold as the primary (copy-on-write), owned by the host and returned
+  /// by reference. Stage 1 only lets the host *hold* more than one; it starts
+  /// no thread and the caller still drives execution. The worker pool
+  /// (Stage 2/3) is what will step these concurrently. The returned reference
+  /// is stable (the contexts live in a node-stable container).
+  WorkerContext &makeWorkerContext();
+
+  /// How many worker contexts the host holds, including the primary (>= 1).
+  [[nodiscard]] std::size_t workerContextCount() const noexcept {
+    return 1 + extraContexts_.size();
+  }
   [[nodiscard]] const xanadu::vql::VQLEngine &vqlEngine() const noexcept {
     return vqlEngine_;
   }
@@ -100,8 +142,11 @@ public:
   }
 
   // -- Configuration ----------------------------------------------------------
-  void setConfig(VortexHostConfig config) noexcept {
+  void setConfig(VortexHostConfig config) {
     config_ = std::move(config);
+    // Rebuild the data-parallel worker pool so a worker_threads change takes
+    // effect immediately (Stage 2/4).
+    applyParallelConfig();
   }
   [[nodiscard]] const VortexHostConfig &config() const noexcept {
     return config_;
@@ -198,6 +243,21 @@ public:
   executeVQL(std::string_view queryOrWeave,
              const std::vector<CellRef> &contextCells = {});
 
+  /// Stage 4 (vortex-multithreading-study.md §6.3): run a batch of independent
+  /// VQL queries in parallel, one per worker context over the shared frozen
+  /// base, and return their result sets in submission (query) order regardless
+  /// of completion order. Each query runs on its own ArenaManifold/VortexCore/
+  /// VQLEngine, so the runs share no mutable state and create no persistent
+  /// cross-store link; results are deterministic and identically ordered for
+  /// any worker count. @p prepare is called once per worker context (with its
+  /// query index) before its query, to populate the ephemeral per-worker cells
+  /// the query reads (the overlay keeps the shared base read-only). Falls back
+  /// to serial when no pool or a single query.
+  std::vector<std::vector<std::string>> executeVQLBatchParallel(
+      const std::vector<std::string> &queries,
+      gleditor::cpp26::function_ref<void(WorkerContext &, std::size_t)>
+          prepare);
+
   /**
    * @brief Evaluates a VQL path relative to currentFocus (or ##), returning the
    * destination cell if reached.
@@ -223,6 +283,24 @@ public:
    */
   std::vector<LogicSolution> solveLogic(std::string_view goalQuery,
                                         std::size_t maxSolutions = 50);
+
+  /// Stage 5 (vortex-multithreading-study.md §6.4,
+  /// design/vicon-andor-parallelism.md): opt-in OR-parallel logic search. Runs
+  /// a batch of independent logic goal queries, each on its own worker context
+  /// (its own ArenaManifold / VortexCore / vprolog compiler / solver) over the
+  /// shared frozen base, and returns, per query in submission order, the
+  /// solutions rendered to context-independent strings (one string per
+  /// solution: its variable bindings joined, so results compare across
+  /// arenas). Each branch's arena mark/release and clause-database writes stay
+  /// inside its own context -- no mark/release crosses a worker boundary,
+  /// which dissolves the multiple-binding problem by isolation rather than a
+  /// shared binding store. Gated by config().orParallelSearch: when false
+  /// (the default) it runs the queries SERIALLY on the primary context, so
+  /// serial vprolog behaviour is unchanged. First-solution-wins is submission
+  /// order: query 0's solutions precede query 1's.
+  std::vector<std::vector<std::string>>
+  solveLogicBatchParallel(const std::vector<std::string> &goalQueries,
+                          std::size_t maxSolutions = 50);
 
   /**
    * @brief Persists a named macro into the active sovereign Store
@@ -252,10 +330,17 @@ private:
   void initHostServices();
   DimRef resolveDimRef(std::string_view dimName);
 
-  ArenaManifold arena_;
-  VortexCore core_;
-  VortexVM vm_;
-  VortexStdLib stdlib_;
+  // The base Manifold every worker context overlays (nullptr => blank arenas).
+  const Manifold *baseManifold_{nullptr};
+
+  // The primary execution context the host runs on. Declared before the
+  // engines because they bind references into its core/vm (Stage 1).
+  WorkerContext primary_;
+
+  // Additional worker contexts the host holds, each overlaying baseManifold_.
+  // node-stable so references handed out by makeWorkerContext() stay valid.
+  std::deque<std::unique_ptr<WorkerContext>> extraContexts_;
+
   xanadu::vql::VQLEngine vqlEngine_;
   xanadu::vql::VQLCompiler vqlCompiler_;
   xanadu::vpl::VPLEngine vplEngine_;
@@ -265,6 +350,12 @@ private:
   VortexHostConfig config_{};
   CellRef gcCursor_{noCell};
   std::size_t frameCount_{0};
+
+  // Stage 2: the host-owned data-parallel worker pool, (re)built from
+  // config_.workerThreads and attached to the primary stdlib. unique_ptr so a
+  // config change can replace it; the stdlib borrows a raw pointer.
+  std::unique_ptr<VortexWorkerPool> workerPool_;
+  void applyParallelConfig();
 
   std::unordered_map<std::string, CellRef> customActionRoutines_;
   std::unordered_map<std::string, std::string> macroRegistry_;

@@ -1,6 +1,6 @@
 # Vortex Hyperstructural Runtime & zzstructure System Specification
 
-**Document Version:** 12.0 — Vlog Vortex Extension & std:logic Module **Target Environment:**
+**Document Version:** 13.0 — `std:xanadu` Standard Library Module **Target Environment:**
 Zero-Allocation Multidimensional Graph Manifolds & Logic Engine
 
 Vortex is a speculative language and runtime design: a programming model whose entire addressable
@@ -72,6 +72,10 @@ ______________________________________________________________________
   - [8.1 System Dimension: `d.clause`](#81-system-dimension-dclause)
   - [8.2 Logic VM Opcodes](#82-logic-vm-opcodes)
   - [8.3 `std:logic` Standard Library Module](#83-stdlogic-standard-library-module)
+- [9. `std:xanadu` Standard Library Module](#9-stdxanadu-standard-library-module)
+  - [9.1 The shared Xanadu vocabulary and types](#91-the-shared-xanadu-vocabulary-and-types)
+  - [9.2 The module: addressing, authoring, and content resolution][toc-13]
+  - [9.3 Layering: which layer owns which verb](#93-layering-which-layer-owns-which-verb)
 - [Appendix: Versioning and Change History](#appendix-versioning-and-change-history)
 
 ## 1. Architectural Foundation & Design Invariants
@@ -1122,6 +1126,132 @@ The standard library exports the `std:logic` module off `d.stdlib`:
 
 ______________________________________________________________________
 
+## 9. `std:xanadu` Standard Library Module
+
+`std:xanadu` is the standard-library module for **direct xanadoc and slice manipulation** — creating
+cells, linking along named dimensions, transcluding spans, following links bidirectionally, walking
+ranks, and querying provenance. Like `std:logic` (§8.3), it is defined here, in the Vortex document,
+because it is a **shared** Vortex package resolved off `d.stdlib` and callable from **every** front
+end — [VQL](vql-query-language.md), [VPL](vpl-array-language.md),
+[vicon](vicon-goal-directed-language.md), [vprolog](vlog-logic-extension.md), and
+[vlace](vlace-functional-language.md) alike. It is not the property of any one language; a front end
+imports it exactly as it imports `std:math` or `std:logic`. (vlace's note documents how *its* purity
+discipline lowers onto this module — authoring in the arena, promotion as the one effect — but the
+module itself is language-neutral.)
+
+The module honours the single-primitive invariant (§1): every verb lowers to `link`/`value` over an
+`ArenaManifold`, plus the one authoring effect `promote`. It introduces no new opcode and no new
+system dimension; it composes the ones the manifold already has (`d.doc`, `d.version`, `d.clone`,
+`d.link`, `d.dims`, and user-named dimensions via `ensureDimension`).
+
+### 9.1 The shared Xanadu vocabulary and types
+
+The data-model vocabulary is defined once (the convergence owns `VSpan`/`CellRef`/`Dir` semantics,
+R5–R8/R12); this module names the **verb** vocabulary over it. A front end brings these types into
+scope with its own `import "std:xanadu"` and maps them to its own type system:
+
+- `CellRef` — a cell's identity (an ops-spool index, or an arena dense id carrying `ephemeralBit`).
+- `DimRef` — a dimension, itself a cell on `d.dims` (R12).
+- `VSpan` — a permascroll span: a **name** for permanent content, never bytes.
+- `Link` — a Xanadu link with its two endsets.
+- `Manifold` — a frozen replay product (read-only).
+- `Arena` — a copy-on-write `ArenaManifold` view, where authoring happens.
+- `Mark` — an arena high-water mark (a choice point / undo token).
+- `GlobalSpan` — a published, globally addressable span.
+- `Dir = Pos | Neg` — a dimensional direction.
+- `DiffKind = Universal | Shared | Unique | Deleted` — Identity-Gold provenance classification.
+- `Resolved a = Pending | Local a | Remote Handle` — the staging type for content whose bytes may
+  live on the swarm (§9.2); addressing is pure, materializing bytes is an effect.
+
+### 9.2 The module: addressing, authoring, and content resolution
+
+Each verb cites the C++ symbol it lowers to. The effect column is stated language-neutrally —
+**read-only** (reads a frozen `Manifold`), **arena** (builds in a CoW `Arena`, mints no persistent
+op), or **effect** (promotes, or resolves content asynchronously) — and each front end maps it to
+its own effect vocabulary (vlace's `IO`, VQL's non-transparency note, vicon's edge).
+
+| name               | signature                                                             | effect                   | lowers to                                       |
+| ------------------ | --------------------------------------------------------------------- | ------------------------ | ----------------------------------------------- |
+| `rebuild_manifold` | `MicroversionId -> Manifold`                                          | read-only                | `Store::rebuildManifold` (frozen by value)      |
+| `arena`            | `Manifold -> Arena`                                                   | read-only                | `ArenaManifold(const Manifold*)` CoW view       |
+| `base`             | `Arena -> Manifold`                                                   | read-only                | the arena's base manifold                       |
+| `home`             | `Manifold -> CellRef`                                                 | read-only                | `Manifold::home` (`d.doc`)                      |
+| `cells`            | `Manifold -> List CellRef`                                            | read-only                | `Manifold::cells`                               |
+| `dimensions`       | `Manifold -> List DimRef`                                             | read-only                | `Manifold::dimensions` (`d.dims`)               |
+| `dimension_named`  | `String -> Manifold -> Option DimRef`                                 | read-only                | `Manifold::dimensionNamed`                      |
+| `linked`           | `CellRef -> DimRef -> Dir -> Manifold -> Option CellRef`              | read-only, O(1)          | `Manifold::linked`                              |
+| `clone_master`     | `CellRef -> DimRef -> Manifold -> Option CellRef`                     | read-only                | `Manifold::cloneMaster` (cycle-guarded)         |
+| `content_of`       | `CellRef -> Manifold -> List VSpan`                                   | read-only                | `Manifold::contentOf` (addresses only)          |
+| `history_of`       | `CellRef -> Manifold -> List OpIndex`                                 | read-only                | `Manifold::historyOf` (R7 chain)                |
+| `cells_within`     | `CellRef -> Int -> Manifold -> List CellRef`                          | read-only                | `Manifold::cellsWithinRadius` (BFS, bounded)    |
+| `occurrences`      | `VSpan -> Manifold -> Stream Extent`                                  | read-only, O(log N + K)  | `Spanfilade::occurrencesOf`                     |
+| `follow`           | `VSpan -> Manifold -> Stream (Link, Endset)`                          | read-only                | `Spanfilade::occurrencesOf` + `Manifold::links` |
+| `diff_versions`    | `List MicroversionId -> Stream (VSpan, DiffKind, Int)`                | read-only, paged         | `Store::diffVersions`                           |
+| `globalise`        | `VSpan -> Manifold -> GlobalSpan`                                     | read-only                | `publication::globalise`                        |
+| `make_text`        | `String -> Arena -> (CellRef, Arena)`                                 | arena                    | `ArenaManifold::makeCell(string_view)`          |
+| `make_scalar`      | `Scalar -> Arena -> (CellRef, Arena)`                                 | arena                    | `ArenaManifold::makeScalarCell` (R6 bits)       |
+| `make_dim`         | `String -> Arena -> (DimRef, Arena)`                                  | arena                    | `ArenaManifold::ensureDimension` (`d.dims`)     |
+| `set_link`         | `CellRef -> DimRef -> Dir -> CellRef -> Arena -> Result Arena`        | arena                    | `ArenaManifold::link` (writes both ends)        |
+| `splice_span`      | `CellRef -> List VSpan -> Arena -> Result Arena`                      | arena                    | `ArenaManifold::setContent` (transclude)        |
+| `insert_in_rank`   | `CellRef -> CellRef -> DimRef -> Dir -> Arena -> Arena`               | arena                    | `ArenaManifold::insertIntoRank`                 |
+| `build_list`       | `List CellRef -> DimRef -> Arena -> Arena`                            | arena                    | `VortexStdLib::createList`                      |
+| `build_grid`       | `Int -> Int -> DimRef -> DimRef -> Arena -> (Grid, Arena)`            | arena                    | `VortexStdLib::createGrid`                      |
+| `clone_to_chain`   | `CellRef -> CellRef -> Arena -> Arena`                                | arena                    | `VortexStdLib::zzCloneToChain`                  |
+| `mark`             | `Arena -> (Mark, Arena)`                                              | arena                    | `ArenaManifold::mark`                           |
+| `release`          | `Mark -> Arena -> Arena`                                              | arena                    | `ArenaManifold::release`                        |
+| `walk`             | `CellRef -> DimRef -> Dir -> Int -> Manifold -> Stream CellRef`       | read-only, step-budgeted | `cell_views::RankView`                          |
+| `resolve`          | `VSpan -> IO (Resolved Bytes)`                                        | effect                   | async `SpanReader` over `managed_torrent`       |
+| `text_of`          | `CellRef -> Manifold -> Resolved String`                              | staged                   | `Manifold::textOf` behind `Resolved`            |
+| `localise`         | `GlobalSpan -> IO (Option VSpan)`                                     | effect                   | `publication::localise`                         |
+| `promote`          | `MicroversionId -> CellRef -> Arena -> IO (Result Overflow Promoted)` | effect                   | `promote(Store&, parent, arena, root, …)`       |
+| `project_xanadoc`  | `MicroversionId -> Manifold`                                          | read-only                | `projectXanaduToZigzag(…, &provenance)`         |
+| `store_to_slice`   | `Manifold -> Slice`                                                   | read-only                | `storeToSlice`                                  |
+
+Three shapes the engine forces, each a correction a naive binding would get wrong:
+
+- **`follow` does not lower to `Store::linksTouching`** — that is a linear `views::filter` over
+  every link, $O(n)$. Bidirectional link following lowers to the Spanfilade's $O(\log N + K)$
+  interval stabbing (`Spanfilade::occurrencesOf`), yielding a $K$-bounded stream.
+- **`promote` returns `Result Overflow Promoted`, never a bare value** — the C++ returns `nullopt`
+  on a `PromotionBudget` overflow or a bad root; the module surfaces that as a typed `Err`.
+- **`promote` preserves `d.clone` sharing** — a promoted subgraph that transcludes shared spans
+  emits them once and links both roots, so a transclusion stays $O(1)$ in new ops rather than
+  copying the quoted content: absolute-transclusion-no-duplication restated as a promotion
+  requirement.
+
+**Content resolution is staged.** A `VSpan` is a permanent address; its bytes may live in another
+store or on the swarm. A front end freely builds, passes, transcludes, and addresses `VSpan`s with
+no effect — only `resolve`/`text_of` cross into bytes, and they return a `Resolved` so a missing
+seeder is a `Pending` the UI can show as "fetching…", never a blocked thread. `SpanReader` runs off
+the evaluation thread.
+
+### 9.3 Layering: which layer owns which verb
+
+The module is organised in three layers so a front end reuses rather than re-implements. This is the
+reuse boundary the standard library exists to enforce:
+
+- **C++ engine (reuse).** `zigzag::RankView` (`cell_views.hpp`, lazy and allocation-free over both
+  `Manifold` and `ArenaManifold`); `ArenaManifold::link` (writes **both** reciprocal edges, as
+  `applyStructure`'s `SetLink` does, so bidirectionality is an invariant not a convention);
+  `insertIntoRank`, `cloneMaster`, `cellsWithinRadius`, `dimensions`; `promote`, `mark`, `release`.
+- **Shared Vortex stdlib (this module, written in Vortex).** The authoring and query verbs above,
+  and the batch constructors `build_list`/`build_grid`/`clone_to_chain` over
+  `VortexStdLib::createList`/`createGrid`/`zzCloneToChain` — a true-orthogonal grid is
+  `build_grid rows cols dRow dCol`, which asserts the N·M·2 reciprocal-link postcondition once,
+  rather than a hand-rolled 1-D chain. A `Cursor` record (`{pos, across, down}` of two directed
+  dimensions, with `move`/`rotate`/`reverse` as pure `step`s over `RankView`) is derived here, as
+  are clone-member and within-radius queries.
+- **Per-language surface.** Only notation sugar is a front end's own: vlace's `Arena` do-notation
+  and lenses, VQL's path operators, VPL's glyphs. These *lower to* this module's verbs; they do not
+  re-implement them. A per-element `link` loop in a front end is a layering violation to promote
+  into `build_list`/`build_grid`.
+
+The rule: **faithfulness is the cheapest derived code.** A cursor is Nelson's I-beam; a batch link
+must still write both ends and carry provenance; and because the engine already enforces those, the
+ergonomic layer is pure Vortex over primitives that exist.
+
+______________________________________________________________________
+
 ## Appendix: Versioning and Change History
 
 **The version means something from here on.** It had not: both this document and its companion sat
@@ -1139,28 +1269,29 @@ The rule, two components:
 Editorial changes that alter no normative text do not bump either component; they are not in the
 table.
 
-| version | commit    | date       | change                                                                                                                                        |
-| ------- | --------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1.0     | `846c0ed` | 2026-09-09 | Initial specification: the manifold-as-state model, the reference engine, and the dimension set.                                              |
-| 2.0     | `bd9b58b` | 2026-09-09 | Reworked around a real zzstructure `Cell`; `%` and `weave` become the creation vocabulary.                                                    |
-| 3.0     | `a7d36d8` | 2026-09-09 | `\\` traversal replaced; `%` batches; `fuse` renamed `entangle`.                                                                              |
-| 4.0     | `bca523d` | 2026-09-09 | `get_link`/`set_link` consolidated into the single `link` primitive branching on its target.                                                  |
-| 4.1     | `a6fffe4` | 2026-09-09 | `entangle_generator` added, for fanning one existing target out over a multi-cell context.                                                    |
-| 4.2     | `22b4aec` | 2026-09-09 | The generator's first pull returns the source itself, so a one-cell context needs no special case.                                            |
-| 4.3     | `c8864ee` | 2026-09-10 | §2's cell layout checked against the convergence's measured one; reconciliation material added.                                               |
-| 5.0     | `88524a9` | 2026-09-10 | V1–V4 accepted: `noCell == 0`, the CSR arena, `set`'s persistence; `d.cache` pinned to a cursor.                                              |
-| 5.1     | `3d1cb53` | 2026-09-10 | Pins get their own Root Set rank, `d.pinning-cursors`.                                                                                        |
-| 5.2     | `05c79d9` | 2026-09-10 | A pin is named on `d.name`, like every other cursor.                                                                                          |
-| 6.0     | `563c93a` | 2026-09-11 | **Entanglement deleted.** `entangled_payload` and the shared-pointer model go; identity sharing is `d.clone` rank traversal through a master. |
-| 7.0     | `4720419` | 2026-09-11 | **`get`/`set` become one `value()` primitive**, cell-in and cell-out, so a write composes in a path; `render()` is the projection.            |
-| 7.1     | `8f7d4bd` | 2026-09-11 | Content wrappers over `value()`: `splice`, `insert`, `append`, `erase`, `get`.                                                                |
-| 8.0     | `ae4e800` | 2026-09-11 | **Negative offsets count from the end** rather than clamping to zero; `resolve_range` derives both ends.                                      |
-| 9.0     | `69ad10d` | 2026-09-11 | **There is no Cell 0.** Zero is the absence of a cell, so `kNoLink` has nothing to mark and the break sentinel `-2` becomes `0`.              |
-| 10.0    | `a03ddcc` | 2026-09-11 | **`clone_generator` never hands out the master**; every pull is a fresh clone.                                                                |
-| 10.1    | `734513a` | 2026-09-11 | Unification and backtracking split into their own note; the deferred idea elaborated, asking the core for two methods.                        |
-| 11.0    | `db39d1a` | 2026-09-12 | Parameter pre/postprocessing along `d.spin`, Design by Contract (`d.contract`), and Vortex-native memoization library (`d.cache`).            |
-| 11.1    | `19c985a` | 2026-09-12 | Vortex Standard Library architecture (written in Vortex): `d.stdlib` module rank, spatial symbol resolution, and core standard modules.       |
-| 12.0    | `1271d20` | 2026-09-12 | **Vlog Vortex Extension & `std:logic` Module**: `d.clause` dimension, logic opcodes, and SLD resolution over `ArenaManifold`.                 |
+| version | commit    | date       | change                                                                                                                                                                                                                                                                                                                                                        |
+| ------- | --------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1.0     | `846c0ed` | 2026-09-09 | Initial specification: the manifold-as-state model, the reference engine, and the dimension set.                                                                                                                                                                                                                                                              |
+| 2.0     | `bd9b58b` | 2026-09-09 | Reworked around a real zzstructure `Cell`; `%` and `weave` become the creation vocabulary.                                                                                                                                                                                                                                                                    |
+| 3.0     | `a7d36d8` | 2026-09-09 | `\\` traversal replaced; `%` batches; `fuse` renamed `entangle`.                                                                                                                                                                                                                                                                                              |
+| 4.0     | `bca523d` | 2026-09-09 | `get_link`/`set_link` consolidated into the single `link` primitive branching on its target.                                                                                                                                                                                                                                                                  |
+| 4.1     | `a6fffe4` | 2026-09-09 | `entangle_generator` added, for fanning one existing target out over a multi-cell context.                                                                                                                                                                                                                                                                    |
+| 4.2     | `22b4aec` | 2026-09-09 | The generator's first pull returns the source itself, so a one-cell context needs no special case.                                                                                                                                                                                                                                                            |
+| 4.3     | `c8864ee` | 2026-09-10 | §2's cell layout checked against the convergence's measured one; reconciliation material added.                                                                                                                                                                                                                                                               |
+| 5.0     | `88524a9` | 2026-09-10 | V1–V4 accepted: `noCell == 0`, the CSR arena, `set`'s persistence; `d.cache` pinned to a cursor.                                                                                                                                                                                                                                                              |
+| 5.1     | `3d1cb53` | 2026-09-10 | Pins get their own Root Set rank, `d.pinning-cursors`.                                                                                                                                                                                                                                                                                                        |
+| 5.2     | `05c79d9` | 2026-09-10 | A pin is named on `d.name`, like every other cursor.                                                                                                                                                                                                                                                                                                          |
+| 6.0     | `563c93a` | 2026-09-11 | **Entanglement deleted.** `entangled_payload` and the shared-pointer model go; identity sharing is `d.clone` rank traversal through a master.                                                                                                                                                                                                                 |
+| 7.0     | `4720419` | 2026-09-11 | **`get`/`set` become one `value()` primitive**, cell-in and cell-out, so a write composes in a path; `render()` is the projection.                                                                                                                                                                                                                            |
+| 7.1     | `8f7d4bd` | 2026-09-11 | Content wrappers over `value()`: `splice`, `insert`, `append`, `erase`, `get`.                                                                                                                                                                                                                                                                                |
+| 8.0     | `ae4e800` | 2026-09-11 | **Negative offsets count from the end** rather than clamping to zero; `resolve_range` derives both ends.                                                                                                                                                                                                                                                      |
+| 9.0     | `69ad10d` | 2026-09-11 | **There is no Cell 0.** Zero is the absence of a cell, so `kNoLink` has nothing to mark and the break sentinel `-2` becomes `0`.                                                                                                                                                                                                                              |
+| 10.0    | `a03ddcc` | 2026-09-11 | **`clone_generator` never hands out the master**; every pull is a fresh clone.                                                                                                                                                                                                                                                                                |
+| 10.1    | `734513a` | 2026-09-11 | Unification and backtracking split into their own note; the deferred idea elaborated, asking the core for two methods.                                                                                                                                                                                                                                        |
+| 11.0    | `db39d1a` | 2026-09-12 | Parameter pre/postprocessing along `d.spin`, Design by Contract (`d.contract`), and Vortex-native memoization library (`d.cache`).                                                                                                                                                                                                                            |
+| 11.1    | `19c985a` | 2026-09-12 | Vortex Standard Library architecture (written in Vortex): `d.stdlib` module rank, spatial symbol resolution, and core standard modules.                                                                                                                                                                                                                       |
+| 12.0    | `1271d20` | 2026-09-12 | **Vlog Vortex Extension & `std:logic` Module**: `d.clause` dimension, logic opcodes, and SLD resolution over `ArenaManifold`.                                                                                                                                                                                                                                 |
+| 13.0    | *this*    | 2026-10-15 | **`std:xanadu` Standard Library Module** (§9): the shared, language-neutral package for direct xanadoc/slice manipulation — addressing, arena authoring, batch constructors, bidirectional link following, rank walking, staged content resolution, and provenance — relocated here from the vlace note so VQL/VPL/vicon/vprolog/vlace all import one module. |
 
 [toc-01]: #2-core-c-runtime-engine-reference-implementation
 [toc-02]: #3-the-dual-wing-calling-convention--spatial-parameter-binding
@@ -1174,3 +1305,4 @@ table.
 [toc-10]: #7-vortex-standard-library-architecture-written-in-vortex
 [toc-11]: #71-spatial-module-topology-dstdlib-and-symbol-resolution
 [toc-12]: #73-metacircular-execution--compilation-into-the-manifold
+[toc-13]: #92-the-module-addressing-authoring-and-content-resolution

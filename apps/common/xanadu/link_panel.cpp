@@ -13,6 +13,14 @@ namespace {
 
 constexpr std::string_view kSep = " · ";
 
+std::string rangeLabel(const OccurrenceSite &site) {
+  return std::visit(
+      [](const auto &at) {
+        return std::format("bytes {}–{}", at.range.start, at.range.end);
+      },
+      site);
+}
+
 PanelLine sideLine(const SelectedLink &selected,
                    const LinkOccurrences &resolved, const LinkSide side,
                    SiteNamer name) {
@@ -30,7 +38,8 @@ PanelLine sideLine(const SelectedLink &selected,
   std::string text =
       std::format("{} {}/{}", label, *cursor.member + 1, members.size());
 
-  const auto &member = members[*cursor.member];
+  std::size_t requiredBytes = 0;
+  const auto &member        = members[*cursor.member];
   if (!member.inView()) {
     text += std::format("{}not in view", kSep);
     return {.text   = std::move(text),
@@ -41,19 +50,22 @@ PanelLine sideLine(const SelectedLink &selected,
     text += std::format("{}choose occurrence ({})", kSep,
                         member.occurrences.size());
   } else {
-    text += std::format("{}occurrence {}/{}", kSep, *cursor.occurrence + 1,
-                        member.occurrences.size());
-  }
-  if (cursor.occurrence) {
     const auto &occurrence = member.occurrences[*cursor.occurrence];
-    text += std::format("{}{}", kSep, name(occurrence.site));
-    if (Coverage::Partial == occurrence.coverage) {
-      text += " (part)";
-    }
+    text += std::format("{}place {}/{} · bytes", kSep, *cursor.occurrence + 1,
+                        member.occurrences.size());
+    text += std::visit(
+        [](const auto &at) {
+          return std::format("\n{}–{}", at.range.start, at.range.end);
+        },
+        occurrence.site);
+    if (Coverage::Partial == occurrence.coverage) text += " (part)";
+    requiredBytes = text.size();
+    text += "\n" + name(occurrence.site);
   }
   return {.text   = std::move(text),
           .tone   = active ? PanelLine::Tone::Active : PanelLine::Tone::Normal,
-          .active = active};
+          .active = active,
+          .requiredBytes = requiredBytes};
 }
 
 std::optional<PanelLine> readingLine(const LinkOccurrences &resolved,
@@ -76,11 +88,13 @@ std::optional<PanelLine> readingLine(const LinkOccurrences &resolved,
     }
   }
   if (!on.empty()) {
-    return PanelLine{.text = "reading: " + on};
+    return PanelLine{.text           = "reading: " + on,
+                     .compactContext = "reading: " + on};
   }
   if (reading.entered) {
-    return PanelLine{.text = "reading: outside the linked range",
-                     .tone = PanelLine::Tone::Muted};
+    return PanelLine{.text           = "reading: outside the linked range",
+                     .tone           = PanelLine::Tone::Muted,
+                     .compactContext = "outside linked range"};
   }
   return std::nullopt;
 }
@@ -105,7 +119,7 @@ linkPanelLines(const SelectedLink &selected,
   if (!link.owner.empty()) {
     heading += std::format("{}{}", kSep, link.owner);
   }
-  lines.push_back({.text = std::move(heading)});
+  lines.push_back({.text = heading, .compactIdentity = std::move(heading)});
   lines.push_back(
       sideLine(selected, *selected.occurrences, LinkSide::Left, name));
   lines.push_back(
@@ -114,8 +128,12 @@ linkPanelLines(const SelectedLink &selected,
     lines.push_back(std::move(*line));
   }
   lines.push_back(
-      {.text = std::format("origin: {}", origin ? name(*origin) : "none"),
-       .tone = PanelLine::Tone::Muted});
+      {.text = std::format("origin: {}", origin ? name(*origin) +
+                                                      std::string(kSep) +
+                                                      rangeLabel(*origin)
+                                                : "none"),
+       .tone = PanelLine::Tone::Muted,
+       .compactContext = origin ? "origin saved" : "origin none"});
   return lines;
 }
 
@@ -206,6 +224,8 @@ std::vector<PanelButton> linkPanelButtons(const SelectedLink &selected,
       resolved && cursor.member &&
       selected.occurrences->members(selected.active)[*cursor.member].inView();
   return {
+      {.label = "Previous link", .command = nav::StepLink{.delta = -1}},
+      {.label = "Next link", .command = nav::StepLink{.delta = 1}},
       {.label   = "\u2039 member",
        .command = nav::StepMember{.delta = -1},
        .enabled = resolved},

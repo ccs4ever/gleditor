@@ -34,7 +34,7 @@ void CliParser::buildParser(argparse::ArgumentParser &parser,
   parser.add_argument("store")
       .help("directory the primary spools live in or slice to load; created if "
             "it is not there. Defaults to \"default\" in the xanadocs folder, "
-            "$XDG_DATA_HOME/xudu/xanadocs")
+            "$XDG_DATA_HOME/xuzz/xanadocs")
       .default_value((xanadu::xanadocsDirectory() / "default").string());
 
   parser.add_argument("--view")
@@ -178,12 +178,17 @@ void CliParser::buildParser(argparse::ArgumentParser &parser,
     return arg;
   };
 
-  hiddenUnlessDetailed(parser.add_argument("--xudu"))
-      .help("load a Xudu store path or document")
+  hiddenUnlessDetailed(parser.add_argument("--xanadoc", "--xudu"))
+      .help("load a Xanadu store path or document")
       .default_value(std::string{});
 
   hiddenUnlessDetailed(parser.add_argument("--slice"))
       .help("load a ZigZag slice or store path")
+      .default_value(std::string{});
+
+  hiddenUnlessDetailed(parser.add_argument("--lens"))
+      .help("project a filesystem path through the FilesystemLens and show its "
+            "cells (use with --raster to print and exit)")
       .default_value(std::string{});
 
   hiddenUnlessDetailed(parser.add_argument("--raster"))
@@ -506,13 +511,17 @@ std::optional<CliOptions> CliParser::parse(argparse::ArgumentParser &parser,
   if (opts.storePath.empty()) {
     opts.storePath = (xanadu::xanadocsDirectory() / "default").string();
   }
-  if (const auto xuduPath = parser.get<std::string>("--xudu");
-      !xuduPath.empty()) {
-    opts.storePath = xuduPath;
+  if (const auto xanadocPath = parser.get<std::string>("--xanadoc");
+      !xanadocPath.empty()) {
+    opts.storePath = xanadocPath;
   }
   if (const auto slicePath = parser.get<std::string>("--slice");
       !slicePath.empty()) {
     opts.slicePath = slicePath;
+  }
+  if (const auto lensPath = parser.get<std::string>("--lens");
+      !lensPath.empty()) {
+    opts.lensPath = lensPath;
   }
 
   opts.rasterMode = (parser["--raster"] == true);

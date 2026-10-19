@@ -38,13 +38,13 @@ make -j"$(nproc)" \
   GLEDITOR_SDL=3 \
   GLEDITOR_ENABLE_VULKAN=1 \
   GLEDITOR_VERSION="$version" \
-  lib gleditor xudu shaders
+  lib gleditor xuzz shaders
 
 echo "==> staging into $stage"
 rm -rf "$stage"
 mkdir -p "$stage/assets/shaders/vulkan"
 cp build/gleditor.exe "$stage/gleditor.exe" 2>/dev/null || cp build/gleditor "$stage/gleditor.exe"
-cp build/xudu.exe "$stage/xudu.exe" 2>/dev/null || cp build/xudu "$stage/xudu.exe"
+cp build/xuzz.exe "$stage/xuzz.exe" 2>/dev/null || cp build/xuzz "$stage/xuzz.exe"
 # The library both programs are linked against. The loader looks in the
 # executable's own directory first, so it belongs beside them and needs no
 # further arrangement -- but nothing runs without it.

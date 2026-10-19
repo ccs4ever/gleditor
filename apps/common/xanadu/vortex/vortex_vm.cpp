@@ -4,11 +4,14 @@
  */
 #include "common/xanadu/vortex/vortex_vm.hpp"
 
+#include <chrono>
 #include <cmath>
 #include <iostream>
 #include <ranges>
 #include <string>
 #include <unordered_set>
+
+#include <gleditor/logging.hpp>
 
 #include "common/xanadu/zigzag/cell_views.hpp"
 #include "common/xanadu/zigzag/vlog.hpp"
@@ -161,17 +164,34 @@ std::string VortexVM::getMemoKey(CellRef opcode) const {
   return "";
 }
 
+std::string formatDeweyPath(std::span<const std::uint16_t> path) {
+  std::string out;
+  for (std::size_t i = 0; i < path.size(); ++i) {
+    if (i > 0) {
+      out.push_back('.');
+    }
+    out += std::to_string(path[i]);
+  }
+  return out;
+}
+
 void VortexVM::pushChoicePoint(CellRef cursor, CellRef altOp) {
   CellRef stackFrame = noCell;
   if (cursor != noCell && core_.arena().contains(cursor)) {
     stackFrame = core_.arena().linked(cursor, core_.dims().stack, false);
   }
+  std::vector<std::uint16_t> altDewey = currentDeweyPath_;
+  altDewey.push_back(1);
+  currentDeweyPath_.push_back(0);
   choiceStack_.push_back(ChoicePoint{
-      .cursor     = cursor,
-      .altOp      = altOp,
-      .mark       = core_.arena().mark(),
-      .stackFrame = stackFrame,
-      .cutBarrier = choiceStack_.size(),
+      .cursor          = cursor,
+      .altOp           = altOp,
+      .mark            = core_.arena().mark(),
+      .stackFrame      = stackFrame,
+      .cutBarrier      = choiceStack_.size(),
+      .deweyPath       = std::move(altDewey),
+      .nextAltIndex    = 1,
+      .cyclesSinceRoot = totalCycles_,
   });
 }
 
@@ -181,6 +201,7 @@ bool VortexVM::backtrack(CellRef cursor) {
     choiceStack_.pop_back();
     if (cursor == noCell || cp.cursor == cursor || cp.cursor == noCell) {
       core_.arena().release(cp.mark);
+      currentDeweyPath_ = cp.deweyPath;
       if (cursor != noCell) {
         setCursorOpcode(cursor, cp.altOp);
         if (cp.stackFrame != noCell && core_.arena().contains(cursor)) {
@@ -199,6 +220,18 @@ void VortexVM::cut(std::size_t cutBarrier) {
     ChoicePoint cp = choiceStack_.back();
     choiceStack_.pop_back();
     core_.arena().discard(cp.mark);
+    if (cutCallback_ && !cp.deweyPath.empty()) {
+      const auto parentSpan =
+          std::span<const std::uint16_t>{cp.deweyPath}.subspan(
+              0, cp.deweyPath.size() - 1);
+      cutCallback_(formatDeweyPath(parentSpan));
+    }
+  }
+  if (cutCallback_ && choiceStack_.empty() && !currentDeweyPath_.empty()) {
+    const auto parentSpan =
+        std::span<const std::uint16_t>{currentDeweyPath_}.subspan(
+            0, currentDeweyPath_.size() - 1);
+    cutCallback_(formatDeweyPath(parentSpan));
   }
 }
 
@@ -206,7 +239,40 @@ std::size_t VortexVM::choiceDepth() const noexcept {
   return choiceStack_.size();
 }
 
-void VortexVM::clearChoicePoints() { choiceStack_.clear(); }
+void VortexVM::clearChoicePoints() { cut(0); }
+
+VortexVM *VortexVM::setOraclePath(std::span<const std::uint16_t> path) {
+  oraclePath_.assign(path.begin(), path.end());
+  oracleCursor_ = 0;
+  currentDeweyPath_.clear();
+  return this;
+}
+
+VortexVM *VortexVM::setCurrentDeweyPath(std::span<const std::uint16_t> path) {
+  currentDeweyPath_.assign(path.begin(), path.end());
+  return this;
+}
+
+std::optional<ChoicePoint> VortexVM::stealNearRootChoicePoint() {
+  if (choiceStack_.empty()) {
+    return std::nullopt;
+  }
+  ChoicePoint stolen = std::move(choiceStack_.front());
+  choiceStack_.erase(choiceStack_.begin());
+  core_.arena().evictOldestMark();
+  for (auto &cp : choiceStack_) {
+    if (cp.cutBarrier > 0) {
+      cp.cutBarrier--;
+    }
+  }
+  return stolen;
+}
+
+VortexVM *
+VortexVM::setCutCallback(std::function<void(std::string_view deweyPrefix)> cb) {
+  cutCallback_ = std::move(cb);
+  return this;
+}
 
 void VortexVM::runPipeline(CellRef paramCell) {
   CellRef pipeOp    = core_.getPipelineHead(paramCell);
@@ -880,7 +946,16 @@ ExecutionResult VortexVM::executeOpcodeBody(
     if (!inputs.empty()) {
       altOp = static_cast<CellRef>(toInt(inputs[0]));
     }
-    pushChoicePoint(cursor, altOp);
+    if (oracleCursor_ < oraclePath_.size()) {
+      const std::uint16_t directive = oraclePath_[oracleCursor_++];
+      currentDeweyPath_.push_back(directive);
+      if (directive > 0 && cursor != noCell && altOp != noCell) {
+        setCursorOpcode(cursor, altOp);
+        jumped = true;
+      }
+    } else {
+      pushChoicePoint(cursor, altOp);
+    }
     outputs.emplace_back(true);
     break;
   }
@@ -934,6 +1009,8 @@ ExecutionResult VortexVM::step(CellRef cursor) {
                            .failingClause     = noCell,
                            .errorMessage      = "Halted"};
   }
+
+  totalCycles_++;
 
   // 1. Precondition Evaluation (-d.contract)
   std::vector<CellRef> preconds = core_.preconditionsOf(op);
@@ -1046,8 +1123,15 @@ ExecutionResult VortexVM::step(CellRef cursor) {
                          .errorMessage      = ""};
 }
 
-ExecutionResult VortexVM::run(CellRef cursor, std::size_t maxCycles) {
+ExecutionResult VortexVM::run(CellRef cursor, std::size_t maxCycles,
+                              std::stop_token stopToken) {
   for (std::size_t i = 0; i < maxCycles; ++i) {
+    if (stopToken.stop_requested()) {
+      return ExecutionResult{.success           = false,
+                             .contractViolation = ContractViolationKind::None,
+                             .failingClause     = noCell,
+                             .errorMessage      = "Cancelled by cut"};
+    }
     CellRef op = getCursorOpcode(cursor);
     if (op == noCell) {
       return ExecutionResult{.success           = true,
@@ -1073,10 +1157,28 @@ ExecutionResult VortexVM::run(CellRef cursor, std::size_t maxCycles) {
                          .errorMessage      = "Exceeded max cycles"};
 }
 
-std::size_t VortexVM::stepScheduler() {
+std::size_t VortexVM::stepScheduler(std::stop_token stopToken) {
+  if (stopToken.stop_requested()) {
+    return 0;
+  }
   std::size_t executed         = 0;
   std::vector<CellRef> cursors = activeCursors();
+
+  // Stage 0 instrumentation (vortex-multithreading-study.md §3.6): time one
+  // cooperative scheduler tick over all active cursors. Because every cursor
+  // steps serially over the one shared arena, this wall time grows linearly
+  // with the cursor count -- the measurement that proves the single arena is
+  // the serialization point. The guard skips the clock reads when the
+  // category is disabled, so an instrumented build pays nothing by default.
+  static const auto schedLogger = gleditor::logging::category("vortex.sched");
+  const bool trace              = schedLogger->should_log(spdlog::level::trace);
+  const auto tickStart = trace ? std::chrono::steady_clock::now()
+                               : std::chrono::steady_clock::time_point{};
+
   for (CellRef cursor : cursors) {
+    if (stopToken.stop_requested()) {
+      break;
+    }
     CellRef op = getCursorOpcode(cursor);
     if (op != noCell) {
       auto res = step(cursor);
@@ -1085,6 +1187,18 @@ std::size_t VortexVM::stepScheduler() {
       }
     }
   }
+
+  if (trace) {
+    const auto elapsedNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                               std::chrono::steady_clock::now() - tickStart)
+                               .count();
+    schedLogger->trace(
+        "tick: cursors={} executed={} elapsed_ns={} ns_per_cursor={}",
+        cursors.size(), executed, elapsedNs,
+        cursors.empty() ? 0
+                        : elapsedNs / static_cast<long long>(cursors.size()));
+  }
+
   return executed;
 }
 

@@ -1,5 +1,5 @@
 /**
- * @file zz_xudu_projector.hpp
+ * @file xanadu_projector.hpp
  * @brief Bidirectional projection and rasterization between Xudu (Xanadocs /
  * Xanalinks) and Project Xanadu Zigzag (Multidimensional cell space).
  */
@@ -25,7 +25,7 @@
 namespace zigzag {
 
 /// Input document description for Xudu -> Zigzag projection.
-struct XuduDocInput {
+struct XanaduDocInput {
   std::string name;
   std::string documentId;
   std::string text;
@@ -35,7 +35,7 @@ struct XuduDocInput {
 };
 
 /// The source addressed by one projected ZigZag cell.
-struct XuduProjectionProvenance {
+struct XanaduProjectionProvenance {
   std::string documentId;
   xanadu::MicroversionId version;
   xanadu::PrimediaSpan span;
@@ -46,7 +46,7 @@ struct XuduProjectionProvenance {
 /// A store projection together with its provenance by pre-mint ZigZag cell id.
 struct ProjectedXuduStore {
   ZzStructureDocument document;
-  std::unordered_map<CellID, XuduProjectionProvenance> sourceByProjectedCell;
+  std::unordered_map<CellID, XanaduProjectionProvenance> sourceByProjectedCell;
 };
 
 /// Configuration options for projecting Xudu documents into Zigzag space.
@@ -76,11 +76,12 @@ struct ZzRasterResult {
  * - @p transclusion_dimension links cells sharing overlapping primedia spans.
  * - @p link_dimension links xanalink endpoints across documents.
  */
-[[nodiscard]] ZzStructureDocument projectXuduToZigzag(
-    const std::vector<XuduDocInput> &docs,
+[[nodiscard]] ZzStructureDocument projectXanaduToZigzag(
+    const std::vector<XanaduDocInput> &docs,
     const std::vector<xanadu::Link> &links,
-    const XuduProjectorOptions &opts                                 = {},
-    std::unordered_map<CellID, XuduProjectionProvenance> *provenance = nullptr);
+    const XuduProjectorOptions &opts = {},
+    std::unordered_map<CellID, XanaduProjectionProvenance> *provenance =
+        nullptr);
 
 /**
  * @brief Project a Xudu Store and its active microversions into a Zigzag

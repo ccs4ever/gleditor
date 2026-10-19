@@ -29,7 +29,7 @@ cell master headcells, and bidirectional Xanadoc $\longleftrightarrow$ Zigzag pr
 >   own `span` addressed) and its `std::optional<Preflet>` are both deleted, so the listing in §2
 >   below records what the struct *held*, not what it has.
 > - **`ZzStructureDocument` is the YAML transfer format**, converted both ways by `sliceToStore()`
->   and `storeToSlice()` in `zz_xudu_projector`. There are no YAML slices to preserve: sample and
+>   and `storeToSlice()` in `xanadu_projector`. There are no YAML slices to preserve: sample and
 >   system slices are regenerated as stores.
 > - **The fixed array of privileged dimensions lost its argument.** R12 removed it in favour of CSR
 >   runs, and the measurement was re-run against the real `Manifold` in step 19: the array's
@@ -192,7 +192,7 @@ N-dimensional Zigzag space, and any Zigzag manifold can be linearized into reada
 ```mermaid
 graph LR
     Xanadoc["Xanadoc Store / EDL<br/>(Primedia + Microversions)"]
-    Projector["zz_xudu_projector<br/>(Bidirectional Projector)"]
+    Projector["xanadu_projector<br/>(Bidirectional Projector)"]
     Zigzag["Zigzag Manifold<br/>(CompactZZCells on Ranks)"]
     Package["LinkPackage<br/>(LinkType::Dimension)"]
 
@@ -257,7 +257,7 @@ ______________________________________________________________________
 | :------------------------- | :---------------------------------------------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------- |
 | **Compact Cell Layout**    | [`apps/common/xanadu/zigzag/compact_zzcell.hpp`](apps/common/xanadu/zigzag/compact_zzcell.hpp)              | Cache-line aligned multidimensional cell with inlined standard dimensions. ~960 bytes, not 64 |
 | **Transclusion Engine**    | [`apps/zigzag/core/unified_transclusion_engine.hpp/.cpp`](apps/zigzag/core/unified_transclusion_engine.hpp) | 2-rank manifold validator, neighborhood extractor, and GPU uploader                           |
-| **Document Projector**     | [`apps/common/xanadu/zigzag/zz_xudu_projector.hpp/.cpp`](apps/common/xanadu/zigzag/zz_xudu_projector.hpp)   | Xanadoc $\longleftrightarrow$ Zigzag mapping, clone deduplication, and rasterization          |
+| **Document Projector**     | [`apps/common/xanadu/zigzag/xanadu_projector.hpp/.cpp`](apps/common/xanadu/zigzag/xanadu_projector.hpp)     | Xanadoc $\longleftrightarrow$ Zigzag mapping, clone deduplication, and rasterization          |
 | **Zigzag Core Data Model** | [`apps/common/xanadu/zigzag/zzcore.hpp/.cpp`](apps/common/xanadu/zigzag/zzcore.hpp)                         | Dimensional navigation, clone master resolution, and rank iterators                           |
 | **YAML Slice Loader**      | [`apps/common/xanadu/zigzag/zzstructure_loader.cpp`](apps/common/xanadu/zigzag/zzstructure_loader.cpp)      | RapidYAML parser for `.zz` multidimensional slice files                                       |
 | **Visualizer & A11y**      | [`apps/zigzag/core/zigzag_visualizer.cpp`](apps/zigzag/core/zigzag_visualizer.cpp)                          | 3D navigation, mouse picking, and AccessKit accessibility tree                                |

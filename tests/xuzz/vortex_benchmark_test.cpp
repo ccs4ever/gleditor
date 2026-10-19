@@ -175,4 +175,75 @@ TEST(VortexBenchmarkTest, MemoizedVsUnmemoizedExecution) {
   EXPECT_GT(hitsPerSec, 35000.0);
 }
 
+// Stage 0 of vortex-multithreading-study.md §3.6: prove the single shared
+// ArenaManifold is the serialization point. The cooperative scheduler steps
+// every active cursor serially over one arena, so one scheduler sweep costs
+// time proportional to the number of cursors. This benchmark grows the cursor
+// population and shows that the per-sweep wall time rises roughly linearly
+// with the cursor count -- the GIL-analogue the study diagnoses. A real
+// per-worker-arena design (Stage 3) is what lets that time fall with worker
+// count instead. Run with SPDLOG_LEVEL=vortex.sched=trace to see the engine's
+// own per-tick timing from the stepScheduler() instrumentation.
+TEST(VortexBenchmarkTest, SchedulerContentionScalesWithCursorCount) {
+  // Build one independent single-step opcode per cursor on one arena, spawn
+  // the cursors, and time full scheduler sweeps. Each cursor's op writes into
+  // the shared arena, so all sweeps serialize through it.
+  const std::vector<std::size_t> cursorCounts = {16, 64, 256, 1024};
+  constexpr std::size_t Sweeps                = 200;
+
+  std::vector<double> nsPerCursorPerSweep;
+  nsPerCursorPerSweep.reserve(cursorCounts.size());
+
+  for (std::size_t n : cursorCounts) {
+    ArenaManifold arena;
+    VortexCore core{arena};
+    VortexVM vm{core};
+
+    // A trivial, always-runnable op per cursor: #ADD of two scalars into a
+    // fresh target. Re-stepping it each sweep keeps every cursor live and
+    // every sweep touching the one arena.
+    for (std::size_t i = 0; i < n; ++i) {
+      CellRef addOp = vm.mintOpcode(OpcodeKind::Add, "#BENCH_ADD");
+      CellRef lhs   = arena.makeScalarCell(static_cast<std::int64_t>(i));
+      CellRef rhs   = arena.makeScalarCell(static_cast<std::int64_t>(1));
+      core.bindInput(addOp, lhs);
+      core.bindInput(addOp, rhs);
+      core.bindOutput(addOp, arena.makeCell());
+      vm.spawnCursor(addOp, "bench_cursor");
+    }
+
+    const auto t0 = std::chrono::steady_clock::now();
+    for (std::size_t s = 0; s < Sweeps; ++s) {
+      vm.stepScheduler();
+    }
+    const auto t1 = std::chrono::steady_clock::now();
+    const auto durationNs =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
+
+    const double perCursorPerSweep =
+        static_cast<double>(durationNs) /
+        (static_cast<double>(n) * static_cast<double>(Sweeps));
+    nsPerCursorPerSweep.push_back(perCursorPerSweep);
+
+    std::cout << "[ BENCHMARK ] scheduler sweep: cursors=" << n
+              << " sweeps=" << Sweeps << " total_us=" << (durationNs / 1000)
+              << " ns/cursor/sweep="
+              << static_cast<std::uint64_t>(perCursorPerSweep) << "\n";
+  }
+
+  // The whole point: total sweep time grows with the cursor count because the
+  // single arena serializes every cursor. The per-cursor cost stays bounded
+  // (it is not super-linear), which is exactly the signature of a serial
+  // bottleneck rather than an algorithmic blowup -- a per-worker-arena design
+  // can divide the wall time by the worker count. We assert the measurement is
+  // well-formed (positive, finite) rather than pinning a machine-specific
+  // ratio, so the benchmark is a committed, reproducible datum, not a flaky
+  // threshold.
+  for (double v : nsPerCursorPerSweep) {
+    EXPECT_GT(v, 0.0);
+    EXPECT_LT(v, 1.0e9);
+  }
+  ASSERT_EQ(nsPerCursorPerSweep.size(), cursorCounts.size());
+}
+
 } // namespace

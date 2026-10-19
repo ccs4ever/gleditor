@@ -58,8 +58,10 @@ struct Pair {
   }
 
   static void handshake(IdentityPeerPlugin &plugin) {
-    const std::string dict = "d1:md20:xudu_identity_lookupi3e16:xudu_oracle_"
-                             "votei4e19:xudu_transcopyrighti5eee";
+    libtorrent::entry handshake;
+    plugin.add_handshake(handshake);
+    std::string dict;
+    libtorrent::bencode(std::back_inserter(dict), handshake);
     libtorrent::bdecode_node node;
     libtorrent::error_code ec;
     libtorrent::bdecode(dict.data(), dict.data() + dict.size(), node, ec);
@@ -79,7 +81,14 @@ struct Pair {
   }
 
   static bool feed(IdentityPeerPlugin &to, std::string_view frame) {
-    return to.on_extended(static_cast<int>(frame.size()), 0,
+    if (frame.empty()) return false;
+    const auto range = static_cast<unsigned char>(frame.front()) >> 4;
+    const int id     = range == 0   ? kExtIdentityLookupMsgId
+                       : range == 1 ? kExtOracleVoteMsgId
+                       : range == 2 ? kExtOracleVerifyMsgId
+                       : range == 3 ? kExtTranscopyrightMsgId
+                                    : kExtVortexActorMsgId;
+    return to.on_extended(static_cast<int>(frame.size()), id,
                           libtorrent::span<char const>(frame));
   }
 };

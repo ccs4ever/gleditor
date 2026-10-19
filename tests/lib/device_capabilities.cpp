@@ -26,6 +26,7 @@ using testing::InSequence;
 // cannot do.
 TEST(DeviceCapabilities, defaultsAreConservative) {
   const render::DeviceCapabilities caps;
+  EXPECT_FALSE(caps.regions);
   EXPECT_FALSE(caps.parallelCommandRecording);
   EXPECT_EQ(1U, caps.recordingThreads);
 }
@@ -37,6 +38,7 @@ TEST(DeviceCapabilities, theGlFamilyCannotRecordInParallel) {
        {render::Backend::OpenGL, render::Backend::OpenGLES}) {
     const render::gl::DeviceGL device(backend);
     const auto caps = device.capabilities();
+    EXPECT_TRUE(caps.regions);
     EXPECT_FALSE(caps.parallelCommandRecording) << render::backendName(backend);
     EXPECT_EQ(1U, caps.recordingThreads) << render::backendName(backend);
   }
@@ -49,6 +51,7 @@ TEST(DeviceCapabilities, theGlFamilyCannotRecordInParallel) {
 TEST(DeviceCapabilities, vulkanReportsItsRecordingThreads) {
   const render::vulkan::DeviceVK device;
   const auto caps = device.capabilities();
+  EXPECT_TRUE(caps.regions);
   EXPECT_GE(caps.recordingThreads, 1U);
   EXPECT_EQ(caps.parallelCommandRecording, caps.recordingThreads > 1);
 }

@@ -1192,7 +1192,7 @@ TEST(ZigzagVisualizerTest, QuotationCellInspectionAndBadge) {
       localStore.quote(regVer, lroot, dimRef, "Alice's Keymap", pin, spec);
 
   ZigzagVisualizer viz("Sans 12");
-  viz.bindXuduStore(localStore, q.version);
+  viz.bindXanaduStore(localStore, q.version);
   viz.focusCell(q.quotationCell);
 
   const auto qInfo = viz.inspectCell(q.quotationCell);
@@ -1356,7 +1356,7 @@ TEST(ZigzagVisualizerTest, aSliceOpensAlongTheDimensionItsHomeUses) {
                        results.cellRefOf(at));
 
   ZigzagVisualizer viz("Sans 12");
-  viz.bindXuduStore(results, at);
+  viz.bindXanaduStore(results, at);
   EXPECT_EQ(viz.currentView().x_dimension, "d.result");
 
   xanadu::Store sequence;
@@ -1365,7 +1365,7 @@ TEST(ZigzagVisualizerTest, aSliceOpensAlongTheDimensionItsHomeUses) {
   seq            = sequence.makeCell(two.version, "below");
   seq = sequence.setLink(seq, sequence.homeCell(), two.dim,
                          zigzag::DimVector::POS, sequence.cellRefOf(seq));
-  viz.bindXuduStore(sequence, seq);
+  viz.bindXanaduStore(sequence, seq);
   EXPECT_EQ(viz.currentView().x_dimension, "d.result")
       << "home links along d.2, which the view still shows";
 }
@@ -1392,4 +1392,21 @@ TEST(ZigzagVisualizerTest, theFocusIsTakenOnlyWithTheKeyboard) {
   gleditor::a11y::Builder home(here, 3);
   viz.describe(home);
   EXPECT_NE(here.focus, 7U) << "ZigZag's focused cell takes it";
+}
+
+TEST(ZigzagVisualizerTest, DimensionBundlesDoNotAuthorMissingDimensions) {
+  xanadu::Store store;
+  const auto head = store.sliceGenesis({});
+  ZigzagVisualizer viz("Sans 12");
+  viz.bindXanaduStore(store, head);
+  const auto before = store.opCount();
+  for (const auto bundle : {ZigzagVisualizer::DimensionBundle::Execution,
+                            ZigzagVisualizer::DimensionBundle::Scope,
+                            ZigzagVisualizer::DimensionBundle::Contract,
+                            ZigzagVisualizer::DimensionBundle::Logic,
+                            ZigzagVisualizer::DimensionBundle::Stdlib})
+    viz.setDimensionBundle(bundle);
+  EXPECT_EQ(store.opCount(), before);
+  EXPECT_EQ(viz.sliceHead(), head);
+  EXPECT_FALSE(store.rebuildManifold(head).dimensionNamed("d.require", store));
 }

@@ -138,7 +138,7 @@ bool Renderer::hasPendingWork() const {
   // An animation counts as pending work, which is what keeps a screenshot
   // honest: the frame a capture wants is the finished one, and a document
   // halfway through fading in is not it.
-  return !renderQueue.empty() || !pendingDocLoads.empty() ||
+  return chromeChanged || !renderQueue.empty() || !pendingDocLoads.empty() ||
          !pickAnswers.empty() || !timeline.empty() ||
          (nullptr != toasts && toasts->fadingIn(ToastOverlay::Clock::now())) ||
          std::ranges::any_of(frameContributors,
@@ -384,6 +384,24 @@ bool Renderer::update(RenderState &state, const bool settled) {
   // the atlas; rebuild the rest of the chain before anything samples it.
   state.glyphCache.flush();
 
+  const auto pixelInset = [](const float inset, const int size) {
+    return static_cast<int>(
+        std::ceil(std::clamp(inset, 0.F, static_cast<float>(size))));
+  };
+  const int contentLeft   = pixelInset(lastChrome.left, screenWidth);
+  const int contentBottom = pixelInset(lastChrome.bottom, screenHeight);
+  const int contentRight =
+      screenWidth - pixelInset(lastChrome.right, screenWidth);
+  const int contentTop =
+      screenHeight - pixelInset(lastChrome.top, screenHeight);
+  const auto contentRegion = device->defineRegion(
+      {.viewWidth  = screenWidth,
+       .viewHeight = screenHeight,
+       .clipLeft   = contentLeft,
+       .clipBottom = contentBottom,
+       .clipWidth  = std::max(0, contentRight - contentLeft),
+       .clipHeight = std::max(0, contentTop - contentBottom)});
+  device->setRegion(contentRegion);
   device->bindPipeline(state.glyphPipeline);
   device->bindAtlasTexture(state.glyphCache.textureHandle());
 
@@ -396,7 +414,10 @@ bool Renderer::update(RenderState &state, const bool settled) {
   budget.screenWidth = static_cast<float>(screenWidth);
   budget.coarseBelow = this->state->coarseBelow;
   budget.cull        = this->state->cullPages;
-  lastDraw           = DrawStats{};
+  if (const auto palette = this->state->documentPalette.load()) {
+    budget.documentPalette = *palette;
+  }
+  lastDraw = DrawStats{};
   // Sort documents back-to-front (lowest Z first) so that alpha blending
   // correctly composites semi-transparent layers in 3D onion-skinning mode.
   auto sortedDocs = state.docs;
@@ -423,6 +444,7 @@ bool Renderer::update(RenderState &state, const bool settled) {
   // across threads, so an improvement there would be invisible in a figure
   // that also counted a matrix multiply per page.
   const auto recordStart = std::chrono::steady_clock::now();
+  for (auto &batch : state.pageBatches) batch.region = contentRegion;
   device->drawGlyphBatches(state.pageBatches);
   const auto recordEnd = std::chrono::steady_clock::now();
 
@@ -431,6 +453,8 @@ bool Renderer::update(RenderState &state, const bool settled) {
       doc->drawCaret(state, viewProjection, *caret);
     }
   }
+
+  device->setRegion(std::nullopt);
 
   // Whatever the program draws for itself: after the documents, so it can sit
   // over them, and before the notifications, which must be over everything.
@@ -444,18 +468,20 @@ bool Renderer::update(RenderState &state, const bool settled) {
         .screenHeight   = screenHeight,
         .timeline       = timeline,
         .settledChrome  = lastChrome,
-        .metrics = {.contentScale = this->state->contentScale.load(),
-                    .userScale    = this->state->uiScale.load(),
-                    .fontScale    = this->state->fontScale.load(),
-                    .screenWidth  = screenWidth,
-                    .screenHeight = screenHeight,
-                    .marginShare  = this->state->uiSafeMarginShare.load()},
-        .theme   = theme ? *theme : gleditor::ui::defaultTheme()};
+        .metrics       = {.contentScale = this->state->contentScale.load(),
+                          .userScale    = this->state->uiScale.load(),
+                          .fontScale    = this->state->fontScale.load(),
+                          .screenWidth  = screenWidth,
+                          .screenHeight = screenHeight,
+                          .marginShare  = this->state->uiSafeMarginShare.load()},
+        .theme         = theme ? *theme : gleditor::ui::defaultTheme(),
+        .contentRegion = contentRegion};
     for (auto *const contributor : frameContributors) {
       ctx.metrics.chrome = ctx.chrome;
       contributor->drawFrame(ctx);
     }
-    lastChrome = ctx.chrome;
+    chromeChanged = lastChrome != ctx.chrome;
+    lastChrome    = ctx.chrome;
   }
 
   // Last, so that the overlay is on top: its pipeline does not depth test, so
@@ -530,7 +556,34 @@ bool Renderer::update(RenderState &state, const bool settled) {
       answer->requestId = requestPick(state, answer->x, answer->y);
     }
   }
-  if (settled) {
+  using ScriptKind = AppState::AutomationStep::Kind;
+  const bool liveNext =
+      nextStep + 1 < this->state->script.size() &&
+      (this->state->script[nextStep + 1].kind == ScriptKind::CaptureLive ||
+       this->state->script[nextStep + 1].kind ==
+           ScriptKind::AwaitAccessibility);
+  const bool handledKey =
+      awaitingInput && this->state->syntheticHandled.load() >= *awaitingInput &&
+      nextStep < this->state->script.size() &&
+      this->state->script[nextStep].kind == ScriptKind::Input &&
+      this->state->script[nextStep].input.kind ==
+          AppState::SyntheticInput::Kind::KeyDown;
+  if (awaitingSettle && handledKey && liveNext && !awaitingClick) {
+    // Give queued render-thread effects one full frame, then let diagnostic
+    // captures observe motion; subsequent input still waits for settlement.
+    if (inputSettledOnce) {
+      awaitingSettle = awaitingStep = inputSettledOnce = false;
+      awaitingInput.reset();
+      ++nextStep;
+    } else
+      inputSettledOnce = true;
+  }
+  const bool liveCapture =
+      !awaitingStep && !scriptFinished() &&
+      (this->state->script[nextStep].kind == ScriptKind::CaptureLive ||
+       this->state->script[nextStep].kind == ScriptKind::AwaitAccessibility);
+  if (liveCapture) advanceScript(state);
+  if (settled && !liveCapture) {
     const auto serviceClickOrDrag = [&]() {
       if (const auto click = this->state->takePointerPick()) {
         requestClick(state, *click);
@@ -715,8 +768,19 @@ void Renderer::reportBenchmark() const {
 void Renderer::placeCaretFromPick(
     RenderState &state, const render::PickingResult &pick,
     const gleditor::ui::PointerPickTarget &origin) {
-  if (!this->state->focusManager.acceptsPointerPick(origin)) return;
+  if (!this->state->focusManager.acceptsPointerPick(origin)) {
+    const auto current = this->state->focusManager.pointerPickTarget();
+    GLEDITOR_LOG_DEBUG("input.pick",
+                       "Discarded pointer pick at {},{}: origin registration "
+                       "{} revision {}, current registration {} revision {}",
+                       pick.x, pick.y, origin.registration, origin.revision,
+                       current.registration, current.revision);
+    return;
+  }
   if (origin.modal) {
+    GLEDITOR_LOG_DEBUG("input.pick",
+                       "Modal pointer pick at {},{} for registration {}",
+                       pick.x, pick.y, origin.registration);
     draggingSelection = false;
     if (!awaitingDrag)
       std::ignore =
@@ -736,6 +800,12 @@ void Renderer::placeCaretFromPick(
   // a page break whenever a selection was dragged over "+ Split".
   for (auto *const observer : pickObservers) {
     if (!awaitingDrag && observer->picked(pick, state)) {
+      GLEDITOR_LOG_DEBUG(
+          "input.pick",
+          "Pointer pick at {},{} button {} handled by observer {}", pick.x,
+          pick.y, pick.button,
+          std::distance(pickObservers.begin(),
+                        std::ranges::find(pickObservers, observer)));
       return;
     }
   }
@@ -843,6 +913,11 @@ void Renderer::collectPickingResults(RenderState &state) {
       awaitingClickRequest.reset();
       auto pickWithButton   = resolvedPick;
       pickWithButton.button = awaitingClickButton;
+      GLEDITOR_LOG_DEBUG(
+          "input.pick",
+          "Completed pointer request {} at {},{} button {}, origin present {}",
+          pick->requestId, pick->x, pick->y, pickWithButton.button,
+          scene.mapped().origin.has_value());
       if (scene.mapped().origin)
         placeCaretFromPick(state, pickWithButton, *scene.mapped().origin);
       // An Input step finishes through the settle check instead, once the
@@ -935,11 +1010,31 @@ void Renderer::clickAt(RenderState &state, int x, int y) {
 /// finished until the reflow it caused has settled, which is what `settled`
 /// already says.
 void Renderer::advanceScript(RenderState &state) {
-  if (scriptFinished() || awaitingStep) {
-    return;
-  }
+  if (scriptFinished() || awaitingStep) return;
   const auto &step = this->state->script[nextStep];
   using Kind       = AppState::AutomationStep::Kind;
+  const auto now   = std::chrono::steady_clock::now();
+  if (step.kind == Kind::AwaitAccessibility && !scriptWaitUntil)
+    scriptWaitUntil = now + step.delay;
+  const bool effectsPending = !renderQueue.empty() ||
+                              !pendingDocLoads.empty() ||
+                              !pickAnswers.empty() || docsLoading(state);
+  if (step.kind == Kind::AwaitAccessibility && effectsPending) {
+    if (now >= *scriptWaitUntil) {
+      std::cerr << "--await-a11y: timed out while queued view effects remain\n";
+      this->state->renderFailed = true;
+      this->state->alive        = false;
+    }
+    return;
+  }
+  // A pick answered in this frame may have queued a document or focus change
+  // after the frame's settled flag was computed. Even a live capture must
+  // wait for those effects, but it deliberately observes ongoing animation.
+  if (step.kind == Kind::CaptureLive || step.kind == Kind::AwaitAccessibility) {
+    if (effectsPending) return;
+  } else if (hasPendingWork()) {
+    return;
+  }
 
   switch (step.kind) {
   case Kind::Wait: {
@@ -948,6 +1043,40 @@ void Renderer::advanceScript(RenderState &state) {
     if (now >= *scriptWaitUntil) {
       scriptWaitUntil.reset();
       ++nextStep;
+    }
+    return;
+  }
+  case Kind::AwaitAccessibility: {
+    const auto now = std::chrono::steady_clock::now();
+    if (!scriptWaitUntil) scriptWaitUntil = now + step.delay;
+    const auto publisher = this->state->accessibility;
+    const auto tree =
+        publisher ? publisher->snapshot() : gleditor::a11y::Tree{};
+    const auto matches =
+        std::ranges::count_if(tree.nodes, [&](const auto &node) {
+          return (step.text.empty() || node.label == step.text) &&
+                 (!step.expectedValue || node.value == *step.expectedValue);
+        });
+    if (matches == 1) {
+      std::cout << std::format("await-a11y \"{}\" value \"{}\": ready\n",
+                               step.text, step.expectedValue.value_or("*"));
+      scriptWaitUntil.reset();
+      ++nextStep;
+    } else if (now >= *scriptWaitUntil) {
+      std::cerr << std::format(
+          "--await-a11y: timed out awaiting \"{}\" value \"{}\"; found {}\n",
+          step.text, step.expectedValue.value_or("*"), matches);
+      this->state->renderFailed = true;
+      this->state->alive        = false;
+    }
+    return;
+  }
+  case Kind::CaptureLive: {
+    const auto now = std::chrono::steady_clock::now();
+    if (!scriptWaitUntil) scriptWaitUntil = now + step.delay;
+    if (now >= *scriptWaitUntil) {
+      scriptWaitUntil.reset();
+      pendingScriptCapture = step.text;
     }
     return;
   }
@@ -1128,19 +1257,24 @@ void Renderer::updateHighlights(RenderState &state) {
     return;
   }
 
-  // The selection goes in first, and both reasons are properties of what
-  // consumes this table. The fragment stage returns on the first span that
-  // covers it, so an earlier entry wins where two overlap; and the device
-  // keeps the first render::maxHighlightRanges and drops the rest, so an
-  // earlier entry survives a table that fills up. A user who cannot see what
-  // they have selected has lost track of something they were doing, where a
-  // decoration that loses to it is only telling them something.
+  // Reserve table capacity for the editing selection before decorations.
   if (caret->hasSelection() && caret->documentIndex() < state.docs.size()) {
-    state.docs[caret->documentIndex()]->highlightsFor(
-        caret->selectionStart(), caret->selectionEnd(), selectionColour,
-        highlights);
+    const auto &doc = *state.docs[caret->documentIndex()];
+    std::optional<gleditor::SpanStyle> style;
+    for (auto *decorator : spanDecorators)
+      if (auto owned = decorator->selectionStyle(doc, *caret)) {
+        style = *owned;
+        break;
+      }
+    doc.highlightsFor(caret->selectionStart(), caret->selectionEnd(),
+                      style ? style->colour : selectionColour, highlights);
+    if (style && style->layer)
+      for (auto &range : highlights)
+        range.layer = {static_cast<std::uint32_t>(*style->layer),
+                       static_cast<std::uint32_t>(*style->layer >> 32U)};
   }
 
+  auto emphasisEnd = highlights.size();
   if (!spanDecorators.empty()) {
     for (const auto &doc : state.docs) {
       decoratedSpans.clear();
@@ -1149,7 +1283,23 @@ void Renderer::updateHighlights(RenderState &state) {
       }
       for (const auto &span : decoratedSpans) {
         if (span.end > span.start) {
+          const auto first = highlights.size();
           doc->highlightsFor(span.start, span.end, span.colour, highlights);
+          for (auto i = first; i < highlights.size(); ++i) {
+            highlights[i].emphasis = static_cast<std::uint32_t>(span.emphasis);
+            highlights[i].edgeWidthPx = span.edgeWidthPx;
+            if (span.layer)
+              highlights[i].layer = {
+                  static_cast<std::uint32_t>(*span.layer),
+                  static_cast<std::uint32_t>(*span.layer >> 32U)};
+          }
+          if (span.emphasis != gleditor::SpanEmphasis::Background) {
+            // Preserve focus accents before the fixed GPU table drops quiet
+            // semantic fills; rotation uses the existing storage.
+            std::rotate(highlights.begin() + emphasisEnd,
+                        highlights.begin() + first, highlights.end());
+            emphasisEnd += highlights.size() - first;
+          }
         }
       }
     }

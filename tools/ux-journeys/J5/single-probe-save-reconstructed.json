@@ -1,0 +1,70 @@
+{
+  "journey": "J5",
+  "stage": "single-probe-save-reconstructed",
+  "driver": "native",
+  "program": "xuzz",
+  "profile": "J5",
+  "source_evidence": "build/ux-green-20261011/postfix-checks/j5-camera-r6/stage-probe-save/{launch.json,events.json,result.json}",
+  "notes": [
+    "Reconstructed from launch argv and the post-type app dump; original helper events stopped before typed/exit assertions, so those native requests were not an original pass. Same-profile reopen subsequently proved the insertion at byte 3 persisted.",
+    "Run after noarg-camera-resume on the same profile; inserts one authorized J5PROBE, then Ctrl+Q and wait_exit.",
+    "The 1500 ms interval captures the typed probe; the final 60000 ms is the native-helper inspection and graceful-exit window. Startup readiness is now label-gated.",
+    "Retains the original 8000 ms startup/native-helper window; the visible menu or focused control is provided by the concurrent native workflow, so a pre-existing accessible label is not a safe completion gate."
+  ],
+  "plan": {
+    "launch_args": [
+      "--backend",
+      "opengl",
+      "--no-present",
+      "--resize",
+      "1440,1000",
+      "--wait-ms",
+      "8000",
+      "--chord",
+      "Escape",
+      "--wait-ms",
+      "1000",
+      "--dump-a11y",
+      "--capture",
+      "${evidence}/post-resume-doc-focus.png",
+      "--type",
+      "J5PROBE",
+      "--wait-ms",
+      "1500",
+      "--dump-a11y",
+      "--capture",
+      "${evidence}/post-resume-typed.png",
+      "--wait-ms",
+      "60000",
+      "--chord",
+      "Ctrl+Q"
+    ],
+    "steps": [
+      {
+        "op": "wait_file",
+        "file": "post-resume-doc-focus.png"
+      },
+      {
+        "op": "snapshot",
+        "file": "post-resume-doc-focus-native.json"
+      },
+      {
+        "op": "wait_file",
+        "file": "post-resume-typed.png"
+      },
+      {
+        "op": "snapshot",
+        "file": "post-resume-typed-native.json"
+      },
+      {
+        "op": "wait_exit"
+      }
+    ]
+  },
+  "variables": {
+    "evidence": {
+      "description": "Run-specific evidence output directory.",
+      "example": "/tmp/ux-run/Jx/stage"
+    }
+  }
+}

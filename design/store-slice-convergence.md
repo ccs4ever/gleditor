@@ -213,7 +213,7 @@ packages and in `Manifold::externalCells`.
 
 Op index 0 is state zero, the null document, and is definitionally not a cell — so `0 == absent` is
 correct in op-index space. It is also already hardcoded at roughly fifteen sites across
-`unified_transclusion_engine.cpp`, `zzcore.cpp` and `zz_xudu_projector.cpp` (and, until R13 deletes
+`unified_transclusion_engine.cpp`, `zzcore.cpp` and `xanadu_projector.cpp` (and, until R13 deletes
 it, `Preflet::target_cell_id`). Adopting Vortex's `kNoLink = -1` would require making `CellID`
 signed plus a dozen call-site changes for no benefit.
 
@@ -1780,12 +1780,12 @@ came back byte-identical across every regenerated fixture.
    caller — its render path reads `role`/`mime_type`/`media_path` at about ten sites, and those live
    on the `d.role`/`d.mime`/`d.media` ranks now.
 
-1. **`sliceToStore()` / `storeToSlice()` against `Manifold`**, replacing `projectXuduToZigzag`'s
+1. **`sliceToStore()` / `storeToSlice()` against `Manifold`**, replacing `projectXanaduToZigzag`'s
    paragraph-splitting heuristic (it pairs paragraph $k$ with `pieces()[k]`, and piece index and
    paragraph index have no relationship) and `zzStructureToLinkPackage`'s synthetic scroll.
    `ZzStructureDocument` and `zigzag::Cell` survive, demoted in their doc comments to the YAML DTO.
 
-   **The two conversions have landed**, in `zz_xudu_projector.{hpp,cpp}` with five tests in
+   **The two conversions have landed**, in `xanadu_projector.{hpp,cpp}` with five tests in
    `tests/zigzag/test_xudu_convergence.cpp`. The heuristic and the synthetic scroll are still there;
    this is the half that unblocks everything else.
 
@@ -1825,7 +1825,7 @@ came back byte-identical across every regenerated fixture.
    is not identity — the same reason R6 refuses to give two cells holding `3.14` one address.
 
    **The paragraph heuristic is gone**, and it was worse than this step described. By the time it
-   was removed, `projectXuduToZigzag()` already resolved a paragraph's address properly — finding
+   was removed, `projectXanaduToZigzag()` already resolved a paragraph's address properly — finding
    which piece the paragraph's first byte falls in — and the `pieces()[k]` pairing survived only as
    a *fallback* for paragraphs no piece covered. That fallback was not merely imprecise: the span it
    invented is what **clone detection compares**, so two paragraphs handed the same borrowed address

@@ -36,14 +36,23 @@ std::string uniformBlock(const Backend backend, const ShaderStage stage) {
              "    mat4 uMVP;\n"
              "    float uOpacity;\n"
              "    uint uIdentity;\n"
+             "    uint uPaperColour;\n"
+             "    uint uInkColour;\n"
+             "    uint uPaletteEnabled;\n"
              "} uPush;\n"
              "#define uMVP uPush.uMVP\n"
              "#define uOpacity uPush.uOpacity\n"
-             "#define uIdentity uPush.uIdentity\n";
+             "#define uIdentity uPush.uIdentity\n"
+             "#define uPaperColour uPush.uPaperColour\n"
+             "#define uInkColour uPush.uInkColour\n"
+             "#define uPaletteEnabled uPush.uPaletteEnabled\n";
     } else {
       out += "uniform mat4 uMVP;\n";
       out += "uniform float uOpacity;\n";
       out += "uniform uint uIdentity;\n";
+      out += "uniform uint uPaperColour;\n";
+      out += "uniform uint uInkColour;\n";
+      out += "uniform uint uPaletteEnabled;\n";
     }
 
   } else {
@@ -59,8 +68,10 @@ std::string uniformBlock(const Backend backend, const ShaderStage stage) {
            "    uint colour;\n"
            "    float startFraction;\n"
            "    float endFraction;\n"
-           "    uint reserved0;\n"
-           "    uint reserved1;\n"
+           "    uint emphasis;\n"
+           "    float edgeWidthPx;\n"
+           "    uvec2 layer;\n"
+           "    uvec2 padding;\n"
            "};\n";
     out += vulkan
                ? "layout(set = 0, binding = 0, std140) uniform Highlights {\n"

@@ -11,6 +11,7 @@
 #ifndef GLEDITOR_GLYPHCACHE_CACHE_H
 #define GLEDITOR_GLYPHCACHE_CACHE_H
 
+#include <array>
 #include <compare>
 #include <cstddef>
 #include <cstdint>
@@ -199,6 +200,8 @@ public:
      * without anything being assumed about the typeface.
      */
     float ink{};
+    /// Half-open raster rows containing nonzero coverage; blank is {0, 0}.
+    std::array<std::uint16_t, 2> inkRows{};
   };
   /**
    * @brief Construct the glyph cache and allocate its device array texture.

@@ -699,6 +699,10 @@ AsciiVisualizer::renderCellInspection(const zigzag::ArenaManifold &manifold,
     oss << "ExternRef\n";
     break;
   }
+  case xanadu::ValueKind::ForeignOpHandle: {
+    oss << "ForeignOpHandle\n";
+    break;
+  }
   case xanadu::ValueKind::Timestamp: {
     oss << "Timestamp (" << manifold.textOf(cell) << ")\n";
     break;

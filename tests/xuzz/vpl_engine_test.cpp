@@ -2,6 +2,7 @@
  * @file vpl_engine_test.cpp
  * @brief Unit tests for VPLEngine direct execution and sys:array integration.
  */
+#include <array>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
@@ -13,6 +14,72 @@ using namespace xanadu::vpl;
 using zigzag::CellRef;
 using zigzag::DimRef;
 using zigzag::noCell;
+
+TEST(VPLEngineTest, CatenateKeepsBudgetAndAliasesIntact) {
+  VPLEngine engine;
+  auto original            = engine.evaluate("data ← 12 10 5");
+  const auto originalCells = original.collectCells(engine.arena());
+  auto report              = engine.evaluate("report ← data , +/data");
+  auto cells               = report.collectCells(engine.arena());
+  ASSERT_EQ(cells.size(), 4u);
+  const std::array<std::int64_t, 4> expected{12, 10, 5, 27};
+  for (std::size_t i = 0; i < cells.size(); ++i) {
+    EXPECT_EQ(engine.arena().asInt64(cells[i]), expected[i]);
+    EXPECT_NE(cells[i], originalCells[std::min(i, originalCells.size() - 1)]);
+  }
+  EXPECT_EQ(engine.evaluate("data").collectCells(engine.arena()),
+            originalCells);
+  auto repeated = engine.evaluate("data , data");
+  EXPECT_EQ(repeated.collectCells(engine.arena()).size(), 6u);
+  EXPECT_EQ(engine.evaluate("data").collectCells(engine.arena()),
+            originalCells);
+}
+
+TEST(VPLEngineTest, CatenateScalarReportsAndMixedTypes) {
+  VPLEngine engine;
+  engine.evaluate("ready ← 2; unready ← 1; total ← 3");
+  auto report = engine.evaluate("ready , unready , total");
+  auto cells  = report.collectCells(engine.arena());
+  ASSERT_EQ(cells.size(), 3u);
+  EXPECT_EQ(engine.arena().asInt64(cells[0]), 2);
+  EXPECT_EQ(engine.arena().asInt64(cells[1]), 1);
+  EXPECT_EQ(engine.arena().asInt64(cells[2]), 3);
+  auto mixed =
+      engine.evaluate("12 , 3.5 , 'label'").collectCells(engine.arena());
+  ASSERT_EQ(mixed.size(), 3u);
+  EXPECT_EQ(engine.arena().asInt64(mixed[0]), 12);
+  EXPECT_EQ(engine.arena().asDouble(mixed[1]), 3.5);
+  EXPECT_EQ(engine.arena().textOf(mixed[2]), "label");
+  auto ravel = engine.evaluate(", 2 1 3");
+  EXPECT_EQ(ravel.collectCells(engine.arena()).size(), 3u);
+  EXPECT_THROW(engine.evaluate("2 ,"), std::runtime_error);
+  EXPECT_THROW(engine.evaluate(","), std::runtime_error);
+}
+
+TEST(VPLEngineTest, CalculationsKeepOperandProvenanceAcrossBindings) {
+  VPLEngine engine;
+  auto first             = engine.evaluate("12 10 5");
+  const auto firstSource = first.collectCells(engine.arena());
+  first.setDependencies(firstSource);
+  engine.setVariable("data", first);
+  const auto total = engine.evaluate("total ← +/data");
+  EXPECT_EQ(total.dependencies(), firstSource);
+  auto second             = engine.evaluate("1 1 0");
+  const auto secondSource = second.collectCells(engine.arena());
+  second.setDependencies(secondSource);
+  engine.setVariable("data", second);
+  auto report            = engine.evaluate("total , +/data");
+  const auto reportCells = report.collectCells(engine.arena());
+  ASSERT_EQ(reportCells.size(), 2u);
+  EXPECT_THAT(engine.dependenciesOf(reportCells[0]),
+              ::testing::ElementsAreArray(firstSource));
+  EXPECT_THAT(engine.dependenciesOf(reportCells[1]),
+              ::testing::ElementsAreArray(secondSource));
+  EXPECT_TRUE(engine.evaluate("literal ← 42").dependencies().empty());
+  EXPECT_TRUE(engine.evaluate("+/data; 99").dependencies().empty());
+  EXPECT_THROW(engine.evaluate("total ,"), std::runtime_error);
+  EXPECT_EQ(engine.evaluate("total").dependencies(), firstSource);
+}
 
 TEST(VPLEngineTest, ScalarArithmeticAndScalarExtension) {
   VPLEngine engine;

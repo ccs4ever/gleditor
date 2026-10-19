@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NURBS beam candidate mockups</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #0b121b; color: #dce5ed; font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 1200px; margin: auto; padding: 24px; }
+  h1 { margin: 0 0 8px; font-size: 28px; }
+  p { margin: 8px 0 16px; }
+  a { color: #77d0df; }
+  nav { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 16px; }
+  nav a { display: inline-flex; align-items: center; min-height: 44px; box-sizing: border-box; padding: 8px 14px; border: 1px solid #43556c; border-radius: 6px; background: #1c293a; color: inherit; text-decoration: none; }
+  nav a:hover { background: #293b50; }
+  a:focus-visible { outline: 3px solid #f5cd65; outline-offset: 3px; }
+  .panel { display: none; scroll-margin-top: 16px; }
+  .panel:target { display: block; }
+  .panel-default { display: block; }
+  .panel:target ~ .panel-default { display: none; }
+  .panel:target h2 { text-decoration: underline; text-decoration-color: #77d0df; text-underline-offset: 6px; }
+  h2 { margin: 8px 0 16px; font-size: 22px; }
+  figure { margin: 0; }
+  img { display: block; width: 100%; height: auto; background: #0b121b; }
+  figcaption { padding: 16px 0; }
+  .note { color: #abbccd; }
+  @media (max-width: 600px) { main { padding: 16px; } h1 { font-size: 24px; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>NURBS beam candidates</h1>
+  <p>Reviewed design mockups. These show proposed appearance and state communication, not screenshots of implemented Xuzz features.</p>
+  <p><a href="../../../ui_nurbs_beam_candidates_2026-10-08.md">Read the candidate report</a> · <a href="../../../ui_nurbs_beam_adversarial_review_2026-10-08.md">Read the adversarial review</a></p>
+  <p><a href="NATIVE-KJV.md">Run the native full-KJV prototype and continuous page-break example</a></p>
+  <nav aria-label="Compare beam mockups">
+    <a href="#combined-ready">Combined · ready</a>
+    <a href="#combined-unavailable">Combined · unavailable</a>
+    <a href="#c1-satin">C1 · satin</a>
+    <a href="#c2-joins">C2 · shoulders</a>
+    <a href="#c3-comb">C3 · exact ranges</a>
+    <a href="#c5-cursors">C5 · cursors</a>
+    <a href="#c6-status">C6 · unresolved</a>
+    <a href="#c7-quality">C7 · quality target</a>
+    <a href="#stress-ten-crossings">Stress · ten crossings</a>
+    <a href="#stress-distant-pages">Stress · distant pages</a>
+    <a href="#stress-overlap-colours">Stress · overlaps</a>
+    <a href="#stress-wide-anchor">Stress · wide anchor</a>
+    <a href="#c4-corridors">C4 · deferred corridors</a>
+    <a href="#c8-detail-ladder">C8 · deferred ladder</a>
+    <a href="#c9-carousel">C9 · rejected default</a>
+  </nav>
+  <section id="combined-unavailable" class="panel" aria-labelledby="combined-unavailable-heading">
+    <h2 id="combined-unavailable-heading">Combined · unavailable</h2>
+    <figure>
+      <img src="combined-unavailable.svg" width="1200" height="800" alt="Combined unavailable state. The chosen member remains named; no target position or replacement passage is invented.">
+      <figcaption>
+        <p>Combined unavailable state. The chosen member remains named; no target position or replacement passage is invented.</p>
+        <p><a href="combined-unavailable.svg" download>Download this SVG</a> · <a href="combined-unavailable.png">Open PNG preview</a></p>
+      </figcaption>
+    </figure>
+  </section>
+  <section id="c1-satin" class="panel" aria-labelledby="c1-satin-heading">
+    <h2 id="c1-satin-heading">C1 · satin</h2>
+    <figure>
+      <img src="c1-satin.svg" width="1200" height="800" alt="C1 isolates a quiet stationary material. Type hue stays stable; transclusion and drag feedback retain distinct treatments.">
+      <figcaption>
+        <p>C1 isolates a quiet stationary material. Type hue stays stable; transclusion and drag feedback retain distinct treatments.</p>
+        <p><a href="c1-satin.svg" download>Download this SVG</a> · <a href="c1-satin.png">Open PNG preview</a></p>
+      </figcaption>
+    </figure>
+  </section>
+  <section id="c2-joins" class="panel" aria-labelledby="c2-joins-heading">
+    <h2 id="c2-joins-heading">C2 · shoulders</h2>
+    <figure>
+      <img src="c2-joins.svg" width="1200" height="800" alt="C2 isolates the junction envelope and coverage. Current ordinary routes already have aligned horizontal endpoint tangents.">
+      <figcaption>
+        <p>C2 isolates the junction envelope and coverage. Current ordinary routes already have aligned horizontal endpoint tangents.</p>
+        <p><a href="c2-joins.svg" download>Download this SVG</a> · <a href="c2-joins.png">Open PNG preview</a></p>
+      </figcaption>
+    </figure>
+  </section>
+  <section id="c3-comb" class="panel" aria-labelledby="c3-comb-heading">
+    <h2 id="c3-comb-heading">C3 · exact ranges</h2>
+    <figure>
+      <img src="c3-comb.svg" width="1200" height="800" alt="C3 separates the exact passage extent from connector thickness. Gaps stay unmarked; the trunk does not encode member count.">
+      <figcaption>
+        <p>C3 separates the exact passage extent from connector thickness. Gaps stay unmarked; the trunk does not encode member count.</p>
+        <p><a href="c3-comb.svg" download>Download this SVG</a> · <a href="c3-comb.png">Open PNG preview</a></p>
+      </figcaption>
+    </figure>
+  </section>
+  <section id="c5-cursors" class="panel" aria-labelledby="c5-cursors-heading">
+    <h2 id="c5-cursors-heading">C5 · cursors</h2>
+    <figure>
+      <img src="c5-cursors.svg" width="1200" height="800" alt="C5 names member, occurrence and active side separately. Local accents do not create an authored pair or enter content.">
+      <figcaption>
+        <p>C5 names member, occurrence and active side separately. Local accents do not create an authored pair or enter content.</p>
+        <p><a href="c5-cursors.svg" download>Download this SVG</a> · <a href="c5-cursors.png">Open PNG preview</a></p>
+      </figcaption>
+    </figure>
+  </section>
+  <section id="c6-status" class="panel" aria-labelledby="c6-status-heading">
+    <h2 id="c6-status-heading">C6 · unresolved</h2>
+    <figure>
+      <img src="c6-status.svg" width="1200" height="800" alt="C6 keeps complete counts and explicit resolver statuses. Unavailable targets have no invented destination or trajectory.">
+      <figcaption>
+        <p>C6 keeps complete counts and explicit resolver statuses. Unavailable targets have no invented destination or trajectory.</p>
+        <p><a href="c6-status.svg" download>Download this SVG</a> · <a href="c6-status.png">Open PNG preview</a></p>
+      </figcaption>
+    </figure>
+  </section>
+  <section id="c7-quality" class="panel" aria-labelledby="c7-quality-heading">
+    <h2 id="c7-quality-heading">C7 · quality target</h2>
+    <figure>
+      <img src="c7-quality.svg" width="1200" height="600" alt="C7 illustrates bounded projected quality. Sample dots are explanatory, not controls or measured performance results.">
+      <figcaption>
+        <p>C7 illustrates bounded projected quality. Sample dots are explanatory, not controls or measured performance results.</p>
+        <p><a href="c7-quality.svg" download>Download this SVG</a> · <a href="c7-quality.png">Open PNG preview</a></p>
+      </figcaption>
+    </figure>
+  </section>
+  <section id="stress-ten-crossings" class="panel" aria-labelledby="stress-ten-crossings-heading">
+    <h2 id="stress-ten-crossings-heading">Stress · ten crossings</h2>
+    <figure>
+      <img src="stress-ten-crossings.svg" alt="Ten intersecting independent links retain separate identities; named selection avoids a topmost-route guess.">
+      <figcaption>
+        <p>Ten intersecting independent links retain separate identities; named selection avoids a topmost-route guess. Design mockup; pictured controls are not interactive.</p>
+        <p><a href="stress-ten-crossings.svg" download>Download this SVG</a> · <a href="stress-ten-crossings.png">Open PNG preview</a></p>
+      </figcaption>
+    </figure>
+  </section>
+  <section id="stress-distant-pages" class="panel" aria-labelledby="stress-distant-pages-heading">
+    <h2 id="stress-distant-pages-heading">Stress · distant pages</h2>
+    <figure>
+      <img src="stress-distant-pages.svg" alt="Three distant members remain separate with exact local markers and an offscreen row; no spine marks the gaps.">
+      <figcaption>
+        <p>Three distant members remain separate with exact local markers and an offscreen row; no spine marks the gaps. Design mockup; pictured controls are not interactive.</p>
+        <p><a href="stress-distant-pages.svg" download>Download this SVG</a> · <a href="stress-distant-pages.png">Open PNG preview</a></p>
+      </figcaption>
+    </figure>
+  </section>
+  <section id="stress-overlap-colours" class="panel" aria-labelledby="stress-overlap-colours-heading">
+    <h2 id="stress-overlap-colours-heading">Stress · overlaps</h2>
+    <figure>
+      <img src="stress-overlap-colours.svg" alt="A selected exact passage stays readable while a named count exposes all overlapping identities.">
+      <figcaption>
+        <p>A selected exact passage stays readable while a named count exposes all overlapping identities. Design mockup; pictured controls are not interactive.</p>
+        <p><a href="stress-overlap-colours.svg" download>Download this SVG</a> · <a href="stress-overlap-colours.png">Open PNG preview</a></p>
+      </figcaption>
+    </figure>
+  </section>
+  <section id="stress-wide-anchor" class="panel" aria-labelledby="stress-wide-anchor-heading">
+    <h2 id="stress-wide-anchor-heading">Stress · wide anchor</h2>
+    <figure>
+      <img src="stress-wide-anchor.svg" alt="A thin selected-occurrence leader routes through blank space; unsafe routes use matching tokens and exact outlines.">
+      <figcaption>
+        <p>A thin selected-occurrence leader routes through blank space; unsafe routes use matching tokens and exact outlines. Design mockup; pictured controls are not interactive.</p>
+        <p><a href="stress-wide-anchor.svg" download>Download this SVG</a> · <a href="stress-wide-anchor.png">Open PNG preview</a></p>
+      </figcaption>
+    </figure>
+  </section>
+  <section id="c4-corridors" class="panel" aria-labelledby="c4-corridors-heading">
+    <h2 id="c4-corridors-heading">C4 · deferred corridors</h2>
+    <figure>
+      <img src="c4-corridors.svg" width="1400" height="1000" alt="Deferred per-link corridor routing is highlighted with neutral dashed reservations; named crossing disambiguation remains required.">
+      <figcaption>
+        <p>Deferred per-link corridor routing is highlighted with neutral dashed reservations; named crossing disambiguation remains required. Numbered neutral frames are review annotations. Design mockup; pictured controls are not interactive.</p>
+        <p><a href="c4-corridors.svg" download>Download this SVG</a> · <a href="c4-corridors.png">Open PNG preview</a></p>
+      </figcaption>
+    </figure>
+  </section>
+  <section id="c8-detail-ladder" class="panel" aria-labelledby="c8-detail-ladder-heading">
+    <h2 id="c8-detail-ladder-heading">C8 · deferred ladder</h2>
+    <figure>
+      <img src="c8-detail-ladder.svg" width="1400" height="1000" alt="Deferred visual quieting and count emphasis are highlighted; exact markers and complete named target access remain required.">
+      <figcaption>
+        <p>Deferred visual quieting and count emphasis are highlighted; exact markers and complete named target access remain required. Numbered neutral frames are review annotations. Design mockup; pictured controls are not interactive.</p>
+        <p><a href="c8-detail-ladder.svg" download>Download this SVG</a> · <a href="c8-detail-ladder.png">Open PNG preview</a></p>
+      </figcaption>
+    </figure>
+  </section>
+  <section id="c9-carousel" class="panel" aria-labelledby="c9-carousel-heading">
+    <h2 id="c9-carousel-heading">C9 · rejected default</h2>
+    <figure>
+      <img src="c9-carousel.svg" width="1400" height="1000" alt="The two independent carousel tracks are highlighted as rejected default presentation; ordered-list fallback remains visible.">
+      <figcaption>
+        <p>The two independent carousel tracks are highlighted as rejected default presentation; ordered-list fallback remains visible. Numbered neutral frames are review annotations. Design mockup; pictured controls are not interactive.</p>
+        <p><a href="c9-carousel.svg" download>Download this SVG</a> · <a href="c9-carousel.png">Open PNG preview</a></p>
+      </figcaption>
+    </figure>
+  </section>
+  <section id="combined-ready" class="panel panel-default" aria-labelledby="combined-ready-heading">
+    <h2 id="combined-ready-heading">Combined · ready</h2>
+    <figure>
+      <img src="combined-ready.svg" width="1200" height="800" alt="Combined ready state. One link, two full independent endsets, exact brackets and a neutral common trunk.">
+      <figcaption>
+        <p>Combined ready state. One link, two full independent endsets, exact brackets and a neutral common trunk.</p>
+        <p><a href="combined-ready.svg" download>Download this SVG</a> · <a href="combined-ready.png">Open PNG preview</a></p>
+      </figcaption>
+    </figure>
+  </section>
+  <p class="note">C1 and C2 isolate complementary aspects of the same treatment. C7 is an illustrative quality target; projected sampling and error have not been measured here. Ordinary route mockups use static unit-weight cubic paths; C7 includes a separate rational quadratic arc example.</p>
+</main>
+</body>
+</html>

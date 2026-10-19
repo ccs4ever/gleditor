@@ -217,12 +217,14 @@ static void placeLinkAttachments(const std::map<zigzag::CellRef, Link> &links,
       }
     }
     if (lefts.empty() != rights.empty()) {
-      leaving.push_back(
-          HalfLink{.link      = id,
-                   .type      = link.type,
-                   .tier      = link.tier,
-                   .here      = lefts.empty() ? rights.front() : lefts.front(),
-                   .elsewhere = lefts.empty() ? link.left : link.right});
+      const auto &local = lefts.empty() ? rights : lefts;
+      for (const auto &here : local)
+        leaving.push_back(
+            HalfLink{.link      = id,
+                     .type      = link.type,
+                     .tier      = link.tier,
+                     .here      = here,
+                     .elsewhere = lefts.empty() ? link.left : link.right});
     }
   }
 }

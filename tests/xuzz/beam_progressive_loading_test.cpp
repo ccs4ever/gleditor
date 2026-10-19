@@ -70,9 +70,9 @@ ExecutionResult executeProcess(const std::string &cmd) {
 
 fs::path findXuduBinary() {
   const std::vector<fs::path> candidates = {
-      fs::current_path() / "build" / "xudu",
-      fs::current_path() / "xudu",
-      fs::current_path() / ".." / "build" / "xudu",
+      fs::current_path() / "build" / "xuzz",
+      fs::current_path() / "xuzz",
+      fs::current_path() / ".." / "build" / "xuzz",
   };
   for (const auto &cand : candidates) {
     if (fs::exists(cand) && (fs::status(cand).permissions() &
@@ -80,7 +80,7 @@ fs::path findXuduBinary() {
       return cand;
     }
   }
-  return fs::current_path() / "build" / "xudu";
+  return fs::current_path() / "build" / "xuzz";
 }
 
 class BeamProgressiveLoadingTest : public testing::Test {

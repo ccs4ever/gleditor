@@ -843,6 +843,10 @@ TEST(SystemDocsTest, UiTypographyDefaultsHaveNativeSchemaAndNotes) {
   EXPECT_FLOAT_EQ(config.uiSafeMarginShare, defaults.uiSafeMarginShare);
   EXPECT_EQ(config.uiTheme, defaults.uiTheme);
   EXPECT_EQ(config.linkPanel.font, "label");
+  EXPECT_FLOAT_EQ(config.linkPanel.chosenEdgeWidthPx,
+                  defaults.linkPanel.chosenEdgeWidthPx);
+  EXPECT_FLOAT_EQ(config.linkPanel.memberEdgeWidthPx,
+                  defaults.linkPanel.memberEdgeWidthPx);
   const auto model = xanadu::SystemStoreModel::fromStore(store);
   EXPECT_TRUE(model.isValid());
   for (std::size_t i = 0; i < gleditor::ui::kFontRoleCount; ++i) {
@@ -944,10 +948,39 @@ TEST(SystemDocsTest, BeamNurbsSettingsAreLiveAndBounded) {
   head      = xanadu::setSetting(store, head, "beams.gatheringShare", -1.0);
   head      = xanadu::setSetting(store, head, "beams.curveSegments",
                                  std::int64_t{10000});
+  head = xanadu::setSetting(store, head, "beams.connectorWidthOfLine", 99.0);
+  head =
+      xanadu::setSetting(store, head, "beams.gutterMinimumWidthOfLine", 99.0);
+  head = xanadu::setSetting(store, head, "beams.bracketWidthOfLine", -1.0);
+  head = xanadu::setSetting(store, head, "beams.anchorReachSeconds", 99.0);
+  head = xanadu::setSetting(store, head, "beams.anchorReducedMotion", true);
   store.repointCurrentVersion(head);
   const auto config = xanadu::LayoutConfig::fromStore(store);
+  EXPECT_EQ(config.beams.anchorReachSeconds, 2.F);
+  EXPECT_TRUE(config.beams.anchorReducedMotion);
   EXPECT_EQ(config.beams.curveWeight, 2.F);
   EXPECT_EQ(config.beams.curveHandleShare, .45F);
   EXPECT_EQ(config.beams.gatheringShare, .1F);
   EXPECT_EQ(config.beams.curveSegments, 256U);
+  EXPECT_EQ(config.beams.connectorWidthOfLine, .5F);
+  EXPECT_EQ(config.beams.gutterMinimumWidthOfLine, .5F);
+  EXPECT_EQ(config.beams.bracketWidthOfLine, .04F);
+}
+
+TEST(SystemDocsTest, DocumentPaletteReadsPackedColoursAndRejectsOutOfRange) {
+  Store store;
+  xanadu::initializeSystemStore(store, SystemDocKind::Settings);
+  auto head = store.primaryCurrentVersion();
+  head = xanadu::setSetting(store, head, xanadu::settings::kPagePaperColour,
+                            std::int64_t{0x151922FF});
+  head = xanadu::setSetting(store, head, xanadu::settings::kPageInkColour,
+                            std::int64_t{0xF1F4FAFF});
+  store.repointCurrentVersion(head);
+  auto settings = SettingsConfig::fromStore(store);
+  EXPECT_EQ(settings.pagePaperColour, 0x151922FFU);
+  EXPECT_EQ(settings.pageInkColour, 0xF1F4FAFFU);
+  head = xanadu::setSetting(store, head, xanadu::settings::kPagePaperColour,
+                            std::int64_t{-1});
+  store.repointCurrentVersion(head);
+  EXPECT_EQ(SettingsConfig::fromStore(store).pagePaperColour, 0xFFFFFFFFU);
 }

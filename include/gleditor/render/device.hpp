@@ -151,6 +151,13 @@ public:
   /// Finish the frame and present it.
   virtual void endFrame() = 0;
 
+  /// Region IDs last until endFrame(); rectangles are clamped on definition.
+  virtual RegionId defineRegion(const RenderRegion &region);
+  virtual RenderDevice *setRegion(std::optional<RegionId> region);
+  [[nodiscard]] std::optional<RegionId> currentRegion() const {
+    return currentRegion_;
+  }
+
   /// Select the pipeline subsequent draws use.
   virtual void bindPipeline(PipelineHandle pipeline) = 0;
 
@@ -188,10 +195,13 @@ public:
    * is made; a device may not re-read that state part way through.
    */
   virtual void drawGlyphBatches(const std::span<const GlyphBatch> batches) {
+    const auto previous = currentRegion();
     for (const auto &batch : batches) {
+      setRegion(batch.region);
       drawGlyphs(batch.uniforms, batch.vertices, batch.vertexByteOffset,
                  batch.instanceCount);
     }
+    setRegion(previous);
   }
 
   /**
@@ -274,6 +284,33 @@ public:
    * it started, with no way to tell.
    */
   virtual void setPresentEnabled(bool enabled) = 0;
+
+protected:
+  void beginRegions(int width, int height);
+  void endRegions();
+  [[nodiscard]] const RenderRegion &regionOf(std::optional<RegionId> id) const;
+
+private:
+  std::vector<RenderRegion> regions_;
+  RenderRegion fullRegion_;
+  std::optional<RegionId> currentRegion_;
+  bool regionsActive_{};
+};
+
+/// Immediate draws restore the caller's region, including on an early return.
+class RegionScope {
+public:
+  RegionScope(RenderDevice &device, std::optional<RegionId> region)
+      : device_(device), previous_(device.currentRegion()) {
+    device_.setRegion(region);
+  }
+  ~RegionScope() { device_.setRegion(previous_); }
+  RegionScope(const RegionScope &)            = delete;
+  RegionScope &operator=(const RegionScope &) = delete;
+
+private:
+  RenderDevice &device_;
+  std::optional<RegionId> previous_;
 };
 
 /// SDL window creation flags a given backend requires.

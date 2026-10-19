@@ -1,0 +1,145 @@
+{
+  "journey": "J10",
+  "stage": "native-mode-cycle-repetition",
+  "driver": "native",
+  "program": "xuzz",
+  "profile": "J10",
+  "source_evidence": "build/ux-green-20261011/postfix-checks/j10-native-r2/plan.json",
+  "notes": [
+    "Passed 18 native Text presence/absence assertions and unchanged store hashes over three mode cycles.",
+    "Its accepted standalone launch authors its own docs/slice and omits the page/slice edits in the UI plan. Do not run the complete authoring launch after J10 edit stage; an integrated full-criterion plan remains needed.",
+    "Retains the original five 5000 ms intervals as native-helper assertion windows between mode captures; an already-present Text value or cell label does not prove the external snapshot/assertion completed."
+  ],
+  "plan": {
+    "launch_args": [
+      "--resize",
+      "1440,1000",
+      "--chord",
+      "Ctrl+Alt+1",
+      "--capture",
+      "${evidence}/pages.png",
+      "--wait-ms",
+      "5000",
+      "--chord",
+      "Ctrl+Alt+2",
+      "--capture",
+      "${evidence}/slices.png",
+      "--wait-ms",
+      "5000",
+      "--chord",
+      "Ctrl+Alt+3",
+      "--capture",
+      "${evidence}/both.png",
+      "--wait-ms",
+      "5000",
+      "--chord",
+      "Ctrl+Alt+1",
+      "--capture",
+      "${evidence}/pages-again.png",
+      "--wait-ms",
+      "5000",
+      "--chord",
+      "Ctrl+Alt+2",
+      "--capture",
+      "${evidence}/slices-again.png",
+      "--wait-ms",
+      "5000",
+      "--chord",
+      "Ctrl+Alt+3",
+      "--capture",
+      "${evidence}/both-again.png",
+      "--wait-ms",
+      "60000"
+    ],
+    "steps": [
+      {
+        "op": "wait_file",
+        "file": "pages.png"
+      },
+      {
+        "op": "text",
+        "interface": "Text",
+        "text_contains": "Second native mode document.",
+        "contains": "Second native mode document."
+      },
+      {
+        "op": "snapshot",
+        "file": "pages-native.json"
+      },
+      {
+        "op": "wait_file",
+        "file": "slices.png"
+      },
+      {
+        "op": "absent",
+        "interface": "Text",
+        "text_contains": "Second native mode document."
+      },
+      {
+        "op": "snapshot",
+        "file": "slices-native.json"
+      },
+      {
+        "op": "wait_file",
+        "file": "both.png"
+      },
+      {
+        "op": "text",
+        "interface": "Text",
+        "text_contains": "Second native mode document.",
+        "contains": "Second native mode document."
+      },
+      {
+        "op": "snapshot",
+        "file": "both-native.json"
+      },
+      {
+        "op": "wait_file",
+        "file": "pages-again.png"
+      },
+      {
+        "op": "text",
+        "interface": "Text",
+        "text_contains": "Second native mode document.",
+        "contains": "Second native mode document."
+      },
+      {
+        "op": "snapshot",
+        "file": "pages-again-native.json"
+      },
+      {
+        "op": "wait_file",
+        "file": "slices-again.png"
+      },
+      {
+        "op": "absent",
+        "interface": "Text",
+        "text_contains": "Second native mode document."
+      },
+      {
+        "op": "snapshot",
+        "file": "slices-again-native.json"
+      },
+      {
+        "op": "wait_file",
+        "file": "both-again.png"
+      },
+      {
+        "op": "text",
+        "interface": "Text",
+        "text_contains": "Second native mode document.",
+        "contains": "Second native mode document."
+      },
+      {
+        "op": "snapshot",
+        "file": "both-again-native.json"
+      }
+    ]
+  },
+  "variables": {
+    "evidence": {
+      "description": "Run-specific evidence output directory.",
+      "example": "/tmp/ux-run/Jx/stage"
+    }
+  }
+}

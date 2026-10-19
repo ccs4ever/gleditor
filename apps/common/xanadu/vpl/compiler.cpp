@@ -26,6 +26,8 @@ namespace {
 
 std::string_view verbName(TokenKind kind) noexcept {
   switch (kind) {
+  case TokenKind::Catenate:
+    return ",";
   case TokenKind::Iota:
     return "⍳ (i.)";
   case TokenKind::Rho:
@@ -587,13 +589,9 @@ CellRef VPLCompiler::compileVector(const VectorExpr &expr) {
 
   if (cells.empty()) return noCell;
 
-  // Chain vector cells along +d.step
-  for (std::size_t i = 0; i + 1 < cells.size(); ++i) {
-    if (cells[i] != noCell && cells[i + 1] != noCell) {
-      zigzag::expectWritten(
-          core_.arena().link(cells[i], core_.dims().step, false, cells[i + 1]));
-    }
-  }
+  // Chain vector cells along +d.step via the shared batch-link primitive.
+  zigzag::expectWritten(core_.arena().linkChain(cells, core_.dims().step,
+                                                zigzag::DimVector::POS));
 
   return cells.front();
 }
@@ -632,6 +630,9 @@ CellRef VPLCompiler::compileAssign(const AssignExpr &expr) {
 }
 
 CellRef VPLCompiler::compileMonadic(const MonadicExpr &expr) {
+  if (expr.verb() == TokenKind::Catenate) {
+    throw std::invalid_argument("Catenate requires the direct VPL engine");
+  }
   if (expr.hasCustomVerb()) {
     if (const auto *adv =
             dynamic_cast<const AdverbExpr *>(expr.customVerb().get())) {
@@ -839,6 +840,9 @@ CellRef VPLCompiler::compileMonadic(const MonadicExpr &expr) {
 }
 
 CellRef VPLCompiler::compileDyadic(const DyadicExpr &expr) {
+  if (expr.verb() == TokenKind::Catenate) {
+    throw std::invalid_argument("Catenate requires the direct VPL engine");
+  }
   if (expr.verb() == TokenKind::Iota) {
     // Dyadic Iota: N ⍳ dim -> Mint N cells on dimension from home
     DimRef dim = resolveDimension("d.1");

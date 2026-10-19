@@ -274,7 +274,7 @@ std::optional<InputArea> ScreenOverlay::pointerArea() const {
 }
 void ScreenOverlay::cancel() { setVisible(false); }
 bool ScreenOverlay::acceptsCommand(std::string_view command) const {
-  return command == "quit" || command == "std:xudu/quit";
+  return command == "quit" || command == "std:xuzz/quit";
 }
 bool ScreenOverlay::pointerEvent(const PointerEvent &event) {
   WidgetId activateId = 0, scrollId = 0;
@@ -376,16 +376,8 @@ void ScreenOverlay::rebuildCanvas(RenderState &state,
           : visual.accessibilityRole == a11y::Role::Button
               ? theme_.colours.buttonSurface.value_or(theme_.colours.surface)
               : theme_.colours.surface);
-      if (visual.accessibilityRole == a11y::Role::Button) {
-        const float radius =
-            std::min(box->rect.height * 0.5F, metrics_.px(6.0F));
-        background_->addRoundedRect(box->rect.left, box->rect.bottom,
-                                    box->rect.width, box->rect.height, radius,
-                                    fill);
-      } else {
-        background_->addRect(box->rect.left, box->rect.bottom, box->rect.width,
-                             box->rect.height, fill);
-      }
+      background_->addRect(box->rect.left, box->rect.bottom, box->rect.width,
+                           box->rect.height, fill);
     }
     if (visual.scrubber) {
       background_->setTag(render::tagKindOverlay, visual.pickingId);
@@ -544,6 +536,17 @@ void ScreenOverlay::describe(a11y::Builder &builder) {
       if (child.parentId == visual.id)
         node.children.push_back(builder.id(child.id));
     if (box->parentId == 0) builder.contribute(builder.id(visual.id));
+    if (visual.textInput) {
+      const auto *widget = findWidget(model_, visual.id);
+      const auto *input =
+          widget ? std::get_if<TextField>(&widget->model) : nullptr;
+      const auto caret = input && focusedNode_ == visual.id
+                             ? std::optional<std::size_t>{input->caret}
+                             : std::nullopt;
+      a11y::appendTextRuns(builder, node,
+                           (1ULL << 47) + (std::uint64_t{visual.id} << 15),
+                           node.value, caret);
+    }
   }
 }
 std::uint64_t ScreenOverlay::accessibilityRevision() const {

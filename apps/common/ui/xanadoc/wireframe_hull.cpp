@@ -180,6 +180,7 @@ void WireframeHullOverlay::describe(gleditor::a11y::Builder &into) {
                             entry->status);
 }
 void WireframeHullOverlay::drawFrame(gleditor::FrameContext &ctx) {
+  const render::RegionScope contentClip(*ctx.state.device, ctx.contentRegion);
   if (!canvas_) return;
   auto &p              = *presentation_;
   auto metrics         = ctx.metrics;

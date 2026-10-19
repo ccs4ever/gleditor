@@ -1,0 +1,75 @@
+{
+  "journey": "J5",
+  "stage": "noarg-camera-resume-reconstructed",
+  "driver": "native",
+  "program": "xuzz",
+  "profile": "J5",
+  "source_evidence": "build/ux-green-20261011/postfix-checks/j5-camera-r6/stage-noarg-camera-compare/{launch.json,events.json,result.json}",
+  "notes": [
+    "Reconstructed from launch argv, partial native requests, snapshots, and accepted Pillow pixel comparison because the original plan was overwritten.",
+    "Run after prepare-readable-savequit against the exact same profile path. Accepted baseline and both noarg captures are pixel-identical; prior resume-initial diagnostics are not this comparison.",
+    "The 12000 ms interval captures the settled resumed camera after the immediate diagnostic frame; it is intentionally retained for pixel comparison. The final 60000 ms is the native-helper assertion/exit window.",
+    "Retains the original 8000 ms startup/native-helper window; the visible menu or focused control is provided by the concurrent native workflow, so a pre-existing accessible label is not a safe completion gate."
+  ],
+  "plan": {
+    "launch_args": [
+      "--backend",
+      "opengl",
+      "--no-present",
+      "--resize",
+      "1440,1000",
+      "--wait-ms",
+      "8000",
+      "--dump-a11y",
+      "--capture",
+      "${evidence}/noarg-initial.png",
+      "--wait-ms",
+      "12000",
+      "--dump-a11y",
+      "--capture",
+      "${evidence}/noarg-settled.png",
+      "--wait-ms",
+      "60000",
+      "--chord",
+      "Ctrl+Q"
+    ],
+    "steps": [
+      {
+        "op": "wait_file",
+        "file": "noarg-initial.png"
+      },
+      {
+        "op": "snapshot",
+        "file": "noarg-initial-native.json"
+      },
+      {
+        "op": "text",
+        "interface": "Text",
+        "text_contains": "Harbor source passage.",
+        "contains": "Harbor source passage."
+      },
+      {
+        "op": "wait_name",
+        "name": "comment link, 1 left and 1 right members",
+        "interface": "Action"
+      },
+      {
+        "op": "wait_file",
+        "file": "noarg-settled.png"
+      },
+      {
+        "op": "snapshot",
+        "file": "noarg-settled-native.json"
+      },
+      {
+        "op": "wait_exit"
+      }
+    ]
+  },
+  "variables": {
+    "evidence": {
+      "description": "Run-specific evidence output directory.",
+      "example": "/tmp/ux-run/Jx/stage"
+    }
+  }
+}

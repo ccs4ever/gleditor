@@ -1,5 +1,5 @@
 /**
- * @file apps/xudu/collaborator_overlay.cpp
+ * @file apps/common/ui/xanadoc/collaborator_overlay.cpp
  * @brief 3D multi-author remote carets, selection highlights, and nameplate
  * badges.
  */
@@ -87,6 +87,7 @@ void CollaboratorCaretOverlay::deviceReady(
 bool CollaboratorCaretOverlay::busy() const { return false; }
 
 void CollaboratorCaretOverlay::drawFrame(gleditor::FrameContext &ctx) {
+  const render::RegionScope contentClip(*ctx.state.device, ctx.contentRegion);
   if (!enabled_ || !canvas_) {
     return;
   }

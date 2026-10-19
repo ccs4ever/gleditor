@@ -67,6 +67,10 @@ struct ClusterBox {
   /// Characters the cluster covers. Greater than one for a ligature, which is
   /// what makes a click inside the quad ambiguous without interpolation.
   std::uint32_t charCount{};
+  /// Exact packed glyph quad retained from upload, without retaining shaping.
+  std::array<float, 2> quadCentre{};
+  std::uint32_t quad{};
+  std::array<std::uint16_t, 2> inkRows{};
 };
 
 /// Where a caret sits on a page: its centre and height, in that page's
@@ -172,25 +176,25 @@ private:
   /// in. Kept for the frustum test.
   float pageWidth{};
   float pageHeight{};
-  /**
-   * @brief This page's shaping, kept only while something needs it.
-   *
-   * A layout is what Pango shaped the page's text into, and it is large: on a
-   * megabyte of text the layouts of every page came to ninety megabytes,
-   * more than the vertex buffer they produced. Once a page's quads are in that
-   * buffer the layout has done its job, and a reader who never puts a cursor
-   * in the document never needs it again.
-   *
-   * So it is released when the page is built and shaped again on demand -- by
-   * the same call on the same text, so it comes back identical. Only placing a
-   * caret and reflowing an edit need one, and both are things a person does to
-   * one page at a time.
-   */
   /// Byte offset of this page's text within the whole document, so a picking
   /// result can name a position in the document rather than in the page.
   std::uint32_t textOffset{};
   /// Every cluster on the page, in text order.
   std::vector<ClusterBox> clusters;
+  struct CaretSpot {
+    float left{};
+    float top{};
+  };
+  // Retain only the first glyph's caret position per cluster, not glyph
+  // strings or full shaping. Missing-glyph and blank-line fallbacks remain
+  // distinct; querying an anchor must not lay the page out again.
+  std::vector<std::optional<CaretSpot>> clusterCarets;
+  // Line bands are small compared with glyphs and let annotations use the
+  // built layout without reshaping text on the render thread.
+  std::vector<PageShaping::LineEntry> lines;
+  std::vector<PageShaping::PlacedBox> boxes;
+  float lineHeight{};
+  bool singleQuadClusters{true};
   /// This page's position in its document, carried in the picking tag.
   std::uint32_t pageIndex{};
   /// The picking identity every quad of this page shares -- its document and
@@ -242,15 +246,33 @@ public:
   }
   /// Bytes of document text this page lays out.
   [[nodiscard]] std::uint32_t textLength() const { return textBytes; }
+  struct TextBand {
+    float top{};
+    float bottom{};
+    float lineHeight{};
+  };
+  /// Vertical reach of the exact nonempty intersection with this page's
+  /// text. Coordinates are page-local; no shaping or allocation occurs.
+  [[nodiscard]] std::optional<TextBand> textBandFor(std::uint32_t start,
+                                                    std::uint32_t end) const;
+  struct RangeTerminal {
+    glm::vec2 point{};
+    float corridorY{};
+  };
+  /// Exact highlighted terminal and an unobstructed line-edge approach.
+  /// Uses the same cluster fractions as highlightFor; no shaping/allocation.
+  [[nodiscard]] std::optional<RangeTerminal>
+  rangeTerminal(std::uint32_t start, std::uint32_t end, bool first,
+                bool towardsRight, float clearancePx) const;
   /// True when a document-global byte offset falls within this page's text.
   [[nodiscard]] bool contains(std::uint32_t globalOffset) const;
 
   /**
    * @brief Where a caret sits for a document-global byte offset.
    *
-   * Answered by Pango rather than derived from the cluster table: it is the
-   * same call an editor would make to place a cursor, and it already knows
-   * about right-to-left runs and about offsets that fall inside a cluster.
+   * Uses the built layout's first glyph position per cluster and its line
+   * bands, retaining right-to-left placement and blank-line fallback without
+   * reshaping text or consulting fonts during an anchor query.
    *
    * @return the caret's centre and height in this page's pixel space, or
    *         nullopt when the offset is not on this page.
@@ -455,8 +477,8 @@ private:
    *
    * Animated, so during an arrival it lags the resting place the constructor
    * was given. Everything that needs the document's transform reads
-   * modelMatrix(), which is built from this rather than from the base class's
-   * matrix -- that one records the destination and does not move.
+   * modelMatrix(), which combines this origin with the base class's placed
+   * basis. The base matrix records the destination and does not move.
    */
   ch::Output<glm::vec3> position;
   /// Alpha the whole document is drawn at. Zero until it has arrived.
@@ -925,6 +947,13 @@ public:
     // Checked on the line above; nothing between mutates pages.
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return *pages[index];
+  }
+
+  /// Conservative viewport page range, including the same prefetch margin
+  /// used by page building. Banked pages in the range still have no Page.
+  [[nodiscard]] std::optional<gleditor::enfilade::VisibleRange>
+  visiblePageRange() const {
+    return viewportPriorityRange();
   }
 
   /// The measured coordinate frame of one built page.

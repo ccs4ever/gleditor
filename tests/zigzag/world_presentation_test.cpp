@@ -260,6 +260,21 @@ TEST(WorldPresentationTest,
   state.beginPickScene();
   sat.drawFrame(ctx);
   EXPECT_EQ(navigations, 2U);
+  EXPECT_TRUE(sat.performAction(builder.id(*widget),
+                                gleditor::a11y::Action::Click, {}));
+  sat.setEndpointPreviewVisible(false);
+  state.beginPickScene();
+  sat.drawFrame(ctx);
+  EXPECT_TRUE(sat.snapshots().empty());
+  EXPECT_FALSE(sat.performAction(builder.id(*widget),
+                                 gleditor::a11y::Action::Click, {}));
+  EXPECT_FALSE(sat.picked({.tag = tag, .overlayWidgetId = widget}, state));
+  EXPECT_EQ(navigations, 2U);
+  sat.setEndpointPreviewVisible(true);
+  state.beginPickScene();
+  sat.drawFrame(ctx);
+  EXPECT_EQ(sat.snapshots().size(), 1U);
+  EXPECT_EQ(navigations, 2U);
   sat.clear();
   EXPECT_TRUE(sat.snapshots().empty());
   EXPECT_TRUE(sat.picked({.tag = tag, .overlayWidgetId = widget}, state));

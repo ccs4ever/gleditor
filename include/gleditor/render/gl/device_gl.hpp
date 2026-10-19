@@ -48,7 +48,7 @@ public:
    * either.
    */
   [[nodiscard]] DeviceCapabilities capabilities() const override {
-    return DeviceCapabilities{};
+    return DeviceCapabilities{.regions = true};
   }
 
   void initialize(AutoSDLWindow &window) override;
@@ -98,6 +98,7 @@ public:
 
   bool beginFrame() override;
   void endFrame() override;
+  RenderDevice *setRegion(std::optional<RegionId> region) override;
   void bindPipeline(PipelineHandle pipeline) override;
   void bindAtlasTexture(TextureHandle texture) override;
   void setHighlights(std::span<const HighlightRange> ranges) override;
@@ -166,8 +167,12 @@ private:
     GLint mvpLoc{-1};
     GLint opacityLoc{-1};
     GLint identityLoc{-1};
+    GLint paperColourLoc{-1};
+    GLint inkColourLoc{-1};
+    GLint paletteEnabledLoc{-1};
     GLint atlasLoc{-1};
     bool depthTest{true};
+    bool writesPicking{true};
   };
 
   /// Compile one stage, throwing with the driver's log on failure.

@@ -34,7 +34,7 @@ build() {
     GLEDITOR_SDL=3 \
     GLEDITOR_ENABLE_VULKAN=1 \
     GLEDITOR_VERSION="$pkgver" \
-    lib gleditor xudu shaders
+    lib gleditor xuzz shaders
 }
 
 package() {

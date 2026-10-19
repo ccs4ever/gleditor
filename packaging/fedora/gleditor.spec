@@ -64,7 +64,7 @@ Requires:       pkgconfig(spdlog)
 %description devel
 The headers, the linker name and the pkg-config file needed to build a program
 against libgleditor. The library draws documents on the GPU and names no
-document format; xudu, shipped in the main package, is one program built on it.
+document format; xuzz, shipped in the main package, is one program built on it.
 
 %prep
 %autosetup
@@ -79,7 +79,7 @@ document format; xudu, shipped in the main package, is one program built on it.
     GLEDITOR_SDL=3 \
     GLEDITOR_ENABLE_VULKAN=1 \
     GLEDITOR_VERSION=%{version} \
-    lib gleditor xudu shaders
+    lib gleditor xuzz shaders
 
 %install
 %make_install \
@@ -102,13 +102,16 @@ appstream-util validate-relax --nonet \
 %license LICENSE
 %doc README.md
 %{_bindir}/gleditor
+%{_bindir}/xuzz
 %{_bindir}/xudu
+%{_bindir}/zigzag
 %{_libdir}/libgleditor.so.0
 %{_datadir}/gleditor/
 %{_datadir}/applications/gleditor.desktop
 %{_datadir}/metainfo/gleditor.metainfo.xml
 %{_datadir}/icons/hicolor/256x256/apps/gleditor.png
 %{_mandir}/man1/gleditor.1*
+%{_mandir}/man1/xuzz.1*
 %{_mandir}/man1/xudu.1*
 
 %files devel

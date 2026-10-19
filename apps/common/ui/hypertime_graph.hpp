@@ -139,6 +139,10 @@ public:
   }
 
   // -- Callbacks --------------------------------------------------------------
+  HypertimeGraph *setOpenedHandler(std::function<void()> handler) {
+    openedHandler_ = std::move(handler);
+    return this;
+  }
   HypertimeGraph *setGoer(std::function<void(const MicroversionId &)> aGoer) {
     goer_ = std::move(aGoer);
     return this;
@@ -253,6 +257,7 @@ private:
   std::function<void(const MicroversionId &, std::uint32_t, std::uint32_t)>
       quoteHandler_;
   std::function<void(const MicroversionId &)> annotateHandler_;
+  std::function<void()> openedHandler_;
   std::function<void(const std::vector<MicroversionId> &)> compareHandler_;
   std::function<void(const std::vector<MicroversionId> &)> onionSkinHandler_;
 

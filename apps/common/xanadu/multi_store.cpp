@@ -346,6 +346,11 @@ DimRef MultiStoreCoordinator::resolveDimension(std::string_view name) {
   if (name == "d.stdlib") return sysDims.stdlib;
   if (name == "d.clause") return sysDims.clause;
 
+  // Canonical generic lens dimensions (design/anything-to-zigzag-lens.md
+  // §4.3.1) -- d.contains/d.seq/d.ref/d.mime -- are not privileged ranks in
+  // core_->dims(); d.clone is the only structural generic that is (handled
+  // above). They resolve through the mint-on-demand fallthrough below, which is
+  // what projection and a query over it both call, so both name the same rank.
   return core_->findOrMintDimension(name);
 }
 

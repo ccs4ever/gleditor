@@ -1,0 +1,79 @@
+{
+  "journey": "J12",
+  "stage": "native-source-return",
+  "driver": "native",
+  "program": "xuzz",
+  "profile": "J12",
+  "source_evidence": "build/ux-green-20261011/j12-native-r4/plan.json",
+  "notes": [
+    "Passed all 8 native requests including activation of accessible Open source and returned-cell verification.",
+    "Requires document_store from the J12 authoring run and the same profile; old cell #6 is operation-sequence-specific.",
+    "The 8000 ms interval is the native-helper activation window and preserves the before/after camera comparison; the source cell label may exist before activation, so it cannot prove movement completion. The final 60000 ms is the helper/exit window."
+  ],
+  "plan": {
+    "launch_args": [
+      "${document_store}",
+      "--resize",
+      "1440,1000",
+      "--chord",
+      "Ctrl+Alt+3",
+      "--chord",
+      "Ctrl+\\",
+      "--capture",
+      "${evidence}/before.ppm",
+      "--wait-ms",
+      "8000",
+      "--capture",
+      "${evidence}/after.ppm",
+      "--wait-ms",
+      "60000"
+    ],
+    "steps": [
+      {
+        "op": "wait_file",
+        "file": "before.ppm"
+      },
+      {
+        "op": "snapshot",
+        "file": "before-native.json"
+      },
+      {
+        "op": "action",
+        "name": "Open source: Harbor orchids retain their first address.",
+        "interface": "Action"
+      },
+      {
+        "op": "wait_name",
+        "name_prefix": "Cell #6: Harbor orchids retain their first address.",
+        "interface": "Component"
+      },
+      {
+        "op": "snapshot",
+        "file": "returned-native.json"
+      },
+      {
+        "op": "action",
+        "name": "Close",
+        "interface": "Action"
+      },
+      {
+        "op": "wait_file",
+        "file": "after.ppm"
+      },
+      {
+        "op": "snapshot",
+        "file": "after-native.json"
+      }
+    ]
+  },
+  "variables": {
+    "evidence": {
+      "description": "Run-specific evidence output directory.",
+      "example": "/tmp/ux-run/Jx/stage"
+    },
+    "document_store": {
+      "description": "Generated xanadoc store from this authoring run.",
+      "example": "/tmp/ux-run/data/xuzz/xanadocs/untitled-<run-id>"
+    }
+  }
+}

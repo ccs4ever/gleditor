@@ -549,3 +549,20 @@ TEST(UiWidgetTest, recessedWellStylingTokens) {
 }
 
 } // namespace
+
+TEST(UiWidgetTest, CompactLabelRetainsCompleteAccessibleDescription) {
+  using namespace gleditor::ui;
+  Widget root{
+      .id    = 1,
+      .model = Label{"bytes 87–153", TextPurpose::Description,
+                     "Left member 1/3, occurrence 1/2, bytes 87–153, Genesis"}};
+  ScreenOverlay overlay(root);
+  overlay.setBounds(Rect{0, 0, 320, 60});
+  const auto scene = overlay.prepare(UiMetrics{}, Theme{});
+  ASSERT_NE(scene, nullptr);
+  const auto *visual = scene->find(1);
+  ASSERT_NE(visual, nullptr);
+  EXPECT_EQ(visual->text, "bytes 87–153");
+  EXPECT_EQ(visual->accessibleLabel,
+            "Left member 1/3, occurrence 1/2, bytes 87–153, Genesis");
+}

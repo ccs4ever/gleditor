@@ -1,10 +1,10 @@
 /**
- * @file apps/xudu/collaborator_overlay.hpp
+ * @file apps/common/ui/xanadoc/collaborator_overlay.hpp
  * @brief 3D multi-author remote carets, selection highlights, and nameplate
  * badges.
  */
-#ifndef XUDU_COLLABORATOR_OVERLAY_HPP
-#define XUDU_COLLABORATOR_OVERLAY_HPP
+#ifndef XANADU_COLLABORATOR_OVERLAY_HPP
+#define XANADU_COLLABORATOR_OVERLAY_HPP
 
 #include <chrono>
 #include <cstdint>
@@ -94,4 +94,4 @@ private:
 
 } // namespace xanadu
 
-#endif // XUDU_COLLABORATOR_OVERLAY_HPP
+#endif // XANADU_COLLABORATOR_OVERLAY_HPP

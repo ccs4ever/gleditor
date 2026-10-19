@@ -16,7 +16,7 @@
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/swarm.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
-#include "common/xanadu/zigzag/zz_xudu_projector.hpp"
+#include "common/xanadu/zigzag/xanadu_projector.hpp"
 #include "common/xanadu/zigzag/zzcore.hpp"
 #include "common/xanadu/zigzag/zzstructure.hpp"
 
@@ -28,15 +28,15 @@ TEST(ZzXuduConvergenceTest, ProjectXuduDocsToZigzag) {
   const xanadu::PrimediaSpan spanB{1, 10, 30}; // Overlaps spanA
   const xanadu::PrimediaSpan spanC{2, 0, 15};
 
-  std::vector<XuduDocInput> docs;
-  docs.push_back(XuduDocInput{
+  std::vector<XanaduDocInput> docs;
+  docs.push_back(XanaduDocInput{
       .name    = "doc_a",
       .text    = "Introduction paragraph\n\nSecond paragraph of doc A",
       .version = xanadu::MicroversionId::parse("1"),
       .spans   = {spanA, spanC},
   });
 
-  docs.push_back(XuduDocInput{
+  docs.push_back(XanaduDocInput{
       .name    = "doc_b",
       .text    = "Transcluded intro\n\nIndependent conclusion",
       .version = xanadu::MicroversionId::parse("1"),
@@ -49,7 +49,7 @@ TEST(ZzXuduConvergenceTest, ProjectXuduDocsToZigzag) {
   xLink.left  = {spanA};
   xLink.right = {spanC};
 
-  auto zzDoc = projectXuduToZigzag(docs, {xLink});
+  auto zzDoc = projectXanaduToZigzag(docs, {xLink});
 
   // Verify cells were created
   EXPECT_FALSE(zzDoc.cells.empty());
@@ -169,22 +169,22 @@ TEST(ZzXuduConvergenceTest, XuduHypertimeUnchangedSpansBecomeCloneCells) {
   const xanadu::PrimediaSpan span2{1, 20, 20};
   const xanadu::PrimediaSpan span3{2, 0, 25};
 
-  std::vector<XuduDocInput> docs;
-  docs.push_back(XuduDocInput{
+  std::vector<XanaduDocInput> docs;
+  docs.push_back(XanaduDocInput{
       .name    = "v1",
       .text    = "First unchanged text\n\nOriginal second text",
       .version = xanadu::MicroversionId::parse("1"),
       .spans   = {span1, span2},
   });
 
-  docs.push_back(XuduDocInput{
+  docs.push_back(XanaduDocInput{
       .name    = "v2",
       .text    = "First unchanged text\n\nEdited second text here",
       .version = xanadu::MicroversionId::parse("2"),
       .spans   = {span1, span3},
   });
 
-  auto zzDoc = projectXuduToZigzag(docs, {});
+  auto zzDoc = projectXanaduToZigzag(docs, {});
 
   std::string error;
   EXPECT_TRUE(validate2RankManifold(zzDoc, &error)) << error;
@@ -516,7 +516,7 @@ TEST(SliceToStoreTest, aSecondSliceReusesTheDimensionsAlreadyMinted) {
             manifold.textOf(two.cells.at(1), store));
 }
 
-// The heuristic step 20 set out to remove. projectXuduToZigzag() resolves a
+// The heuristic step 20 set out to remove. projectXanaduToZigzag() resolves a
 // paragraph's address by finding which piece its first byte falls in; when no
 // piece covered it, it used to fall back to `doc.spans[paragraphIndex]`. A
 // paragraph index and a piece index have no relationship -- a piece is a run of
@@ -529,7 +529,7 @@ TEST(SliceToStoreTest, aSecondSliceReusesTheDimensionsAlreadyMinted) {
 // paragraph it has nothing to do with. A wrong address is a claim, and this is
 // the claim being made.
 TEST(XuduProjectionTest, AParagraphNeverBorrowsAnotherParagraphsAddress) {
-  XuduDocInput doc;
+  XanaduDocInput doc;
   doc.name = "uncovered";
   doc.text = "First paragraph.\n\nSecond paragraph.\n\nThird paragraph.";
   // Pieces covering only the first six bytes, so the second and third
@@ -540,7 +540,7 @@ TEST(XuduProjectionTest, AParagraphNeverBorrowsAnotherParagraphsAddress) {
   doc.spans.push_back(xanadu::PrimediaSpan{1, 500, 2});
   doc.spans.push_back(xanadu::PrimediaSpan{1, 500, 2});
 
-  const auto projected = projectXuduToZigzag({doc}, {});
+  const auto projected = projectXanaduToZigzag({doc}, {});
 
   int clones = 0;
   std::vector<std::string> texts;

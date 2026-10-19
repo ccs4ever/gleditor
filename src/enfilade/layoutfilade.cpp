@@ -20,7 +20,7 @@ constexpr std::string_view kMediaAnchorString = "\xEF\xBF\xBC";
   for (std::size_t i = 0; i < count; ++i) {
     const auto &e = entries[i];
     w.totalBytes += e.byteLength;
-    w.totalHeightPx += (e.heightPx + (2.0F * e.marginPx));
+    w.totalHeightPx += e.effectiveHeightPx;
     w.lineCount += 1;
     w.maxLineWidthPx =
         std::max(w.maxLineWidthPx, e.widthPx + (2.0F * e.marginPx));
@@ -149,6 +149,12 @@ void Layoutfilade::buildTree() {
     return;
   }
 
+  for (auto &e : entries_) {
+    if (e.effectiveHeightPx == 0.0F) {
+      e.effectiveHeightPx = e.heightPx + (2.0F * e.marginPx);
+    }
+  }
+
   // 1. Build leaf level
   constexpr std::size_t B = LayoutCrum::BranchingFactor;
   std::vector<std::size_t> currentLevel;
@@ -216,50 +222,62 @@ Layoutfilade::findEntryAtY(const float targetYPx) const {
   std::uint32_t currByte  = 0;
 
   while (!crums_[currCrumIdx].isLeaf) {
-    const auto &crum = crums_[currCrumIdx];
-    bool stepped     = false;
+    const auto &crum           = crums_[currCrumIdx];
+    bool stepped               = false;
+    const auto lastC           = static_cast<std::size_t>(crum.childCount - 1);
+    const LayoutCrum *childPtr = &crums_[crum.firstChild];
+    __builtin_prefetch(childPtr, 0, 3);
+    __builtin_prefetch(childPtr + 8, 0, 3);
 
-    for (std::size_t c = 0; c < crum.childCount; ++c) {
-      const auto childIdx  = crum.firstChild + c;
-      const float chHeight = crums_[childIdx].wid.totalHeightPx;
+    for (std::size_t c = 0; c < lastC; ++c) {
+      const float nextY = currY + childPtr[c].wid.totalHeightPx;
 
-      if (std::cmp_equal(c, crum.childCount - 1) ||
-          targetYPx < (currY + chHeight)) {
-        currCrumIdx = childIdx;
+      if (targetYPx < nextY) {
+        currCrumIdx = crum.firstChild + static_cast<std::uint32_t>(c);
         stepped     = true;
         break;
       }
-      currY += chHeight;
-      currByte += crums_[childIdx].wid.totalBytes;
+      currY = nextY;
+      currByte += childPtr[c].wid.totalBytes;
     }
 
     if (!stepped) {
-      currCrumIdx = crum.firstChild + crum.childCount - 1;
+      currCrumIdx = crum.firstChild + static_cast<std::uint32_t>(lastC);
     }
   }
 
   // At leaf crum
   const auto &leaf = crums_[currCrumIdx];
-  for (std::size_t i = 0; i < leaf.entryCount; ++i) {
-    const auto entryIdx = leaf.firstEntry + i;
-    const auto &entry   = entries_[entryIdx];
-    const float eHeight = entry.heightPx + (2.0F * entry.marginPx);
+  if (leaf.entryCount == 0) {
+    return std::nullopt;
+  }
+  const auto lastI            = static_cast<std::size_t>(leaf.entryCount - 1);
+  const LayoutEntry *entryPtr = &entries_[leaf.firstEntry];
 
-    if (std::cmp_equal(i, leaf.entryCount - 1) ||
-        targetYPx < (currY + eHeight)) {
+  for (std::size_t i = 0; i < lastI; ++i) {
+    const float eHeight = entryPtr[i].heightPx + (2.0F * entryPtr[i].marginPx);
+    const float nextY   = currY + eHeight;
+
+    if (targetYPx < nextY) {
       return LayoutHit{
-          .entryIndex      = entryIdx,
+          .entryIndex      = leaf.firstEntry + i,
           .startByte       = currByte,
           .startYPx        = currY,
           .intraByteOffset = 0,
-          .entry           = entry,
+          .entry           = entryPtr[i],
       };
     }
-    currY += eHeight;
-    currByte += entry.byteLength;
+    currY = nextY;
+    currByte += entryPtr[i].byteLength;
   }
 
-  return std::nullopt;
+  return LayoutHit{
+      .entryIndex      = leaf.firstEntry + lastI,
+      .startByte       = currByte,
+      .startYPx        = currY,
+      .intraByteOffset = 0,
+      .entry           = entryPtr[lastI],
+  };
 }
 
 std::optional<LayoutHit>
@@ -426,6 +444,10 @@ bool Layoutfilade::updateEntry(const std::size_t entryIndex,
   }
 
   entries_[entryIndex] = newEntry;
+  if (entries_[entryIndex].effectiveHeightPx == 0.0F) {
+    entries_[entryIndex].effectiveHeightPx =
+        newEntry.heightPx + (2.0F * newEntry.marginPx);
+  }
 
   // Locate leaf crum: because leaves are built bottom-up sequentially in blocks
   // of B, the leaf index is entryIndex / B.

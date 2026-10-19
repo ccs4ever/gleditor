@@ -98,7 +98,7 @@ stdenv.mkDerivation {
   buildFlags = [
     "lib"
     "gleditor"
-    "xudu"
+    "xuzz"
     "shaders"
   ];
 
@@ -115,7 +115,7 @@ stdenv.mkDerivation {
   # libGL comes from the driver on a NixOS system, hence only the Vulkan
   # loader being pinned here.
   postInstall = ''
-    for program in gleditor xudu; do
+    for program in gleditor xuzz; do
       wrapProgram $out/bin/$program \
         --prefix LD_LIBRARY_PATH : ${
           lib.makeLibraryPath [

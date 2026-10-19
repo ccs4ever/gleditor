@@ -1,0 +1,287 @@
+{
+  "journey": "J7",
+  "stages": [
+    {
+      "journey": "J7",
+      "stage": "author",
+      "driver": "ui",
+      "program": "xuzz",
+      "profile": "j7-author-profile",
+      "source_evidence": "build/ux-green-20261011/j7-fresh-author/plan.json",
+      "notes": [
+        "Fresh GUI authoring stage; save/close and inspect actual store path, home, dimension and CellRefs before consumers.",
+        "Authoring operations create int64 cells 12/8/5; do not create a substitute result in a file or script.",
+        "Evidence captures are redirected to stage evidence."
+      ],
+      "plan": {
+        "steps": [
+          "--chord",
+          "Ctrl+Alt+N",
+          "--chord",
+          "N",
+          "--chord",
+          "E",
+          "--type",
+          "12",
+          "--chord",
+          "Return",
+          "--chord",
+          "N",
+          "--chord",
+          "E",
+          "--type",
+          "8",
+          "--chord",
+          "Return",
+          "--chord",
+          "N",
+          "--chord",
+          "E",
+          "--type",
+          "5",
+          "--chord",
+          "Return",
+          "--dump-a11y",
+          "--capture",
+          "${evidence}/budget.ppm",
+          "--chord",
+          "Ctrl+Q"
+        ]
+      },
+      "variables": {
+        "repo": {
+          "description": "Repository root supplied by runner.",
+          "example": "/work/gleditor-restore"
+        },
+        "evidence": {
+          "description": "Fresh per-run evidence directory; must not exist before stage.",
+          "example": "/tmp/ux-run/J6/query"
+        },
+        "budget_store": {
+          "description": "Store path discovered after saving the actual GUI-authored slice.",
+          "example": "${profile}/data/xuzz/xanadocs/untitled-..."
+        }
+      }
+    },
+    {
+      "journey": "J7",
+      "stage": "calculate-save",
+      "driver": "pty",
+      "program": "vpl",
+      "profile": "j7-author-profile",
+      "source_evidence": "build/ux-green-20261011/terminal-prepared/j7-vpl.json",
+      "notes": [
+        "Requires actual closed GUI author profile; :open source path comes from inspected save, not a guessed timestamp.",
+        "Home is selected by :open; d.1 and cell topology must be confirmed from current :dims/:rank and dumps.",
+        "Preserve malformed-expression error and recovery assertions."
+      ],
+      "plan": {
+        "prompt": "      ",
+        "steps": [
+          {
+            "line": ":open ${budget_store}",
+            "contains": [
+              "Opened ${budget_store}",
+              "Use :rank <dimension> to select data."
+            ]
+          },
+          {
+            "line": ":dims",
+            "contains": [
+              "d.1"
+            ]
+          },
+          {
+            "line": ":rank d.1",
+            "contains": [
+              "data: 12 8 5"
+            ]
+          },
+          {
+            "line": "data",
+            "contains": [
+              "\r\n12 8 5\r\n"
+            ]
+          },
+          {
+            "line": "total \u2190 +/ data",
+            "contains": [
+              "\r\n25\r\n"
+            ]
+          },
+          {
+            "line": "data \u2190 data + 0 2 0",
+            "contains": [
+              "\r\n12 10 5\r\n"
+            ]
+          },
+          {
+            "line": "total \u2190 +/ data",
+            "contains": [
+              "\r\n27\r\n"
+            ]
+          },
+          {
+            "line": "data",
+            "contains": [
+              "\r\n12 10 5\r\n"
+            ]
+          },
+          {
+            "line": ":grid",
+            "contains": [
+              "12",
+              "10",
+              "5"
+            ]
+          },
+          {
+            "line": "data +",
+            "contains": [
+              "Error:"
+            ]
+          },
+          {
+            "line": "data",
+            "contains": [
+              "\r\n12 10 5\r\n"
+            ]
+          },
+          {
+            "line": "total \u2190 +/ data",
+            "contains": [
+              "\r\n27\r\n"
+            ]
+          },
+          {
+            "line": "report \u2190 data , total",
+            "contains": [
+              "\r\n12 10 5 27\r\n"
+            ]
+          },
+          {
+            "line": ":grid",
+            "contains": [
+              "12",
+              "10",
+              "5",
+              "27"
+            ]
+          },
+          {
+            "line": "report",
+            "contains": [
+              "\r\n12 10 5 27\r\n"
+            ]
+          },
+          {
+            "line": ":save ${evidence}/budget-result",
+            "contains": [
+              "Saved 4 result rows to ${evidence}/budget-result"
+            ]
+          },
+          {
+            "line": ":quit",
+            "contains": [],
+            "exit": true
+          }
+        ]
+      },
+      "variables": {
+        "repo": {
+          "description": "Repository root supplied by runner.",
+          "example": "/work/gleditor-restore"
+        },
+        "evidence": {
+          "description": "Fresh per-run evidence directory; must not exist before stage.",
+          "example": "/tmp/ux-run/J6/query"
+        },
+        "budget_store": {
+          "description": "Exact current GUI-authored budget store path.",
+          "example": "${profile}/data/xuzz/xanadocs/untitled-..."
+        },
+        "budget_result": {
+          "description": "Fresh independent saved VPL result store.",
+          "example": "${profile}/budget-result"
+        }
+      }
+    },
+    {
+      "journey": "J7",
+      "stage": "original-native",
+      "driver": "native",
+      "program": "xuzz",
+      "profile": "j7-author-profile",
+      "source_evidence": "build/ux-green-20261011/terminal-prepared/j7-original-native/plan.json",
+      "notes": [
+        "Runs against closed author profile after source hash capture.",
+        "Expected refs 6/15/20 are evidence-specific; resolve from actual store dump/native tree if authoring changes.",
+        "Compare before/after source ops.nodes and store.tables hashes.",
+        "Accessible source CellRefs are dynamic for fresh authoring; bind these variables from the saved source store."
+      ],
+      "plan": {
+        "launch_args": [
+          "${budget_store}",
+          "--resize",
+          "1440,1000",
+          "--chord",
+          "F6",
+          "--chord",
+          "Alt+Right",
+          "--capture",
+          "${evidence}/budget.ppm",
+          "--wait-ms",
+          "60000"
+        ],
+        "steps": [
+          {
+            "op": "wait_file",
+            "file": "budget.ppm"
+          },
+          {
+            "op": "wait_name",
+            "name_prefix": "Cell #${cell_12}: 12 [number] [value kind: int64]"
+          },
+          {
+            "op": "wait_name",
+            "name_prefix": "Cell #${cell_8}: 8 [number] [value kind: int64]"
+          },
+          {
+            "op": "wait_name",
+            "name_prefix": "Cell #${cell_5}: 5 [number] [value kind: int64]"
+          },
+          {
+            "op": "snapshot",
+            "file": "native.json"
+          }
+        ]
+      },
+      "variables": {
+        "repo": {
+          "description": "Repository root supplied by runner.",
+          "example": "/work/gleditor-restore"
+        },
+        "evidence": {
+          "description": "Fresh per-run evidence directory; must not exist before stage.",
+          "example": "/tmp/ux-run/J6/query"
+        },
+        "budget_store": {
+          "description": "Actual current GUI-authored budget store.",
+          "example": "${profile}/data/xuzz/xanadocs/untitled-..."
+        },
+        "cell_12": {
+          "description": "CellRef of the authored int64 value 12, discovered from the current fresh store dump/native tree.",
+          "example": "6"
+        },
+        "cell_8": {
+          "description": "CellRef of the authored int64 value 8, discovered from the current fresh store dump/native tree.",
+          "example": "15"
+        },
+        "cell_5": {
+          "description": "CellRef of the authored int64 value 5, discovered from the current fresh store dump/native tree.",
+          "example": "20"
+        }
+      }
+    }
+  ]
+}

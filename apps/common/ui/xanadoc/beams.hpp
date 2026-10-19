@@ -21,8 +21,8 @@
  * what the caching here is: expensive to answer, asked when something changes,
  * and turned into geometry every frame by a matrix multiply.
  */
-#ifndef XUDU_BEAMS_H
-#define XUDU_BEAMS_H
+#ifndef XANADU_BEAMS_H
+#define XANADU_BEAMS_H
 
 #include <array>
 #include <cstdint>
@@ -42,6 +42,7 @@
 
 #include "common/ui/xanadoc/session.hpp"
 #include "common/xanadu/anchor_lanes.hpp"
+#include "common/xanadu/anchor_motion.hpp"
 #include "common/xanadu/enfilade/spanfilade.hpp"
 #include "common/xanadu/link_layout.hpp"
 #include "common/xanadu/link_navigation.hpp"
@@ -107,10 +108,12 @@ public:
 
   void setMediaRectResolver(MediaRectResolver resolver) {
     mediaRectResolver = std::move(resolver);
+    geometryDirty     = true;
   }
 
   void setCellAnchorResolver(CellAnchorResolver resolver) {
     cellAnchorResolver = std::move(resolver);
+    geometryDirty      = true;
   }
 
   void setManifoldViews(std::vector<const zigzag::Manifold *> views,
@@ -160,7 +163,7 @@ public:
   // -- gleditor::a11y::Source ------------------------------------------------
   //
   // A beam is a line drawn between two passages. Nothing about a line is
-  // reachable without seeing it, which makes this the part of Xudu that most
+  // reachable without seeing it, which makes this the part of Xuzz that most
   // needs saying rather than drawing: the links are the hypertext.
   void describe(gleditor::a11y::Builder &into) override;
   [[nodiscard]] std::uint64_t accessibilityRevision() const override;
@@ -171,7 +174,10 @@ public:
 
   /// Where beam picks and accessibility actions on links are sent. Without
   /// one a beam is only drawn.
-  void setLinkContext(LinkContext *context) noexcept { linkContext_ = context; }
+  void setLinkContext(LinkContext *context) noexcept {
+    geometryDirty = geometryDirty || linkContext_ != context;
+    linkContext_  = context;
+  }
 
   /// See settings::kReadableTextPx: bringing a linked document alongside
   /// never backs the camera out past where the text reads at this height.
@@ -179,9 +185,12 @@ public:
 
   /// Whether beams are drawn at all. They are, by default: a link nobody can
   /// see is most of what Xanadu was arguing against.
-  void setVisible(const bool shown) { visible = shown; }
+  void setVisible(const bool shown) {
+    geometryDirty = geometryDirty || visible != shown;
+    visible       = shown;
+  }
   [[nodiscard]] bool isVisible() const { return visible; }
-  void toggle() { visible = !visible; }
+  void toggle() { setVisible(!visible); }
 
   /**
    * @brief Whether a link coming into view brings its far document to it.
@@ -190,7 +199,10 @@ public:
    * the beams still draw, and following one by clicking it still moves the
    * document, because that was asked for explicitly.
    */
-  void setSworph(const bool on) { sworph = on; }
+  void setSworph(const bool on) {
+    geometryDirty = geometryDirty || sworph != on;
+    sworph        = on;
+  }
   [[nodiscard]] bool sworphing() const { return sworph; }
 
   /// Links that would be drawn if the documents holding them are built. For
@@ -203,6 +215,7 @@ public:
     return looms_;
   }
   void setHoveredTransclusion(std::optional<std::size_t> idx) noexcept {
+    geometryDirty        = geometryDirty || hoveredTransclusion_ != idx;
     hoveredTransclusion_ = idx;
   }
   [[nodiscard]] std::optional<std::size_t>
@@ -221,7 +234,8 @@ public:
     satelloidOverlay_ = overlay;
   }
   void setBeamConfig(const xanadu::BeamConfig &cfg) noexcept {
-    beamConfig_ = cfg;
+    beamConfig_   = cfg;
+    geometryDirty = true;
   }
   [[nodiscard]] const xanadu::BeamConfig &beamConfig() const noexcept {
     return beamConfig_;
@@ -303,6 +317,12 @@ private:
     bool trunkStaged{};
   };
   std::vector<Gathering> gatherings_;
+  struct GutterOwner {
+    std::size_t first{}, second{};
+    std::uint64_t owner{}, link{};
+    auto operator<=>(const GutterOwner &) const = default;
+  };
+  std::vector<GutterOwner> gutterOwners_;
 
   std::vector<TransclusionStrand> transclusionStrands;
 
@@ -398,6 +418,12 @@ private:
     /// scale of the text rather than at some fixed size that swamps small type
     /// and disappears in large.
     float lineHeight{};
+    std::optional<glm::vec3> topMeet, bottomMeet, topCorridor, bottomCorridor;
+    bool continuesBefore{};
+    bool continuesAfter{};
+    /// Only the margin rail reaches these paper edges; ribbons stay at text.
+    std::optional<glm::vec3> continuationTop{};
+    std::optional<glm::vec3> continuationBottom{};
   };
 
   /// How far an anchor reaches above and below its middle when drawn: its own
@@ -411,7 +437,8 @@ private:
   /// The vertical reach @ref drawnHalfExtent gives, as an extent to hand to
   /// xanadu::assignAnchorLanes().
   [[nodiscard]] static AnchorExtent drawnExtent(const Edge &edge,
-                                                float stubMinOfLine = 0.9F);
+                                                float stubMinOfLine = 0.9F,
+                                                float strokeOfLine  = 0);
 
   /// Both ends of one link end at its document's margin, or nothing if the
   /// pages holding it are not built yet.
@@ -421,6 +448,12 @@ private:
 
   [[nodiscard]] static std::optional<Edge> edgeOf(const CellAnchor &anchor,
                                                   bool towardsRight);
+
+  void
+  visitDocumentEdges(const Doc &doc, const LinkEnd &end, bool towardsRight,
+                     const glm::mat4 &viewProjection,
+                     gleditor::cpp26::function_ref<void(const Edge &)> visitor,
+                     bool terminals = false);
 
   /**
    * @brief Draw the connection between two link ends as a band of strands.
@@ -443,10 +476,14 @@ private:
    *        unmodified edges. See xanadu::linkZJitter() and
    *        BeamConfig::activeZBoost for why a caller would want this.
    */
+  struct GutterLane {
+    float centre{}, width{};
+  };
   void band(const Edge &nearSide, const Edge &farSide,
             std::size_t documentsApart, std::uint32_t colour, std::uint32_t tag,
             float phase = 0.0F, float zNudge = 0.0F,
-            gleditor::Beams::Surface surface = gleditor::Beams::Surface::Glass);
+            gleditor::Beams::Surface surface = gleditor::Beams::Surface::Glass,
+            std::optional<GutterLane> corridor = std::nullopt);
 
   /**
    * @brief Mark one end of a link down its document's margin.
@@ -461,7 +498,9 @@ private:
    */
   void drawMarginAnchorLane(const Edge &edge, std::uint32_t colour,
                             std::uint32_t tag, bool farEnd, int laneIndex,
-                            int laneCount, bool isActive);
+                            int laneCount, bool isActive,
+                            bool transclusion = false, float reach = 0,
+                            float reachOpacity = 1);
 
   /// @p colour with its alpha scaled by @p factor, for a beam that has to be
   /// as faint as the documents it runs between.
@@ -479,7 +518,8 @@ private:
   CellAnchorResolver cellAnchorResolver;
   std::vector<const zigzag::Manifold *> manifoldViews_;
   std::vector<zigzag::CellRef> manifoldFoci_;
-  std::unique_ptr<gleditor::Beams> beams;
+  std::unique_ptr<gleditor::Beams> beams, anchorAccents;
+  AnchorMotion anchorMotion;
   std::vector<Strand> strands;
   std::vector<Dangling> dangling;
   /// The generation the strands were worked out for, and how many documents
@@ -488,6 +528,18 @@ private:
   std::size_t builtDocs{static_cast<std::size_t>(-1)};
   std::vector<glm::mat4> lastDocTransforms;
   std::vector<float> lastDocOpacities;
+  struct DocumentGeometryStamp {
+    std::uint64_t edit{};
+    std::size_t pages{}, built{};
+    std::optional<std::pair<std::size_t, std::size_t>> visiblePages;
+    bool operator==(const DocumentGeometryStamp &) const = default;
+  };
+  std::vector<DocumentGeometryStamp> lastDocGeometry;
+  std::optional<glm::mat4> lastPreparedProjection;
+  std::optional<std::uint64_t> lastPreparedContext;
+  bool lastPreparedMotion{};
+  bool preparedPulses{};
+  bool geometryDirty{true};
   bool strandsRebuilt{true};
   bool visible{true};
   bool sworph{true};
@@ -585,6 +637,9 @@ private:
   bool spanfiladeClean_{false};
   int cellRadius_{3};
 
+  struct AnchorReach {
+    float value{}, opacity{1};
+  };
   struct MarginAnchor {
     Edge edge;
     std::uint32_t colour{};
@@ -597,6 +652,7 @@ private:
     ProminenceTier tier{};
     LinkType type{};
     bool transclusion{};
+    float reach{}, reachOpacity{1};
   };
 
   std::vector<MarginAnchor> allAnchors_;
@@ -604,4 +660,4 @@ private:
 
 } // namespace xanadu
 
-#endif // XUDU_BEAMS_H
+#endif // XANADU_BEAMS_H

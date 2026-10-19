@@ -75,7 +75,7 @@ enum class OpKind : std::uint8_t {
    * move -- CompactBinaryV3 widened the wire format's kind field to four bits
    * (migration step 10), so BinStructure = 7 no longer fills it.
    *
-   * Emitted by system_docs.cpp (dominant, 34 calls), zz_xudu_projector.cpp,
+   * Emitted by system_docs.cpp (dominant, 34 calls), xanadu_projector.cpp,
    * arena_manifold.cpp::promote(), vortex_host.cpp::promoteAndAttachToStore(),
    * the VQL and VPL compilers, and batch_orchestrator.cpp. Store::replay()
    * treats it as a text no-op because a slice's structure is a *second* replay
@@ -151,14 +151,17 @@ inline constexpr std::uint8_t valueKindShift = 4;
 /// endpoint and a formattable, transcludable Xanadu object while a query
 /// never has to parse its text. See design R6.
 enum class ValueKind : std::uint8_t {
-  None      = 0,
-  Double    = 1,
-  Bool      = 2,
-  Int64     = 3,
-  OpHandle  = 4,
-  ExternRef = 5,
-  Timestamp = 6,
+  None            = 0,
+  Double          = 1,
+  Bool            = 2,
+  Int64           = 3,
+  OpHandle        = 4,
+  ExternRef       = 5,
+  Timestamp       = 6,
+  ForeignOpHandle = 7,
 };
+static_assert((static_cast<std::uint8_t>(ValueKind::ForeignOpHandle)
+               << valueKindShift) <= valueKindMask);
 
 /// For a dump or a diagnostic. An unrecognised verb or value kind is named
 /// "unknown" rather than as one of the real ones, since a build reading a newer

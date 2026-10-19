@@ -31,7 +31,7 @@ ______________________________________________________________________
           │                           │                           │
           v                           v                           v
   [ BEP 46 Catalogs ]      [ DHT Topic Swarms ]     [ Publication Ledger ]
-  bep46:<pubkey>/catalog   xudu:topic:<tag>         Append-Only Merkle Tree
+  bep46:<pubkey>/catalog   xanadu:topic:<tag>         Append-Only Merkle Tree
   (Author-Curated)         (Associative Clusters)   (Verifiable Consensus)
           │                           │                           │
           └───────────────────────────┼───────────────────────────┘
@@ -60,7 +60,7 @@ ______________________________________________________________________
 - Any topic tag $T$ maps to an immutable 20-byte infohash:
 
   $$
-  \text{Target}(T) = \text{SHA-1}("xudu:topic:" \parallel \text{canonicalize}(T))
+  \text{Target}(T) = \text{SHA-1}("xanadu:topic:" \parallel \text{canonicalize}(T))
   $$
 
 - Authors and curators announce publication tokens directly to this swarm on the Mainline DHT.

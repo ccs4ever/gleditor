@@ -35,6 +35,10 @@
 #include "resolver.hpp"
 #include "torrent.hpp"
 
+namespace xanadu::identity {
+class IdentityNetworkController;
+}
+
 namespace xanadu {
 
 /// What a mutable name points at, and how recently the publisher said so.
@@ -145,6 +149,9 @@ public:
     /// How long to wait for a magnet's metadata.
     std::chrono::milliseconds metadataTimeout{std::chrono::seconds{60}};
     std::size_t maximumPublicationTopics{128};
+    /// Opt-in authenticated extensions on the same session/socket as content.
+    /// The shared owner outlives every per-torrent and per-peer plugin.
+    std::shared_ptr<identity::IdentityNetworkController> identityController;
   };
 
   /// @throws std::runtime_error when the build has no libtorrent.
@@ -407,8 +414,8 @@ public:
                                        std::uint64_t length) const override;
 
 private:
-  friend class XuduTorrentPlugin;
-  friend class XuduPeerPlugin;
+  friend class XanaduTorrentPlugin;
+  friend class XanaduPeerPlugin;
   void joinCatalogRendezvous(const InfoHash &hash, const std::string &dataRoot,
                              const std::string &catalog);
   struct Impl;

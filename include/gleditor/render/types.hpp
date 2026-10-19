@@ -188,6 +188,8 @@ struct PipelineDesc {
    * depth conventions, which no single value satisfies.
    */
   bool depthTest{true};
+  /// Colour-only ornament preserves both the picking attachment and depth.
+  bool writesPicking{true};
 };
 
 /**
@@ -229,7 +231,28 @@ struct DrawUniforms {
    * the quad's own kind into the top bits.
    */
   std::uint32_t identity{};
+  /// Optional monochrome document palette, packed as RGBA. Disabled for UI
+  /// batches and other callers that retain their instance colours.
+  std::uint32_t paperColour{0xFFFFFFFFU};
+  std::uint32_t inkColour{0x000000FFU};
+  std::uint32_t paletteEnabled{};
 };
+
+// The vertex push block is copied whole, with scalar fields following mat4.
+static_assert(offsetof(DrawUniforms, paperColour) == 72);
+static_assert(offsetof(DrawUniforms, inkColour) == 76);
+static_assert(offsetof(DrawUniforms, paletteEnabled) == 80);
+static_assert(sizeof(DrawUniforms) <= 128,
+              "Draw uniforms must fit Vulkan's guaranteed push-constant size");
+
+/// Bottom-up target pixels. The viewport preserves projection even when only
+/// part of it is writable; depth is stated with zero nearest on every backend.
+struct RenderRegion {
+  int viewLeft{}, viewBottom{}, viewWidth{}, viewHeight{};
+  int clipLeft{}, clipBottom{}, clipWidth{}, clipHeight{};
+  float nearDepth{0.F}, farDepth{1.F};
+};
+using RegionId = std::uint16_t;
 
 /**
  * @brief One glyph draw, described rather than issued.
@@ -244,6 +267,7 @@ struct GlyphBatch {
   BufferHandle vertices;
   std::size_t vertexByteOffset{};
   std::uint32_t instanceCount{};
+  std::optional<RegionId> region;
 };
 
 /**
@@ -254,6 +278,8 @@ struct GlyphBatch {
  * still be guessing about the driver underneath.
  */
 struct DeviceCapabilities {
+  /// Viewport, writable clip and depth slice are retained per draw.
+  bool regions{false};
   /**
    * @brief One frame's commands may be recorded by several threads at once.
    *
@@ -477,8 +503,11 @@ struct HighlightRange {
   /// Where the span starts within firstCluster, and ends within lastCluster.
   float startFraction{};
   float endFraction{1.0F};
-  std::uint32_t reserved0{};
-  std::uint32_t reserved1{};
+  std::uint32_t emphasis{};
+  float edgeWidthPx{};
+  /// Zero is an unowned layer in the GPU encoding, not an application identity.
+  std::array<std::uint32_t, 2> layer{};
+  std::array<std::uint32_t, 2> padding{};
 };
 
 /**
@@ -486,7 +515,7 @@ struct HighlightRange {
  *
  * One span per page a selection touches, so a handful is ample -- far fewer
  * than the thousand the old whole-cluster scheme needed. The block is read per
- * fragment now, and at eight words an element a larger table would also risk
+ * fragment now, and at twelve words an element a larger table would also risk
  * the 16 KB uniform block size OpenGL ES 3.0 guarantees.
  */
 inline constexpr int maxHighlightRanges = 64;

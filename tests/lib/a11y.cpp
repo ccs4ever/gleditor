@@ -366,3 +366,8 @@ TEST(A11yPublisherTest, withNoPlatformThereIsNothingToDoAndNothingBreaks) {
   EXPECT_EQ(publisher.pumpActions(), 0U);
   EXPECT_FALSE(publisher.snapshot().empty()) << "the description is still made";
 }
+
+TEST(A11yRunTest, trailingNewlineKeepsAnEmptyCaretRun) {
+  EXPECT_EQ(a11y::runBreaks("one\n"), (std::vector<std::size_t>{0, 4, 4}));
+  EXPECT_EQ(a11y::runBreaks("\n\n"), (std::vector<std::size_t>{0, 1, 2, 2}));
+}

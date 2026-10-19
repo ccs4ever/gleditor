@@ -2,7 +2,7 @@
 #
 # xudu-e2e-orchestration.sh
 #
-# Standalone end-to-end integration test runner that orchestrates the xudu
+# Standalone end-to-end integration test runner that orchestrates the xuzz
 # binary through:
 #   1. Loading 2 source media torrents.
 #   2. Loading 2 published XanaDocs side-by-side.
@@ -15,13 +15,13 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-BIN="${ROOT}/build/xudu"
+BIN="${ROOT}/build/xuzz"
 TEST_BIN="${ROOT}/build/xuzz_test"
 SCREENSHOT_DIR="${ROOT}/build/integration_screenshots"
 
 if [ ! -x "$BIN" ] || [ ! -x "$TEST_BIN" ]; then
-  echo "==> Building xudu and xuzz_test..."
-  make -C "$ROOT" -j"$(nproc)" xudu xuzz_test
+  echo "==> Building xuzz and xuzz_test..."
+  make -C "$ROOT" -j"$(nproc)" xuzz xuzz_test
 fi
 
 echo "==> Running E2E Binary Orchestration Test Suite..."

@@ -1,9 +1,9 @@
 /**
- * @file zz_xudu_projector.cpp
+ * @file xanadu_projector.cpp
  * @brief Implementation of bidirectional projection and rasterization between
  *        Xudu (Xanadocs/Xanalinks) and Zigzag (Multidimensional cell space).
  */
-#include "common/xanadu/zigzag/zz_xudu_projector.hpp"
+#include "common/xanadu/zigzag/xanadu_projector.hpp"
 
 #include <algorithm>
 #include <ctime>
@@ -40,10 +40,10 @@ constexpr std::string_view mediaDimension = "d.media";
 
 } // namespace
 
-ZzStructureDocument projectXuduToZigzag(
-    const std::vector<XuduDocInput> &docs,
+ZzStructureDocument projectXanaduToZigzag(
+    const std::vector<XanaduDocInput> &docs,
     const std::vector<xanadu::Link> &links, const XuduProjectorOptions &opts,
-    std::unordered_map<CellID, XuduProjectionProvenance> *const provenance) {
+    std::unordered_map<CellID, XanaduProjectionProvenance> *const provenance) {
   ZzStructureDocument result;
   result.meta.name = "Xudu Xanadoc Space";
   result.focus     = 1;
@@ -201,10 +201,10 @@ ZzStructureDocument projectXuduToZigzag(
           result.cells[id] = std::move(cell);
           if (nullptr != provenance) {
             provenance->insert_or_assign(
-                id, XuduProjectionProvenance{.documentId = doc.documentId,
-                                             .version    = doc.version,
-                                             .span       = span,
-                                             .sourceCell = doc.sourceCell});
+                id, XanaduProjectionProvenance{.documentId = doc.documentId,
+                                               .version    = doc.version,
+                                               .span       = span,
+                                               .sourceCell = doc.sourceCell});
           }
           docCellChains[docIdx].push_back(id);
           cellMappings.push_back(
@@ -244,10 +244,10 @@ ZzStructureDocument projectXuduToZigzag(
       result.cells[id] = std::move(cell);
       if (nullptr != provenance) {
         provenance->insert_or_assign(
-            id, XuduProjectionProvenance{.documentId = doc.documentId,
-                                         .version    = doc.version,
-                                         .span       = span,
-                                         .sourceCell = doc.sourceCell});
+            id, XanaduProjectionProvenance{.documentId = doc.documentId,
+                                           .version    = doc.version,
+                                           .span       = span,
+                                           .sourceCell = doc.sourceCell});
       }
       docCellChains[docIdx].push_back(id);
       cellMappings.push_back(
@@ -343,7 +343,7 @@ ProjectedXuduStore
 projectStoreWithProvenance(const xanadu::Store &store,
                            const std::vector<xanadu::MicroversionId> &versions,
                            const XuduProjectorOptions &opts) {
-  std::vector<XuduDocInput> docInputs;
+  std::vector<XanaduDocInput> docInputs;
   for (const auto &verId : versions) {
     const auto ver = store.rebuild(verId);
     std::string assembledText;
@@ -370,7 +370,7 @@ projectStoreWithProvenance(const xanadu::Store &store,
       }
     }
 
-    docInputs.push_back(XuduDocInput{
+    docInputs.push_back(XanaduDocInput{
         .name       = verId.str(),
         .documentId = store.documentId().str(),
         .text       = std::move(assembledText),
@@ -382,8 +382,8 @@ projectStoreWithProvenance(const xanadu::Store &store,
   const auto allLinks = store.linkView() | std::ranges::to<std::vector>();
 
   ProjectedXuduStore result;
-  result.document = projectXuduToZigzag(docInputs, allLinks, opts,
-                                        &result.sourceByProjectedCell);
+  result.document = projectXanaduToZigzag(docInputs, allLinks, opts,
+                                          &result.sourceByProjectedCell);
   return result;
 }
 

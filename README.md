@@ -18,7 +18,7 @@ decisions; [AGENTS.md](AGENTS.md) is the contributor runbook.
 | `build/vquery`, `build/vqueryc` | VQL query runner/REPL and standalone compiler.                                 |
 | `build/vpl`, `build/vplc`       | VPL array-language runner/REPL and compiler.                                   |
 | `build/vprolog`                 | Prolog REPL over the Vortex/Vlog logic runtime.                                |
-| `build/xudu-dump`               | Inspect a store or `ops.nodes` directly, including one the loader refuses.     |
+| `build/store-dump`              | Inspect a store or `ops.nodes` directly, including one the loader refuses.     |
 | `build/xudu-swarm-peer`         | Peer used by the network-namespace swarm tests.                                |
 
 `xudu` and `zigzag` are retired as separate applications; `xuzz` is the one program for both.
@@ -65,8 +65,8 @@ to use GCC. Useful switches are `GLEDITOR_SDL=2|3`, `GLEDITOR_DISABLE_VULKAN=1`,
 objects; `ccache` is used automatically when installed. The Makefile lists all targets and switches.
 
 Start with `./build/gleditor file.txt` or `./build/xuzz [store]`. `xuzz --view zigzag` opens on the
-cell view and `--view xanadoc` on the pages. `xuzz --xudu STORE` projects a xanadoc store into the
-cell view; `--raster` prints a text projection and exits. Each program's `--help` shows everyday
+cell view and `--view xanadoc` on the pages. `xuzz --xanadoc STORE` projects a xanadoc store into
+the cell view; `--raster` prints a text projection and exits. Each program's `--help` shows everyday
 options and `--help-all` shows batch and diagnostic options. `xuzz --headless` runs batch commands
 without a window. The query and language tools also offer `--help` and headless execution.
 
@@ -110,6 +110,11 @@ coarse bars according to projected size. `--no-cull` and `--coarse-below` expose
 comparison. `Doc::collect()` submits page draws across open documents as one list. Vulkan can record
 chunks on worker threads; GL and GLES record in order on their context thread. Vulkan measures the
 choice at run time; `GLEDITOR_RECORD_THREADS` overrides it for comparison.
+
+Per-frame render regions keep viewport mapping separate from the writable clip rectangle and depth
+range. Batches carry their region into worker recording; immediate draws use a restoring scope.
+World content and its picking are clipped outside settled edge chrome while screen controls retain
+the whole target. The camera projection is unchanged.
 
 Picking writes an identity attachment beside color. `requestPickingTag()` queues an asynchronous
 read and `takePickingTag()` returns a completed result with its pixel coordinates. GL/GLES use a PBO
@@ -156,7 +161,7 @@ only the program's own wiring. Pages and cells are two presentations of the same
 Each author has one append-only `UserPermascroll` for primedia. A `Store` is an edit decision list
 over local slot 0 and registered external scrolls. A store directory holds `ops.nodes` and
 `store.tables`; it contains **no primedia** and is not portable without the permascroll it
-addresses. The default permascroll lives under `$XDG_DATA_HOME/xudu/permascroll/`;
+addresses. The default permascroll lives under `$XDG_DATA_HOME/xuzz/permascroll/`;
 `xuzz --permascroll` binds an explicit one. Publishing packages the content and references others
 need to read, instead of copying a bare store directory.
 
@@ -164,7 +169,7 @@ need to read, instead of copying a bare store directory.
 64 KiB Merkle-piece-aligned segments. `store.tables` format 4 holds local segment carriers and
 private reader deployment bindings. Scroll registration, links, designated versions and annotations
 are authored Structure operations. A format the loader does not understand is refused by name and
-version; `xudu-dump --section=header STORE` or `--section=ops` inspects the bytes without that
+version; `store-dump --section=header STORE` or `--section=ops` inspects the bytes without that
 loader. Human-readable OSMIC or compact binary operations are optional `ops.export` output, not
 another store file.
 
@@ -278,7 +283,10 @@ front end over Vortex/Vlog logic operations. Xuzz's cell view also has Vortex an
 can compose multiple stores in one ephemeral arena; this does not make persistent cross-store cell
 links automatic. The [Vortex](design/vortex-hyperstructural-runtime.md),
 [VQL](design/vql-query-language.md), [VPL](design/vpl-array-language.md), and
-[Vlog](design/vlog-logic-extension.md) notes document their models and remaining work.
+[Vlog](design/vlog-logic-extension.md) notes document their models and remaining work; the
+[vicon](design/vicon-goal-directed-language.md) note proposes an Icon-shaped goal-directed language
+over the same runtime, and the [vlace](design/vlace-functional-language.md) note proposes a
+text-based, purely functional one (both specification only, nothing built).
 
 ## ZigZag and Xuzz presentation
 
@@ -287,7 +295,7 @@ and its rank neighborhood with animated transitions, GPU picking, and accessibil
 Cell Content View emphasizes the content of each cell; Topology View emphasizes its dimensional
 connections. The view can cycle dimensions and use execution, scope, contract, logic, and standard
 library bundles. `xuzz --raster STORE` prints a non-graphical projection. The visualizer can adopt a
-store-backed slice or project xanadoc versions via `--xudu`.
+store-backed slice or project xanadoc versions via `--xanadoc`.
 
 Xuzz composes this presentation with its pages and beams. The current bridge supplies cell anchors,
 a shared scene, and cell activation. It is a foundation for the proposed unified link journey, not a
@@ -374,13 +382,13 @@ make -j$(nproc) xuzz
 ```
 
 The second script restores the floating-image sample deleted by the first. Its permascroll is part
-of the fixture. `xudu-dump --section=ops STORE` is the semantic diff to use across format changes;
+of the fixture. `store-dump --section=ops STORE` is the semantic diff to use across format changes;
 `--section=header` shows the format version.
 
 `make format-check`, `make lint`, `make analyze`, and `make check` are the broader quality gates. If
 a lint tool is missing, install it locally when possible and rerun the gate; a skipped tool is not a
 pass. `AGENTS.md` has formatter and linter setup details. Logging uses named spdlog categories;
-`SPDLOG_LEVEL='warn,text.layout=debug,xudu.links=trace'` enables selected diagnostics on stderr.
+`SPDLOG_LEVEL='warn,text.layout=debug,xuzz.links=trace'` enables selected diagnostics on stderr.
 
 ## Installing and project layout
 

@@ -296,13 +296,26 @@ int medianLinePitch(const fs::path &path) {
     const auto i = (static_cast<std::size_t>(y) * width + x) * 3U;
     return (rgb[i] * 299 + rgb[i + 1] * 587 + rgb[i + 2] * 114) / 1000;
   };
-  // A row carries ink when a dark pixel sits between paper on both sides,
-  // which is what countInkOnPaper() counts, row by row.
-  const auto inked = [&](const int y) {
-    for (int x = 3; x < width - 3; ++x) {
-      if (luma(x, y) < 160 && luma(x - 3, y) >= 230 && luma(x + 3, y) >= 230) {
-        return true;
+  const auto onPaper = [&](const int x, const int y) {
+    constexpr int lineNeighbourhoodPx = 24;
+    for (int offset = 1; offset <= lineNeighbourhoodPx; ++offset)
+      for (const int row : {y - offset, y + offset}) {
+        if (row < 0 || row >= height) continue;
+        const auto at = (static_cast<std::size_t>(row) * width + x) * 3U;
+        if (rgb[at] > 235 && rgb[at + 1] > 235 && rgb[at + 2] > 235)
+          return true;
       }
+    return false;
+  };
+  // Highlighted paper is not white. Require nearby paper ownership and
+  // local contrast instead; several ink pixels exclude a lone thin caret.
+  const auto inked = [&](const int y) {
+    int inkPixels = 0;
+    for (int x = 3; x < width - 3; ++x) {
+      const auto ink = luma(x, y);
+      if (ink < 160 && luma(x - 3, y) - ink >= 80 &&
+          luma(x + 3, y) - ink >= 80 && onPaper(x, y) && ++inkPixels >= 3)
+        return true;
     }
     return false;
   };
@@ -335,9 +348,9 @@ void exportToPng(const fs::path &ppmPath, const fs::path &pngPath) {
 
 fs::path findXuduBinary() {
   std::vector<fs::path> candidates = {
-      fs::current_path() / "build" / "xudu",
-      fs::current_path() / "xudu",
-      fs::current_path() / ".." / "build" / "xudu",
+      fs::current_path() / "build" / "xuzz",
+      fs::current_path() / "xuzz",
+      fs::current_path() / ".." / "build" / "xuzz",
   };
   for (const auto &cand : candidates) {
     if (fs::exists(cand) && (fs::status(cand).permissions() &
@@ -345,7 +358,7 @@ fs::path findXuduBinary() {
       return cand;
     }
   }
-  return fs::current_path() / "build" / "xudu";
+  return fs::current_path() / "build" / "xuzz";
 }
 
 std::string activeBackend() {
@@ -881,7 +894,7 @@ TEST(E2EBinaryOrchestrationTest, untitledXanadocIsKeptOnlyWhenWrittenTo) {
       fs::current_path() / "build" / "integration_workspace_untitled";
   fs::remove_all(testRoot);
   fs::create_directories(testRoot);
-  const auto xanadocs = testRoot / "data" / "xudu" / "xanadocs";
+  const auto xanadocs = testRoot / "data" / "xuzz" / "xanadocs";
   const auto run      = [&](const std::string &script) {
     return executeProcess("XDG_CONFIG_HOME=" + (testRoot / "config").string() +
                           " XDG_DATA_HOME=" + (testRoot / "data").string() +
@@ -960,7 +973,7 @@ TEST(E2EBinaryOrchestrationTest, theKeyboardMovesTheCaretAndEdits) {
 
   std::vector<fs::path> untitled;
   for (const auto &entry :
-       fs::directory_iterator(testRoot / "data" / "xudu" / "xanadocs")) {
+       fs::directory_iterator(testRoot / "data" / "xuzz" / "xanadocs")) {
     if (entry.path().filename().string().starts_with("untitled-")) {
       untitled.push_back(entry.path());
     }
@@ -1299,17 +1312,18 @@ TEST(E2EBinaryOrchestrationTest, aDraggedSelectionLandsWhereItIsDropped) {
     fs::create_directories(testRoot);
     return executeProcess(
         "XDG_CONFIG_HOME=" + (testRoot / "config").string() +
-        " XDG_DATA_HOME=" + (testRoot / "data").string() + " timeout 120 " +
+        " XDG_DATA_HOME=" + (testRoot / "data").string() +
+        " XDG_CACHE_HOME=" + (testRoot / "cache").string() + " timeout 120 " +
         xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
         " --backend " + activeBackend() +
         " --profile --chord Ctrl+N --type 'alpha beta gamma' --chord Ctrl+Left"
         " --chord Ctrl+Left --chord Ctrl+Shift+Right" +
-        (drop.empty() ? " --capture " + capture.string()
+        (drop.empty() ? " --capture " + capture.string() + " --dump-a11y"
                       : " --drag " + start + ":" + drop));
   };
   const auto untitledOps = [&] {
     for (const auto &entry :
-         fs::directory_iterator(testRoot / "data" / "xudu" / "xanadocs")) {
+         fs::directory_iterator(testRoot / "data" / "xuzz" / "xanadocs")) {
       if (entry.path().filename().string().starts_with("untitled-")) {
         return executeProcess(dumpBin.string() +
                               " --section=ops --permascroll=" +
@@ -1324,7 +1338,10 @@ TEST(E2EBinaryOrchestrationTest, aDraggedSelectionLandsWhereItIsDropped) {
   const auto calibration = dragTo("");
   ASSERT_EQ(calibration.exitCode, 0) << calibration.output;
   const auto selected = selectionBounds(capture);
-  ASSERT_TRUE(selected);
+  ASSERT_TRUE(selected) << "No selection pixels; retained capture at "
+                        << capture
+                        << "\nCalibration accessibility and diagnostics:\n"
+                        << calibration.output;
   const auto [left, top, right, bottom] = *selected;
   const auto y                          = (top + bottom) / 2;
   start = std::to_string((left + right) / 2) + "," + std::to_string(y);
@@ -1995,7 +2012,7 @@ TEST(E2EBinaryOrchestrationTest,
   // unread background and sworphs forward into the foreground row only
   // once its link to the thesis comes into view.
   std::string cmd =
-      "SPDLOG_LEVEL='off,xudu.links=debug' " + xuduBin.string() +
+      "SPDLOG_LEVEL='off,xuzz.links=debug' " + xuduBin.string() +
       permascrollFlag(testRoot / "permascroll") + " --backend " +
       activeBackend() + " --profile --whole-pages --fov 15 --coarse-below 0" +
       " --version-id " + vLinked.str() + " --background " + vCorpus.str() +
@@ -2195,7 +2212,7 @@ TEST(E2EBinaryOrchestrationTest,
   const auto reader  = permascrollAt(readerPerma);
   bool checkedSource = false;
   for (const auto &entry :
-       fs::directory_iterator(root / "data/xudu/xanadocs")) {
+       fs::directory_iterator(root / "data/xuzz/xanadocs")) {
     Store loaded(reader);
     loaded.load(entry.path().string());
     if (entry.path().filename().string().starts_with("publication-")) {
@@ -2242,7 +2259,7 @@ TEST(E2EBinaryOrchestrationTest,
               testing::Not(testing::HasSubstr("Quotation source unavailable")));
   // A completed source return belongs to private reader activity, never Alice's
   // spool.
-  const auto activityPath = root / "data/xudu/activity";
+  const auto activityPath = root / "data/xuzz/activity";
   ASSERT_TRUE(fs::exists(activityPath)) << returned.output;
   Store activity(reader);
   activity.load(activityPath.string());
@@ -2259,7 +2276,7 @@ TEST(E2EBinaryOrchestrationTest,
   // The commentary and the private pouch must each own what they need offline.
   fs::remove_all(seeds);
   for (const auto &entry :
-       fs::directory_iterator(root / "data/xudu/xanadocs")) {
+       fs::directory_iterator(root / "data/xuzz/xanadocs")) {
     if (entry.path().filename().string().starts_with("publication-"))
       fs::remove_all(entry.path());
   }
@@ -2922,7 +2939,7 @@ TEST(E2EBinaryOrchestrationTest, ForeignRunDragCreatesAReaderOwnedStore) {
       head      = xanadu::setSetting(
           ui, head, xanadu::settings::kTetherReducedMotion, reduced);
       ui.setCurrentVersions({head});
-      ui.save((dir / "config/xudu/system/ui").string());
+      ui.save((dir / "config/xuzz/system/ui").string());
     }
     const auto result = executeProcess(
         "XDG_CONFIG_HOME=" + (dir / "config").string() +
@@ -2954,7 +2971,7 @@ TEST(E2EBinaryOrchestrationTest, ForeignRunDragCreatesAReaderOwnedStore) {
   bool foundReaderStore = false;
   auto reader           = permascrollAt(root / "spawn/permascroll");
   for (const auto &entry :
-       fs::directory_iterator(root / "spawn/data/xudu/xanadocs")) {
+       fs::directory_iterator(root / "spawn/data/xuzz/xanadocs")) {
     Store store(reader);
     store.load(entry.path().string());
     if (entry.path().filename().string().starts_with("publication-")) {
@@ -2982,9 +2999,7 @@ TEST(E2EBinaryOrchestrationTest, ForeignRunDragCreatesAReaderOwnedStore) {
                        (root / "pouch-dropped.ppm").string());
   ASSERT_EQ(collected.exitCode, 0) << collected.output;
   Store pouch(permascrollAt(root / "pouch/permascroll"));
-  const auto pouchConfig = fs::exists(root / "pouch/config/xuzz/system/pouches")
-                               ? root / "pouch/config/xuzz/system/pouches"
-                               : root / "pouch/config/xudu/system/pouches";
+  const auto pouchConfig = root / "pouch/config/xuzz/system/pouches";
   pouch.load(pouchConfig.string());
   xanadu::PouchManager manager(pouch);
   manager.loadManifest();
@@ -3051,7 +3066,7 @@ TEST(E2EBinaryOrchestrationTest, GroupedLinkKeepsIndependentEndsetCursors) {
       fs::current_path() / "build/integration_workspace_nurbs_link";
   fs::remove_all(root);
   fs::create_directories(root);
-  const auto perma = permascrollAt(root / "data/xudu/permascroll/default");
+  const auto perma = permascrollAt(root / "data/xuzz/permascroll/default");
   Store left(perma), right(perma);
   const auto a = left.insert(
       {}, 0, "ALPHA left member\nUnlinked gap\nOMEGA left member\n");
@@ -3083,7 +3098,7 @@ TEST(E2EBinaryOrchestrationTest, GroupedLinkKeepsIndependentEndsetCursors) {
         xanadu::setSetting(ui, ui.primaryCurrentVersion(),
                            xanadu::settings::kUiScale, std::stod(scale));
     ui.setCurrentVersions({head});
-    ui.save((root / "config/xudu/system/ui").string());
+    ui.save((root / "config/xuzz/system/ui").string());
   }
   const auto beforeLeft = left.opCount(), beforeRight = right.opCount();
   const auto capture = [&](std::string_view name) {
@@ -3092,7 +3107,7 @@ TEST(E2EBinaryOrchestrationTest, GroupedLinkKeepsIndependentEndsetCursors) {
   const auto result = executeProcess(
       "XDG_DATA_HOME=" + (root / "data").string() + " XDG_CONFIG_HOME=" +
       (root / "config").string() + " timeout 120 " + binary.string() +
-      permascrollFlag(root / "data/xudu/permascroll/default") + " --backend " +
+      permascrollFlag(root / "data/xuzz/permascroll/default") + " --backend " +
       activeBackend() + " --strict-diagnostics --profile " +
       (root / "left").string() +
       " --chord Ctrl+Alt+1 --chord Ctrl+O --chord Tab --type '" +

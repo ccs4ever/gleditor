@@ -66,7 +66,7 @@ TEST(KeyboardSliceTest, aSliceIsBuiltNamedAndLinkedFromTheKeyboard) {
 
   std::vector<fs::path> untitled;
   for (const auto &entry :
-       fs::directory_iterator(root / "data" / "xudu" / "xanadocs")) {
+       fs::directory_iterator(root / "data" / "xuzz" / "xanadocs")) {
     if (entry.path().filename().string().starts_with("untitled-")) {
       untitled.push_back(entry.path());
     }
@@ -111,7 +111,7 @@ TEST(KeyboardSliceTest, aRelaunchedSessionCarriesOnWhereItStopped) {
   const auto untitledStores = [&] {
     std::vector<fs::path> found;
     for (const auto &entry :
-         fs::directory_iterator(root / "data" / "xudu" / "xanadocs")) {
+         fs::directory_iterator(root / "data" / "xuzz" / "xanadocs")) {
       if (entry.path().filename().string().starts_with("untitled-")) {
         found.push_back(entry.path());
       }
@@ -120,9 +120,7 @@ TEST(KeyboardSliceTest, aRelaunchedSessionCarriesOnWhereItStopped) {
   };
   const auto dumpOf = [&](const fs::path &store) {
     fs::path permascroll;
-    const auto permaDir = fs::exists(root / "data" / "xuzz" / "permascroll")
-                              ? root / "data" / "xuzz" / "permascroll"
-                              : root / "data" / "xudu" / "permascroll";
+    const auto permaDir = root / "data" / "xuzz" / "permascroll";
     for (const auto &entry : fs::directory_iterator(permaDir)) {
       permascroll = entry.path();
     }
@@ -145,7 +143,7 @@ TEST(KeyboardSliceTest, aRelaunchedSessionCarriesOnWhereItStopped) {
                         "kind=insert [^\n]* at=6 [^\n]*text=\"Z\""))
       << text;
 
-  fs::remove_all(root / "data" / "xudu" / "xanadocs");
+  fs::remove_all(root / "data" / "xuzz" / "xanadocs");
   const auto sliced = xuzz("--chord Ctrl+Alt+N --chord N");
   ASSERT_EQ(sliced.exitCode, 0) << sliced.output;
   const auto renamed = xuzz("--chord E --type renamed --chord Return");

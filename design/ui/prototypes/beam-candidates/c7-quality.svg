@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560" role="img" aria-labelledby="title desc">
+  <title id="title">C7 NURBS quality budget, design-only geometry inset</title>
+  <desc id="desc">A rational quarter-circle with shared tangent normals is shown at two illustrative projected scales. This is an idealized geometry drawing, not a native renderer measurement or an application route proposal. Existing shared-normal sampling should be preserved while projected-error refinement is proposed.</desc>
+  <rect width="1200" height="560" fill="#0b111b"/>
+  <g font-family="sans-serif" fill="#d5e1ea">
+    <text x="32" y="38" font-size="26" font-weight="600">C7 · Bounded quality as curves get closer</text>
+    <text x="32" y="67" font-size="16" fill="#a3b6c8">DESIGN-ONLY GEOMETRY INSET · not an app render, measured error, default route or actual scale screenshot</text>
+    <g transform="translate(32 104)">
+      <rect width="546" height="338" rx="10" fill="#182332" stroke="#34475a"/>
+      <text x="20" y="32" font-size="18">Illustrative scale 1</text>
+      <path d="M90 294L90 74L310 74" fill="none" stroke="#536679" stroke-width="1.5" stroke-dasharray="5 4"/>
+      <path d="M90 294 A220 220 0 0 1 310 74" fill="none" stroke="#224b5d" stroke-width="10"/>
+      <path d="M90 294 A220 220 0 0 1 310 74" fill="none" stroke="#4bb5cd" stroke-width="7"/>
+      <path d="M90 294 A220 220 0 0 1 310 74" fill="none" stroke="#a2d9df" stroke-width="1.4"/>
+      <g fill="#102f40" stroke="#a7e3e8" stroke-width="1.5">
+        <circle cx="90" cy="294" r="4"/>
+        <circle cx="106.7" cy="209.8" r="4"/>
+        <circle cx="154.4" cy="138.4" r="4"/>
+        <circle cx="225.8" cy="90.7" r="4"/>
+        <circle cx="310" cy="74" r="4"/>
+      </g>
+      <path d="M78 294H102 M95.6 205.2L117.8 214.4 M145.9 129.9L162.9 146.9 M221.2 79.6L230.4 101.8 M310 62V86" fill="none" stroke="#88aabf" stroke-width="1"/>
+      <text x="342" y="126" font-size="15" fill="#a7bacb">Analytic tangent</text>
+      <text x="342" y="150" font-size="15" fill="#a7bacb">Shared join normal</text>
+      <text x="342" y="174" font-size="15" fill="#a7bacb">Quiet core / edge</text>
+      <text x="20" y="320" font-size="14" fill="#91a9bd">Shown sample dots are explanatory, not visible UI controls.</text>
+    </g>
+    <g transform="translate(622 104)">
+      <rect width="546" height="338" rx="10" fill="#182332" stroke="#34475a"/>
+      <text x="20" y="32" font-size="18">Illustrative closer view · refined samples</text>
+      <path d="M70 305 A235 235 0 0 1 305 70" fill="none" stroke="#224b5d" stroke-width="12"/>
+      <path d="M70 305 A235 235 0 0 1 305 70" fill="none" stroke="#4bb5cd" stroke-width="8"/>
+      <path d="M70 305 A235 235 0 0 1 305 70" fill="none" stroke="#a2d9df" stroke-width="1.6"/>
+      <g fill="#102f40" stroke="#a7e3e8" stroke-width="1.5">
+        <circle cx="70" cy="305" r="4"/>
+        <circle cx="74.5" cy="259.2" r="4"/>
+        <circle cx="87.9" cy="215.1" r="4"/>
+        <circle cx="109.6" cy="174.4" r="4"/>
+        <circle cx="138.8" cy="138.8" r="4"/>
+        <circle cx="174.4" cy="109.6" r="4"/>
+        <circle cx="215.1" cy="87.9" r="4"/>
+        <circle cx="259.2" cy="74.5" r="4"/>
+        <circle cx="305" cy="70" r="4"/>
+      </g>
+      <text x="335" y="138" font-size="15" fill="#a7bacb">Projected-error target</text>
+      <text x="335" y="162" font-size="15" fill="#a7bacb">Fixed storage bound</text>
+      <text x="335" y="186" font-size="15" fill="#a7bacb">Stable frame budget</text>
+      <text x="20" y="320" font-size="14" fill="#91a9bd">Keep selected visible branches; avoid shimmer at a budget step.</text>
+    </g>
+    <text x="32" y="479" font-size="16">Example rational quadratic arc: middle weight √½. This demonstrates a genuine rational capability.</text>
+    <text x="32" y="508" font-size="15" fill="#a3b6c8">Actual ordinary link routes should still default to unit weights. Shared normals already exist; adaptive refinement is a proposal.</text>
+    <text x="32" y="537" font-size="14" fill="#87a0b8">Acceptance needs native projected error, width envelope checks, frame cost and GL / GLES / Vulkan captures at both UI scales.</text>
+  </g>
+</svg>

@@ -112,9 +112,15 @@ void GLApi::load() {
 
   GLEDITOR_RESOLVE(Enable);
   GLEDITOR_RESOLVE(DepthFunc);
+  GLEDITOR_RESOLVE(DepthMask);
   GLEDITOR_RESOLVE(Disable);
   GLEDITOR_RESOLVE(BlendFunc);
   GLEDITOR_RESOLVE(Viewport);
+  GLEDITOR_RESOLVE(Scissor);
+  // GL 3.3 uses doubles; GLES 3.0 uses floats. Neither requires the other's
+  // API.
+  resolveOptional(DepthRangef, "glDepthRangef");
+  resolveOptional(DepthRange, "glDepthRange");
   GLEDITOR_RESOLVE(Clear);
   GLEDITOR_RESOLVE(ClearColor);
   GLEDITOR_RESOLVE(FrontFace);

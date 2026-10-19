@@ -147,9 +147,9 @@ std::size_t changedPixels(const fs::path &before, const fs::path &after) {
 
 fs::path findXuduBinary() {
   const std::vector<fs::path> candidates = {
-      fs::current_path() / "build" / "xudu",
-      fs::current_path() / "xudu",
-      fs::current_path() / ".." / "build" / "xudu",
+      fs::current_path() / "build" / "xuzz",
+      fs::current_path() / "xuzz",
+      fs::current_path() / ".." / "build" / "xuzz",
   };
   for (const auto &cand : candidates) {
     if (fs::exists(cand) && (fs::status(cand).permissions() &
@@ -157,7 +157,7 @@ fs::path findXuduBinary() {
       return cand;
     }
   }
-  return fs::current_path() / "build" / "xudu";
+  return fs::current_path() / "build" / "xuzz";
 }
 
 std::string activeBackend() {
@@ -191,7 +191,6 @@ protected:
 
 TEST_F(AnimationTransclusionTest,
        VideoCardScreenshotChangesAfterClickingItsPlayButton) {
-  GTEST_SKIP() << "Skipped for now";
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
 
@@ -199,18 +198,21 @@ TEST_F(AnimationTransclusionTest,
   const auto after  = screenshotDir / "video_playing.ppm";
   const auto store  = testRoot / "video_card_store";
 
-  // --video makes a screen-space card at (30,80). The play control's centre
-  // is (60,105) in bottom-left canvas coordinates; automation input is
-  // top-left, hence 600 - 105 = 495 for the default 800x600 test surface.
+  // A settled capture waits until a finite video ends; observe Playing first
+  // and capture immediately without waiting for playback to finish.
   const std::string cmd =
       xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
       " --backend " + activeBackend() +
       " --profile --no-present --strict-diagnostics --video " +
       "tests/samples/sample_video_seekable.mp4 --capture " + before.string() +
-      " --click 60,495 --capture " + after.string() + " " + store.string();
+      " --click-label Play --await-a11y 3000,sample_video_seekable.mp4=Playing "
+      "--capture-live 0," +
+      after.string() + " " + store.string();
   const auto result = executeProcess(cmd);
   ASSERT_EQ(result.exitCode, 0)
       << "video-card capture failed: " << result.output;
+  ASSERT_NE(result.output.find("value \"Playing\": ready"), std::string::npos)
+      << result.output;
   ASSERT_TRUE(fs::exists(before)) << "stopped video-card screenshot missing";
   ASSERT_TRUE(fs::exists(after)) << "playing video-card screenshot missing";
 

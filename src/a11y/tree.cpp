@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <stdexcept>
 
 namespace gleditor::a11y {
 
@@ -147,7 +148,7 @@ std::vector<std::size_t> runBreaks(const std::string_view text) {
     afterSeparator = 0;
   }
 
-  if (breaks.back() != text.size()) {
+  if (breaks.back() != text.size() || text.ends_with('\n')) {
     breaks.push_back(text.size());
   }
   // Empty text is one empty run: a document with nothing in it still has a
@@ -175,6 +176,43 @@ std::size_t characterIndexOf(const std::string_view text,
     index++;
   }
   return index;
+}
+
+void appendTextRuns(Builder &into, Node &owner,
+                    const std::uint64_t firstRunLocal,
+                    const std::string_view text,
+                    const std::optional<std::size_t> caretByte,
+                    const std::size_t maximumRuns) {
+  // The supplied text may live in owner.value, which adding children moves.
+  const std::string exposed{text};
+  const auto breaks = runBreaks(exposed);
+  const auto runs   = breaks.size() - 1;
+  if (runs > maximumRuns)
+    throw std::length_error("Accessibility text run IDs exhausted");
+  for (std::size_t run = 0; run < runs; ++run)
+    owner.children.push_back(into.id(firstRunLocal + run));
+  if (caretByte) {
+    const auto byte = std::min(*caretByte, exposed.size());
+    for (std::size_t run = 0; run < runs; ++run) {
+      if (byte < breaks[run + 1] || run + 1 == runs) {
+        const auto piece = std::string_view{exposed}.substr(
+            breaks[run], breaks[run + 1] - breaks[run]);
+        const TextPoint point{.node = into.id(firstRunLocal + run),
+                              .character =
+                                  characterIndexOf(piece, byte - breaks[run])};
+        owner.selection = TextSelection{.anchor = point, .focus = point};
+        break;
+      }
+    }
+  }
+  for (std::size_t run = 0; run < runs; ++run) {
+    const auto piece = std::string_view{exposed}.substr(
+        breaks[run], breaks[run + 1] - breaks[run]);
+    auto &node            = into.add(firstRunLocal + run, Role::TextRun);
+    node.value            = piece;
+    node.characterLengths = characterLengths(piece);
+    node.wordStarts       = wordStarts(piece);
+  }
 }
 
 } // namespace gleditor::a11y

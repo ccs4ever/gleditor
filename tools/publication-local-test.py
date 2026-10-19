@@ -218,7 +218,7 @@ def validate_reader(binary, root, author_env):
     assert "Open Document or System Xanadoc" in opened
     assert "complete store" in opened, "Open did not restore the publication"
     assert "Could not open publication" not in opened
-    copies = list((root / "reader-data/xudu/xanadocs").glob("publication-*"))
+    copies = list((root / "reader-data/xuzz/xanadocs").glob("publication-*"))
     assert len(copies) == 1, "Reader installation is missing or duplicated"
     copy = copies[0]
     initial_ops = (copy / "ops.nodes").read_bytes()
@@ -257,7 +257,7 @@ def validate_reader(binary, root, author_env):
     # completed-download picker across restart. Live transfer is checked in
     # the separate namespace runner, not claimed by this seeded UI fixture.
     pub = decode(manifest.read_bytes())
-    incoming = root / "reader-data/xudu/publication-inbox" / pub[b"publisher"].hex()
+    incoming = root / "reader-data/xuzz/publication-inbox" / pub[b"publisher"].hex()
     shutil.copytree(copy, incoming / "store")
     shutil.copy2(manifest, incoming / "publication.xanadoc")
     with (root / "download-reopen.log").open("w") as log:

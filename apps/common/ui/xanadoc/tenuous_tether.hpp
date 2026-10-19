@@ -9,8 +9,8 @@
  * (clamped quadratic NURBS arc with alpha ~ 0.25), preventing visual
  * disorientation and maintaining Nelsonian deep provenance.
  */
-#ifndef XUDU_TENUOUS_TETHER_HPP
-#define XUDU_TENUOUS_TETHER_HPP
+#ifndef XANADU_TENUOUS_TETHER_HPP
+#define XANADU_TENUOUS_TETHER_HPP
 
 #include <cstddef>
 #include <cstdint>
@@ -143,4 +143,4 @@ private:
 
 } // namespace xanadu
 
-#endif // XUDU_TENUOUS_TETHER_HPP
+#endif // XANADU_TENUOUS_TETHER_HPP

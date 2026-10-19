@@ -1,9 +1,9 @@
 /**
  * @file views.hpp
- * @brief Document presentation and views coordinator for Xudu.
+ * @brief Document presentation and views coordinator for Xuzz.
  */
-#ifndef XUDU_VIEWS_HPP
-#define XUDU_VIEWS_HPP
+#ifndef XANADU_VIEWS_HPP
+#define XANADU_VIEWS_HPP
 
 #include <algorithm>
 #include <cstdint>
@@ -69,6 +69,9 @@ public:
   }
 
   void setReadableTextPx(const float px) noexcept { readableTextPx_ = px; }
+  [[nodiscard]] float readableTextPx() const noexcept {
+    return readableTextPx_;
+  }
   void frameForReading(const gleditor::FrameContext &ctx);
   void placeCameraWhenReady(std::function<bool()> place) {
     pendingCamera_ = std::move(place);
@@ -195,6 +198,8 @@ public:
   std::function<void()> packageVisibilityChanged;
   std::function<void()> sourceLeaving;
   std::function<void(const OccurrenceSite &)> sourceEntered;
+  std::function<void(RenderState &, std::size_t, const CellSite &)>
+      cellSourceEntry;
   std::optional<Publication> packageFilterSource;
   std::map<std::string, Publication> packageQuerySources;
   void publicationUpdates(const std::string &subscription = {},
@@ -218,6 +223,8 @@ public:
 
   void openDocumentPalette();
   void openDocumentFromPath(const std::string &chosen);
+
+  std::function<void(RenderState &, std::uint32_t)> documentActivated;
 
   void selectDoc(std::uint32_t index);
   void nextDoc();
@@ -276,4 +283,4 @@ private:
 
 } // namespace xanadu
 
-#endif // XUDU_VIEWS_HPP
+#endif // XANADU_VIEWS_HPP

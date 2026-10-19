@@ -561,9 +561,11 @@ private:
     scene_.layout.boxes.back().defaultAction = w.defaultAction;
     if (parent && button) scene_.layout.boxes.back().focusGroup = parent;
 
-    if (const auto *label = std::get_if<Label>(&w.model))
+    if (const auto *label = std::get_if<Label>(&w.model)) {
       visual(w, geometry, label->text, label->purpose, a11y::Role::Label);
-    else if (buttonModel) {
+      if (!label->accessibleLabel.empty())
+        scene_.visuals.back().accessibleLabel = label->accessibleLabel;
+    } else if (buttonModel) {
       visual(w, geometry, buttonModel->text, TextPurpose::Label,
              a11y::Role::Button, true, buttonModel->action);
       if (!buttonModel->accessibleLabel.empty())

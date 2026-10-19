@@ -1,5 +1,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <map>
+#include <set>
 
 #include <algorithm>
 #include <array>
@@ -8,8 +10,13 @@
 #include <string>
 #include <vector>
 
+#include <gleditor/caret.hpp>
+#include <gleditor/doc.hpp>
 #include <gleditor/render_state.hpp>
+#include <gleditor/renderer.hpp>
+#include <gleditor/state.hpp>
 #include <gleditor/text/diagnostics.hpp>
+#include <gleditor/text_source.hpp>
 
 #include "../lib/mocks/device.hpp"
 #include "common/ui/link_panel_presentation.hpp"
@@ -43,8 +50,117 @@ std::vector<xanadu::PanelLine> contextLines() {
            .tone = xanadu::PanelLine::Tone::Muted}};
 }
 
-std::array<ui::WidgetId, 10> actionIds() {
-  return {1024, 1025, 1026, 1027, 1028, 1029, 1030, 1031, 1032, 1033};
+std::array<ui::WidgetId, 12> actionIds() {
+  return {1024, 1025, 1026, 1027, 1028, 1029, 1030, 1031, 1032, 1033, 1034, 1035};
+}
+
+TEST(LinkPanelPresentationTest, BothChosenLineBandsStayClearOfContextChrome) {
+  const auto lines   = contextLines();
+  const auto buttons = xanadu::linkPanelButtons({}, false);
+  const auto ids     = actionIds();
+  const ui::UiMetrics metrics{.screenWidth  = 1800,
+                              .screenHeight = 1050,
+                              .chrome       = {.top = 44, .bottom = 18}};
+  const ui::Rect band{0, 485, 1800, 65};
+  gleditor::text::ShapingCache measurements;
+  const auto leaf = common_ui::linkPanelPresentation(
+      lines, buttons, ids, metrics, ui::Theme{}, xanadu::LinkPanelConfig{},
+      std::nullopt, measurements, band);
+  contained(leaf.bounds, metrics.pixelSafeArea());
+  EXPECT_TRUE(leaf.bounds.bottom + leaf.bounds.height <= band.bottom ||
+              leaf.bounds.bottom >= band.bottom + band.height);
+}
+
+TEST(LinkPanelPresentationTest,
+     SeparateTextExclusionsLeaveBlankCanvasAvailable) {
+  const auto lines   = contextLines();
+  const auto buttons = xanadu::linkPanelButtons({}, false);
+  const auto ids     = actionIds();
+  const ui::UiMetrics metrics{.screenWidth  = 1800,
+                              .screenHeight = 1050,
+                              .chrome       = {.top = 44, .bottom = 18}};
+  const std::array text{ui::Rect{0, 0, 890, 1050},
+                        ui::Rect{909, 350, 890, 210}};
+  gleditor::text::ShapingCache measurements;
+  const auto leaf = common_ui::linkPanelPresentation(
+      lines, buttons, ids, metrics, ui::Theme{}, xanadu::LinkPanelConfig{},
+      std::nullopt, measurements, std::nullopt, text);
+  contained(leaf.bounds, metrics.pixelSafeArea());
+  EXPECT_GE(leaf.bounds.left, 890);
+  EXPECT_GE(leaf.bounds.bottom, 560);
+}
+
+TEST(LinkPanelPresentationTest, NarrowFreeAreaKeepsFullActionCaptions) {
+  const auto lines   = contextLines();
+  const auto buttons = xanadu::linkPanelButtons({}, false);
+  const auto ids     = actionIds();
+  const ui::UiMetrics metrics{.screenWidth  = 1440,
+                              .screenHeight = 1000,
+                              .chrome       = {.top = 44, .bottom = 18}};
+  const ui::Rect reading{0, 0, 1040, 1000};
+  gleditor::text::ShapingCache cache;
+  const auto leaf = common_ui::linkPanelPresentation(
+      lines, buttons, ids, metrics, ui::Theme{}, {}, {}, cache, reading);
+  ASSERT_TRUE(leaf.safePlacement);
+  ASSERT_TRUE(leaf.completeContent);
+  EXPECT_GE(leaf.bounds.left, reading.left + reading.width);
+  ui::ScreenOverlay panel(leaf.model);
+  panel.setBounds(leaf.bounds);
+  const auto scene = panel.prepare(metrics, leaf.theme);
+  ASSERT_NE(scene, nullptr);
+  for (const auto id : ids) {
+    ASSERT_NE(scene->find(id), nullptr);
+    EXPECT_FALSE(scene->find(id)->fitted.truncated) << scene->find(id)->text;
+    contained(scene->layout.find(id)->rect, leaf.bounds);
+  }
+}
+
+TEST(LinkPanelPresentationTest, CaptionPaddingFitsConstrainedActionColumns) {
+  const auto buttons = xanadu::linkPanelButtons({}, false);
+  const auto ids     = actionIds();
+  gleditor::text::ShapingCache cache;
+  for (const auto width : {320, 360, 400, 480}) {
+    for (const auto height : {270, 320, 400}) {
+      SCOPED_TRACE(testing::Message() << width << "x" << height);
+      const ui::UiMetrics metrics{.screenWidth = width, .screenHeight = height};
+      xanadu::LinkPanelConfig config;
+      config.font           = "Sans 10";
+      config.maxWidthShare  = 1;
+      config.maxHeightShare = 1;
+      const auto leaf       = common_ui::linkPanelPresentation(
+          contextLines(), buttons, ids, metrics, ui::Theme{}, config, {},
+          cache);
+      if (!leaf.completeContent) continue;
+      ui::ScreenOverlay panel(leaf.model);
+      panel.setBounds(leaf.bounds);
+      const auto scene = panel.prepare(metrics, leaf.theme);
+      ASSERT_NE(scene, nullptr);
+      for (const auto id : ids) {
+        ASSERT_NE(scene->find(id), nullptr);
+        EXPECT_FALSE(scene->find(id)->fitted.truncated)
+            << scene->find(id)->text;
+      }
+    }
+  }
+}
+
+TEST(LinkPanelPresentationTest, MoreBlankHeightDoesNotInflateLabelSpacing) {
+  const auto lines   = contextLines();
+  const auto buttons = xanadu::linkPanelButtons({}, false);
+  const auto ids     = actionIds();
+  ui::UiMetrics metrics{.screenWidth = 1280, .screenHeight = 800};
+  gleditor::text::ShapingCache measurements;
+  const auto normal = common_ui::linkPanelPresentation(
+      lines, buttons, ids, metrics, ui::Theme{}, xanadu::LinkPanelConfig{},
+      std::nullopt, measurements);
+  metrics.screenHeight = 1440;
+  const auto taller    = common_ui::linkPanelPresentation(
+      lines, buttons, ids, metrics, ui::Theme{}, xanadu::LinkPanelConfig{},
+      std::nullopt, measurements);
+  EXPECT_FLOAT_EQ(normal.bounds.height, taller.bounds.height);
+  for (std::size_t index = 0; index < lines.size(); ++index)
+    EXPECT_FLOAT_EQ(normal.model.children[index].preferred.height,
+                    taller.model.children[index].preferred.height);
 }
 
 TEST(LinkPanelPresentationTest,
@@ -134,6 +250,136 @@ TEST(LinkPanelPresentationTest,
                      gleditor::a11y::bit(gleditor::a11y::Action::Click)) != 0,
                     buttons[index].enabled);
         }
+      }
+    }
+  }
+}
+
+TEST(LinkPanelPresentationTest,
+     ExactRangePrefixesSurviveLongContextAndSmallLineLimit) {
+  auto lines             = contextLines();
+  const std::string left = "Left 2/7 · place 1/4 · bytes\n2302771–2303273";
+  const std::string right =
+      "Right 3/9 · place 5/5 · bytes\n4294967200–4294967295";
+  lines[1].text           = left + "\n" + std::string(250, 'L');
+  lines[1].requiredBytes  = left.size();
+  lines[2].text           = right + "\n" + std::string(250, 'R');
+  lines[2].requiredBytes  = right.size();
+  lines[3].compactContext = "outside linked range";
+  lines[4].compactContext = "origin saved";
+  const auto buttons      = xanadu::linkPanelButtons({}, false);
+  const auto ids          = actionIds();
+  gleditor::text::ShapingCache measurements;
+  xanadu::LinkPanelConfig config;
+  config.maxLines = 1;
+  for (const auto size :
+       {ui::Size{640, 480}, ui::Size{1280, 800}, ui::Size{1800, 1050}}) {
+    for (const auto scale : {1.F, 1.5F, 2.F}) {
+      SCOPED_TRACE(testing::Message() << size.width << " scale " << scale);
+      const ui::UiMetrics metrics{.fontScale    = scale,
+                                  .screenWidth  = static_cast<int>(size.width),
+                                  .screenHeight = static_cast<int>(size.height),
+                                  .chrome       = {.top = 44, .bottom = 18}};
+      const std::optional<ui::Rect> reading =
+          size.width == 1280 && scale == 2
+              ? std::optional<ui::Rect>{{0, 450, 1280, 350}}
+              : std::nullopt;
+      const auto leaf = common_ui::linkPanelPresentation(
+          lines, buttons, ids, metrics, ui::Theme{}, config, std::nullopt,
+          measurements, reading);
+      if (!leaf.completeContent) {
+        // The overlay reserves a dock before drawing an incomplete floating
+        // layout. Every range and command must remain readable through paging.
+        auto dockMetrics        = metrics;
+        dockMetrics.marginShare = 0;
+        std::set<ui::WidgetId> reached;
+        std::set<std::string> ranges;
+        std::size_t count = 1;
+        for (std::size_t page = 0; page < count; ++page) {
+          const auto dock = common_ui::linkPanelDockPresentation(
+              lines, buttons, ids, 2000, false, dockMetrics, ui::Theme{},
+              config, measurements,
+              common_ui::LinkPanelPageRequest{2001, 2002, page});
+          ASSERT_TRUE(dock.completeContent);
+          ASSERT_TRUE(dock.pages);
+          count = dock.pages->count;
+          ASSERT_TRUE(dock.reservedBottom);
+          EXPECT_EQ(*dock.reservedBottom,
+                    dock.bounds.bottom + dock.bounds.height);
+          ui::ScreenOverlay panel(dock.model);
+          panel.setBounds(dock.bounds);
+          const auto scene = panel.prepare(dockMetrics, dock.theme);
+          ASSERT_NE(scene, nullptr);
+          contained(dock.bounds, dockMetrics.pixelSafeArea());
+          for (const auto id : {4U, 5U, 2000U, 2001U, 2002U}) {
+            ASSERT_NE(scene->find(id), nullptr);
+            EXPECT_FALSE(scene->find(id)->fitted.truncated);
+          }
+          EXPECT_NE(scene->find(4)->text.find("2/7"), std::string::npos);
+          EXPECT_NE(scene->find(5)->text.find("3/9"), std::string::npos);
+          for (const auto &action : dock.actions) {
+            reached.insert(action.id);
+            const auto *visual = scene->find(action.id);
+            ASSERT_NE(visual, nullptr);
+            EXPECT_FALSE(visual->fitted.truncated) << visual->text;
+            EXPECT_EQ(action.command,
+                      buttons[std::ranges::find(ids, action.id) - ids.begin()]
+                          .command);
+          }
+          for (const auto index : {1U, 2U})
+            if (const auto *visual = scene->find(index + 20)) {
+              EXPECT_FALSE(visual->fitted.truncated);
+              EXPECT_EQ(visual->accessibleLabel, lines[index].text);
+              const auto required = lines[index].text.substr(
+                  lines[index].text.find('\n') + 1,
+                  lines[index].requiredBytes - lines[index].text.find('\n') -
+                      1);
+              EXPECT_NE(visual->text.find(required), std::string::npos);
+              ranges.insert(visual->accessibleLabel);
+            }
+          for (const auto &box : scene->layout.boxes)
+            contained(box.rect, dock.bounds);
+        }
+        EXPECT_GT(count, 1);
+        EXPECT_EQ(reached, std::set<ui::WidgetId>(ids.begin(), ids.end()));
+        EXPECT_EQ(ranges,
+                  (std::set<std::string>{lines[1].text, lines[2].text}));
+        continue;
+      }
+      ASSERT_TRUE(leaf.safePlacement);
+      ui::ScreenOverlay panel(leaf.model);
+      panel.setBounds(leaf.bounds);
+      const auto scene = panel.prepare(metrics, leaf.theme);
+      ASSERT_NE(scene, nullptr);
+      contained(leaf.bounds, metrics.pixelSafeArea());
+      if (reading)
+        EXPECT_LE(leaf.bounds.bottom + leaf.bounds.height, reading->bottom);
+      for (const auto index : {1U, 2U}) {
+        const auto *visual = scene->find(index + 3);
+        ASSERT_NE(visual, nullptr);
+        const auto required =
+            lines[index].requiredBytes +
+            (lines[index].active ? std::string("\u25B8 ").size() : 0);
+        EXPECT_GE(visual->fitted.visibleBytes, required);
+        EXPECT_EQ(visual->accessibleLabel, lines[index].active
+                                               ? "\u25B8 " + lines[index].text
+                                               : lines[index].text);
+      }
+      for (const auto id : ids) {
+        const auto *visual = scene->find(id);
+        ASSERT_NE(visual, nullptr);
+        const auto *box = scene->layout.find(id);
+        ASSERT_NE(box, nullptr);
+        EXPECT_FALSE(visual->fitted.truncated)
+            << visual->text << " fitted " << visual->fitted.widthPx << "x"
+            << visual->fitted.heightPx << " font " << visual->fontDescription
+            << " content " << box->contentRect.width << "x"
+            << box->contentRect.height << " panel " << leaf.bounds.height
+            << " padding " << leaf.theme.paddingEm << " flow "
+            << leaf.model.children.back().preferred.height << " row "
+            << leaf.model.children.back().children.front().preferred.height
+            << " labels " << leaf.model.children.size();
+        contained(box->rect, scene->layout.bounds);
       }
     }
   }
@@ -247,7 +493,7 @@ protected:
     draw();
   }
 
-  void draw() {
+  gleditor::ScreenInsets draw(gleditor::ScreenInsets settled = {}) {
     state.beginPickScene();
     gleditor::FrameContext frame{.state          = state,
                                  .viewProjection = projection,
@@ -255,9 +501,11 @@ protected:
                                  .screenHeight   = metrics.screenHeight,
                                  .timeline       = timeline,
                                  .chrome         = metrics.chrome,
+                                 .settledChrome  = settled,
                                  .metrics        = metrics,
                                  .theme          = theme};
     overlay.drawFrame(frame);
+    return frame.chrome;
   }
 
   render::PickingResult captured(const std::string &label) {
@@ -277,6 +525,103 @@ protected:
     return pick;
   }
 };
+
+TEST_F(LinkPanelOverlayTest, PreviewEdgesKeepLinkHueExactRangesAndActiveSide) {
+  const auto key = navigation.keyOf(links[0]);
+  ASSERT_TRUE(navigation.execute(
+      nav::SelectOccurrence{key, xanadu::LinkSide::Left, 0, 0}));
+  ASSERT_TRUE(navigation.execute(
+      nav::SelectOccurrence{key, xanadu::LinkSide::Right, 0, 0}));
+  auto app      = std::make_shared<AppState>();
+  auto renderer = Renderer::create(app, render::Backend::OpenGL);
+  auto doc = Doc::create(renderer, &device, glm::mat4(1.F),
+                         gleditor::MemoryTextSource("Left right", "edge-test"));
+  const auto collect = [&] {
+    std::vector<gleditor::SpanStyle> styles;
+    overlay.decorate(*doc, styles);
+    return styles;
+  };
+  const auto styles = collect();
+  ASSERT_EQ(styles.size(), 2U);
+  EXPECT_EQ(styles[0].start, 0U);
+  EXPECT_EQ(styles[0].end, 4U);
+  EXPECT_EQ(styles[1].start, 5U);
+  EXPECT_EQ(styles[1].end, 10U);
+  const auto selectedState = navigation.selection();
+  const auto &selected     = *selectedState;
+  const auto hue =
+      session.selectedLinkColour(key, selected.occurrences->link) & 0xFFFFFF00U;
+  for (const auto &style : styles) {
+    EXPECT_EQ(style.emphasis, gleditor::SpanEmphasis::Contour);
+    for (const auto shift : {8U, 16U, 24U}) {
+      EXPECT_EQ((style.colour >> shift) & 255U,
+                ((hue >> shift) & 255U) * 3U / 5U);
+    }
+  }
+  EXPECT_GT(styles[1].edgeWidthPx, styles[0].edgeWidthPx);
+  ASSERT_TRUE(navigation.execute(nav::Cross{}));
+  const auto crossed = collect();
+  ASSERT_EQ(crossed.size(), 2U);
+  EXPECT_GT(crossed[0].edgeWidthPx, crossed[1].edgeWidthPx);
+  ASSERT_TRUE(navigation.execute(nav::Dismiss{}));
+  EXPECT_TRUE(collect().empty());
+}
+
+TEST_F(LinkPanelOverlayTest,
+       NavigationSelectionOwnershipSurvivesCrossButNotEditsOrOtherLinks) {
+  auto app      = std::make_shared<AppState>();
+  auto renderer = Renderer::create(app, render::Backend::OpenGL);
+  auto doc =
+      Doc::create(renderer, &device, glm::mat4(1.F),
+                  gleditor::MemoryTextSource("Left right", "ownership-test"));
+  Caret caret(&device);
+  caret.placeAt(0, 0);
+  caret.extendTo(4);
+  const auto first = navigation.keyOf(links[0]);
+  EXPECT_FALSE(overlay.selectionStyle(*doc, caret));
+  overlay.noteNavigationSelection(caret, first);
+  const auto owned = overlay.selectionStyle(*doc, caret);
+  ASSERT_TRUE(owned);
+  EXPECT_EQ(owned->start, 0U);
+  EXPECT_EQ(owned->end, 4U);
+  EXPECT_EQ(owned->layer, session.linkHighlightLayer(first));
+  ASSERT_TRUE(navigation.execute(nav::Cross{}));
+  ASSERT_TRUE(overlay.selectionStyle(*doc, caret));
+  EXPECT_EQ(overlay.selectionStyle(*doc, caret)->layer, owned->layer);
+  caret.extendTo(3);
+  EXPECT_FALSE(overlay.selectionStyle(*doc, caret));
+  caret.extendTo(4);
+  EXPECT_FALSE(overlay.selectionStyle(*doc, caret));
+  overlay.noteNavigationSelection(caret, first);
+  ASSERT_TRUE(navigation.execute(nav::SelectLink{navigation.keyOf(links[1])}));
+  EXPECT_FALSE(overlay.selectionStyle(*doc, caret));
+  EXPECT_TRUE(caret.hasSelection());
+  ASSERT_TRUE(navigation.execute(nav::SelectLink{first}));
+  overlay.noteNavigationSelection(caret, first);
+  ASSERT_TRUE(navigation.execute(nav::Dismiss{}));
+  EXPECT_FALSE(overlay.selectionStyle(*doc, caret));
+  EXPECT_EQ(caret.selectionStart(), 0U);
+  EXPECT_EQ(caret.selectionEnd(), 4U);
+  ASSERT_TRUE(navigation.execute(nav::SelectLink{first}));
+  EXPECT_FALSE(overlay.selectionStyle(*doc, caret));
+  overlay.noteNavigationSelection(caret, std::nullopt);
+  EXPECT_FALSE(overlay.selectionStyle(*doc, caret));
+  overlay.noteNavigationSelection(caret, first);
+  ASSERT_TRUE(overlay.selectionStyle(*doc, caret));
+  session.views()[0].version = {};
+  EXPECT_FALSE(overlay.selectionStyle(*doc, caret));
+}
+
+TEST_F(LinkPanelOverlayTest, PresentationLayersKeepAuthorityAndLinkIdentity) {
+  const auto first  = navigation.keyOf(links[0]);
+  auto foreign      = first;
+  foreign.authority = xanadu::DocumentId{};
+  const auto layer  = session.linkHighlightLayer(first);
+  EXPECT_EQ(session.linkHighlightLayer(first), layer);
+  EXPECT_NE(session.linkHighlightLayer(navigation.keyOf(links[1])), layer);
+  EXPECT_NE(session.linkHighlightLayer(foreign), layer);
+  EXPECT_EQ(session.linkHighlightLayer(first), layer);
+}
 
 TEST_F(LinkPanelOverlayTest,
        WarmFramesReuseShapingAndMovingAnchorsKeepActionIdentity) {
@@ -433,4 +778,322 @@ TEST(LinkPanelPresentationTest, ReadingContentRemainsClearWhenThereIsRoom) {
       }
     }
   }
+}
+
+TEST(LinkPanelPresentationTest, NoFreeAreaIsExplicitAndDockPreservesCommands) {
+  auto lines    = contextLines();
+  lines[1].text = "Left 2/7 · place 1/4 · bytes\n2302771–2303273 (part)\nKJV";
+  lines[2].text = "Right 3/9 · place 5/5 · bytes\n0–34\nNotes";
+  lines[1].requiredBytes  = lines[1].text.find("\nKJV");
+  lines[2].requiredBytes  = lines[2].text.find("\nNotes");
+  lines[3].compactContext = "reading: left member 2";
+  lines[4].compactContext = "origin saved";
+  const auto buttons      = xanadu::linkPanelButtons({}, false);
+  const auto ids          = actionIds();
+  const ui::UiMetrics metrics{
+      .screenWidth = 640, .screenHeight = 480, .chrome = {.top = 76}};
+  gleditor::text::ShapingCache cache;
+  const auto floating = common_ui::linkPanelPresentation(
+      lines, buttons, ids, metrics, ui::Theme{}, {}, {}, cache,
+      metrics.pixelSafeArea());
+  EXPECT_FALSE(floating.safePlacement);
+  for (const auto collapsed : {false, true}) {
+    const auto dock = common_ui::linkPanelDockPresentation(
+        lines, buttons, ids, 2000, collapsed, metrics, ui::Theme{}, {}, cache);
+    EXPECT_TRUE(dock.completeContent);
+    EXPECT_EQ(dock.toggleControls, 2000);
+    EXPECT_EQ(dock.bounds.bottom, metrics.chrome.bottom);
+    EXPECT_EQ(dock.bounds.width, 640);
+    ASSERT_TRUE(dock.reservedBottom);
+    EXPECT_LE(*dock.reservedBottom, metrics.screenHeight * .65F);
+    EXPECT_EQ(dock.actions.size(), collapsed ? 1 : buttons.size());
+    ui::ScreenOverlay panel(dock.model);
+    panel.setBounds(dock.bounds);
+    auto dockMetrics        = metrics;
+    dockMetrics.marginShare = 0;
+    const auto scene        = panel.prepare(dockMetrics, dock.theme);
+    ASSERT_NE(scene, nullptr);
+    for (const auto &action : dock.actions) {
+      const auto *visual = scene->find(action.id);
+      ASSERT_NE(visual, nullptr);
+      EXPECT_FALSE(visual->fitted.truncated) << visual->text;
+      contained(scene->layout.find(action.id)->rect, dock.bounds);
+    }
+    EXPECT_FALSE(scene->find(2000)->fitted.truncated);
+    EXPECT_NE(scene->find(4)->accessibleLabel.find("2303273"),
+              std::string::npos);
+    if (collapsed)
+      EXPECT_NE(scene->find(4)->text.find("(part)"), std::string::npos);
+    if (!collapsed)
+      EXPECT_GE(scene->find(4)->fitted.visibleBytes, lines[1].requiredBytes);
+  }
+  auto enlarged       = metrics;
+  enlarged.fontScale  = 3;
+  const auto tooSmall = common_ui::linkPanelDockPresentation(
+      lines, buttons, ids, 2000, false, enlarged, ui::Theme{}, {}, cache);
+  EXPECT_FALSE(tooSmall.completeContent);
+  EXPECT_EQ(tooSmall.actions.size(), 1);
+}
+
+TEST_F(LinkPanelOverlayTest, DockWaitsForClipAndReadControlsPreserveSelection) {
+  xanadu::LinkPanelConfig config;
+  config.maxHeightShare = .2F;
+  overlay.setConfig(config);
+  const auto revision = navigation.revision();
+  auto claim          = draw();
+  EXPECT_GT(claim.bottom, 0);
+  EXPECT_TRUE(overlay.busy());
+  EXPECT_TRUE(state.overlayPickScene.widgetOverlays.empty());
+  claim = draw(claim);
+  EXPECT_FALSE(overlay.busy());
+  const auto controls = captured("Controls");
+  ASSERT_TRUE(controls.overlayWidgetId);
+  EXPECT_TRUE(overlay.performAction(
+      gleditor::a11y::Ids::of(27, *controls.overlayWidgetId),
+      gleditor::a11y::Action::Click, {}));
+  EXPECT_TRUE(overlay.busy());
+  const auto expanded = draw(claim);
+  EXPECT_GT(expanded.bottom, claim.bottom);
+  EXPECT_TRUE(overlay.busy());
+  EXPECT_TRUE(state.overlayPickScene.widgetOverlays.empty());
+  claim = draw(expanded);
+  EXPECT_FALSE(overlay.busy());
+  EXPECT_EQ(navigation.revision(), revision);
+  EXPECT_NE(captured("Enter").overlayWidgetId, std::nullopt);
+  // A newly available floating position must not remove the active toggle.
+  overlay.setConfig(xanadu::LinkPanelConfig{});
+  claim = draw(claim);
+  EXPECT_NE(captured("Read").overlayWidgetId, std::nullopt);
+  overlay.toggleControls();
+  const auto collapsed = draw(claim);
+  EXPECT_LT(collapsed.bottom, claim.bottom);
+  draw(collapsed);
+  EXPECT_FALSE(overlay.busy());
+  EXPECT_EQ(navigation.revision(), revision);
+  EXPECT_NE(captured("Controls").overlayWidgetId, std::nullopt);
+}
+
+TEST(LinkPanelPresentationTest,
+     EnlargedInspectorPagesKeepRangesAndEveryCommandReachable) {
+  auto lines               = contextLines();
+  lines[0].compactIdentity = "link 4294967295";
+  lines[1].text = "Left 2/7 · place 1/4 · bytes\n2302771–2303273 (part)\nKJV";
+  lines[2].text = "Right 3/9 · place 5/5 · bytes\n0–34\nNotes";
+  lines[1].requiredBytes  = lines[1].text.find("\nKJV");
+  lines[2].requiredBytes  = lines[2].text.find("\nNotes");
+  lines[3].compactContext = "reading outside the range";
+  lines[4].compactContext = "origin saved";
+  const auto buttons      = xanadu::linkPanelButtons({}, false);
+  const auto ids          = actionIds();
+  for (const auto &[scale, height] :
+       std::array{std::pair{2.F, 480}, std::pair{3.F, 800}}) {
+    ui::UiMetrics metrics{.fontScale    = scale,
+                          .screenWidth  = 640,
+                          .screenHeight = height,
+                          .chrome       = {.top = 76, .bottom = 18}};
+    gleditor::text::ShapingCache cache;
+    std::set<ui::WidgetId> reached;
+    std::set<std::string> ranges;
+    std::size_t count = 1;
+    for (std::size_t page = 0; page < count; ++page) {
+      const auto leaf = common_ui::linkPanelDockPresentation(
+          lines, buttons, ids, 2000, false, metrics, ui::Theme{}, {}, cache,
+          common_ui::LinkPanelPageRequest{2001, 2002, page});
+      ASSERT_TRUE(leaf.completeContent);
+      ASSERT_TRUE(leaf.pages);
+      count = leaf.pages->count;
+      EXPECT_GT(count, 1);
+      EXPECT_EQ(leaf.pages->request.page, page);
+      EXPECT_EQ(leaf.bounds.bottom, 18);
+      EXPECT_LE(leaf.bounds.bottom + leaf.bounds.height, height - 76);
+      metrics.marginShare = 0;
+      ui::ScreenOverlay panel(leaf.model);
+      panel.setBounds(leaf.bounds);
+      const auto scene = panel.prepare(metrics, leaf.theme);
+      for (const auto id : {3U, 4U, 5U, 2000U, 2001U, 2002U}) {
+        ASSERT_NE(scene->find(id), nullptr);
+        EXPECT_FALSE(scene->find(id)->fitted.truncated)
+            << scene->find(id)->text;
+      }
+      EXPECT_NE(scene->find(3)->text.find("Controls"), std::string::npos);
+      EXPECT_NE(scene->find(4)->text.find("2/7"), std::string::npos);
+      EXPECT_NE(scene->find(5)->text.find("3/9"), std::string::npos);
+      for (const auto &action : leaf.actions) {
+        reached.insert(action.id);
+        ASSERT_NE(scene->find(action.id), nullptr);
+        EXPECT_FALSE(scene->find(action.id)->fitted.truncated);
+      }
+      for (const auto id : {21U, 22U})
+        if (const auto *visual = scene->find(id)) {
+          EXPECT_FALSE(visual->fitted.truncated) << visual->text;
+          ranges.insert(visual->accessibleLabel);
+        }
+      for (const auto &box : scene->layout.boxes)
+        contained(box.rect, leaf.bounds);
+    }
+    EXPECT_EQ(reached, std::set<ui::WidgetId>(ids.begin(), ids.end()));
+    EXPECT_EQ(ranges, (std::set<std::string>{lines[1].text, lines[2].text}));
+    metrics.screenHeight  = 200;
+    const auto impossible = common_ui::linkPanelDockPresentation(
+        lines, buttons, ids, 2000, false, metrics, ui::Theme{}, {}, cache,
+        common_ui::LinkPanelPageRequest{2001, 2002, 0});
+    EXPECT_FALSE(impossible.completeContent);
+    EXPECT_FALSE(impossible.pages);
+  }
+}
+
+TEST(LinkPanelPresentationTest, ConstrainedDockKeepsMeasuredActionRows) {
+  auto lines    = contextLines();
+  lines[1].text = "Left 2/7 · place 1/4 · bytes\n2302771–2303273\nContext";
+  lines[2].text =
+      "Right 3/9 · place 5/5 · bytes\n4294967200–4294967295\nContext";
+  for (const auto index : {1U, 2U})
+    lines[index].requiredBytes = lines[index].text.rfind('\n');
+  lines[3].compactContext = "outside linked range";
+  lines[4].compactContext = "origin saved";
+  const auto buttons      = xanadu::linkPanelButtons({}, false);
+  const auto ids          = actionIds();
+  const ui::UiMetrics metrics{.fontScale    = 2,
+                              .screenWidth  = 1280,
+                              .screenHeight = 800,
+                              .chrome       = {.top = 44, .bottom = 18},
+                              .marginShare  = 0};
+  xanadu::LinkPanelConfig config;
+  config.dockMaxHeightShare = .4F;
+  config.maxLines           = 1;
+  gleditor::text::ShapingCache cache;
+  const auto leaf = common_ui::linkPanelDockPresentation(
+      lines, buttons, ids, 2000, false, metrics, ui::Theme{}, config, cache);
+  ASSERT_TRUE(leaf.completeContent);
+  ASSERT_FALSE(leaf.pages);
+  ASSERT_TRUE(leaf.reservedBottom);
+  ui::ScreenOverlay panel(leaf.model);
+  panel.setBounds(leaf.bounds);
+  const auto scene = panel.prepare(metrics, leaf.theme);
+  ASSERT_NE(scene, nullptr);
+  for (const auto id : ids) {
+    ASSERT_NE(scene->find(id), nullptr);
+    EXPECT_FALSE(scene->find(id)->fitted.truncated);
+    contained(scene->layout.find(id)->rect, leaf.bounds);
+  }
+  EXPECT_FALSE(scene->find(2000)->fitted.truncated);
+  for (const auto index : {1U, 2U}) {
+    ASSERT_NE(scene->find(index + 3), nullptr);
+    EXPECT_GE(scene->find(index + 3)->fitted.visibleBytes,
+              lines[index].requiredBytes);
+  }
+}
+
+TEST(LinkPanelPresentationTest, InspectorPinsWrappedCursorsAndPendingReason) {
+  auto lines               = contextLines();
+  lines[0].compactIdentity = "link 42";
+  lines[1].text = "Left 12345/67890 · place 12345/67890 · bytes\n10–20\nKJV";
+  lines[1].requiredBytes  = lines[1].text.find("\nKJV");
+  lines[3].compactContext = "reading outside the range";
+  lines[4].compactContext = "origin saved";
+  lines.push_back({.text = "Entry pending: building exact target page"});
+  auto buttons = xanadu::linkPanelButtons({}, false);
+  buttons.push_back({.label = "Cancel", .command = xanadu::nav::CancelEntry{}});
+  const auto baseIds = actionIds();
+  std::vector<ui::WidgetId> ids(baseIds.begin(), baseIds.end());
+  ids.push_back(1999);
+  ui::UiMetrics metrics{
+      .fontScale = 2, .screenWidth = 640, .screenHeight = 900};
+  gleditor::text::ShapingCache cache;
+  auto config               = xanadu::LinkPanelConfig{};
+  config.dockMaxHeightShare = .1F;
+  const auto leaf           = common_ui::linkPanelDockPresentation(
+      lines, buttons, ids, 2000, false, metrics, ui::Theme{}, config, cache,
+      common_ui::LinkPanelPageRequest{2001, 2002, 0});
+  ASSERT_TRUE(leaf.completeContent);
+  ASSERT_TRUE(leaf.pages);
+  ui::ScreenOverlay panel(leaf.model);
+  panel.setBounds(leaf.bounds);
+  const auto scene = panel.prepare(metrics, leaf.theme);
+  ASSERT_NE(scene->find(4), nullptr);
+  EXPECT_FALSE(scene->find(4)->fitted.truncated);
+  EXPECT_NE(scene->find(4)->text.find("12345/67890"), std::string::npos);
+  ASSERT_NE(scene->find(65), nullptr);
+  EXPECT_FALSE(scene->find(65)->fitted.truncated);
+  EXPECT_NE(scene->find(65)->text.find("Entry pending"), std::string::npos);
+  ASSERT_NE(scene->find(1999), nullptr);
+}
+
+TEST(LinkPanelPresentationTest, MinimumWarningAndEscapesFitAtEnlargedType) {
+  const auto lines   = contextLines();
+  const auto buttons = xanadu::linkPanelButtons({}, false);
+  const auto ids     = actionIds();
+  ui::UiMetrics metrics{.fontScale    = 3,
+                        .screenWidth  = 640,
+                        .screenHeight = 480,
+                        .chrome       = {.top = 114, .bottom = 18}};
+  gleditor::text::ShapingCache cache;
+  const auto leaf = common_ui::linkPanelDockPresentation(
+      lines, buttons, ids, 2000, true, metrics, ui::Theme{}, {}, cache,
+      common_ui::LinkPanelPageRequest{2001, 2002, 0});
+  EXPECT_FALSE(leaf.completeContent);
+  ui::ScreenOverlay panel(leaf.model);
+  panel.setBounds(leaf.bounds);
+  const auto scene = panel.prepare(metrics, leaf.theme);
+  ASSERT_NE(scene->find(3), nullptr);
+  EXPECT_EQ(scene->find(3)->text, "Enlarge window");
+  EXPECT_FALSE(scene->find(3)->fitted.truncated);
+  EXPECT_NE(scene->find(3)->accessibleLabel.find("reduce UI text size"),
+            std::string::npos);
+  for (const auto id : {2000U, ids.back()}) {
+    ASSERT_NE(scene->find(id), nullptr);
+    EXPECT_FALSE(scene->find(id)->fitted.truncated);
+  }
+  EXPECT_EQ(scene->find(2000)->text, "Controls");
+}
+
+TEST_F(LinkPanelOverlayTest,
+       OverflowPagingRetainsCommandIdentityWithoutNavigation) {
+  metrics.fontScale = 2;
+  xanadu::LinkPanelConfig config;
+  config.maxHeightShare = .2F;
+  overlay.setConfig(config);
+  auto claim            = draw();
+  claim                 = draw(claim);
+  const auto revision   = navigation.revision();
+  const auto operations = session.store().opCount();
+  overlay.toggleControls();
+  claim = draw(claim);
+  claim = draw(claim);
+  EXPECT_NE(captured("Next").overlayWidgetId, std::nullopt);
+  const auto firstHeading = overlay.presentation()->find(3)->text;
+  const auto next         = captured("Next");
+  EXPECT_TRUE(
+      overlay.performAction(gleditor::a11y::Ids::of(27, *next.overlayWidgetId),
+                            gleditor::a11y::Action::Click, {}));
+  claim = draw(claim);
+  EXPECT_NE(overlay.presentation()->find(3)->text, firstHeading);
+  EXPECT_EQ(navigation.revision(), revision);
+  EXPECT_EQ(session.store().opCount(), operations);
+  std::map<std::string, ui::WidgetId> commands;
+  for (int step = 0; step < 8; ++step) {
+    const auto scene = overlay.presentation();
+    for (const auto &visual : scene->visuals)
+      if (visual.action == "link_controls" && visual.id > 1024 &&
+          visual.text != "Previous" && visual.text != "Next" &&
+          visual.text != "Read") {
+        const auto [at, inserted] = commands.emplace(visual.text, visual.id);
+        if (!inserted) EXPECT_EQ(at->second, visual.id);
+      }
+    overlay.pageControls(1);
+    claim = draw(claim);
+  }
+  for (int step = 0; step < 8; ++step) {
+    overlay.pageControls(-1);
+    claim = draw(claim);
+    for (const auto &visual : overlay.presentation()->visuals)
+      if (const auto at = commands.find(visual.text); at != commands.end())
+        EXPECT_EQ(at->second, visual.id);
+  }
+  EXPECT_EQ(navigation.revision(), revision);
+  EXPECT_EQ(session.store().opCount(), operations);
+  overlay.toggleControls();
+  claim = draw(claim);
+  draw(claim);
+  EXPECT_NE(captured("Controls").overlayWidgetId, std::nullopt);
 }

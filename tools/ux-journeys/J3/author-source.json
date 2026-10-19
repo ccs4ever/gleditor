@@ -1,0 +1,28 @@
+{
+  "journey": "J3",
+  "stage": "author-source",
+  "driver": "ui",
+  "program": "xuzz",
+  "profile": "J3",
+  "source_evidence": "build/ux-green-20261011/harness-j3/author-plan.json",
+  "notes": [
+    "Seeds the source xanadoc/permascroll; run first in the J3 profile."
+  ],
+  "plan": {
+    "steps": [
+      "--type",
+      "Harbor source passage.\nMeadow second passage.\nSurrounding text remains.\n",
+      "--dump-a11y",
+      "--capture",
+      "${evidence}/source.ppm",
+      "--chord",
+      "Ctrl+Q"
+    ]
+  },
+  "variables": {
+    "evidence": {
+      "description": "Run-specific evidence output directory.",
+      "example": "/tmp/ux-run/Jx/stage"
+    }
+  }
+}

@@ -8,8 +8,8 @@
  * is activated, a lightweight proxy quad glides into collinear reading
  * alignment beside the text line rather than teleporting the reader.
  */
-#ifndef XUDU_SATELLOID_HPP
-#define XUDU_SATELLOID_HPP
+#ifndef XANADU_SATELLOID_HPP
+#define XANADU_SATELLOID_HPP
 
 #include <algorithm>
 #include <chrono>
@@ -196,6 +196,8 @@ public:
     anchorResolver_ = std::move(resolver);
   }
   void setSiteFilter(SiteFilter filter) { siteFilter_ = std::move(filter); }
+  SatelloidOverlay *setPresentationVisible(bool visible);
+  SatelloidOverlay *setEndpointPreviewVisible(bool visible);
 
   // -- FrameContributor implementation ---------------------------------------
   void deviceReady(render::RenderDevice &device,
@@ -238,8 +240,9 @@ private:
   std::chrono::steady_clock::time_point lastFrameTime_{
       std::chrono::steady_clock::now()};
   bool visible_{true};
+  bool endpointPreviewVisible_{true};
 };
 
 } // namespace xanadu
 
-#endif // XUDU_SATELLOID_HPP
+#endif // XANADU_SATELLOID_HPP

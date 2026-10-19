@@ -294,7 +294,7 @@ ______________________________________________________________________
 - For topic-based document discovery, topic names map deterministically to 20-byte infohashes:
 
   $$
-  \text{Infohash}(\text{topic}) = \text{SHA-1}("xudu:topic:" + \text{canonicalize}(\text{topic}))
+  \text{Infohash}(\text{topic}) = \text{SHA-1}("xanadu:topic:" + \text{canonicalize}(\text{topic}))
   $$
 
 - Curators and readers announce themselves to the topic infohash on the Mainline DHT.
@@ -697,7 +697,7 @@ The implementation of the missing UI elements is partitioned into seven sequenti
 | **Stage 4** | **Pouch Drawer & Clasp Bench ($N \times M$)**   | `apps/xudu/pouch_drawer.hpp/.cpp`, `apps/xudu/link_forge.hpp/.cpp`, `apps/xudu/beams.cpp` | Pouch Drawer backed by `system://pouches`, Clasp Assembly Bench ($N \times M$), margin brackets `⟦...⟧`, and multi-spine connection ribbons.                             |
 | **Stage 5** | **Drag-to-Empty-Space Transclusion**            | `apps/xudu/main.cpp`, `src/doc.cpp`                                                       | Kinetic drag tether spawning new pages or documents in void, with automatic `OpKind::Transclude` and volumetric prism rendering.                                         |
 | **Stage 6** | **Page Break Controls**                         | `src/text/layout.cpp`, `apps/xudu/session.cpp`                                            | Inter-paragraph hover gap splitter and `Ctrl+Enter` shortcut inserting `OpKind::PageBreak` without primedia pollution.                                                   |
-| **Stage 7** | **Decentralized Swarm Telescope**               | `apps/xudu/core/managed_torrent.cpp`, `swarm_browser.hpp`                                 | BEP 46 author catalog rendezvous, DHT topic swarms (`xudu:topic:<name>`), and 3D constellation browser.                                                                  |
+| **Stage 7** | **Decentralized Swarm Telescope**               | `apps/xudu/core/managed_torrent.cpp`, `swarm_browser.hpp`                                 | BEP 46 author catalog rendezvous, DHT topic swarms (`xanadu:topic:<name>`), and 3D constellation browser.                                                                |
 
 ______________________________________________________________________
 

@@ -3,8 +3,8 @@
  * @brief Tripartite Clasp Assembly Bench widget for N x M asymmetric
  * hyperlinking.
  */
-#ifndef XUDU_CLASP_LINK_FORGE_HPP
-#define XUDU_CLASP_LINK_FORGE_HPP
+#ifndef XANADU_CLASP_LINK_FORGE_HPP
+#define XANADU_CLASP_LINK_FORGE_HPP
 
 #include <atomic>
 #include <cstdint>
@@ -210,4 +210,4 @@ private:
 
 } // namespace xanadu
 
-#endif // XUDU_CLASP_LINK_FORGE_HPP
+#endif // XANADU_CLASP_LINK_FORGE_HPP

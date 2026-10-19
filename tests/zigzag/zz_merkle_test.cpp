@@ -6,7 +6,7 @@
 #include <gtest/gtest.h>
 
 #include "common/xanadu/merkle_ledger.hpp"
-#include "common/xanadu/zigzag/zz_xudu_projector.hpp"
+#include "common/xanadu/zigzag/xanadu_projector.hpp"
 #include "common/xanadu/zigzag/zzstructure.hpp"
 
 namespace zigzag {

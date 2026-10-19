@@ -38,6 +38,12 @@ struct PanelLine {
   /// is a colour and not everybody can see one. Drawn in a gutter of its own
   /// so the side names line up whichever is active.
   bool active{};
+  /// Prefix whose exact range must survive wrapping and context truncation.
+  std::size_t requiredBytes{};
+  /// Reading/origin status may share a compact row when height is scarce.
+  std::string compactContext;
+  /// Inspector heading must retain the link type and author identity.
+  std::optional<std::string> compactIdentity;
 
   bool operator==(const PanelLine &) const = default;
 };

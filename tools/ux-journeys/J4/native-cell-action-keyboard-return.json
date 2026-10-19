@@ -1,0 +1,89 @@
+{
+  "journey": "J4",
+  "stage": "native-cell-action-keyboard-return",
+  "driver": "native",
+  "program": "xuzz",
+  "profile": "J4",
+  "source_evidence": "build/ux-green-20261011/postfix-checks/j4-native-keyboard-r2/plan.json",
+  "notes": [
+    "Passed native cell Action, ordinary E/type/Return, and F6 return to Text caret 3; same default_store required throughout.",
+    "Cell #7 and --select 3,3 are specific to the authored fixture.",
+    "The 8000 ms interval is the native-helper service window for its cell Action before ordinary E/type/Return; accessible cell presence alone would not prove the Action completed. The 4000 ms interval lets the edited cell settle before F6. The final 60000 ms is the native-helper assertion window."
+  ],
+  "plan": {
+    "launch_args": [
+      "${default_store}",
+      "--resize",
+      "1440,1000",
+      "--select",
+      "3,3",
+      "--chord",
+      "Alt+Shift+N",
+      "--capture",
+      "${evidence}/before.png",
+      "--wait-ms",
+      "8000",
+      "--chord",
+      "E",
+      "--type",
+      " keyboard probe",
+      "--chord",
+      "Return",
+      "--capture",
+      "${evidence}/after-keyboard.png",
+      "--wait-ms",
+      "4000",
+      "--chord",
+      "F6",
+      "--capture",
+      "${evidence}/document-return.png",
+      "--wait-ms",
+      "60000"
+    ],
+    "steps": [
+      {
+        "op": "wait_file",
+        "file": "before.png"
+      },
+      {
+        "op": "snapshot",
+        "file": "before-native.json"
+      },
+      {
+        "op": "action",
+        "interface": "Action",
+        "name_prefix": "Cell #7:"
+      },
+      {
+        "op": "snapshot",
+        "file": "after-native-cell-action.json"
+      },
+      {
+        "op": "wait_file",
+        "file": "after-keyboard.png"
+      },
+      {
+        "op": "snapshot",
+        "file": "after-keyboard.json"
+      },
+      {
+        "op": "wait_file",
+        "file": "document-return.png"
+      },
+      {
+        "op": "snapshot",
+        "file": "document-return-native.json"
+      }
+    ]
+  },
+  "variables": {
+    "evidence": {
+      "description": "Run-specific evidence output directory.",
+      "example": "/tmp/ux-run/Jx/stage"
+    },
+    "default_store": {
+      "description": "Default xanadoc store in this journey profile.",
+      "example": "/tmp/ux-run/data/xuzz/xanadocs/default"
+    }
+  }
+}

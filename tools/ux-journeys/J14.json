@@ -1,0 +1,418 @@
+[
+  {
+    "journey": "J14",
+    "stage": "author",
+    "driver": "ui",
+    "program": "xuzz",
+    "profile": "j14",
+    "source_evidence": "build/ux-green-20261011/j14-complete-r5/plan.json",
+    "notes": [
+      "Authors ordinary text and scalar kinds and performs the handle/foreign-cell setup. Run first in an isolated profile."
+    ],
+    "plan": {
+      "steps": [
+        "--chord",
+        "Ctrl+Alt+N",
+        "--chord",
+        "N",
+        "--chord",
+        "E",
+        "--type",
+        "ordinary text",
+        "--chord",
+        "Return",
+        "--dump-a11y",
+        "--capture",
+        "${evidence}/none.ppm",
+        "--chord",
+        "N",
+        "--chord",
+        "E",
+        "--type",
+        "12",
+        "--chord",
+        "Return",
+        "--dump-a11y",
+        "--capture",
+        "${evidence}/int64.ppm",
+        "--chord",
+        "N",
+        "--chord",
+        "E",
+        "--type",
+        "3.5",
+        "--chord",
+        "Return",
+        "--dump-a11y",
+        "--capture",
+        "${evidence}/double.ppm",
+        "--chord",
+        "N",
+        "--chord",
+        "E",
+        "--type",
+        "true",
+        "--chord",
+        "Return",
+        "--dump-a11y",
+        "--capture",
+        "${evidence}/bool.ppm",
+        "--chord",
+        "Ctrl+H",
+        "--mouse-move",
+        "600,450",
+        "--wheel",
+        "40,0",
+        "--dump-a11y",
+        "--capture",
+        "${evidence}/choose-operation.ppm",
+        "--click-label",
+        "S \u00b7 Version 25",
+        "--click-label",
+        "Annotate operation 25 and place handle on d.1",
+        "--type",
+        "Bool birth is this exact operation.",
+        "--chord",
+        "Return",
+        "--click-label",
+        "Close hypertime",
+        "--dump-a11y",
+        "--capture",
+        "${evidence}/handle-at-rank-tail.ppm",
+        "--chord",
+        "Ctrl+Alt+N",
+        "--chord",
+        "N",
+        "--chord",
+        "E",
+        "--type",
+        "Distinctive foreign lighthouse.",
+        "--chord",
+        "Return",
+        "--click-label",
+        "Doc 2",
+        "--chord",
+        "Alt+Home",
+        "--chord",
+        "Right",
+        "--chord",
+        "Right",
+        "--chord",
+        "Right",
+        "--chord",
+        "Right",
+        "--chord",
+        "Right",
+        "--dump-a11y",
+        "--capture",
+        "${evidence}/handle-focus.ppm",
+        "--chord",
+        "Ctrl+Alt+R",
+        "--dump-a11y",
+        "--capture",
+        "${evidence}/foreign-choices.ppm",
+        "--chord",
+        "Return",
+        "--dump-a11y",
+        "--capture",
+        "${evidence}/six-kinds-ordered.ppm",
+        "--chord",
+        "Ctrl+Q"
+      ]
+    },
+    "variables": {
+      "repo": {
+        "description": "Repository root, used only for repository assets.",
+        "example": "/data/git/gleditor-restore"
+      },
+      "evidence": {
+        "description": "Writable output directory for this stage\u2019s captures and snapshots.",
+        "example": "/tmp/ux-evidence/J14/author"
+      }
+    }
+  },
+  {
+    "journey": "J14",
+    "stage": "reference-and-foreign-target",
+    "driver": "ui",
+    "program": "xuzz",
+    "profile": "j14",
+    "source_evidence": "build/ux-green-20261011/j14-complete-r3/reference-plan.json",
+    "notes": [
+      "Requires the authored J14 store and referenced foreign-store fixture/profile; paths are parameterized."
+    ],
+    "plan": {
+      "launch_args": [
+        "${evidence}/data/xuzz/xanadocs/untitled-20261011-223124"
+      ],
+      "steps": [
+        "--chord",
+        "Ctrl+O",
+        "--chord",
+        "Return",
+        "--chord",
+        "Down",
+        "--chord",
+        "Down",
+        "--chord",
+        "Down",
+        "--chord",
+        "Down",
+        "--chord",
+        "Down",
+        "--chord",
+        "Return",
+        "--chord",
+        "Tab",
+        "--type",
+        "${evidence}/data/xuzz/xanadocs/untitled-20261011-223253",
+        "--chord",
+        "Return",
+        "--click-label",
+        "Doc 1",
+        "--chord",
+        "F6",
+        "--chord",
+        "Alt+Home",
+        "--chord",
+        "Right",
+        "--chord",
+        "Right",
+        "--chord",
+        "Right",
+        "--chord",
+        "Right",
+        "--chord",
+        "Right",
+        "--dump-a11y",
+        "--capture",
+        "${evidence}/handle-focus.ppm",
+        "--chord",
+        "Ctrl+Alt+R",
+        "--dump-a11y",
+        "--capture",
+        "${evidence}/reference-choice.ppm",
+        "--chord",
+        "Return",
+        "--dump-a11y",
+        "--capture",
+        "${evidence}/six-kinds.ppm",
+        "--chord",
+        "Ctrl+Q"
+      ]
+    },
+    "variables": {
+      "repo": {
+        "description": "Repository root, used only for repository assets.",
+        "example": "/data/git/gleditor-restore"
+      },
+      "evidence": {
+        "description": "Writable output directory for this stage\u2019s captures and snapshots.",
+        "example": "/tmp/ux-evidence/J14/reference-and-foreign-target"
+      }
+    }
+  },
+  {
+    "journey": "J14",
+    "stage": "native-six-kind-rank",
+    "driver": "native",
+    "program": "xuzz",
+    "profile": "j14",
+    "source_evidence": "build/ux-green-20261011/prepared-fix-checks-r1/j14/native-all6-final/native-plan.json",
+    "notes": [
+      "Requires a successful fresh six-kind authoring run and its reopened store; native cell names expose slice content, while page Text is empty by design."
+    ],
+    "plan": {
+      "launch_args": [
+        "${source_store}",
+        "--resize",
+        "1440,1000",
+        "--chord",
+        "Ctrl+O",
+        "--chord",
+        "Return",
+        "--chord",
+        "Down",
+        "--chord",
+        "Down",
+        "--chord",
+        "Down",
+        "--chord",
+        "Down",
+        "--chord",
+        "Down",
+        "--chord",
+        "Return",
+        "--chord",
+        "Tab",
+        "--type",
+        "${source_store_2}",
+        "--chord",
+        "Return",
+        "--wait-ms",
+        "3000",
+        "--click-label",
+        "Doc 1",
+        "--chord",
+        "Ctrl+Alt+2",
+        "--chord",
+        "Alt+Home",
+        "--capture",
+        "{evidence}/rank-open.ppm"
+      ],
+      "steps": [
+        {
+          "op": "wait_file",
+          "file": "rank-open.ppm"
+        },
+        {
+          "op": "text",
+          "interface": "Text",
+          "text_contains": "Foreign lighthouse changed after reopen.",
+          "contains": "Foreign lighthouse changed after reopen."
+        },
+        {
+          "op": "wait_name",
+          "name_prefix": "Cell #6: ordinary text [text] [value kind: none]",
+          "interface": "Action"
+        },
+        {
+          "op": "action",
+          "name_prefix": "Cell #6: ordinary text [text] [value kind: none]",
+          "interface": "Action"
+        },
+        {
+          "op": "wait_name",
+          "name_prefix": "Cell #6: ordinary text [text] [value kind: none] (Focused)",
+          "interface": "Accessible"
+        },
+        {
+          "op": "snapshot",
+          "file": "after-cell-01.json"
+        },
+        {
+          "op": "wait_name",
+          "name_prefix": "Cell #15: 12 [number] [value kind: int64]",
+          "interface": "Action"
+        },
+        {
+          "op": "action",
+          "name_prefix": "Cell #15: 12 [number] [value kind: int64]",
+          "interface": "Action"
+        },
+        {
+          "op": "wait_name",
+          "name_prefix": "Cell #15: 12 [number] [value kind: int64] (Focused)",
+          "interface": "Accessible"
+        },
+        {
+          "op": "snapshot",
+          "file": "after-cell-02.json"
+        },
+        {
+          "op": "wait_name",
+          "name_prefix": "Cell #20: 3.5 [number] [value kind: double]",
+          "interface": "Action"
+        },
+        {
+          "op": "action",
+          "name_prefix": "Cell #20: 3.5 [number] [value kind: double]",
+          "interface": "Action"
+        },
+        {
+          "op": "wait_name",
+          "name_prefix": "Cell #20: 3.5 [number] [value kind: double] (Focused)",
+          "interface": "Accessible"
+        },
+        {
+          "op": "snapshot",
+          "file": "after-cell-03.json"
+        },
+        {
+          "op": "wait_name",
+          "name_prefix": "Cell #25: true [boolean] [value kind: bool]",
+          "interface": "Action"
+        },
+        {
+          "op": "action",
+          "name_prefix": "Cell #25: true [boolean] [value kind: bool]",
+          "interface": "Action"
+        },
+        {
+          "op": "wait_name",
+          "name_prefix": "Cell #25: true [boolean] [value kind: bool] (Focused)",
+          "interface": "Accessible"
+        },
+        {
+          "op": "snapshot",
+          "file": "after-cell-04.json"
+        },
+        {
+          "op": "wait_name",
+          "name_prefix": "Cell #38:  [handle / 25] [value kind: op_handle] [operation #25] [note: Bool birth is this exact operation.]",
+          "interface": "Action"
+        },
+        {
+          "op": "action",
+          "name_prefix": "Cell #38:  [handle / 25] [value kind: op_handle] [operation #25] [note: Bool birth is this exact operation.]",
+          "interface": "Action"
+        },
+        {
+          "op": "wait_name",
+          "name_prefix": "Cell #38:  [handle / 25] [value kind: op_handle] [operation #25] [note: Bool birth is this exact operation.] (Focused)",
+          "interface": "Accessible"
+        },
+        {
+          "op": "snapshot",
+          "file": "after-cell-05.json"
+        },
+        {
+          "op": "wait_name",
+          "name_prefix": "Cell #46: 6 [extern / local:7ba912ce8d4903ea81755ec11e567057 @ 6] [value kind: extern_ref] [foreign scroll: local:7ba912ce8d4903ea81755ec11e567057] [foreign operation: 6]",
+          "interface": "Action"
+        },
+        {
+          "op": "action",
+          "name_prefix": "Cell #46: 6 [extern / local:7ba912ce8d4903ea81755ec11e567057 @ 6] [value kind: extern_ref] [foreign scroll: local:7ba912ce8d4903ea81755ec11e567057] [foreign operation: 6]",
+          "interface": "Action"
+        },
+        {
+          "op": "wait_name",
+          "name_prefix": "Cell #46: 6 [extern / local:7ba912ce8d4903ea81755ec11e567057 @ 6] [value kind: extern_ref] [foreign scroll: local:7ba912ce8d4903ea81755ec11e567057] [foreign operation: 6] [resolved in store 6 cell #6: Foreign lighthouse changed after reopen.] (Focused)",
+          "interface": "Accessible"
+        },
+        {
+          "op": "snapshot",
+          "file": "after-cell-06.json"
+        },
+        {
+          "op": "wait_name",
+          "name_prefix": "Cell #46: 6 [extern / local:7ba912ce8d4903ea81755ec11e567057 @ 6] [value kind: extern_ref] [foreign scroll: local:7ba912ce8d4903ea81755ec11e567057] [foreign operation: 6] [resolved in store 6 cell #6: Foreign lighthouse changed after reopen.] (Focused)",
+          "interface": "Accessible"
+        },
+        {
+          "op": "snapshot",
+          "file": "rank-and-target.json"
+        }
+      ]
+    },
+    "variables": {
+      "repo": {
+        "description": "Repository root, used only for repository assets.",
+        "example": "/data/git/gleditor-restore"
+      },
+      "evidence": {
+        "description": "Writable output directory for this stage\u2019s captures and snapshots.",
+        "example": "/tmp/ux-evidence/J14/native-six-kind-rank"
+      },
+      "source_store": {
+        "description": "Absolute path to the required saved source xanadoc for this stage.",
+        "example": "/path/to/isolated/profile/xudu/xanadocs/source-store"
+      },
+      "source_store_2": {
+        "description": "Absolute path to the required saved source xanadoc for this stage.",
+        "example": "/path/to/isolated/profile/xudu/xanadocs/source-store"
+      }
+    }
+  }
+]

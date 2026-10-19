@@ -1,0 +1,82 @@
+{
+  "journey": "J4",
+  "stage": "native-home-return-action",
+  "driver": "native",
+  "program": "xuzz",
+  "profile": "J4",
+  "source_evidence": "build/ux-green-20261011/postfix-checks/j4-native-plan.json",
+  "notes": [
+    "Passed Home-cell AT-SPI Action and Text focus return; reuses authored default store and saved caret selection.",
+    "Explicit default_store and byte selection are fixture-dependent; numeric cell IDs depend on the store operation sequence.",
+    "The 6000 ms intervals preserve the cell-camera transition captures and native Action/focus handoff; the home cell may already exist before activation, so awaiting its label would not prove the transition. The final 60000 ms is the native-helper assertion window."
+  ],
+  "plan": {
+    "launch_args": [
+      "${default_store}",
+      "--resize",
+      "1440,1000",
+      "--select",
+      "3,3",
+      "--chord",
+      "Alt+Shift+N",
+      "--capture",
+      "${evidence}/before.png",
+      "--wait-ms",
+      "6000",
+      "--capture",
+      "${evidence}/native-home.png",
+      "--wait-ms",
+      "6000",
+      "--capture",
+      "${evidence}/native-return.png",
+      "--wait-ms",
+      "60000"
+    ],
+    "steps": [
+      {
+        "op": "wait_file",
+        "file": "before.png"
+      },
+      {
+        "op": "snapshot",
+        "file": "before-native.json"
+      },
+      {
+        "op": "action",
+        "name": "Cell #4: home [home] [value kind: none] (Focused)",
+        "interface": "Action"
+      },
+      {
+        "op": "wait_file",
+        "file": "native-home.png"
+      },
+      {
+        "op": "snapshot",
+        "file": "home-native.json"
+      },
+      {
+        "op": "focus",
+        "name": "default",
+        "interface": "Component"
+      },
+      {
+        "op": "wait_file",
+        "file": "native-return.png"
+      },
+      {
+        "op": "snapshot",
+        "file": "returned-native.json"
+      }
+    ]
+  },
+  "variables": {
+    "evidence": {
+      "description": "Run-specific evidence output directory.",
+      "example": "/tmp/ux-run/Jx/stage"
+    },
+    "default_store": {
+      "description": "Default xanadoc store in this journey profile.",
+      "example": "/tmp/ux-run/data/xuzz/xanadocs/default"
+    }
+  }
+}

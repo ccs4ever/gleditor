@@ -111,6 +111,6 @@ class Gleditor < Formula
     # Both return before SDL, GL or the DHT are touched, so this is a real
     # check of the installed binary's dynamic dependencies and nothing more.
     system bin/"gleditor", "--version"
-    system bin/"xudu", "--version"
+    system bin/"xuzz", "--version"
   end
 end

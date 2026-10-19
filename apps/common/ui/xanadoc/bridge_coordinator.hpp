@@ -1,9 +1,9 @@
 /**
  * @file bridge_coordinator.hpp
- * @brief Xudu composition boundary for an embedded Zigzag presentation.
+ * @brief Xuzz composition boundary for an embedded Zigzag presentation.
  */
-#ifndef XUDU_BRIDGE_COORDINATOR_HPP
-#define XUDU_BRIDGE_COORDINATOR_HPP
+#ifndef XANADU_BRIDGE_COORDINATOR_HPP
+#define XANADU_BRIDGE_COORDINATOR_HPP
 
 #include <cstdint>
 #include <functional>
@@ -20,7 +20,7 @@
 
 namespace xanadu {
 /**
- * @brief Connects a presentation surface to Xudu's renderer and LinkBeams.
+ * @brief Connects a presentation surface to Xuzz's renderer and LinkBeams.
  *
  * The coordinator owns no surface. The host owns the surface and must detach
  * it before either object is destroyed, making the renderer's non-owning
@@ -54,7 +54,7 @@ public:
     documentFocusHandler_ = std::move(handler);
   }
 
-  /// Activate a cell in Zigzag, resolving its span and notifying Xudu to focus.
+  /// Activate a cell in Zigzag, resolving its span and notifying Xuzz to focus.
   void activateCell(zigzag::CellRef cell);
 
   /// Notify that a document link to a Zigzag cell was activated.
@@ -101,4 +101,4 @@ private:
 
 } // namespace xanadu
 
-#endif // XUDU_BRIDGE_COORDINATOR_HPP
+#endif // XANADU_BRIDGE_COORDINATOR_HPP

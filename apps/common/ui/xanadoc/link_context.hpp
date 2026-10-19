@@ -1,6 +1,6 @@
 /**
  * @file link_context.hpp
- * @brief The selected-link context of a running xudu or xuzz.
+ * @brief The selected-link context of a running xuzz.
  *
  * The engine's LinkNavigator decides what a gesture means; this carries its
  * answers out against the open session -- resolving a link's occurrences in
@@ -13,8 +13,8 @@
  * navigator and the caret, document views and presentation surface, none of
  * which Vortex reaches. The keymap actions that call it are Vortex-bound.
  */
-#ifndef XUDU_LINK_CONTEXT_HPP
-#define XUDU_LINK_CONTEXT_HPP
+#ifndef XANADU_LINK_CONTEXT_HPP
+#define XANADU_LINK_CONTEXT_HPP
 
 #include <cstddef>
 #include <cstdint>
@@ -72,10 +72,39 @@ public:
   void setFocusDocument(FocusDocument handler) {
     focusDocument = std::move(handler);
   }
+  LinkContext *setDocumentEntryHandler(
+      std::function<void(std::size_t, Extent, RenderState &)> handler) {
+    documentEntry = std::move(handler);
+    return this;
+  }
   void setFocusCell(FocusCell handler) { focusCell = std::move(handler); }
   void setCaretQuery(CaretQuery query) { caretQuery = std::move(query); }
   void setCellFocusQuery(CellFocusQuery query) {
     cellFocusQuery = std::move(query);
+  }
+
+  LinkContext *setCellEntryHandler(
+      std::function<void(RenderState &, std::size_t, const CellSite &)>
+          handler) {
+    cellEntry = std::move(handler);
+    return this;
+  }
+  [[nodiscard]] std::vector<WalkEntry> walkEntries() const {
+    return activity.walkEntries();
+  }
+  [[nodiscard]] std::optional<VisitId> currentVisit() const {
+    return navigator.currentVisit();
+  }
+  std::expected<StoreActivityLog *, ActivityError> referenceVisit(VisitId id) {
+    return activity.reference(id);
+  }
+  std::expected<StoreActivityLog *, ActivityError>
+  annotateVisit(VisitId id, std::string_view text) {
+    return activity.annotate(id, text);
+  }
+  [[nodiscard]] std::string previewVisit(VisitId id) const;
+  [[nodiscard]] const std::string &entryStatus() const {
+    return entryUnavailable;
   }
 
   /// The slice currently bound to the bridge, or null outside xuzz. Every
@@ -91,15 +120,16 @@ public:
   /// The links on screen, in the stable order Next/Previous link walk.
   void setCandidates(const std::vector<zigzag::CellRef> &linkIds);
 
-  /// The key of link @p id in the primary store, which holds every link the
-  /// beams draw; federated links need their own authority design.
+  /// Recover the immutable authority from a private beam presentation ID.
   [[nodiscard]] xanadu::LinkKey keyOf(std::uint64_t id) const;
   /// Verified enabled packages and native links share the command boundary.
   [[nodiscard]] std::expected<LinkOccurrences, LinkQueryError>
   resolveForPresentation(const LinkKey &key,
                          std::optional<int> cellRadius = std::nullopt) const;
   [[nodiscard]] std::vector<LinkOccurrences>
-  packagePresentation(int cellRadius) const;
+  presentationLinks(int cellRadius) const;
+  [[nodiscard]] std::vector<LinkOccurrences>
+  packagePresentation(int cellRadius = -1) const;
   [[nodiscard]] std::optional<Link> recordOf(std::uint64_t renderId) const;
   void packageVisibilityChanged();
   void recordReadingOrigin() { noteOrigin(); }
@@ -117,8 +147,15 @@ public:
    */
   xanadu::NavigationResult execute(const xanadu::NavigationCommand &command);
 
+  /// Revisit a pending entry only after its exact local page geometry exists.
+  void advanceFrame(RenderState &state);
+  [[nodiscard]] bool entryPending() const noexcept {
+    return pendingEntry.has_value();
+  }
+
   /// Rehydrate the selected link after reopened views can resolve its ends.
   void restoreCurrentSelection();
+  void restoreSelection(const LinkVisitContext &context);
 
   [[nodiscard]] gleditor::cpp26::optional<const xanadu::SelectedLink &>
   selection() const noexcept {
@@ -129,6 +166,7 @@ public:
     return previewing;
   }
   [[nodiscard]] ReadingStamp readingStamp() const;
+  [[nodiscard]] std::optional<LinkKey> enteredLink() const;
   [[nodiscard]] std::vector<xanadu::Visit> forwardChoices() const;
 
   /**
@@ -157,6 +195,8 @@ public:
   [[nodiscard]] const Session &sessionRef() const noexcept { return session; }
 
 private:
+  [[nodiscard]] bool readerStore(std::size_t index) const;
+  [[nodiscard]] const Store *nativeStoreOf(const LinkKey &key) const;
   [[nodiscard]] PackageOccurrenceIndex
   packageIndex(std::optional<int> cellRadius) const;
   [[nodiscard]] std::expected<xanadu::LinkOccurrences, xanadu::LinkQueryError>
@@ -168,6 +208,15 @@ private:
   void apply(xanadu::NavigationEffect effect);
   void focus(const xanadu::OccurrenceSite &site);
 
+  struct PendingEntry {
+    NavigationCommand command;
+    std::uint64_t views{};
+    std::size_t view{};
+    DocumentSite site;
+  };
+  std::optional<PendingEntry> pendingEntry;
+  RenderState *renderState_{};
+
   Session &session;
   const zigzag::Manifold *manifold{};
   std::size_t manifoldStoreIndex{};
@@ -175,7 +224,10 @@ private:
   xanadu::StoreActivityLog activity;
   xanadu::LinkNavigator navigator{activity};
   FocusDocument focusDocument;
+  std::function<void(std::size_t, Extent, RenderState &)> documentEntry;
   FocusCell focusCell;
+  std::function<void(RenderState &, std::size_t, const CellSite &)> cellEntry;
+  std::string entryUnavailable;
   CaretQuery caretQuery;
   CellFocusQuery cellFocusQuery;
   std::optional<xanadu::Preview> previewing;
@@ -185,4 +237,4 @@ private:
 
 } // namespace xanadu
 
-#endif // XUDU_LINK_CONTEXT_HPP
+#endif // XANADU_LINK_CONTEXT_HPP

@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include "link_navigation.hpp"
 #include "microversion.hpp"
 
 namespace xanadu {
@@ -52,6 +53,8 @@ struct ReadingPlace {
   std::string zigzagVersion;
   std::int64_t zigzagFocus{};
   bool zigzagHasKeyboard{};
+  /// The pinned link can exist before any endpoint visit is completed.
+  std::optional<LinkVisitContext> link;
 
   bool operator==(const ReadingPlace &) const = default;
 };
@@ -75,7 +78,7 @@ MicroversionId recordPlace(Store &store, const ReadingPlace &place);
 
 /**
  * @brief Where the reader's activity store lives:
- *        `$XDG_DATA_HOME/xudu/activity`.
+ *        `$XDG_DATA_HOME/xuzz/activity`.
  *
  * Data rather than configuration, so beside the xanadocs rather than with
  * the system xanadocs; system://activity is its name.

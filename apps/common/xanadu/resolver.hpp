@@ -245,7 +245,7 @@ public:
   /// predictable world-writable name is one another account can create first
   /// and then read out of.
   [[nodiscard]] static std::filesystem::path defaultCacheDir() {
-    return std::filesystem::path(gleditor::paths::cacheDir("xudu")) / "content";
+    return std::filesystem::path(gleditor::paths::cacheDir("xuzz")) / "content";
   }
 
   /// @param source Where external content comes from. Not owned; may be null,

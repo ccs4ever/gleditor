@@ -31,11 +31,11 @@ LIBGL_ALWAYS_SOFTWARE ?= 1
 export SDL_VIDEODRIVER SDL_AUDIODRIVER LIBGL_ALWAYS_SOFTWARE
 
 # And under the build tree, not the developer's home. A store holds no primedia
-# of its own: what was typed lives in the author's permascroll, which xudu
-# resolves to $XDG_DATA_HOME/xudu/permascroll by default. Without this, running
+# of its own: what was typed lives in the author's permascroll, which xuzz
+# resolves to $XDG_DATA_HOME/xuzz/permascroll by default. Without this, running
 # the suite writes every byte the tests type into the real permascroll of
 # whoever ran it, and it stays there. $XDG_CONFIG_HOME is the same argument for
-# the system xanadocs -- keymap, settings, layout, ui -- which xudu writes for
+# the system xanadocs -- keymap, settings, layout, ui -- which xuzz writes for
 # itself on first run and which a test run would otherwise overwrite with
 # whatever that test was demonstrating. $XDG_CACHE_HOME keeps the LMDB content
 # cache under the build tree as well; without it, Resolver falls back to the
@@ -274,7 +274,7 @@ TEST_PKGS := gmock_main
 # thing this program is for. Better to fail at configure time than to ship a
 # xanadoc editor that quietly cannot publish.
 # OpenSSL is required for in-process Ed25519 signing and X.509 v3 device delegation.
-XUDU_PKGS := libtorrent-rasterbar openssl lmdb libmagic sqlite3 spdlog libzstd
+XUDU_PKGS := libtorrent-rasterbar openssl lmdb libmagic sqlite3 spdlog libzstd libblake3 libzmq libngtcp2 libngtcp2_crypto_ossl
 ifneq (,$(filter-out $(NO_SDL_GOALS),$(or $(MAKECMDGOALS),all)))
 ifneq ($(shell pkg-config --exists libtorrent-rasterbar && echo 1),1)
 $(error libtorrent-rasterbar was not found by pkg-config. It is required: \
@@ -424,12 +424,16 @@ datarootdir ?= $(prefix)/share
 datadir ?= $(datarootdir)
 mandir ?= $(datarootdir)/man
 appdir := $(datadir)/gleditor
-ifdef DEBUG
+# Sanitizer flag sets are defined unconditionally so both the stock
+# sanitize/* targets and the Stage 0 engine-and-test sanitizer targets
+# (vortex-multithreading-study.md §3.6) can reference them. They are inert
+# unless a sanitize target adds them to CXXFLAGS/LDFLAGS.
 SANITIZE_ADDR_OPTS := -fsanitize=address,undefined,integer -fno-omit-frame-pointer -fsanitize-address-use-after-return=runtime \
 	         -fsanitize-address-use-after-scope
 SANITIZE_THR_OPTS := -fsanitize=thread,undefined,integer -fno-omit-frame-pointer
 SANITIZE_MEM_OPTS := -fsanitize=memory,undefined,integer -fPIE -pie -fno-omit-frame-pointer \
 		     -fsanitize-memory-track-origins
+ifdef DEBUG
 DEBUG_OPTS := -g -gembed-source -fdebug-macro -O0
 PROFILE_OPTS := -fprofile-instr-generate -fcoverage-mapping -fcoverage-mcdc
 else
@@ -522,7 +526,7 @@ GLEDITOR_LIBS :=
 XUDU_LIBS := $(shell pkg-config $(STATIC) --libs $(XUDU_PKGS))
 # Matches XUDU_PKGS because ZIGZAG_SHARED_CORE_OBJS is XUDU_CORE_OBJS: zigzag
 # links the whole xanalogical engine, so it needs whatever that engine needs.
-ZIGZAG_PKGS := libtorrent-rasterbar openssl lmdb libmagic sqlite3 spdlog libzstd
+ZIGZAG_PKGS := $(XUDU_PKGS)
 ZIGZAG_LIBS := $(shell pkg-config $(STATIC) --libs $(ZIGZAG_PKGS))
 
 # glslangValidator is the traditional name and glslang the current one; which
@@ -543,7 +547,7 @@ GLSLANG := $(shell command -v glslangValidator 2>/dev/null || command -v glslang
 # one program be built on it.
 #
 # The programs live under apps/. `gleditor` is the plain editor -- a command
-# line, a key map and an event loop over the library. `xudu` is a second one
+# line, a key map and an event loop over the library. `xuzz` is a second one
 # that keeps a versioned hypertext and renders it with the same library. The
 # library must not need either of them in order to build, and neither program
 # may need the other; that is the whole of what the boundary is for.
@@ -611,16 +615,23 @@ XUZZ_TEST_OBJS  := $(call obj,$(XUZZ_TEST_SRCS))
 XUDU_TEST_OBJS  := $(XUZZ_TEST_OBJS)
 SWARM_PEER_OBJS := $(call obj,tools/xudu-swarm-peer.cpp)
 UI_TEXT_BASELINE_OBJS := $(call obj,tools/ui-text-baseline.cpp)
+LINK_STRESS_OBJS := $(call obj,tools/render-link-stress.cpp)
 VQUERYC_SRCS    := $(shell find apps/vqueryc -name '*.cpp' 2>/dev/null)
 VQUERYC_OBJS    := $(call obj,$(VQUERYC_SRCS))
 VQUERY_SRCS     := $(shell find apps/vquery -name '*.cpp' 2>/dev/null)
 VQUERY_OBJS     := $(call obj,$(VQUERY_SRCS))
 VPROLOG_SRCS    := $(shell find apps/vprolog -name '*.cpp' 2>/dev/null)
 VPROLOG_OBJS    := $(call obj,$(VPROLOG_SRCS))
+VLACE_SRCS      := $(shell find apps/vlace -name '*.cpp' 2>/dev/null)
+VLACE_OBJS      := $(call obj,$(VLACE_SRCS))
+VLACEC_SRCS     := $(shell find apps/vlacec -name '*.cpp' 2>/dev/null)
+VLACEC_OBJS     := $(call obj,$(VLACEC_SRCS))
 VPLC_SRCS       := $(shell find apps/vplc -name '*.cpp' 2>/dev/null)
 VPLC_OBJS       := $(call obj,$(VPLC_SRCS))
 VPL_SRCS        := $(shell find apps/vpl -name '*.cpp' 2>/dev/null)
 VPL_OBJS        := $(call obj,$(VPL_SRCS))
+SPIKE_SRCS      := $(shell find tools/spikes -name '*.cpp' 2>/dev/null)
+SPIKE_OBJS      := $(call obj,$(SPIKE_SRCS))
 
 # What a shared library is called, and how a program finds it, differ enough
 # between the two targets that both are spelled out rather than guessed at.
@@ -684,8 +695,8 @@ endif
 ALL_OBJS := $(sort $(LIB_OBJS) $(GLEDITOR_OBJS) $(XUDU_CORE_OBJS) $(XUZZ_OBJS) \
 	$(ZIGZAG_CORE_OBJS) $(ZIGZAG_TEST_OBJS) $(COMMON_UI_OBJS) \
 	$(LIB_TEST_OBJS) $(XUDU_TEST_OBJS) $(XUZZ_TEST_OBJS) $(SWARM_PEER_OBJS) \
-	$(GENERATE_SAMPLE_XANADOCS_OBJS) $(VQUERYC_OBJS) $(VQUERY_OBJS) $(VPROLOG_OBJS) $(VPLC_OBJS) $(VPL_OBJS) \
-	$(UI_TEXT_BASELINE_OBJS))
+	$(GENERATE_SAMPLE_XANADOCS_OBJS) $(VQUERYC_OBJS) $(VQUERY_OBJS) $(VPROLOG_OBJS) $(VPLC_OBJS) $(VPL_OBJS) $(VLACE_OBJS) $(VLACEC_OBJS) \
+	$(UI_TEXT_BASELINE_OBJS) $(LINK_STRESS_OBJS) $(SPIKE_OBJS))
 ALL_OBJ_DIRS := $(sort $(OBJDIR)/ $(OBJDIR)/tmp/ $(dir $(ALL_OBJS)))
 DEPS := $(sort $(patsubst %.o,%.dep,$(ALL_OBJS)))
 JFILES := $(sort $(patsubst %.o,%.j,$(ALL_OBJS)))
@@ -719,7 +730,7 @@ endif
 GLSL_SOURCES := $(wildcard assets/shaders/*.glsl)
 SPIRV := $(patsubst assets/shaders/%.glsl,assets/shaders/vulkan/%.spv,$(GLSL_SOURCES))
 
-all: lib gleditor xudu xuzz zigzag store-dump xudu-dump vqueryc vquery vprolog vplc vpl gleditor_test xuzz_test xudu_test zigzag_test $(OBJDIR)/compile_commands.json
+all: lib gleditor xudu xuzz zigzag store-dump xudu-dump vqueryc vquery vprolog vplc vpl vlace vlacec gleditor_test xuzz_test xudu_test zigzag_test $(OBJDIR)/compile_commands.json
 ifdef GLEDITOR_ENABLE_VULKAN
 all: shaders
 endif
@@ -856,8 +867,39 @@ sanitize/memory: gleditor
 sanitize/memory/run: sanitize/memory
 	MSAN_OPTIONS=check_initialization_order=1:detect_leaks=1:strict_string_checks=1 $(OBJDIR)/gleditor
 
+# -- Stage 0 engine-and-test sanitizer targets --------------------------------
+# vortex-multithreading-study.md §3.6: the stock sanitize/address and
+# sanitize/thread targets build only `gleditor`, which by AGENTS.md design
+# links no Xanadu or Vortex code, so they instrument zero lines of the engine.
+# These targets apply the same SANITIZE_*_OPTS flag macros to the engine
+# objects and the xudu_test / zigzag_test binaries, which do exercise
+# vortex_vm, arena_manifold, vlog and the frontends. Use /run to build and
+# execute the engine suites under the sanitizer single-threaded.
+.PHONY: sanitize/engine-address sanitize/engine-address/run \
+        sanitize/engine-thread sanitize/engine-thread/run
 
-.PHONY: gleditor_test xuzz_test xudu_test zigzag_test
+sanitize/engine-address: CXXFLAGS += $(SANITIZE_ADDR_OPTS)
+sanitize/engine-address: LDFLAGS += $(SANITIZE_ADDR_OPTS)
+sanitize/engine-address: xuzz_test zigzag_test
+
+sanitize/engine-address/run: sanitize/engine-address
+	ASAN_OPTIONS=check_initialization_order=1:detect_leaks=1:strict_string_checks=1 \
+	  $(OBJDIR)/xuzz_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
+	ASAN_OPTIONS=check_initialization_order=1:detect_leaks=1:strict_string_checks=1 \
+	  $(OBJDIR)/zigzag_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
+
+sanitize/engine-thread: CXXFLAGS += $(SANITIZE_THR_OPTS)
+sanitize/engine-thread: LDFLAGS += $(SANITIZE_THR_OPTS)
+sanitize/engine-thread: xuzz_test zigzag_test
+
+sanitize/engine-thread/run: sanitize/engine-thread
+	TSAN_OPTIONS=second_deadlock_stack=1 \
+	  $(OBJDIR)/xuzz_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
+	TSAN_OPTIONS=second_deadlock_stack=1 \
+	  $(OBJDIR)/zigzag_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
+
+
+.PHONY: gleditor_test xanadu_test xudu_test xuzz_test zigzag_test
 TEST_LIBS = $(shell pkg-config $(STATIC) --libs $(TEST_PKGS))
 
 # The library's own tests, linked against the library the programs link
@@ -872,8 +914,12 @@ $(OBJDIR)/gleditor_test: $(LIB_TEST_OBJS) $(OBJDIR)/apps/gleditor/editor_config.
 # merely asserted: if a rule about versions, links or content addresses ever
 # needed a renderer, this would stop linking. Focus arbitration is also
 # device-independent and is shared with the modal adapter contract tests.
+xanadu_test: $(OBJDIR)/xanadu_test
+$(OBJDIR)/xanadu_test: $(OBJDIR)/xuzz_test
+	ln -sf xuzz_test $@
+
 xuzz_test: $(OBJDIR)/xuzz_test
-$(OBJDIR)/xuzz_test: $(XUZZ_TEST_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o
+$(OBJDIR)/xuzz_test: $(XUZZ_TEST_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
 
 xudu_test: $(OBJDIR)/xudu_test
@@ -897,7 +943,7 @@ FUZZ_FLAGS    := -fsanitize=fuzzer-no-link,address,undefined
 FUZZ_CORE_OBJS := $(patsubst %.cpp,$(FUZZ_OBJDIR)/%.o,$(XUDU_CORE_SRCS))
 # scroll.cpp and publication.cpp (both under XUDU_CORE_SRCS above) now call
 # into MimeType and SourceGrounder, which live under src/ rather than
-# apps/xudu/core/ and so are not swept up by XUDU_CORE_SRCS. Needed here for
+# apps/common/xanadu/ and so are not swept up by XUDU_CORE_SRCS. Needed here for
 # the same reason xudu-swarm-peer needs them below: anything linking the
 # engine now needs these two as well.
 FUZZ_CORE_OBJS += $(FUZZ_OBJDIR)/src/mimetype.o $(FUZZ_OBJDIR)/src/source_grounder.o
@@ -933,12 +979,12 @@ fuzz: fuzz_binary_ops fuzz_link_package fuzz_identity_wire fuzz_session_package 
 # namespace of its own.
 .PHONY: xudu-swarm-peer
 xudu-swarm-peer: $(OBJDIR)/xudu-swarm-peer
-$(OBJDIR)/xudu-swarm-peer: $(OBJDIR)/tools/xudu-swarm-peer.o $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o
+$(OBJDIR)/xudu-swarm-peer: $(OBJDIR)/tools/xudu-swarm-peer.o $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
 .PHONY: generate-seed-corpora
 generate-seed-corpora: $(OBJDIR)/generate-seed-corpora
-$(OBJDIR)/generate-seed-corpora: $(OBJDIR)/tools/generate_seed_corpora.o $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o
+$(OBJDIR)/generate-seed-corpora: $(OBJDIR)/tools/generate_seed_corpora.o $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
 # All compilation happens inside the image, so the host needs only git and
@@ -955,27 +1001,37 @@ swarm-image:
 
 .PHONY: vqueryc
 vqueryc: $(OBJDIR)/vqueryc
-$(OBJDIR)/vqueryc: $(VQUERYC_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o
+$(OBJDIR)/vqueryc: $(VQUERYC_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
 .PHONY: vquery
 vquery: $(OBJDIR)/vquery
-$(OBJDIR)/vquery: $(VQUERY_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o
+$(OBJDIR)/vquery: $(VQUERY_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
 .PHONY: vprolog
 vprolog: $(OBJDIR)/vprolog
-$(OBJDIR)/vprolog: $(VPROLOG_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o
+$(OBJDIR)/vprolog: $(VPROLOG_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
 .PHONY: vplc
 vplc: $(OBJDIR)/vplc
-$(OBJDIR)/vplc: $(VPLC_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o
+$(OBJDIR)/vplc: $(VPLC_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
 .PHONY: vpl
 vpl: $(OBJDIR)/vpl
-$(OBJDIR)/vpl: $(VPL_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o
+$(OBJDIR)/vpl: $(VPL_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
+	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
+
+.PHONY: vlace
+vlace: $(OBJDIR)/vlace
+$(OBJDIR)/vlace: $(VLACE_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
+	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
+
+.PHONY: vlacec
+vlacec: $(OBJDIR)/vlacec
+$(OBJDIR)/vlacec: $(VLACEC_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
 # Reads a store as text without going through the loader, which is what lets
@@ -1032,6 +1088,17 @@ endif
 $(OBJDIR)/ui-text-baseline: $(UI_TEXT_BASELINE_OBJS) $(LIBLINK)
 	$(CXX) $(LDFLAGS) -o $@ $(UI_TEXT_BASELINE_OBJS) $(APP_LDFLAGS) $(LIBS)
 
+# Real Session/LinkBeams component evidence over cloned diagnostic fixtures.
+# Optional: prepared scene placement does not replace an interactive journey.
+.PHONY: render-link-stress
+render-link-stress: $(OBJDIR)/render-link-stress
+ifdef GLEDITOR_ENABLE_VULKAN
+render-link-stress: shaders
+endif
+$(OBJDIR)/render-link-stress: $(LINK_STRESS_OBJS) $(COMMON_UI_OBJS) $(XUDU_CORE_OBJS) $(LIBLINK)
+	$(CXX) $(LDFLAGS) -o $@ $(LINK_STRESS_OBJS) $(COMMON_UI_OBJS) $(XUDU_CORE_OBJS) \
+	  $(APP_LDFLAGS) $(LIBS) $(XUDU_LIBS)
+
 # Proves the decode-index prototype (design/decode-index-spike.md) on real
 # files rather than leaving it a paper design: a PNG scanline checkpoint
 # spike (zlib inflateCopy()), an audio/video seek spike (FFmpeg
@@ -1066,8 +1133,40 @@ decode-index-spike:
 	@echo "decode-index-spike: libavformat/libavcodec/libavutil/zlib/libjpeg/libwebp not all found by pkg-config -- skipping (optional, see tools/decode-index-spike.cpp)"
 endif
 
+.PHONY: spikes spike-s1 spike-s2 spike-s3 spike-s4 spike-s5 spike-s6 spike-runner
+spike-s1: $(OBJDIR)/spike-s1
+$(OBJDIR)/spike-s1: $(call obj,tools/spikes/spike_s1_rankfilade.cpp) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(LIBLINK)
+	$(CXX) $(LDFLAGS) $(RPATH_FLAGS) -o $@ $^ $(XUDU_LIBS) $(LIBS)
+
+spike-s2: $(OBJDIR)/spike-s2
+$(OBJDIR)/spike-s2: $(call obj,tools/spikes/spike_s2_zz9p.cpp)
+	$(CXX) $(LDFLAGS) -o $@ $^
+
+spike-s3: $(OBJDIR)/spike-s3
+$(OBJDIR)/spike-s3: $(call obj,tools/spikes/spike_s3_crdt_zz.cpp)
+	$(CXX) $(LDFLAGS) -o $@ $^
+
+spike-s4: $(OBJDIR)/spike-s4
+$(OBJDIR)/spike-s4: $(call obj,tools/spikes/spike_s4_layoutfilade.cpp) $(OBJDIR)/src/enfilade/layoutfilade.o $(LIBLINK)
+	$(CXX) $(LDFLAGS) $(RPATH_FLAGS) -o $@ $^ $(LIBS)
+
+spike-s5: $(OBJDIR)/spike-s5
+$(OBJDIR)/spike-s5: $(call obj,tools/spikes/spike_s5_arena_toss.cpp) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(LIBLINK)
+	$(CXX) $(LDFLAGS) $(RPATH_FLAGS) -o $@ $^ $(XUDU_LIBS) $(LIBS)
+
+spike-s6: $(OBJDIR)/spike-s6
+$(OBJDIR)/spike-s6: $(call obj,tools/spikes/spike_s6_treefilade.cpp)
+	$(CXX) $(LDFLAGS) -o $@ $^
+
+spike-runner: $(OBJDIR)/spike-runner
+$(OBJDIR)/spike-runner: $(call obj,tools/spikes/spike_runner.cpp)
+	$(CXX) $(LDFLAGS) -o $@ $^ -pthread
+
+spikes: $(OBJDIR)/spike-s1 $(OBJDIR)/spike-s2 $(OBJDIR)/spike-s3 $(OBJDIR)/spike-s4 $(OBJDIR)/spike-s5 $(OBJDIR)/spike-s6 $(OBJDIR)/spike-runner
+	LD_LIBRARY_PATH=$(OBJDIR) $(OBJDIR)/spike-runner
+
 .PHONY: sample-xanadocs
-sample-xanadocs: $(OBJDIR)/xudu
+sample-xanadocs: $(OBJDIR)/xuzz
 	tools/create-sample-xanadocs.sh
 
 # The swarm tests proper, with the two peers on separate network stacks via
@@ -1075,26 +1174,33 @@ sample-xanadocs: $(OBJDIR)/xudu
 .PHONY: test/swarm
 test/swarm: $(OBJDIR)/xudu-swarm-peer $(OBJDIR)/xuzz_test $(OBJDIR)/xuzz
 	tools/swarm-netns-test.sh
-	XUDU_SWARM_TEST_FILTER='PublicationOutboxNetworkTest.*' tools/swarm-netns-test.sh
+	XUDU_SWARM_TEST_FILTER='PublicationOutboxNetworkTest.*:MeshCheckpointNetworkTest.*' tools/swarm-netns-test.sh
 
 .PHONY: test/publication-swarm
 test/publication-swarm: $(OBJDIR)/xudu-swarm-peer $(OBJDIR)/xuzz_test $(OBJDIR)/xuzz
-	XUDU_SWARM_TEST_FILTER='PublicationOutboxNetworkTest.*' tools/swarm-netns-test.sh
+	XUDU_SWARM_TEST_FILTER='PublicationOutboxNetworkTest.*:MeshCheckpointNetworkTest.*' tools/swarm-netns-test.sh
 
 .PHONY: test/publication-local
 test/publication-local: $(OBJDIR)/xuzz
 	python3 tools/publication-local-test.py --binary $(OBJDIR)/xuzz --output $(OBJDIR)/publication-local
 
+.PHONY: test/ux-journey-plans
+test/ux-journey-plans:
+	python3 tools/ux-journey.py --check
+	python3 tests/tools/ux_journey_test.py
+
+test: test/ux-journey-plans
+
 # Network namespace suites that require two peers on separate network stacks.
 # Standalone xuzz_test skips these; tools/swarm-netns-test.sh runs them.
-SWARM_NETNS_TESTS := SwarmTest.*:MutableNameTest.*:PublicationOutboxNetworkTest.*
+SWARM_NETNS_TESTS := SwarmTest.*:MutableNameTest.*:PublicationOutboxNetworkTest.*:MeshCheckpointNetworkTest.*
 TEST_FILTER ?= -$(SWARM_NETNS_TESTS)
 
 # Programs the suites run as child processes (the E2E tests look for them
 # under build/), so a fresh checkout's `make test` builds them rather than
 # failing with "binary not found".
 TEST_PROGRAMS := $(addprefix $(OBJDIR)/,gleditor xudu xuzz zigzag xudu-dump \
-	xudu-swarm-peer vquery vpl vplc vprolog)
+	xudu-swarm-peer vquery vpl vplc vprolog vlace vlacec)
 
 .PHONY: test test/all test/integration test/e2e-orchestration
 test: $(TEST_PROGRAMS) $(OBJDIR)/gleditor_test $(OBJDIR)/xuzz_test $(OBJDIR)/zigzag_test
@@ -1103,7 +1209,7 @@ test: $(TEST_PROGRAMS) $(OBJDIR)/gleditor_test $(OBJDIR)/xuzz_test $(OBJDIR)/zig
 	$(OBJDIR)/zigzag_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
 	@if [ -z "$(TEST_FILTER)" ] || [ "$(TEST_FILTER)" = "-$(SWARM_NETNS_TESTS)" ] || echo "$(TEST_FILTER)" | grep -qE 'Swarm|MutableName|PublicationOutboxNetwork|\*'; then \
 		tools/swarm-netns-test.sh && \
-		XUDU_SWARM_TEST_FILTER='PublicationOutboxNetworkTest.*' tools/swarm-netns-test.sh; \
+		XUDU_SWARM_TEST_FILTER='PublicationOutboxNetworkTest.*:MeshCheckpointNetworkTest.*' tools/swarm-netns-test.sh; \
 	fi
 
 test/all: test
@@ -1272,7 +1378,7 @@ TIDY_FILES              ?= '^(?!.*thirdparty).*/(src|apps)/'
 TIDY_CHECKS             ?=
 TIDY_WARNINGS_AS_ERRORS ?=
 TIDY_HEADER_FILTER      ?= '^(include|src|apps)/'
-SCAN_BUILD_TARGETS      ?= lib gleditor xudu zigzag
+SCAN_BUILD_TARGETS      ?= lib gleditor xuzz zigzag
 SCAN_BUILD_FLAGS        ?= -o $(OBJDIR)/scan-reports
 CPPCHECK_FLAGS          ?= --enable=warning,style,performance,portability \
                            --suppress=missingIncludeSystem \
@@ -1499,11 +1605,15 @@ endif
 	$(INSTALL) -d $(DESTDIR)$(mandir)/man1
 	$(SED) 's,@DATADIR@,$(appdir),g' packaging/gleditor.1 > $(OBJDIR)/gleditor.1
 	$(INSTALL) -m 644 $(OBJDIR)/gleditor.1 $(DESTDIR)$(mandir)/man1/gleditor.1
+	$(SED) 's,@DATADIR@,$(appdir),g' packaging/xuzz.1 > $(OBJDIR)/xuzz.1
+	$(INSTALL) -m 644 $(OBJDIR)/xuzz.1 $(DESTDIR)$(mandir)/man1/xuzz.1
 	$(SED) 's,@DATADIR@,$(appdir),g' packaging/xudu.1 > $(OBJDIR)/xudu.1
 	$(INSTALL) -m 644 $(OBJDIR)/xudu.1 $(DESTDIR)$(mandir)/man1/xudu.1
 
 uninstall:
 	$(RM) -f $(DESTDIR)$(bindir)/gleditor
+	$(RM) -f $(DESTDIR)$(bindir)/xuzz
+	$(RM) -f $(DESTDIR)$(bindir)/zigzag
 	$(RM) -f $(DESTDIR)$(bindir)/xudu
 	$(RM) -f $(DESTDIR)$(libdir)/$(notdir $(LIBREAL))
 	$(RM) -f $(DESTDIR)$(libdir)/$(LIBNAME)
@@ -1514,6 +1624,7 @@ uninstall:
 	$(RM) -f $(DESTDIR)$(datadir)/metainfo/gleditor.metainfo.xml
 	$(RM) -f $(DESTDIR)$(datadir)/icons/hicolor/256x256/apps/gleditor.png
 	$(RM) -f $(DESTDIR)$(mandir)/man1/gleditor.1
+	$(RM) -f $(DESTDIR)$(mandir)/man1/xuzz.1
 	$(RM) -f $(DESTDIR)$(mandir)/man1/xudu.1
 
 # A release tarball, which is what the distribution packages build from. The
@@ -1592,3 +1703,9 @@ $(OBJDIR)/compile_commands.json: $(JFILES)
 ifeq (,$(filter clean dist $(NO_SDL_GOALS),$(MAKECMDGOALS)))
 include $(DEPS)
 endif
+
+# This prepares a native, full-text reading fixture; navigation remains the
+# program's normal member/occurrence, Cross, Enter and Origin controls.
+.PHONY: prototype/kjv-links
+prototype/kjv-links: xuzz
+	python3 tools/create-kjv-link-prototype.py

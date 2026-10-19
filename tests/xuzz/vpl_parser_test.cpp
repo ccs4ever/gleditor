@@ -9,6 +9,17 @@
 namespace xanadu::vpl {
 namespace {
 
+TEST(VplParserTest, CatenateChainsRightToLeftAndRejectsMissingOperand) {
+  auto ast         = Parser("ready , unready , total").parseExpression();
+  const auto outer = std::dynamic_pointer_cast<DyadicExpr>(ast);
+  ASSERT_NE(outer, nullptr);
+  EXPECT_EQ(outer->verb(), TokenKind::Catenate);
+  const auto inner = std::dynamic_pointer_cast<DyadicExpr>(outer->right());
+  ASSERT_NE(inner, nullptr);
+  EXPECT_EQ(inner->verb(), TokenKind::Catenate);
+  EXPECT_THROW(Parser("data ,").parseProgram(), std::runtime_error);
+}
+
 TEST(VplParserTest, RightToLeftAssociativity) {
   // In APL, 3 × 2 + 1 evaluates to 3 × (2 + 1) = 9
   Parser parser("3 × 2 + 1");

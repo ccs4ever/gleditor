@@ -46,6 +46,7 @@ void Caret::createPipeline(const render::PipelineDesc &documentDesc) {
 
 void Caret::placeAt(const std::uint32_t aDocIndex,
                     const std::uint32_t aByteOffset) {
+  ++selectionRevision_;
   docIndex    = aDocIndex;
   byteOffset_ = aByteOffset;
   visible     = true;
@@ -53,11 +54,13 @@ void Caret::placeAt(const std::uint32_t aDocIndex,
 }
 
 void Caret::anchorSelection() {
+  ++selectionRevision_;
   anchor   = byteOffset_;
   anchored = true;
 }
 
 void Caret::extendTo(const std::uint32_t aByteOffset) {
+  ++selectionRevision_;
   if (!anchored) {
     anchorSelection();
   }
@@ -66,6 +69,7 @@ void Caret::extendTo(const std::uint32_t aByteOffset) {
 
 void Caret::shiftForInsertion(const std::uint32_t at,
                               const std::uint32_t bytes) {
+  ++selectionRevision_;
   // An insertion exactly at the caret pushes the caret after what was typed,
   // which is where the next character belongs.
   if (at <= byteOffset_) {
@@ -92,6 +96,7 @@ std::uint32_t afterErasure(const std::uint32_t offset, const std::uint32_t at,
 } // namespace
 
 void Caret::shiftForErasure(const std::uint32_t at, const std::uint32_t bytes) {
+  ++selectionRevision_;
   byteOffset_ = afterErasure(byteOffset_, at, bytes);
   if (anchored) {
     anchor = afterErasure(anchor, at, bytes);

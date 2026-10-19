@@ -50,7 +50,7 @@ explicitly materialised view with `advance()` and `verifyAgainstFullRebuild()`);
 its ephemeral copy-on-write twin, and R8 draws the persistent/ephemeral boundary at the *type*.
 
 Who writes Structure operations today, outside tests: `system_docs.cpp` (the dominant writer, 34
-calls), `zz_xudu_projector.cpp`'s `sliceToStore()`, `unified_transclusion_engine.cpp`,
+calls), `xanadu_projector.cpp`'s `sliceToStore()`, `unified_transclusion_engine.cpp`,
 `arena_manifold.cpp`'s `promote()` (the one road from ephemeral to persistent),
 `vortex_host.cpp::promoteAndAttachToStore()`, the VQL and VPL compilers' persist paths,
 `dimension_registry.cpp`, and `apps/common/ui/xanadoc/batch_orchestrator.cpp`. **Xanadu the text

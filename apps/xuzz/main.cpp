@@ -3,6 +3,7 @@
  * @brief Sovereign entry point for Xuzz.
  */
 #include "xuzz_app.hpp"
+#include <csignal>
 #include <gleditor/android_bootstrap.hpp>
 #include <gleditor/app.hpp>
 #include <iostream>
@@ -12,6 +13,11 @@
 #endif
 
 int main(const int argc, char **argv) {
+#ifdef SIGPIPE
+  // A native service closing its IPC stream must report EPIPE to its
+  // transport, rather than terminate the editor before it saves the session.
+  std::signal(SIGPIPE, SIG_IGN);
+#endif
 #ifdef __ANDROID__
   gleditor::androidBootstrap();
 #endif

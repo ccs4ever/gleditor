@@ -9,6 +9,7 @@
 #include <gleditor/beams.hpp>
 #include <gleditor/render_state.hpp>
 #include <gleditor/text_source.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include <gtest/gtest.h>
 
 namespace {
@@ -217,7 +218,7 @@ TEST_F(ReaderPackageUiTest,
   });
   beams.deviceReady(device, {});
   ch::Timeline timeline;
-  glm::mat4 projection{1};
+  const auto projection = glm::ortho(-200.F, 200.F, -100.F, 100.F, -10.F, 10.F);
   gleditor::FrameContext frame{.state          = state,
                                .viewProjection = projection,
                                .screenWidth    = 800,
@@ -237,4 +238,203 @@ TEST_F(ReaderPackageUiTest,
   EXPECT_TRUE(touches(90, 0));
   EXPECT_EQ(store.opCount(), operations);
 }
+
+TEST_F(ReaderPackageUiTest,
+       ClosedNativeEndpointRefusesEntryAndSavedVisitWithoutChangingReading) {
+  auto perma = std::make_shared<UserPermascroll>();
+  Session session((root / "workspace").string(), perma);
+  auto &store       = session.store();
+  const auto text   = store.insert({}, 0, "origin destination");
+  const auto pieces = store.rebuild(text);
+  Link link{.left = pieces.spansFor(0, 6), .right = pieces.spansFor(7, 11)};
+  const auto head = store.addLink(text, link);
+  store.repointCurrentVersion(head);
+  session.viewOpened(head);
+  const LinkKey key{.authority = store.documentId(),
+                    .id        = store.links().begin()->first};
+  LinkContext navigation(session);
+  std::optional<Extent> focused;
+  navigation.setFocusDocument([&](std::size_t view, Extent range) {
+    EXPECT_EQ(view, 0U);
+    focused = range;
+  });
+  navigation.setCaretQuery([] {
+    return std::optional{LinkContext::CaretPosition{.view = 0, .offset = 0}};
+  });
+  ASSERT_TRUE(navigation.execute(nav::SelectLink{.key = key}));
+  ASSERT_TRUE(navigation.execute(nav::SelectOccurrence{
+      .key = key, .side = LinkSide::Right, .member = 0, .occurrence = 0}));
+  ASSERT_TRUE(navigation.execute(nav::Enter{}));
+  EXPECT_EQ(focused, (Extent{7, 18}));
+  const auto destination = navigation.currentVisit();
+  ASSERT_TRUE(destination);
+  navigation.recordSourceArrival(DocumentSite{
+      .store = store.documentId(), .version = head, .range = {0, 6}});
+  const auto current = navigation.currentVisit();
+  ASSERT_NE(current, destination);
+  const auto visits      = navigation.walkEntries().size();
+  const auto activityOps = session.activityForNavigation()->opCount();
+  const auto operations  = store.opCount();
+  const auto selected    = *navigation.selection();
+  session.views().clear();
+
+  for (const NavigationCommand &command :
+       {NavigationCommand{nav::Enter{}},
+        NavigationCommand{nav::EnterAt{
+            .key = key, .side = LinkSide::Right, .member = 0, .occurrence = 0}},
+        NavigationCommand{nav::EnterVisit{.visit = *destination}}}) {
+    const auto result = navigation.execute(command);
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error(), NavigationError::MemberNotInView);
+    EXPECT_FALSE(navigation.entryStatus().empty());
+    EXPECT_EQ(navigation.currentVisit(), current);
+    EXPECT_EQ(navigation.walkEntries().size(), visits);
+    EXPECT_EQ(session.activityForNavigation()->opCount(), activityOps);
+    ASSERT_TRUE(navigation.selection());
+    EXPECT_EQ(navigation.selection()->key, selected.key);
+    EXPECT_EQ(navigation.selection()->left, selected.left);
+    EXPECT_EQ(navigation.selection()->right, selected.right);
+    EXPECT_EQ(navigation.selection()->active, selected.active);
+    EXPECT_EQ(focused, (Extent{7, 18}));
+  }
+  ASSERT_TRUE(navigation.execute(nav::CancelEntry{}));
+  EXPECT_TRUE(navigation.entryStatus().empty());
+  EXPECT_EQ(navigation.currentVisit(), current);
+  EXPECT_EQ(session.activityForNavigation()->opCount(), activityOps);
+  EXPECT_EQ(store.opCount(), operations);
+}
+
+TEST_F(ReaderPackageUiTest,
+       SavedCellEntryRestoresHistoricalVersionAndExactContentRange) {
+  auto perma = std::make_shared<UserPermascroll>();
+  Session session((root / "workspace").string(), perma);
+  auto &store           = session.store();
+  const auto historical = store.makeCell({}, "old endpoint text");
+  const auto cell       = store.cellRefOf(historical);
+  const auto latest     = store.spliceCell(historical, cell, 0, 3, "new");
+  store.repointCurrentVersion(latest);
+  const auto bound = store.rebuildManifold(latest);
+  LinkContext navigation(session);
+  navigation.setManifold(&bound, 0, latest);
+  const CellSite target{.store   = store.documentId(),
+                        .version = historical,
+                        .cell    = cell,
+                        .range   = {4, 12}};
+  navigation.recordSourceArrival(target);
+  const auto saved = navigation.currentVisit();
+  ASSERT_TRUE(saved);
+  navigation.recordSourceArrival(CellSite{.store   = store.documentId(),
+                                          .version = latest,
+                                          .cell    = cell,
+                                          .range   = {0, 3}});
+  WorldRecordingDevice device;
+  RenderState state{&device};
+  navigation.advanceFrame(state);
+  std::optional<CellSite> entered;
+  navigation.setCellEntryHandler(
+      [&](RenderState &received, std::size_t index, const CellSite &site) {
+        EXPECT_EQ(&received, &state);
+        EXPECT_EQ(index, 0U);
+        entered = site;
+      });
+  navigation.setFocusCell([](zigzag::CellRef, Extent) {
+    ADD_FAILURE() << "Historical entry must use the exact-version callback";
+  });
+  const auto operations  = store.opCount();
+  const auto activityOps = session.activityForNavigation()->opCount();
+  const auto visits      = navigation.walkEntries().size();
+  ASSERT_TRUE(navigation.execute(nav::EnterVisit{.visit = *saved}));
+  EXPECT_EQ(entered, target);
+  EXPECT_EQ(navigation.currentVisit(), saved);
+  EXPECT_EQ(navigation.walkEntries().size(), visits);
+  EXPECT_GT(session.activityForNavigation()->opCount(), activityOps);
+  const auto checkpointOps = session.activityForNavigation()->opCount();
+  ASSERT_TRUE(navigation.execute(nav::EnterVisit{.visit = *saved}));
+  EXPECT_EQ(session.activityForNavigation()->opCount(), checkpointOps);
+  EXPECT_EQ(navigation.walkEntries().size(), visits);
+  EXPECT_EQ(store.opCount(), operations);
+  EXPECT_EQ(bound.textOf(cell, store), "new endpoint text");
+}
+
+TEST_F(ReaderPackageUiTest,
+       WalksPreviewAndMetadataPreserveCurrentVisitAndHistoricalExcerpt) {
+  auto perma = std::make_shared<UserPermascroll>();
+  Session session((root / "workspace").string(), perma);
+  auto &store           = session.store();
+  const auto historical = store.insert({}, 0, "old passage");
+  const auto latest     = store.insert(historical, 0, "new prefix ");
+  store.repointCurrentVersion(latest);
+  session.viewOpened(latest);
+  LinkContext navigation(session);
+  navigation.recordSourceArrival(DocumentSite{
+      .store = store.documentId(), .version = historical, .range = {4, 11}});
+  const auto saved = navigation.currentVisit();
+  ASSERT_TRUE(saved);
+  navigation.recordSourceArrival(DocumentSite{
+      .store = store.documentId(), .version = latest, .range = {0, 3}});
+  const auto current     = navigation.currentVisit();
+  const auto stamp       = navigation.readingStamp();
+  const auto visits      = navigation.walkEntries().size();
+  const auto activityOps = session.activityForNavigation()->opCount();
+  const auto operations  = store.opCount();
+  EXPECT_EQ(navigation.previewVisit(*saved), "a closed version: passage");
+  EXPECT_EQ(navigation.previewVisit(VisitId{999}), "Unavailable visit");
+  EXPECT_EQ(navigation.readingStamp(), stamp);
+  EXPECT_EQ(navigation.currentVisit(), current);
+  EXPECT_EQ(session.activityForNavigation()->opCount(), activityOps);
+  ASSERT_TRUE(navigation.referenceVisit(*saved));
+  const auto referencedOps = session.activityForNavigation()->opCount();
+  ASSERT_TRUE(navigation.referenceVisit(*saved));
+  EXPECT_EQ(session.activityForNavigation()->opCount(), referencedOps);
+  const std::string note = "Reader café\nsecond line";
+  ASSERT_TRUE(navigation.annotateVisit(*saved, note));
+  const auto entries    = navigation.walkEntries();
+  const auto savedEntry = std::ranges::find_if(
+      entries, [&](const auto &entry) { return entry.visit.id == *saved; });
+  ASSERT_NE(savedEntry, entries.end());
+  EXPECT_TRUE(savedEntry->referenced);
+  EXPECT_EQ(savedEntry->annotations, std::vector<std::string>{note});
+  EXPECT_EQ(navigation.readingStamp(), stamp);
+  EXPECT_EQ(navigation.currentVisit(), current);
+  EXPECT_EQ(entries.size(), visits);
+  EXPECT_EQ(store.opCount(), operations);
+}
 } // namespace
+
+TEST_F(ReaderPackageUiTest, NativeFormattingIsNotAReaderNavigationCandidate) {
+  auto perma = std::make_shared<UserPermascroll>();
+  Session session((root / "workspace").string(), perma);
+  const auto secondary = session.createNewStore((root / "secondary").string());
+  auto &store          = session.store(secondary);
+  const auto text      = store.insert({}, 0, "left right");
+  const auto pieces    = store.rebuild(text);
+  const Link comment{.left  = pieces.spansFor(0, 4),
+                     .right = pieces.spansFor(5, 5)};
+  auto format          = comment;
+  format.type          = LinkType::Format;
+  const auto formatted = store.addLink(text, format);
+  const auto head      = store.addLink(formatted, comment);
+  store.repointCurrentVersion(head);
+  session.viewOpened(head, secondary);
+  const auto commentId =
+      std::ranges::find_if(store.links(), [](const auto &entry) {
+        return entry.second.type == LinkType::Comment;
+      });
+  ASSERT_NE(commentId, store.links().end());
+  // Loading configuration must not introduce its metadata links into a
+  // reader's candidate cycle; opening that store deliberately may do so.
+  std::ignore = session.systemStoreIndex(SystemDocKind::Keymap);
+  std::ignore = session.systemStoreIndex(SystemDocKind::Settings);
+  LinkContext navigation(session);
+  navigation.setCandidates({});
+  ASSERT_TRUE(navigation.execute(nav::StepLink{.delta = 1}));
+  ASSERT_TRUE(navigation.selection());
+  EXPECT_EQ(navigation.selection()->key,
+            (LinkKey{store.documentId(), commentId->first}));
+  const auto selected = navigation.selection()->key;
+  ASSERT_TRUE(navigation.execute(nav::StepLink{.delta = 1}));
+  EXPECT_EQ(navigation.selection()->key, selected);
+  const auto presented = navigation.presentationLinks(-1);
+  ASSERT_EQ(presented.size(), 1U);
+  EXPECT_EQ(presented.front().link.type, LinkType::Comment);
+}

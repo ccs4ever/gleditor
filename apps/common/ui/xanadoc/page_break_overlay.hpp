@@ -1,9 +1,9 @@
 /**
- * @file apps/xudu/page_break_overlay.hpp
+ * @file apps/common/ui/xanadoc/page_break_overlay.hpp
  * @brief Inter-paragraph hover gap affordance and page break overlay.
  */
-#ifndef XUDU_PAGE_BREAK_OVERLAY_HPP
-#define XUDU_PAGE_BREAK_OVERLAY_HPP
+#ifndef XANADU_PAGE_BREAK_OVERLAY_HPP
+#define XANADU_PAGE_BREAK_OVERLAY_HPP
 
 #include <array>
 #include <cstdint>
@@ -118,4 +118,4 @@ private:
 
 } // namespace xanadu
 
-#endif // XUDU_PAGE_BREAK_OVERLAY_HPP
+#endif // XANADU_PAGE_BREAK_OVERLAY_HPP

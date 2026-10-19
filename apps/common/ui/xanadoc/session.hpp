@@ -11,8 +11,8 @@
  *
  * There is nothing in the library that had to learn what a transclusion is.
  */
-#ifndef XUDU_SESSION_H
-#define XUDU_SESSION_H
+#ifndef XANADU_SESSION_H
+#define XANADU_SESSION_H
 
 #include <chrono>
 #include <cstdint>
@@ -71,7 +71,7 @@ class Session;
 
 /**
  * @brief Where the reader's xanadocs live unless they say otherwise:
- *        `$XDG_DATA_HOME/xudu/xanadocs`.
+ *        `$XDG_DATA_HOME/xuzz/xanadocs`.
  *
  * New and imported documents start here, under generated names, rather than
  * in a temporary directory: a xanadoc is saved as it is typed, so one kept
@@ -464,6 +464,9 @@ public:
   [[nodiscard]] std::expected<Session *, std::string>
   setLinkPackageEnabled(const LinkPackageStatus &package, bool enabled);
   [[nodiscard]] std::uint64_t packageRenderId(const LinkKey &key);
+  [[nodiscard]] std::uint32_t selectedLinkColour(const LinkKey &key,
+                                                 const Link &link);
+  [[nodiscard]] std::uint64_t linkHighlightLayer(const LinkKey &key);
   [[nodiscard]] LinkKey presentationLinkKey(std::uint64_t id) const;
   std::vector<Publication> packagePublicationSources();
   PublicationPin pinPublication(const Publication &publication) const;
@@ -596,6 +599,20 @@ public:
    * @return The store index.
    */
   std::size_t createNewStore(const std::string &path = "");
+
+  using AuthoredCommitHandler = std::function<void(
+      std::uint32_t docIndex, std::size_t storeIndex,
+      const MicroversionId &parent, const MicroversionId &head)>;
+  Session *setAuthoredCommitHandler(AuthoredCommitHandler handler) {
+    authoredCommitHandler_ = std::move(handler);
+    return this;
+  }
+
+  /// Advance a paired view only if it still shows the authored parent.
+  /// Historical views and pending text edits are never overwritten.
+  bool advanceViewAfterCommit(std::uint32_t docIndex,
+                              const MicroversionId &parent,
+                              const MicroversionId &head);
 
   // -- System Xanadocs & Subsystem Hot-Reload --------------------------------
   using SystemDocChangedCallback =
@@ -856,6 +873,7 @@ private:
 
   /// Where the bytes of torrent-backed scrolls come from.
   void loadRetainedScrolls(const Store &store, const std::string &storePath);
+  std::unordered_map<std::string, std::uint64_t> highlightLayers_;
   DirectoryContentSource contentSource;
   std::vector<PublicationSeed> mountedSeeds_;
   mutable std::unique_ptr<ContentRetention> contentRetention_;
@@ -901,6 +919,17 @@ private:
   /// Bumped whenever a view or a link changes, which is what a cached set of
   /// decorations is checked against.
   std::uint64_t epoch{1};
+  struct MediaClassification {
+    DocumentId document;
+    std::size_t operationCount{};
+    std::vector<PrimediaSpan> pieces;
+    std::vector<MediaSpanInfo> spans;
+  };
+  // Session reads already run on the serialized owner path. Retain only
+  // complete local classifications; remote readiness has no revision yet.
+  mutable std::optional<std::uint64_t> mediaClassificationEpoch_;
+  mutable std::map<std::pair<std::size_t, MicroversionId>, MediaClassification>
+      mediaClassifications_;
   std::vector<OpenView> open;
   /// This machine's key pair, read or minted the first time it is wanted.
   std::optional<MutableKeys> keys;
@@ -910,6 +939,10 @@ private:
   std::optional<Config> config;
   std::map<SystemDocKind, std::size_t> systemStoreIndices_;
   SystemDocChangedCallback systemDocChangedCallback_;
+  AuthoredCommitHandler authoredCommitHandler_;
+  void notifyAuthoredCommit(std::uint32_t docIndex,
+                            const MicroversionId &parent,
+                            const MicroversionId &head);
   std::set<SystemDocKind> publishedSystemDocs_;
 
   MediaManager mediaManager_;
@@ -1034,4 +1067,4 @@ private:
 
 } // namespace xanadu
 
-#endif // XUDU_SESSION_H
+#endif // XANADU_SESSION_H

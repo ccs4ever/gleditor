@@ -4,11 +4,13 @@
 #include <bit>
 #include <cstddef>
 #include <limits>
+#include <span>
 #include <sstream>
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 
+#include "common/xanadu/foreign_op_handle.hpp"
 #include "common/xanadu/provenance.hpp"
 #include "common/xanadu/publication.hpp"
 #include "common/xanadu/scalar.hpp"
@@ -55,6 +57,7 @@ ArenaManifold::dimensionNamed(const std::string_view name,
 
 DimRef ArenaManifold::dimensionNamed(const std::string_view name,
                                      const xanadu::SpanReader *reader) const {
+  if (!reader) reader = defaultReader_;
   if (base_ != nullptr) {
     std::optional<DimRef> baseDim;
     if (reader != nullptr) {
@@ -467,7 +470,8 @@ ArenaManifold::foreignOf(const CellRef ref) const noexcept {
 
 gleditor::cpp26::optional<std::pair<const xanadu::Store *, CellRef>>
 ArenaManifold::resolveForeign(const CellRef ref) const noexcept {
-  const auto foreign = foreignOf(ref);
+  const auto target  = isQuoteOccurrence(ref) ? canonicalProxyOf(ref) : ref;
+  const auto foreign = foreignOf(target);
   if (!foreign) {
     return gleditor::cpp26::nullopt;
   }
@@ -476,6 +480,14 @@ ArenaManifold::resolveForeign(const CellRef ref) const noexcept {
     return gleditor::cpp26::nullopt;
   }
   return std::make_pair(s->store, foreign->index);
+}
+
+gleditor::cpp26::optional<std::pair<const xanadu::Store *, CellRef>>
+ArenaManifold::resolveSourceCell(const CellRef ref) const noexcept {
+  if (const auto foreign = resolveForeign(ref)) return foreign;
+  if (!isEphemeral(ref) && base_ && base_->contains(ref) && store())
+    return std::make_pair(store(), ref);
+  return gleditor::cpp26::nullopt;
 }
 
 DimRef ArenaManifold::dimIn(const std::uint32_t space,
@@ -1093,6 +1105,7 @@ ArenaManifold::scratchTextOf(const xanadu::PrimediaSpan &span) const noexcept {
 
 std::string ArenaManifold::textOf(const CellRef ref,
                                   const xanadu::SpanReader *reader) const {
+  if (!reader) reader = defaultReader_;
   CellRef target = ref;
   if (isQuoteOccurrence(ref)) {
     target = canonicalProxyOf(ref);
@@ -1139,6 +1152,10 @@ std::string ArenaManifold::textOf(const CellRef ref,
 }
 
 xanadu::PrimediaSpan ArenaManifold::intern(const std::string_view text) {
+  consumeWork();
+  if (scratchLimit_ && (scratch_.size() > *scratchLimit_ ||
+                        text.size() > *scratchLimit_ - scratch_.size()))
+    throw std::runtime_error("Vortex evaluation byte budget exhausted");
   const auto start = scratch_.size();
   scratch_ += text;
   return xanadu::PrimediaSpan{
@@ -1148,6 +1165,7 @@ xanadu::PrimediaSpan ArenaManifold::intern(const std::string_view text) {
 CellRef
 ArenaManifold::mintSlot(const xanadu::ValueKind kind, const std::uint64_t bits,
                         const std::span<const xanadu::PrimediaSpan> content) {
+  consumeWork();
   if (slots_.size() >= allocationLimit_) {
     throw std::runtime_error(
         "ArenaManifold exhausted: cannot allocate beyond " +
@@ -1415,6 +1433,30 @@ ArenaManifold *ArenaManifold::insertIntoRank(const CellRef cell,
   std::ignore          = link(anchor, dim, dir, cell);
   if (displaced.has_value() && *displaced != noCell) {
     std::ignore = link(cell, dim, dir, *displaced);
+  }
+  return this;
+}
+
+ArenaResult ArenaManifold::linkChain(const std::span<const CellRef> cells,
+                                     const DimRef dim, const DimVector dir) {
+  if (noCell == dim) {
+    return this;
+  }
+  // Chain consecutive non-absent cells. Each link() writes both reciprocal
+  // ends (RL1); the first refusal stops and is returned, having changed only
+  // what the successful links before it did -- the caller releases its mark on
+  // a refusal exactly as it would for a single link().
+  CellRef prev = noCell;
+  for (const CellRef cur : cells) {
+    if (noCell == cur) {
+      continue;
+    }
+    if (noCell != prev) {
+      if (auto res = link(prev, dim, dir, cur); !res.has_value()) {
+        return res;
+      }
+    }
+    prev = cur;
   }
   return this;
 }
@@ -1710,6 +1752,12 @@ std::optional<Promoted> promote(xanadu::Store &store,
         from.isProxy(current)) {
       continue;
     }
+    if (xanadu::isCellRelocationHandle(from, current)) {
+      const auto target = from.handleTarget(current);
+      if (!target || !from.contains(*target)) return std::nullopt;
+      if (seen.insert(*target).second) order.push_back(*target);
+      if (queued.insert(*target).second) frontier.push_back(*target);
+    }
     for (const auto &edge : from.dimensionsOf(current)) {
       if (from.textOf(edge.dim) == "d.dims") {
         continue;
@@ -1735,10 +1783,59 @@ std::optional<Promoted> promote(xanadu::Store &store,
     }
   }
 
+  // An arena cell has no operation yet. Explicit cell relocations may name
+  // its eventual birth. Cycles acquire births before their values are set,
+  // so no operation needs a forward reference to an operation not yet minted.
+  std::vector<CellRef> mintOrder;
+  std::vector<CellRef> deferred;
+  std::vector<CellRef> cyclicHandles;
+  std::unordered_set<CellRef> ready;
+  for (const auto cell : order) {
+    if (from.valueKindOf(cell) == xanadu::ValueKind::OpHandle &&
+        isEphemeral(cell) && !from.isProxy(cell)) {
+      const auto target = from.handleTarget(cell);
+      if (!target) return std::nullopt;
+      if (isEphemeral(*target)) {
+        if (!xanadu::isCellRelocationHandle(from, cell) ||
+            !seen.contains(*target))
+          return std::nullopt;
+        deferred.push_back(cell);
+        continue;
+      }
+      if (!store.getCompactOp(*target)) return std::nullopt;
+    }
+    mintOrder.push_back(cell);
+    ready.insert(cell);
+  }
+  while (!deferred.empty()) {
+    const auto before = deferred.size();
+    std::erase_if(deferred, [&](CellRef cell) {
+      if (!ready.contains(*from.handleTarget(cell))) return false;
+      mintOrder.push_back(cell);
+      ready.insert(cell);
+      return true;
+    });
+    if (deferred.size() == before) {
+      cyclicHandles = std::move(deferred);
+      mintOrder.insert(mintOrder.end(), cyclicHandles.begin(),
+                       cyclicHandles.end());
+      break;
+    }
+  }
+  if (order.size() > budget.maxOps ||
+      cyclicHandles.size() > budget.maxOps - order.size())
+    return std::nullopt;
+  const std::unordered_set<CellRef> delayed(cyclicHandles.begin(),
+                                            cyclicHandles.end());
+
   // A quotation of another store's bytes is written as a transclusion of them,
   // so each of its spans must be nameable here; checked before anything is
   // written, for the same reason as the budget.
-  for (const CellRef arena : order) {
+  for (const CellRef arena : mintOrder) {
+    if (from.valueKindOf(arena) == xanadu::ValueKind::ForeignOpHandle &&
+        !xanadu::foreignOpTarget(from, arena)) {
+      return std::nullopt;
+    }
     if (!isEphemeral(arena) || from.isProxy(arena)) {
       continue;
     }
@@ -1759,7 +1856,7 @@ std::optional<Promoted> promote(xanadu::Store &store,
   Promoted out{.version = parent, .cells = {}};
   out.cells.reserve(order.size());
 
-  for (const CellRef arena : order) {
+  for (const CellRef arena : mintOrder) {
     // A cell the overlay was only reading through already has a name in this
     // document, so promotion maps it to itself and mints nothing. Only what
     // the evaluation invented is new.
@@ -1833,10 +1930,25 @@ std::optional<Promoted> promote(xanadu::Store &store,
     } else if (xanadu::ValueKind::Int64 == kind) {
       minted =
           store.makeScalarCell(out.version, from.asInt64(arena).value_or(0));
+    } else if (xanadu::ValueKind::OpHandle == kind && delayed.contains(arena)) {
+      // Cycle members get real birth operations before any value names them.
+      // SetValue below then creates the cycle without a forward reference or
+      // any edit of an immutable CompactOpNode.
+      if (spans.empty())
+        minted = store.makeCell(out.version, std::string_view{});
+      else if (spans.front().scroll == xanadu::scratchScroll)
+        minted = store.makeCell(out.version, from.scratchTextOf(spans.front()));
+      else
+        minted = store.makeCell(out.version, spans.front());
     } else if (xanadu::ValueKind::OpHandle == kind) {
-      minted =
-          store.makeOpHandle(out.version, from.handleTarget(arena).value_or(0),
-                             from.textOf(arena));
+      const auto target = *from.handleTarget(arena);
+      minted            = store.makeOpHandle(
+          out.version, isEphemeral(target) ? real.at(target) : target,
+          from.textOf(arena));
+    } else if (xanadu::ValueKind::ForeignOpHandle == kind) {
+      const auto target = xanadu::foreignOpTarget(from, arena);
+      minted            = store.makeForeignOpHandle(out.version, *target);
+      spans.clear();
     } else if (spans.empty()) {
       minted = store.makeCell(out.version, std::string_view{});
     } else if (xanadu::scratchScroll == spans.front().scroll) {
@@ -1863,6 +1975,32 @@ std::optional<Promoted> promote(xanadu::Store &store,
       }
       at += span.length;
     }
+  }
+
+  if (!cyclicHandles.empty()) {
+    auto current = store.rebuildManifold(out.version);
+    for (const auto handle : cyclicHandles) {
+      const auto born    = real.at(handle);
+      const auto content = current.contentOf(born);
+      const std::vector<xanadu::PrimediaSpan> spans(content.begin(),
+                                                    content.end());
+      const auto target = *from.handleTarget(handle);
+      out.version =
+          store.setValue(out.version, born,
+                         spans.empty() ? xanadu::PrimediaSpan{} : spans.front(),
+                         xanadu::ValueKind::OpHandle,
+                         isEphemeral(target) ? real.at(target) : target);
+      std::uint64_t offset = spans.empty() ? 0 : spans.front().length;
+      for (std::size_t i = 1; i < spans.size(); ++i) {
+        out.version =
+            store.spliceCellSpan(out.version, born, offset, 0, spans[i]);
+        offset += spans[i].length;
+      }
+    }
+  }
+  out.cells.clear();
+  for (const auto cell : order) {
+    if (isEphemeral(cell)) out.cells.push_back(real.at(cell));
   }
 
   // Links last: both ends have to exist, and every ref is translated rather
@@ -1908,6 +2046,315 @@ std::optional<Promoted> promote(xanadu::Store &store,
                           toString(stepped.error().refusal));
       }
     }
+  }
+  return out;
+}
+
+ArenaManifold::PrefixSnapshot ArenaManifold::exportPrefix(const Mark &m) const {
+  PrefixSnapshot out{};
+  out.mark = m;
+
+  const auto cellCount = std::min<std::size_t>(m.cellCount, slots_.size());
+  out.slots.assign(slots_.begin(),
+                   slots_.begin() + static_cast<std::ptrdiff_t>(cellCount));
+  for (std::size_t i = trail_.size(); i > m.trailSize; --i) {
+    const auto &entry = trail_[i - 1];
+    if (entry.dense < out.slots.size()) {
+      out.slots[entry.dense] = entry.saved;
+    }
+  }
+
+  const auto linkSize = std::min<std::size_t>(m.linkSize, links_.size());
+  out.links.assign(links_.begin(),
+                   links_.begin() + static_cast<std::ptrdiff_t>(linkSize));
+
+  const auto contentSize =
+      std::min<std::size_t>(m.contentSize, content_.size());
+  out.content.assign(content_.begin(),
+                     content_.begin() +
+                         static_cast<std::ptrdiff_t>(contentSize));
+
+  const auto scratchSize =
+      std::min<std::size_t>(m.scratchSize, scratch_.size());
+  out.scratch.assign(scratch_.data(), scratchSize);
+
+  const auto shadowCount =
+      std::min<std::size_t>(m.shadowCount, shadowOrder_.size());
+  out.shadowOrder.assign(shadowOrder_.begin(),
+                         shadowOrder_.begin() +
+                             static_cast<std::ptrdiff_t>(shadowCount));
+
+  for (const auto &[name, dim] : arenaDims_) {
+    if (!isEphemeral(dim) || (dim & ~ephemeralBit) < cellCount) {
+      out.arenaDims.emplace(name, dim);
+    }
+  }
+  return out;
+}
+
+ArenaManifold *ArenaManifold::hydratePrefix(const PrefixSnapshot &snapshot) {
+  slots_       = snapshot.slots;
+  links_       = snapshot.links;
+  content_     = snapshot.content;
+  scratch_     = snapshot.scratch;
+  shadowOrder_ = snapshot.shadowOrder;
+  arenaDims_   = snapshot.arenaDims;
+  liveLinks_   = snapshot.mark.liveLinks;
+  liveContent_ = snapshot.mark.liveContent;
+
+  overlay_.clear();
+  for (std::uint32_t dense = 0; dense < slots_.size(); ++dense) {
+    if (!isEphemeral(slots_[dense].birthOp)) {
+      overlay_[slots_[dense].birthOp] = dense;
+    }
+  }
+
+  trail_.clear();
+  floors_.clear();
+  floors_.push_back(Floors{
+      .cells   = static_cast<std::uint32_t>(slots_.size()),
+      .links   = static_cast<std::uint32_t>(links_.size()),
+      .content = static_cast<std::uint32_t>(content_.size()),
+  });
+  outstandingMarks_ = 1;
+  return this;
+}
+
+ArenaManifold *ArenaManifold::evictOldestMark() noexcept {
+  if (outstandingMarks_ == 0 || floors_.empty()) {
+    return this;
+  }
+  floors_.erase(floors_.begin());
+  outstandingMarks_--;
+  return this;
+}
+
+namespace {
+
+void writeU8(std::string &out, const std::uint8_t v) {
+  out.push_back(static_cast<char>(v));
+}
+
+void writeU16(std::string &out, const std::uint16_t v) {
+  out.push_back(static_cast<char>(v & 0xFFU));
+  out.push_back(static_cast<char>((v >> 8U) & 0xFFU));
+}
+
+void writeU32(std::string &out, const std::uint32_t v) {
+  for (int i = 0; i < 4; ++i) {
+    out.push_back(static_cast<char>((v >> (i * 8)) & 0xFFU));
+  }
+}
+
+void writeU64(std::string &out, const std::uint64_t v) {
+  for (int i = 0; i < 8; ++i) {
+    out.push_back(static_cast<char>((v >> (i * 8)) & 0xFFULL));
+  }
+}
+
+void writeStr(std::string &out, const std::string_view s) {
+  writeU32(out, static_cast<std::uint32_t>(s.size()));
+  out.append(s.data(), s.size());
+}
+
+bool readU8(std::string_view &in, std::uint8_t &out) {
+  if (in.empty()) return false;
+  out = static_cast<std::uint8_t>(in.front());
+  in.remove_prefix(1);
+  return true;
+}
+
+bool readU16(std::string_view &in, std::uint16_t &out) {
+  if (in.size() < 2) return false;
+  out = static_cast<std::uint16_t>(static_cast<std::uint8_t>(in[0])) |
+        static_cast<std::uint16_t>(
+            static_cast<std::uint16_t>(static_cast<std::uint8_t>(in[1])) << 8U);
+  in.remove_prefix(2);
+  return true;
+}
+
+bool readU32(std::string_view &in, std::uint32_t &out) {
+  if (in.size() < 4) return false;
+  out = 0;
+  for (int i = 0; i < 4; ++i) {
+    out |= static_cast<std::uint32_t>(static_cast<std::uint8_t>(in[i]))
+           << (i * 8);
+  }
+  in.remove_prefix(4);
+  return true;
+}
+
+bool readU64(std::string_view &in, std::uint64_t &out) {
+  if (in.size() < 8) return false;
+  out = 0;
+  for (int i = 0; i < 8; ++i) {
+    out |= static_cast<std::uint64_t>(static_cast<std::uint8_t>(in[i]))
+           << (i * 8);
+  }
+  in.remove_prefix(8);
+  return true;
+}
+
+bool readStr(std::string_view &in, std::string &out) {
+  std::uint32_t len = 0;
+  if (!readU32(in, len) || in.size() < len) return false;
+  out.assign(in.data(), len);
+  in.remove_prefix(len);
+  return true;
+}
+
+} // namespace
+
+std::string encodeArenaPrefix(const ArenaManifold::PrefixSnapshot &snapshot) {
+  std::string out;
+  out.append("APFX", 4);
+  writeU32(out, snapshot.mark.cellCount);
+  writeU32(out, snapshot.mark.linkSize);
+  writeU32(out, snapshot.mark.contentSize);
+  writeU32(out, snapshot.mark.scratchSize);
+  writeU32(out, snapshot.mark.trailSize);
+  writeU32(out, snapshot.mark.liveLinks);
+  writeU32(out, snapshot.mark.liveContent);
+  writeU32(out, snapshot.mark.shadowCount);
+  writeU32(out, snapshot.mark.proxyCount);
+  writeU32(out, snapshot.mark.quoteOccurrenceCount);
+  writeU32(out, snapshot.mark.proxyShadowedEdgeCount);
+  writeU32(out, snapshot.mark.quoteSpaceCount);
+
+  writeU32(out, static_cast<std::uint32_t>(snapshot.slots.size()));
+  for (const auto &s : snapshot.slots) {
+    writeU32(out, s.spanOffset);
+    writeU16(out, s.spanCount);
+    writeU16(out, s.formatFlags);
+    writeU32(out, s.birthOp);
+    writeU32(out, s.lastOp);
+    writeU32(out, s.linkOffset);
+    writeU16(out, s.linkCount);
+    writeU8(out, s.valueKind);
+    writeU8(out, s.flags);
+    writeU64(out, s.valueBits);
+  }
+
+  writeU32(out, static_cast<std::uint32_t>(snapshot.links.size()));
+  for (const auto &l : snapshot.links) {
+    writeU32(out, l.dim);
+    writeU32(out, l.pos);
+    writeU32(out, l.neg);
+  }
+
+  writeU32(out, static_cast<std::uint32_t>(snapshot.content.size()));
+  for (const auto &c : snapshot.content) {
+    writeU32(out, c.scroll);
+    writeU64(out, c.start);
+    writeU64(out, c.length);
+  }
+
+  writeStr(out, snapshot.scratch);
+
+  writeU32(out, static_cast<std::uint32_t>(snapshot.shadowOrder.size()));
+  for (const auto ref : snapshot.shadowOrder) {
+    writeU32(out, ref);
+  }
+
+  writeU32(out, static_cast<std::uint32_t>(snapshot.arenaDims.size()));
+  for (const auto &[name, dim] : snapshot.arenaDims) {
+    writeStr(out, name);
+    writeU32(out, dim);
+  }
+  return out;
+}
+
+std::optional<ArenaManifold::PrefixSnapshot>
+decodeArenaPrefix(std::string_view bytes) {
+  if (bytes.size() < 4 || bytes.substr(0, 4) != "APFX") {
+    return std::nullopt;
+  }
+  bytes.remove_prefix(4);
+
+  ArenaManifold::PrefixSnapshot out{};
+  if (!readU32(bytes, out.mark.cellCount) ||
+      !readU32(bytes, out.mark.linkSize) ||
+      !readU32(bytes, out.mark.contentSize) ||
+      !readU32(bytes, out.mark.scratchSize) ||
+      !readU32(bytes, out.mark.trailSize) ||
+      !readU32(bytes, out.mark.liveLinks) ||
+      !readU32(bytes, out.mark.liveContent) ||
+      !readU32(bytes, out.mark.shadowCount) ||
+      !readU32(bytes, out.mark.proxyCount) ||
+      !readU32(bytes, out.mark.quoteOccurrenceCount) ||
+      !readU32(bytes, out.mark.proxyShadowedEdgeCount) ||
+      !readU32(bytes, out.mark.quoteSpaceCount)) {
+    return std::nullopt;
+  }
+
+  std::uint32_t slotCount = 0;
+  if (!readU32(bytes, slotCount) || slotCount > 1000000U) {
+    return std::nullopt;
+  }
+  out.slots.resize(slotCount);
+  for (std::uint32_t i = 0; i < slotCount; ++i) {
+    auto &s = out.slots[i];
+    if (!readU32(bytes, s.spanOffset) || !readU16(bytes, s.spanCount) ||
+        !readU16(bytes, s.formatFlags) || !readU32(bytes, s.birthOp) ||
+        !readU32(bytes, s.lastOp) || !readU32(bytes, s.linkOffset) ||
+        !readU16(bytes, s.linkCount) || !readU8(bytes, s.valueKind) ||
+        !readU8(bytes, s.flags) || !readU64(bytes, s.valueBits)) {
+      return std::nullopt;
+    }
+  }
+
+  std::uint32_t linkCount = 0;
+  if (!readU32(bytes, linkCount) || linkCount > 4000000U) {
+    return std::nullopt;
+  }
+  out.links.resize(linkCount);
+  for (std::uint32_t i = 0; i < linkCount; ++i) {
+    auto &l = out.links[i];
+    if (!readU32(bytes, l.dim) || !readU32(bytes, l.pos) ||
+        !readU32(bytes, l.neg)) {
+      return std::nullopt;
+    }
+  }
+
+  std::uint32_t contentCount = 0;
+  if (!readU32(bytes, contentCount) || contentCount > 4000000U) {
+    return std::nullopt;
+  }
+  out.content.resize(contentCount);
+  for (std::uint32_t i = 0; i < contentCount; ++i) {
+    auto &c = out.content[i];
+    if (!readU32(bytes, c.scroll) || !readU64(bytes, c.start) ||
+        !readU64(bytes, c.length)) {
+      return std::nullopt;
+    }
+  }
+
+  if (!readStr(bytes, out.scratch)) {
+    return std::nullopt;
+  }
+
+  std::uint32_t shadowCount = 0;
+  if (!readU32(bytes, shadowCount) || shadowCount > 1000000U) {
+    return std::nullopt;
+  }
+  out.shadowOrder.resize(shadowCount);
+  for (std::uint32_t i = 0; i < shadowCount; ++i) {
+    if (!readU32(bytes, out.shadowOrder[i])) {
+      return std::nullopt;
+    }
+  }
+
+  std::uint32_t dimCount = 0;
+  if (!readU32(bytes, dimCount) || dimCount > 100000U) {
+    return std::nullopt;
+  }
+  for (std::uint32_t i = 0; i < dimCount; ++i) {
+    std::string name;
+    DimRef dim = noCell;
+    if (!readStr(bytes, name) || !readU32(bytes, dim)) {
+      return std::nullopt;
+    }
+    out.arenaDims.emplace(std::move(name), dim);
   }
   return out;
 }

@@ -1,6 +1,6 @@
 /**
  * @file unified_transclusion_engine.hpp
- * @brief High-performance coordinator bridging Xudu storage, Zigzag topology,
+ * @brief High-performance coordinator bridging Xanadu storage, Zigzag topology,
  *        and Gleditor GPU text streaming.
  */
 #ifndef ZIGZAG_UNIFIED_TRANSCLUSION_ENGINE_HPP
@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <list>
 #include <map>
 #include <memory>
@@ -37,7 +38,7 @@ namespace zigzag {
 
 /**
  * @class UnifiedTransclusionEngine
- * @brief Coordinates incremental topological mapping from Xudu append-only
+ * @brief Coordinates incremental topological mapping from Xanadu append-only
  *        operations spools into multidimensional ZigZag ranks, performing
  *        zero-copy text resolution and GPU instance buffer staging.
  */
@@ -79,6 +80,15 @@ public:
   void syncIncremental();
   /// Rebuild the derived manifold at an exact branch head.
   void syncTo(const xanadu::MicroversionId &version);
+
+  using AuthoredCommitHandler =
+      std::function<void(const xanadu::MicroversionId &parent,
+                         const xanadu::MicroversionId &head)>;
+  UnifiedTransclusionEngine *
+  setAuthoredCommitHandler(AuthoredCommitHandler handler) {
+    authoredCommitHandler_ = std::move(handler);
+    return this;
+  }
 
   /// The structure map this engine reads. The model, not a cache of one.
   [[nodiscard]] const Manifold &manifold() const noexcept { return manifold_; }
@@ -231,7 +241,7 @@ public:
   //
   // toZzStructureDocument() and loadFromZzStructureDocument() were here, and
   // migration step 19 deleted them. The YAML document is a transfer format now,
-  // not a second cell space: sliceToStore() in zz_xudu_projector mints one as
+  // not a second cell space: sliceToStore() in xanadu_projector mints one as
   // Structure operations and storeToSlice() reads a Manifold back out, both
   // tested against the real sample slice. Ingesting a document by filling in
   // cells that no operation minted is exactly the arrangement the convergence
@@ -323,6 +333,8 @@ private:
   xanadu::Store &store_;
   std::uint32_t lastSyncedOpIndex_{0};
   xanadu::MicroversionId head_;
+  xanadu::MicroversionId lastSyncedHead_;
+  AuthoredCommitHandler authoredCommitHandler_;
 
   /// The model. What used to be here instead: a CellID space of its own with
   /// `nextCellId_` handing out names, `cells_` holding a CompactZZCell each,

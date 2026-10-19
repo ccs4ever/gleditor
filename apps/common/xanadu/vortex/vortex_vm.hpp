@@ -11,8 +11,10 @@
 #define COMMON_XANADU_VORTEX_VM_HPP
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <span>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -90,7 +92,12 @@ struct ChoicePoint {
   zigzag::Mark mark{};
   CellRef stackFrame{noCell};
   std::size_t cutBarrier{0};
+  std::vector<std::uint16_t> deweyPath;
+  std::uint16_t nextAltIndex{1};
+  std::uint64_t cyclesSinceRoot{0};
 };
+
+[[nodiscard]] std::string formatDeweyPath(std::span<const std::uint16_t> path);
 
 class VortexVM {
 public:
@@ -121,10 +128,31 @@ public:
   [[nodiscard]] std::size_t choiceDepth() const noexcept;
   void clearChoicePoints();
 
+  // -- Distributed / Intra-Node OR-Parallelism Extensions ---------------------
+  VortexVM *setOraclePath(std::span<const std::uint16_t> path);
+  VortexVM *setCurrentDeweyPath(std::span<const std::uint16_t> path);
+  [[nodiscard]] std::span<const std::uint16_t>
+  currentDeweyPath() const noexcept {
+    return currentDeweyPath_;
+  }
+  [[nodiscard]] std::string currentDeweyKey() const {
+    return formatDeweyPath(currentDeweyPath_);
+  }
+  [[nodiscard]] std::uint64_t totalCycles() const noexcept {
+    return totalCycles_;
+  }
+  [[nodiscard]] std::span<const ChoicePoint> choiceStack() const noexcept {
+    return choiceStack_;
+  }
+  [[nodiscard]] std::optional<ChoicePoint> stealNearRootChoicePoint();
+  VortexVM *
+  setCutCallback(std::function<void(std::string_view deweyPrefix)> cb);
+
   // -- Execution Lifecycle ----------------------------------------------------
   ExecutionResult step(CellRef cursor);
-  ExecutionResult run(CellRef cursor, std::size_t maxCycles = 100000);
-  std::size_t stepScheduler();
+  ExecutionResult run(CellRef cursor, std::size_t maxCycles = 100000,
+                      std::stop_token stopToken = {});
+  std::size_t stepScheduler(std::stop_token stopToken = {});
 
   // -- Cursor PC Tracking ----------------------------------------------------
   [[nodiscard]] CellRef getCursorOpcode(CellRef cursor) const;
@@ -149,6 +177,11 @@ private:
   std::unordered_map<CellRef, std::string> memoizedOps_;
   std::unordered_map<CellRef, CellRef> cursorPC_;
   std::vector<ChoicePoint> choiceStack_;
+  std::vector<std::uint16_t> currentDeweyPath_;
+  std::vector<std::uint16_t> oraclePath_;
+  std::size_t oracleCursor_{0};
+  std::uint64_t totalCycles_{0};
+  std::function<void(std::string_view deweyPrefix)> cutCallback_;
 };
 
 } // namespace zigzag::vortex

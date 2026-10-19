@@ -27,6 +27,7 @@
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/store_stream.hpp"
 #include "common/xanadu/user_permascroll.hpp"
+#include "common/xanadu/vortex/mesh_cli.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/vql/ascii_visualizer.hpp"
@@ -64,7 +65,8 @@ resultRows(const xanadu::MultiStoreCoordinator &coordinator,
       rendered = std::get<std::string>(value);
     }
     std::string source;
-    if (const auto foreign = coordinator.arena().resolveForeign(cell)) {
+    if (const auto foreign = coordinator.arena().resolveSourceCell(
+            coordinator.derefCloneMaster(cell).value_or(cell))) {
       for (const auto &info : coordinator.stores()) {
         if (info.store.get() == foreign->first) {
           const auto identity = info.path == transientPath
@@ -213,6 +215,9 @@ std::vector<std::string> reorderArgs(int argc, char *argv[]) {
 // rather than be swallowed into a generic error message.
 // NOLINTNEXTLINE(bugprone-exception-escape)
 int main(int argc, char *argv[]) {
+  if (const auto mesh = zigzag::vortex::mesh::runMeshCommand(
+          zigzag::vortex::mesh::Frontend::Vquery, argc, argv))
+    return *mesh;
   argparse::ArgumentParser program("vquery", "1.0.0");
 
   program.add_argument("-e", "--eval")
@@ -353,23 +358,15 @@ int main(int argc, char *argv[]) {
       return 1;
     }
     permaConfig.storageDir = permaDir;
-  } else if (!storePaths.empty()) {
-    std::filesystem::path p(storePaths[0]);
-    if (std::filesystem::exists(p / "permascroll")) {
-      permaConfig.storageDir = p / "permascroll";
-    } else if (p.has_parent_path() &&
-               std::filesystem::exists(p.parent_path() / "permascroll")) {
-      permaConfig.storageDir = p.parent_path() / "permascroll";
-    } else if (p.has_parent_path() && p.parent_path().has_parent_path() &&
-               std::filesystem::exists(p.parent_path().parent_path() /
-                                       "permascroll")) {
-      permaConfig.storageDir = p.parent_path().parent_path() / "permascroll";
-    }
   }
 
   const auto permaSource = permaConfig.storageDir;
+  // Native stores address the registered author scroll; nearby directories
+  // can be registry containers or belong to another author.
   auto permascroll =
-      std::make_shared<xanadu::UserPermascroll>(std::move(permaConfig));
+      permaConfig.storageDir.empty()
+          ? xanadu::PermascrollRegistry::instance().defaultUser()
+          : std::make_shared<xanadu::UserPermascroll>(std::move(permaConfig));
   // A store holds no text of its own; read against a permascroll that is
   // not the one it was written against, every answer comes back blank. Say
   // so rather than print nothing.

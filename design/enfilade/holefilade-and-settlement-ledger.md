@@ -148,7 +148,7 @@ Using `merklecpp`, any client or seeder can generate a succinct (O(\\log M)) Mer
 verifyReceiptProof(receipt, proof, root) -> true / false
 ```
 
-Enabling instant, verifiable peer-wire settlement over BEP 10 `xudu_transcopyright`.
+Enabling instant, verifiable peer-wire settlement over BEP 10 `xanadu_transcopyright`.
 
 ______________________________________________________________________
 

@@ -9,6 +9,7 @@
 #include <cmath>
 #include <filesystem>
 #include <functional>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -49,7 +50,7 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
     return "Schema and Purpose\n\n"
            "Purpose:\n"
            "The sovereign Keymap system xanadoc manages interactive keyboard "
-           "shortcuts and hotkey bindings across Xudu sessions. Each entry "
+           "shortcuts and hotkey bindings across Xuzz sessions. Each entry "
            "maps an application action identifier to a key combination "
            "string.\n\n"
            "Schema:\n"
@@ -72,7 +73,8 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "Selected-link navigation, all on Alt+Shift: link next and "
            "previous N and P; member next and previous J and K; place next "
            "and previous L and H; cross X; enter Return; return to origin O; "
-           "dismiss D; activity back B, which steps back through visits "
+           "docked controls/read I; dismiss D; activity back B, which steps "
+           "back through visits "
            "rather than document versions. overview-toggle: show or hide the "
            "overview of every open page, Alt+Shift+V.\n";
   case SystemDocKind::Settings:
@@ -286,9 +288,9 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "linkPanel.mutedColour, linkPanel.buttonColour: Panel colours as "
            "RGBA integers, the muted one for unset choices, members not in "
            "view and buttons that would be refused.\n"
-           "linkPanel.chosenHighlightColour, linkPanel.memberHighlightColour: "
-           "Highlights behind the chosen occurrence and behind the chosen "
-           "member's other occurrences in the text, as RGBA integers.\n";
+           "linkPanel.chosenEdgeWidthPx, linkPanel.memberEdgeWidthPx: "
+           "Same-hue edge widths for the active chosen occurrence and "
+           "secondary occurrences, in device pixels. Defaults are 2.5 and 1.\n";
   case SystemDocKind::Pouches:
     return "Schema and Purpose\n\n"
            "Purpose:\n"
@@ -605,6 +607,25 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
         {.name    = std::string(settings::kPhysicsTimeStep),
          .notes   = "Physics simulation time delta in seconds",
          .schemas = {{.expectedTypes = {"float"}, .defaultValues = {0.016}}}},
+        {.name    = "beams.connectorWidthOfLine",
+         .notes   = "Authored connector thickness relative to text line height",
+         .schemas = {{.expectedTypes = {"float"}, .defaultValues = {0.40}}}},
+        {.name  = "beams.gutterMinimumWidthOfLine",
+         .notes = "Minimum connector stroke allowed when fitting gutter lanes",
+         .schemas = {{.expectedTypes = {"float"}, .defaultValues = {0.30}}}},
+        {.name  = "beams.anchorReachSeconds",
+         .notes = "Selected occurrence terminal extension/retraction seconds; "
+                  "zero cuts",
+         .schemas = {{.expectedTypes = {"float"}, .defaultValues = {0.25}}}},
+        {.name    = "beams.anchorReducedMotion",
+         .notes   = "Cut selected anchor terminals directly to their target",
+         .schemas = {{.expectedTypes = {"bool"}, .defaultValues = {false}}}},
+        {.name    = "beams.bracketInkShare",
+         .notes   = "Authored bracket ink intensity on paper",
+         .schemas = {{.expectedTypes = {"float"}, .defaultValues = {0.60}}}},
+        {.name    = "beams.bracketWidthOfLine",
+         .notes   = "Exact margin bracket stroke relative to text line height",
+         .schemas = {{.expectedTypes = {"float"}, .defaultValues = {0.10}}}},
         {.name    = std::string(settings::kBeamsBandStrandLimit),
          .notes   = "Max strands in a ribbon band",
          .schemas = {{.expectedTypes = {"integer"},
@@ -637,7 +658,7 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
         {.name  = "beams.inactiveLinkAlpha",
          .notes = "Other link opacity while one link is selected; bounded 0.15 "
                   "to 0.8",
-         .schemas = {{.expectedTypes = {"float"}, .defaultValues = {0.35}}}},
+         .schemas = {{.expectedTypes = {"float"}, .defaultValues = {0.70}}}},
         {.name    = "beams.curveWeight",
          .notes   = "Positive rational weight of the inner NURBS controls; "
                     "bounded 0.25 to 4",
@@ -753,31 +774,6 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
         {.name    = std::string(settings::kBridgeLoomHoverAlpha),
          .notes   = "Transclusion loom ribbon hover alpha",
          .schemas = {{.expectedTypes = {"float"}, .defaultValues = {1.0}}}},
-        {.name    = std::string(settings::kPaletteIdentityGold),
-         .notes   = "WCAG AAA OkLCH Identity Gold palette token (#E5C07B)",
-         .schemas = {{.expectedTypes = {"integer"},
-                      .defaultValues = {static_cast<std::int64_t>(
-                          palette::kIdentityGold)}}}},
-        {.name    = std::string(settings::kPaletteCelestialCyan),
-         .notes   = "WCAG AAA OkLCH Celestial Cyan palette token (#38BDF8)",
-         .schemas = {{.expectedTypes = {"integer"},
-                      .defaultValues = {static_cast<std::int64_t>(
-                          palette::kCelestialCyan)}}}},
-        {.name    = std::string(settings::kPaletteAmethystPurple),
-         .notes   = "WCAG AAA OkLCH Amethyst Purple palette token (#C084FC)",
-         .schemas = {{.expectedTypes = {"integer"},
-                      .defaultValues = {static_cast<std::int64_t>(
-                          palette::kAmethystPurple)}}}},
-        {.name    = std::string(settings::kPaletteEmeraldMint),
-         .notes   = "WCAG AAA OkLCH Emerald Mint palette token (#34D399)",
-         .schemas = {{.expectedTypes = {"integer"},
-                      .defaultValues = {static_cast<std::int64_t>(
-                          palette::kEmeraldMint)}}}},
-        {.name    = std::string(settings::kPaletteCoralCrimson),
-         .notes   = "WCAG AAA OkLCH Coral Crimson palette token (#FB7185)",
-         .schemas = {{.expectedTypes = {"integer"},
-                      .defaultValues = {static_cast<std::int64_t>(
-                          palette::kCoralCrimson)}}}},
     };
     break;
 
@@ -806,6 +802,14 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Active UI theme name",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"system"}}}}},
+        {.name    = std::string(settings::kPagePaperColour),
+         .notes   = "Document paper colour, packed RGBA8 (red in high byte)",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{0xFFFFFFFFU}}}}},
+        {.name    = std::string(settings::kPageInkColour),
+         .notes   = "Document ink colour, packed RGBA8 (red in high byte)",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{0x000000FFU}}}}},
         {.name  = std::string(settings::kThemeBackground),
          .notes = "Theme background color (RGB as 3 floats 0..1 or 3 integers "
                   "0..255)",
@@ -814,6 +818,22 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
                      {.expectedTypes = {"integer", "integer", "integer"},
                       .defaultValues = {std::int64_t{26}, std::int64_t{26},
                                         std::int64_t{26}}}}},
+        {.name    = std::string(settings::kVortexWorkerThreads),
+         .notes   = "Vortex worker thread count for data-parallel execution; 0 "
+                    "probes hardware_concurrency, 1 is caller-only",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{0}}}}},
+        {.name    = std::string(settings::kVortexParallelThreshold),
+         .notes   = "Minimum element count before Vortex data-parallel "
+                    "map/filter/fold fans across workers; smaller arrays run "
+                    "serially",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{1024}}}}},
+        {.name  = std::string(settings::kVortexOrParallelSearch),
+         .notes = "Opt-in: run vprolog OR-parallel logic search across worker "
+                  "contexts (independent goals on private arenas, merged by "
+                  "submission index). Default off; serial search is unchanged",
+         .schemas = {{.expectedTypes = {"boolean"}, .defaultValues = {false}}}},
     };
     break;
 
@@ -1071,6 +1091,10 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Gap between the link panel and the window edge in pixels",
          .schemas = {{.expectedTypes = {"float"},
                       .defaultValues = {double{panel.marginPx}}}}},
+        {.name = "linkPanel.dockMaxHeightShare",
+         .notes =
+             "Maximum share of reading space used by the link inspector dock",
+         .schemas = {{.expectedTypes = {"float"}, .defaultValues = {0.65}}}},
         {.name    = std::string(settings::kLinkPanelTopPx),
          .notes   = "Gap between the link panel and the window top in pixels",
          .schemas = {{.expectedTypes = {"float"},
@@ -1100,31 +1124,14 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Link panel button RGBA hexadecimal colour",
          .schemas = {{.expectedTypes = {"integer"},
                       .defaultValues = {std::int64_t{panel.buttonColour}}}}},
-        {.name    = std::string(settings::kLinkPanelChosenHighlightColour),
-         .notes   = "Highlight behind the chosen occurrence in the text",
-         .schemas = {{.expectedTypes = {"integer"},
-                      .defaultValues = {std::int64_t{
-                          panel.chosenHighlightColour}}}}},
-        {.name    = std::string(settings::kLinkPanelMemberHighlightColour),
-         .notes   = "Highlight behind the chosen member's other occurrences",
-         .schemas = {{.expectedTypes = {"integer"},
-                      .defaultValues = {std::int64_t{
-                          panel.memberHighlightColour}}}}},
-        colourSpec(settings::kPaletteIdentityGold,
-                   "WCAG AAA OkLCH Identity Gold palette token (#E5C07B)",
-                   palette::kIdentityGold),
-        colourSpec(settings::kPaletteCelestialCyan,
-                   "WCAG AAA OkLCH Celestial Cyan palette token (#38BDF8)",
-                   palette::kCelestialCyan),
-        colourSpec(settings::kPaletteAmethystPurple,
-                   "WCAG AAA OkLCH Amethyst Purple palette token (#C084FC)",
-                   palette::kAmethystPurple),
-        colourSpec(settings::kPaletteEmeraldMint,
-                   "WCAG AAA OkLCH Emerald Mint palette token (#34D399)",
-                   palette::kEmeraldMint),
-        colourSpec(settings::kPaletteCoralCrimson,
-                   "WCAG AAA OkLCH Coral Crimson palette token (#FB7185)",
-                   palette::kCoralCrimson),
+        {.name    = std::string(settings::kLinkPanelChosenEdgeWidthPx),
+         .notes   = "Same-hue edge width of the active occurrence in pixels",
+         .schemas = {{.expectedTypes = {"float"},
+                      .defaultValues = {double{panel.chosenEdgeWidthPx}}}}},
+        {.name    = std::string(settings::kLinkPanelMemberEdgeWidthPx),
+         .notes   = "Same-hue edge width of secondary occurrences in pixels",
+         .schemas = {{.expectedTypes = {"float"},
+                      .defaultValues = {double{panel.memberEdgeWidthPx}}}}},
     };
     for (std::size_t i = 0; i < gleditor::ui::kFontRoleCount; ++i) {
       const auto role  = static_cast<gleditor::ui::FontRole>(i);
@@ -1314,26 +1321,31 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Make the other side of the selected link active",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"Alt+Shift+X"}}}}},
+        {.name    = "std:xuzz/link_cancel_entry",
+         .notes   = "Cancel pending endpoint entry without dismissing the link",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+Escape"}}}}},
         {.name    = std::string(settings::kKeymapLinkEnter),
          .notes   = "Go to the chosen place of the selected link",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"Alt+Shift+Return"}}}}},
-        {.name    = std::string(settings::kKeymapLinkFollow),
-         .notes   = "Atomically cross side and enter target occurrence",
-         .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"Alt+Return"}}}}},
-        {.name    = std::string(settings::kKeymapLeaderMode),
-         .notes   = "Activate navigation leader mode",
-         .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{",l"}}}}},
-        {.name    = std::string(settings::kKeymapRestoreDismissed),
-         .notes   = "Restore most recently dismissed link from stash ring",
-         .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"Alt+Shift+Z"}}}}},
         {.name    = std::string(settings::kKeymapLinkOrigin),
          .notes   = "Return to where the selected link was selected",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"Alt+Shift+O"}}}}},
+        {.name    = "std:xuzz/link_controls_previous",
+         .notes   = "Previous controls page without changing the link endpoint",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+PageUp"}}}}},
+        {.name    = "std:xuzz/link_controls_next",
+         .notes   = "Next controls page without changing the link endpoint",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+PageDown"}}}}},
+        {.name    = "std:xuzz/link_controls",
+         .notes   = "Toggle between reading and docked link controls without "
+                    "changing the link",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+I"}}}}},
         {.name    = std::string(settings::kKeymapLinkDismiss),
          .notes   = "Put the selected link away",
          .schemas = {{.expectedTypes = {"string"},
@@ -1346,6 +1358,11 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Choose a saved forward visit",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"Alt+Shift+Y"}}}}},
+        {.name = std::string(settings::kKeymapWalks),
+         .notes =
+             "Preview, restore, reference and annotate saved activity walks",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+W"}}}}},
         {.name    = std::string(settings::kKeymapLinkAddCell),
          .notes   = "Add the focused cell content to the pending xanalink",
          .schemas = {{.expectedTypes = {"string"},
@@ -1615,23 +1632,23 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
         {.name    = std::string(settings::kKeymapBundleExecution),
          .notes   = "Shortcut to switch to Execution dimension bundle",
          .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"Ctrl+1"}}}}},
+                      .defaultValues = {std::string{"Ctrl+Shift+1"}}}}},
         {.name    = std::string(settings::kKeymapBundleScope),
          .notes   = "Shortcut to switch to Scope dimension bundle",
          .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"Ctrl+2"}}}}},
+                      .defaultValues = {std::string{"Ctrl+Shift+2"}}}}},
         {.name    = std::string(settings::kKeymapBundleContract),
          .notes   = "Shortcut to switch to Contract dimension bundle",
          .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"Ctrl+3"}}}}},
+                      .defaultValues = {std::string{"Ctrl+Shift+3"}}}}},
         {.name    = std::string(settings::kKeymapBundleLogic),
          .notes   = "Shortcut to switch to Logic dimension bundle",
          .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"Ctrl+4"}}}}},
+                      .defaultValues = {std::string{"Ctrl+Shift+4"}}}}},
         {.name    = std::string(settings::kKeymapBundleStdlib),
          .notes   = "Shortcut to switch to Stdlib dimension bundle",
          .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"Ctrl+5"}}}}},
+                      .defaultValues = {std::string{"Ctrl+Shift+5"}}}}},
         {.name    = std::string(settings::kKeymapBundleCycle),
          .notes   = "Shortcut to cycle active dimension bundle forward",
          .schemas = {{.expectedTypes = {"string"},
@@ -1723,7 +1740,7 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"R"}}}}},
         {.name    = std::string(settings::kKeymapExportLinkPackage),
-         .notes   = "Shortcut to export current slice as Xudu LinkPackage",
+         .notes   = "Shortcut to export current slice as Xanadu LinkPackage",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"Ctrl+E"}}}}},
         {.name = std::string(settings::kKeymapInsertCellXPos),
@@ -2838,187 +2855,85 @@ struct ActionAlias {
 constexpr ActionAlias kActionAliases[] = {
     // Xuzz Core Actions
     {.legacy = "quit", .canonical = "std:xuzz/quit"},
-    {.legacy = "std:xudu/quit", .canonical = "std:xuzz/quit"},
     {.legacy = "save", .canonical = "std:xuzz/save"},
-    {.legacy = "save-document", .canonical = "std:xuzz/save"},
-    {.legacy = "std:xudu/save", .canonical = "std:xuzz/save"},
-    {.legacy = "std:xudu/save_document", .canonical = "std:xuzz/save"},
-    {.legacy = "std:xuzz/save_document", .canonical = "std:xuzz/save"},
     {.legacy = "close", .canonical = "std:xuzz/close"},
-    {.legacy = "close-doc", .canonical = "std:xuzz/close"},
-    {.legacy = "std:xudu/close", .canonical = "std:xuzz/close"},
-    {.legacy = "std:xudu/close_doc", .canonical = "std:xuzz/close"},
-    {.legacy = "std:xuzz/close_doc", .canonical = "std:xuzz/close"},
     {.legacy = "next-doc", .canonical = "std:xuzz/next_doc"},
-    {.legacy = "std:xudu/next_doc", .canonical = "std:xuzz/next_doc"},
     {.legacy = "prev-doc", .canonical = "std:xuzz/prev_doc"},
-    {.legacy = "std:xudu/prev_doc", .canonical = "std:xuzz/prev_doc"},
     {.legacy = "doc-1", .canonical = "std:xuzz/doc_1"},
-    {.legacy = "std:xudu/doc_1", .canonical = "std:xuzz/doc_1"},
     {.legacy = "doc-2", .canonical = "std:xuzz/doc_2"},
-    {.legacy = "std:xudu/doc_2", .canonical = "std:xuzz/doc_2"},
     {.legacy = "doc-3", .canonical = "std:xuzz/doc_3"},
-    {.legacy = "std:xudu/doc_3", .canonical = "std:xuzz/doc_3"},
     {.legacy = "doc-4", .canonical = "std:xuzz/doc_4"},
-    {.legacy = "std:xudu/doc_4", .canonical = "std:xuzz/doc_4"},
     {.legacy = "doc-5", .canonical = "std:xuzz/doc_5"},
-    {.legacy = "std:xudu/doc_5", .canonical = "std:xuzz/doc_5"},
     {.legacy = "doc-6", .canonical = "std:xuzz/doc_6"},
-    {.legacy = "std:xudu/doc_6", .canonical = "std:xuzz/doc_6"},
     {.legacy = "doc-7", .canonical = "std:xuzz/doc_7"},
-    {.legacy = "std:xudu/doc_7", .canonical = "std:xuzz/doc_7"},
     {.legacy = "doc-8", .canonical = "std:xuzz/doc_8"},
-    {.legacy = "std:xudu/doc_8", .canonical = "std:xuzz/doc_8"},
     {.legacy = "doc-9", .canonical = "std:xuzz/doc_9"},
-    {.legacy = "std:xudu/doc_9", .canonical = "std:xuzz/doc_9"},
     {.legacy = "back", .canonical = "std:xuzz/back"},
-    {.legacy = "std:xudu/back", .canonical = "std:xuzz/back"},
     {.legacy = "new-doc", .canonical = "std:xuzz/new_doc"},
     {.legacy = "std:xudu/new_doc", .canonical = "std:xuzz/new_doc"},
     {.legacy = "forward", .canonical = "std:xuzz/forward"},
-    {.legacy = "std:xudu/forward", .canonical = "std:xuzz/forward"},
     {.legacy = "open-doc", .canonical = "std:xuzz/open_doc"},
-    {.legacy = "std:xudu/open_doc", .canonical = "std:xuzz/open_doc"},
+    {.legacy = "close-doc", .canonical = "std:xuzz/close"},
     {.legacy = "onion-skin", .canonical = "std:xuzz/onion_skin"},
-    {.legacy = "std:xudu/onion_skin", .canonical = "std:xuzz/onion_skin"},
     {.legacy = "pouch-toggle", .canonical = "std:xuzz/pouch_toggle"},
-    {.legacy = "std:xudu/pouch_toggle", .canonical = "std:xuzz/pouch_toggle"},
     {.legacy = "pouch-toggle-f2", .canonical = "std:xuzz/pouch_toggle_f2"},
-    {.legacy    = "std:xudu/pouch_toggle_f2",
-     .canonical = "std:xuzz/pouch_toggle_f2"},
     {.legacy = "telescope-toggle", .canonical = "std:xuzz/telescope_toggle"},
-    {.legacy    = "std:xudu/telescope_toggle",
-     .canonical = "std:xuzz/telescope_toggle"},
     {.legacy    = "telescope-toggle-f3",
-     .canonical = "std:xuzz/telescope_toggle_f3"},
-    {.legacy    = "std:xudu/telescope_toggle_f3",
      .canonical = "std:xuzz/telescope_toggle_f3"},
     {.legacy    = "tension-physics-toggle",
      .canonical = "std:xuzz/tension_physics_toggle"},
-    {.legacy    = "std:xudu/tension_physics_toggle",
-     .canonical = "std:xuzz/tension_physics_toggle"},
     {.legacy    = "unlock-transcopyright",
-     .canonical = "std:xuzz/unlock_transcopyright_ctrl_u"},
-    {.legacy    = "std:xudu/unlock_transcopyright",
      .canonical = "std:xuzz/unlock_transcopyright_ctrl_u"},
     {.legacy    = "unlock-transcopyright-f5",
      .canonical = "std:xuzz/unlock_transcopyright_f5"},
-    {.legacy    = "std:xudu/unlock_transcopyright_f5",
-     .canonical = "std:xuzz/unlock_transcopyright_f5"},
     {.legacy    = "unlock-transcopyright-ctrl-u",
      .canonical = "std:xuzz/unlock_transcopyright_ctrl_u"},
-    {.legacy    = "std:xudu/unlock_transcopyright_ctrl_u",
-     .canonical = "std:xuzz/unlock_transcopyright_ctrl_u"},
     {.legacy = "scrub-forward", .canonical = "std:xuzz/scrub_forward"},
-    {.legacy = "std:xudu/scrub_forward", .canonical = "std:xuzz/scrub_forward"},
     {.legacy = "scrub-backward", .canonical = "std:xuzz/scrub_backward"},
-    {.legacy = "scrub-back", .canonical = "std:xuzz/scrub_backward"},
-    {.legacy    = "std:xudu/scrub_backward",
-     .canonical = "std:xuzz/scrub_backward"},
-    {.legacy = "std:xudu/scrub_back", .canonical = "std:xuzz/scrub_backward"},
     {.legacy = "transclude", .canonical = "std:xuzz/transclude"},
-    {.legacy = "std:xudu/transclude", .canonical = "std:xuzz/transclude"},
     {.legacy = "xanalink", .canonical = "std:xuzz/xanalink"},
-    {.legacy = "std:xudu/xanalink", .canonical = "std:xuzz/xanalink"},
     {.legacy = "cancel-link", .canonical = "std:xuzz/cancel_link"},
-    {.legacy = "std:xudu/cancel_link", .canonical = "std:xuzz/cancel_link"},
     {.legacy = "beams", .canonical = "std:xuzz/beams"},
-    {.legacy = "std:xudu/beams", .canonical = "std:xuzz/beams"},
     {.legacy = "sworph", .canonical = "std:xuzz/sworph"},
-    {.legacy = "std:xudu/sworph", .canonical = "std:xuzz/sworph"},
     {.legacy = "publish", .canonical = "std:xuzz/publish"},
-    {.legacy = "std:xudu/publish", .canonical = "std:xuzz/publish"},
-    {.legacy    = "publication-status",
-     .canonical = "std:xuzz/publication_status"},
-    {.legacy    = "std:xudu/publication_status",
-     .canonical = "std:xuzz/publication_status"},
-    {.legacy    = "publication-discovery",
-     .canonical = "std:xuzz/publication_discovery"},
-    {.legacy    = "std:xudu/publication_discovery",
-     .canonical = "std:xuzz/publication_discovery"},
-    {.legacy    = "link-package-publish",
-     .canonical = "std:xuzz/link_package_publish"},
-    {.legacy    = "std:xudu/link_package_publish",
-     .canonical = "std:xuzz/link_package_publish"},
-    {.legacy = "links-responses", .canonical = "std:xuzz/links_responses"},
-    {.legacy    = "std:xudu/links_responses",
-     .canonical = "std:xuzz/links_responses"},
-    {.legacy    = "publication-updates",
-     .canonical = "std:xuzz/publication_updates"},
-    {.legacy    = "std:xudu/publication_updates",
-     .canonical = "std:xuzz/publication_updates"},
     {.legacy = "history", .canonical = "std:xuzz/history"},
-    {.legacy = "std:xudu/history", .canonical = "std:xuzz/history"},
     {.legacy = "delete", .canonical = "std:xuzz/delete"},
-    {.legacy = "std:xudu/delete", .canonical = "std:xuzz/delete"},
     {.legacy = "page-break", .canonical = "std:xuzz/page_break"},
-    {.legacy = "insert-break", .canonical = "std:xuzz/page_break"},
-    {.legacy = "std:xudu/page_break", .canonical = "std:xuzz/page_break"},
-    {.legacy = "std:xudu/insert_break", .canonical = "std:xuzz/page_break"},
-    {.legacy = "std:xuzz/insert_break", .canonical = "std:xuzz/page_break"},
     {.legacy = "hypertime-map", .canonical = "std:xuzz/hypertime_map"},
     {.legacy = "map", .canonical = "std:xuzz/hypertime_map"},
-    {.legacy = "std:xudu/hypertime_map", .canonical = "std:xuzz/hypertime_map"},
-    {.legacy = "std:xudu/map", .canonical = "std:xuzz/hypertime_map"},
+    {.legacy = "scrub-back", .canonical = "std:xuzz/scrub_backward"},
     {.legacy = "radial-menu", .canonical = "std:xuzz/radial_menu"},
-    {.legacy = "std:xudu/radial_menu", .canonical = "std:xuzz/radial_menu"},
     {.legacy = "pouch-drop", .canonical = "std:xuzz/pouch_drop"},
-    {.legacy = "std:xudu/pouch_drop", .canonical = "std:xuzz/pouch_drop"},
     {.legacy    = "pouch-drop-to-link-left",
-     .canonical = "std:xuzz/pouch_drop_to_link_left"},
-    {.legacy    = "std:xudu/pouch_drop_to_link_left",
      .canonical = "std:xuzz/pouch_drop_to_link_left"},
     {.legacy    = "pouch-drop-to-link-right",
      .canonical = "std:xuzz/pouch_drop_to_link_right"},
-    {.legacy    = "std:xudu/pouch_drop_to_link_right",
-     .canonical = "std:xuzz/pouch_drop_to_link_right"},
     {.legacy = "pouch-drop-notes", .canonical = "std:xuzz/pouch_drop_notes"},
-    {.legacy    = "std:xudu/pouch_drop_notes",
-     .canonical = "std:xuzz/pouch_drop_notes"},
     {.legacy    = "pouch-drop-scratch",
      .canonical = "std:xuzz/pouch_drop_scratch"},
-    {.legacy    = "std:xudu/pouch_drop_scratch",
-     .canonical = "std:xuzz/pouch_drop_scratch"},
     {.legacy = "pouch-drop-left", .canonical = "std:xuzz/pouch_drop_left"},
-    {.legacy    = "std:xudu/pouch_drop_left",
-     .canonical = "std:xuzz/pouch_drop_left"},
     {.legacy = "pouch-drop-right", .canonical = "std:xuzz/pouch_drop_right"},
-    {.legacy    = "std:xudu/pouch_drop_right",
-     .canonical = "std:xuzz/pouch_drop_right"},
     {.legacy = "forge-clasp", .canonical = "std:xuzz/forge_clasp"},
-    {.legacy = "std:xudu/forge_clasp", .canonical = "std:xuzz/forge_clasp"},
     {.legacy = "format-bold", .canonical = "std:xuzz/format_bold"},
-    {.legacy = "std:xudu/format_bold", .canonical = "std:xuzz/format_bold"},
     {.legacy = "format-italic", .canonical = "std:xuzz/format_italic"},
-    {.legacy = "std:xudu/format_italic", .canonical = "std:xuzz/format_italic"},
     {.legacy = "format-underline", .canonical = "std:xuzz/format_underline"},
-    {.legacy    = "std:xudu/format_underline",
-     .canonical = "std:xuzz/format_underline"},
     {.legacy    = "format-strikethrough",
-     .canonical = "std:xuzz/format_strikethrough"},
-    {.legacy    = "std:xudu/format_strikethrough",
      .canonical = "std:xuzz/format_strikethrough"},
     {.legacy    = "format-superscript",
      .canonical = "std:xuzz/format_superscript"},
-    {.legacy    = "std:xudu/format_superscript",
-     .canonical = "std:xuzz/format_superscript"},
     {.legacy = "format-subscript", .canonical = "std:xuzz/format_subscript"},
-    {.legacy    = "std:xudu/format_subscript",
-     .canonical = "std:xuzz/format_subscript"},
+    {.legacy = "save-document", .canonical = "std:xuzz/save"},
+    {.legacy = "std:xudu/save_document", .canonical = "std:xuzz/save"},
+    {.legacy = "std:xuzz/save_document", .canonical = "std:xuzz/save"},
     {.legacy = "export-osmic", .canonical = "std:xuzz/export_osmic"},
-    {.legacy = "std:xudu/export_osmic", .canonical = "std:xuzz/export_osmic"},
+    {.legacy = "insert-break", .canonical = "std:xuzz/page_break"},
+    {.legacy = "std:xudu/insert_break", .canonical = "std:xuzz/page_break"},
+    {.legacy = "std:xudu/page_break", .canonical = "std:xuzz/page_break"},
+    {.legacy = "std:xuzz/insert_break", .canonical = "std:xuzz/page_break"},
     {.legacy = "clear-bench", .canonical = "std:xuzz/clear_bench"},
-    {.legacy = "std:xudu/clear_bench", .canonical = "std:xuzz/clear_bench"},
-    {.legacy = "overview-toggle", .canonical = "std:xuzz/overview_toggle"},
-    {.legacy    = "std:xudu/overview_toggle",
-     .canonical = "std:xuzz/overview_toggle"},
-    {.legacy = "quotation-toggle", .canonical = "std:xuzz/quotation_toggle"},
-    {.legacy    = "std:xudu/quotation_toggle",
-     .canonical = "std:xuzz/quotation_toggle"},
-    {.legacy    = "quotation-toggle-f9",
-     .canonical = "std:xuzz/quotation_toggle_f9"},
-    {.legacy    = "std:xudu/quotation_toggle_f9",
-     .canonical = "std:xuzz/quotation_toggle_f9"},
+    {.legacy = "std:xudu/quit", .canonical = "std:xuzz/quit"},
+    {.legacy = "std:xudu/save", .canonical = "std:xuzz/save"},
+    {.legacy = "std:xudu/close", .canonical = "std:xuzz/close"},
 
     // Zigzag Visualizer & Pure Vortex Actions
     {.legacy    = "view-mode-content-1",
@@ -3122,29 +3037,10 @@ constexpr ActionAlias kActionAliases[] = {
     {.legacy = "zigzag-step-y-neg", .canonical = "std:nav/zigzag_step_y_neg"},
     {.legacy = "zigzag-step-z-pos", .canonical = "std:nav/zigzag_step_z_pos"},
     {.legacy = "zigzag-step-z-neg", .canonical = "std:nav/zigzag_step_z_neg"},
-
-    // Navigation & Link Panel Actions
-    {.legacy = "link-next", .canonical = "std:xuzz/link_next"},
-    {.legacy = "link-prev", .canonical = "std:xuzz/link_prev"},
-    {.legacy = "member-next", .canonical = "std:xuzz/member_next"},
-    {.legacy = "member-prev", .canonical = "std:xuzz/member_prev"},
-    {.legacy = "occurrence-next", .canonical = "std:xuzz/occurrence_next"},
-    {.legacy = "occurrence-prev", .canonical = "std:xuzz/occurrence_prev"},
-    {.legacy = "link-cross", .canonical = "std:xuzz/link_cross"},
-    {.legacy = "link-enter", .canonical = "std:xuzz/link_enter"},
-    {.legacy = "link-origin", .canonical = "std:xuzz/link_origin"},
-    {.legacy = "link-dismiss", .canonical = "std:xuzz/link_dismiss"},
-    {.legacy = "link-follow", .canonical = "std:nav/link_follow"},
-    {.legacy = "activity-back", .canonical = "std:xuzz/activity_back"},
 };
 } // namespace
 
 std::string_view keymapScope(const std::string_view action) {
-  if (action == settings::kKeymapLeaderMode ||
-      action == settings::kKeymapLinkFollow ||
-      action == settings::kKeymapRestoreDismissed) {
-    return {};
-  }
   const auto slash = action.find('/');
   if (std::string_view::npos == slash) {
     return {};
@@ -3226,8 +3122,17 @@ SettingsConfig SettingsConfig::fromStore(const Store &store) {
   cfg.autoSaveSeconds = static_cast<std::uint32_t>(
       model.getInt64(settings::kAutoSaveSeconds,
                      static_cast<std::int64_t>(cfg.autoSaveSeconds)));
-  cfg.theme        = model.getString(settings::kTheme, cfg.theme);
-  const auto bgRgb = model.getDoubleList(settings::kThemeBackground);
+  const auto colour = [&model](const std::string_view name,
+                               const std::uint32_t fallback) {
+    const auto value = model.getInt64(name, fallback);
+    return value >= 0 && value <= std::numeric_limits<std::uint32_t>::max()
+               ? static_cast<std::uint32_t>(value)
+               : fallback;
+  };
+  cfg.pagePaperColour = colour(settings::kPagePaperColour, cfg.pagePaperColour);
+  cfg.pageInkColour   = colour(settings::kPageInkColour, cfg.pageInkColour);
+  cfg.theme           = model.getString(settings::kTheme, cfg.theme);
+  const auto bgRgb    = model.getDoubleList(settings::kThemeBackground);
   if (bgRgb.size() == 3) {
     cfg.themeBackgroundRgb = bgRgb;
   }
@@ -3293,6 +3198,19 @@ LayoutConfig LayoutConfig::fromStore(const Store &store) {
                                       value, double(low), double(high)))
                                 : fallback;
   };
+  cfg.beams.connectorWidthOfLine = curveNumber(
+      "beams.connectorWidthOfLine", cfg.beams.connectorWidthOfLine, .04F, .5F);
+  cfg.beams.gutterMinimumWidthOfLine = curveNumber(
+      "beams.gutterMinimumWidthOfLine", cfg.beams.gutterMinimumWidthOfLine,
+      .04F, cfg.beams.connectorWidthOfLine);
+  cfg.beams.bracketWidthOfLine = curveNumber(
+      "beams.bracketWidthOfLine", cfg.beams.bracketWidthOfLine, .04F, .3F);
+  cfg.beams.anchorReachSeconds = curveNumber(
+      "beams.anchorReachSeconds", cfg.beams.anchorReachSeconds, 0.F, 2.F);
+  cfg.beams.anchorReducedMotion =
+      model.getBool("beams.anchorReducedMotion", false);
+  cfg.beams.bracketInkShare =
+      curveNumber("beams.bracketInkShare", cfg.beams.bracketInkShare, .2F, 1.F);
   cfg.beams.inactiveLinkAlpha = curveNumber(
       "beams.inactiveLinkAlpha", cfg.beams.inactiveLinkAlpha, .15F, .8F);
   cfg.beams.curveHandleShare = curveNumber(
@@ -3409,13 +3327,18 @@ gleditor::RadialConfig createDefaultRadialConfig() {
   // Entries naming a keymap action run it, so a menu and a key reach the
   // same command and neither can drift from the other.
   auto fileAction = makeAction("group:file", "File", "+", "subwheel:file");
-  fileAction.desc = "New and Open";
+  fileAction.desc = "Documents and session";
   fileAction.subActions = {
       makeAction("run:std:xuzz/new_doc", "New xanadoc", "+",
                  "run:std:xuzz/new_doc"),
       makeAction("run:std:xuzz/new_slice", "New slice", "#",
                  "run:std:xuzz/new_slice"),
+      makeAction("run:std:xuzz/walks", "Walks", "W", "run:std:xuzz/walks"),
       makeAction("run:std:xuzz/open_doc", "Open", "O", "run:std:xuzz/open_doc"),
+      makeAction("run:std:xuzz/close", "Close document", "×",
+                 "run:std:xuzz/close"),
+      makeAction("run:std:xuzz/quit", "Save and quit", "Q",
+                 "run:std:xuzz/quit"),
   };
 
   cfg.actions = {
@@ -3643,10 +3566,21 @@ UIConfig UIConfig::fromStore(const Store &store) {
   colour(settings::kLinkPanelTextColour, panel.textColour);
   colour(settings::kLinkPanelMutedColour, panel.mutedColour);
   colour(settings::kLinkPanelButtonColour, panel.buttonColour);
-  colour(settings::kLinkPanelChosenHighlightColour,
-         panel.chosenHighlightColour);
-  colour(settings::kLinkPanelMemberHighlightColour,
-         panel.memberHighlightColour);
+  length("linkPanel.dockMaxHeightShare", panel.dockMaxHeightShare);
+  panel.dockMaxHeightShare =
+      std::isfinite(panel.dockMaxHeightShare)
+          ? std::clamp(panel.dockMaxHeightShare, .2F, .8F)
+          : defaults.dockMaxHeightShare;
+  length(settings::kLinkPanelChosenEdgeWidthPx, panel.chosenEdgeWidthPx);
+  length(settings::kLinkPanelMemberEdgeWidthPx, panel.memberEdgeWidthPx);
+  panel.chosenEdgeWidthPx =
+      std::isfinite(panel.chosenEdgeWidthPx)
+          ? std::clamp(panel.chosenEdgeWidthPx, 0.5F, 8.0F)
+          : defaults.chosenEdgeWidthPx;
+  panel.memberEdgeWidthPx =
+      std::isfinite(panel.memberEdgeWidthPx)
+          ? std::clamp(panel.memberEdgeWidthPx, 0.5F, 8.0F)
+          : defaults.memberEdgeWidthPx;
   return cfg;
 }
 

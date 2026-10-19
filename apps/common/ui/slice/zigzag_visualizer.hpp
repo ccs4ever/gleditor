@@ -13,7 +13,7 @@
 #include "common/xanadu/vortex/vortex_host.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
 #include "common/xanadu/zigzag/presentation_surface.hpp"
-#include "common/xanadu/zigzag/zz_xudu_projector.hpp"
+#include "common/xanadu/zigzag/xanadu_projector.hpp"
 #include "common/xanadu/zigzag/zzcore.hpp"
 #include "common/xanadu/zigzag/zzstructure.hpp"
 
@@ -167,23 +167,24 @@ public:
   [[nodiscard]] std::optional<gleditor::InputArea> textArea() const override;
 
   // -- ZigZag Actions -------------------------------------------------------
-  void adoptDocument(ZzStructureDocument &&doc, std::string sourcePath,
-                     const std::unordered_map<CellID, XuduProjectionProvenance>
-                         *origins = nullptr);
+  void adoptDocument(
+      ZzStructureDocument &&doc, std::string sourcePath,
+      const std::unordered_map<CellID, XanaduProjectionProvenance> *origins =
+          nullptr);
   void populateFallbackStructure();
 
-  void adoptXuduStore(const xanadu::Store &store,
-                      const std::vector<xanadu::MicroversionId> &versions);
-  void bindXuduStore(xanadu::Store &store,
-                     const xanadu::MicroversionId &version);
+  void adoptXanaduStore(const xanadu::Store &store,
+                        const std::vector<xanadu::MicroversionId> &versions);
+  void bindXanaduStore(xanadu::Store &store,
+                       const xanadu::MicroversionId &version);
   void reloadStoreVersion(const xanadu::MicroversionId &version,
                           zigzag::CellRef newFocus = zigzag::noCell);
   ZigzagVisualizer *setOnOpenQuoteBuilder(std::function<void()> cb) {
     onOpenQuoteBuilder_ = std::move(cb);
     return this;
   }
-  void adoptXuduDocs(const std::vector<XuduDocInput> &docs,
-                     const std::vector<xanadu::Link> &links = {});
+  void adoptXanaduDocs(const std::vector<XanaduDocInput> &docs,
+                       const std::vector<xanadu::Link> &links = {});
   [[nodiscard]] ZzRasterResult
   rasterize(const DimID &primaryDim   = "d.doc",
             const DimID &secondaryDim = "d.transclude") const;
@@ -197,6 +198,7 @@ public:
     navigateFocus(dimension, positive ? DimVector::POS : DimVector::NEG);
   }
   void navigateFocusTo(CellID id);
+  std::function<void()> accessibilityActivated;
 
   void swapDimensions(int axis1, int axis2);
   void cycleDimensions(bool forward = true);
@@ -517,6 +519,19 @@ public:
   [[nodiscard]] std::uint64_t bridgeRevision() const noexcept override {
     return revision_;
   }
+  using AuthoredCommitHandler =
+      UnifiedTransclusionEngine::AuthoredCommitHandler;
+  ZigzagVisualizer *setAuthoredCommitHandler(AuthoredCommitHandler handler) {
+    authoredCommitHandler_ = std::move(handler);
+    if (engine_) engine_->setAuthoredCommitHandler(authoredCommitHandler_);
+    return this;
+  }
+
+  /// Synchronize an authored descendant without rebinding a historical view
+  /// or moving the focus, axes, or camera.
+  bool advanceEditingHead(const xanadu::MicroversionId &parent,
+                          const xanadu::MicroversionId &head);
+
   void setBridgeInvalidationCallback(
       xanadu::ZigzagPresentationSurface::InvalidationCallback callback)
       override {
@@ -605,7 +620,7 @@ public:
 private:
   void refreshCellLayouts();
   /// Point the view at the dimensions the home cell links along when it
-  /// links along neither of the current two; see bindXuduStore().
+  /// links along neither of the current two; see bindXanaduStore().
   void fitViewToHome();
 
   std::string fontName_;
@@ -626,6 +641,7 @@ private:
   std::uint32_t linkHighlightBorder_{};
   xanadu::ZigzagPresentationSurface::InvalidationCallback
       bridgeInvalidationCallback_;
+  AuthoredCommitHandler authoredCommitHandler_;
 
   std::string structure_name_;
   std::string current_slice_path_;
@@ -689,7 +705,7 @@ private:
   std::unordered_map<CellRef, std::shared_ptr<const render::PickSemanticTarget>>
       pickTargets_;
   std::string pickTargetVersion_;
-  std::unordered_map<CellRef, XuduProjectionProvenance> sourceOrigins_;
+  std::unordered_map<CellRef, XanaduProjectionProvenance> sourceOrigins_;
 
   DimensionBundle dimension_bundle_{DimensionBundle::Custom};
   std::shared_ptr<vortex::VortexHost> vortex_host_{nullptr};

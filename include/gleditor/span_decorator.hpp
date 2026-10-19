@@ -19,9 +19,11 @@
 #define GLEDITOR_SPAN_DECORATOR_H
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 class Doc;
+class Caret;
 
 namespace gleditor {
 
@@ -32,12 +34,18 @@ namespace gleditor {
  * picking use, and the range is half-open. A range whose end is not greater
  * than its start contributes nothing.
  */
+enum class SpanEmphasis : std::uint32_t { Background, Edge, Contour };
+
 struct SpanStyle {
   std::uint32_t start{};
   std::uint32_t end{};
   /// Packed RGBA8, most significant byte red -- the same encoding
   /// render::HighlightRange::colour takes.
   std::uint32_t colour{};
+  SpanEmphasis emphasis{SpanEmphasis::Background};
+  float edgeWidthPx{1.0F};
+  /// Opaque presentation ownership, shared by a fill and its edge accent.
+  std::optional<std::uint64_t> layer;
 };
 
 /**
@@ -51,7 +59,7 @@ struct SpanStyle {
  * render::maxHighlightRanges, and a range crossing a page boundary costs one
  * per page it touches -- so a decorator over a large document should return
  * what is on screen rather than everything it knows. Ranges past the limit are
- * dropped, and the selection is added last so that it survives.
+ * dropped, and the selection is added first so that it survives.
  */
 class SpanDecorator {
 public:
@@ -66,6 +74,11 @@ public:
   /// Append the ranges to colour in @p doc. Called once per open document per
   /// frame; @p out is not cleared between documents.
   virtual void decorate(const Doc &doc, std::vector<SpanStyle> &out) = 0;
+  /// A program may style a selection it explicitly owns; ordinary edits retain
+  /// the renderer default. No caret positions or selected bytes are changed.
+  virtual std::optional<SpanStyle> selectionStyle(const Doc &, const Caret &) {
+    return std::nullopt;
+  }
 };
 
 } // namespace gleditor

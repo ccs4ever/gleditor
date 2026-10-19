@@ -168,11 +168,18 @@ TEST_F(MediaWidgetTest, AccessibilityTreeAndActions) {
   widget->setTitle("Audio Sample");
   widget->describe(builder);
 
+  ASSERT_FALSE(tree.nodes.empty());
+  EXPECT_EQ(tree.nodes.back().label, "Audio Sample");
+  EXPECT_EQ(tree.nodes.back().value, "Stopped");
   const auto rootId = static_cast<std::uint64_t>(widget->tagBase());
   // Perform Action: Click on Play
   EXPECT_TRUE(widget->performAction(rootId + MediaWidget::tagPlay,
                                     gleditor::a11y::Action::Click, ""));
   EXPECT_EQ(player->state(), PlaybackState::Playing);
+  gleditor::a11y::Tree playing;
+  gleditor::a11y::Builder playingBuilder(playing, 1);
+  widget->describe(playingBuilder);
+  EXPECT_EQ(playing.nodes.back().value, "Playing");
 
   // Perform Action: Click on Pause
   EXPECT_TRUE(widget->performAction(rootId + MediaWidget::tagPause,

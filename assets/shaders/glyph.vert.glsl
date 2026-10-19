@@ -51,6 +51,9 @@ GLEDITOR_OUT_FLAT(7) uint vSolid;
 // at the top. Interpolated, allowing vertical multi-banding when multiple
 // highlight ranges overlap.
 GLEDITOR_OUT(8) float vQuadV;
+// Only monochrome document ink participates in contrast adaptation. Coloured
+// rows, including media and UI, keep their supplied foreground.
+GLEDITOR_OUT_FLAT(9) uint vPaletteInk;
 
 // Field widths must stay in step with Doc::VBORow.
 const uint depthMask = 3u;
@@ -97,6 +100,7 @@ void main() {
     vQuadU      = 0.0;
     vQuadV      = 0.0;
     vSolid      = 1u;
+    vPaletteInk = 0u;
     return;
   }
 
@@ -118,8 +122,20 @@ void main() {
   // select whole clusters, and one cluster can be a ligature covering
   // several characters.
 
-  vFgColor = unpackInk(foreground);
-  vBgColor = unpackPaper(paper >> 16);
+  vFgColor    = unpackInk(foreground);
+  vBgColor    = unpackPaper(paper >> 16);
+  vPaletteInk = 0u;
+  if (uPaletteEnabled != 0u) {
+    vec3 palettePaper    = unpackInk(uPaperColour);
+    vec3 paletteInk      = unpackInk(uInkColour);
+    bool monochromeInk   = vFgColor.r == vFgColor.g && vFgColor.g == vFgColor.b;
+    bool monochromePaper = vBgColor.r == vBgColor.g && vBgColor.g == vBgColor.b;
+    if (monochromeInk) {
+      vFgColor    = mix(paletteInk, palettePaper, vFgColor.r);
+      vPaletteInk = (flags & solidFlag) == 0u ? 1u : 0u;
+    }
+    if (monochromePaper) vBgColor = mix(paletteInk, palettePaper, vBgColor.r);
+  }
   // The atlas origin is the bottom-left of the glyph, so the texture
   // coordinate follows the same corner selection as the position. How far it
   // reaches is not carried at all: the atlas holds a glyph at its own size,

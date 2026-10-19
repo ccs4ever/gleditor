@@ -215,7 +215,8 @@ public:
   std::optional<ScrollSegment>
   sealIncremental(const std::filesystem::path &outputDir,
                   const SignedProvenance &provenance,
-                  const std::vector<PublishedHoleRecord> &holes = {});
+                  const std::vector<PublishedHoleRecord> &holes = {},
+                  std::optional<std::uint64_t> expectedEnd      = std::nullopt);
 
   /// Synchronize unwritten active bytes to disk.
   bool flush();

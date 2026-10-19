@@ -300,8 +300,8 @@ the catalog pointer; immutable catalog seeds remain available after restart.
 `Ctrl+Shift+D` opens discovery by topic or publishing key. Telescope accepts Return on a simple
 keyword such as `Ideas`, `#Ideas`, or `author:<64-hex-key>`. Author discovery resolves the signed
 catalog pointer and fetches its torrent. Topic discovery joins the deterministic
-`SHA1("xudu:topic:" + canonical-topic)` rendezvous and exchanges signed catalogs through the
-`xudu_publications` BitTorrent extension. No separate service, direct reader peer address or
+`SHA1("xanadu:topic:" + canonical-topic)` rendezvous and exchanges signed catalogs through the
+`xanadu_publications` BitTorrent extension. No separate service, direct reader peer address or
 preloaded search record is needed. Discovery and download sessions stay on their workers.
 
 Readers verify catalog signatures, requested publisher/topic, canonical encoding and observed

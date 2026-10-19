@@ -55,6 +55,7 @@
 #include <set>
 #include <source_location>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -259,6 +260,11 @@ public:
   ArenaManifold(const Manifold *base, const xanadu::Store &store)
       : ArenaManifold(base, &store) {}
 
+  ArenaManifold *
+  setDefaultSpanReader(const xanadu::SpanReader *reader) noexcept {
+    defaultReader_ = reader;
+    return this;
+  }
   [[nodiscard]] const Manifold *base() const noexcept { return base_; }
   [[nodiscard]] const xanadu::Store *store() const noexcept {
     return store_ != nullptr ? store_
@@ -328,6 +334,12 @@ public:
       std::pair<const xanadu::Store *, CellRef>>
   resolveForeign(CellRef ref) const noexcept;
 
+  /// Authored identity of a base cell or federation proxy; scratch content
+  /// alone does not identify an authored cell.
+  [[nodiscard]] gleditor::cpp26::optional<
+      std::pair<const xanadu::Store *, CellRef>>
+  resolveSourceCell(CellRef ref) const noexcept;
+
   /**
    * @brief Mint a cell quoting @p content, addressed in @p space's scrolls.
    *
@@ -384,6 +396,25 @@ public:
                                      DimVector dir        = DimVector::POS,
                                      std::size_t maxSteps = 100);
 
+  /// Limits remain active across choice-point rollback: failed work costs fuel.
+  ArenaManifold *setExecutionLimits(std::uint32_t cells, std::size_t work,
+                                    std::size_t scratchBytes) noexcept {
+    allocationLimit_ = cells;
+    workRemaining_   = work;
+    scratchLimit_    = scratchBytes;
+    return this;
+  }
+  [[nodiscard]] bool executionLimited() const noexcept {
+    return workRemaining_.has_value();
+  }
+  void consumeWork() const {
+    if (workRemaining_) {
+      if (*workRemaining_ == 0)
+        throw std::runtime_error("Vortex evaluation work budget exhausted");
+      --*workRemaining_;
+    }
+  }
+
   ArenaManifold *setAllocationLimitForTesting(std::uint32_t limit) noexcept {
     allocationLimit_ = limit;
     return this;
@@ -409,6 +440,11 @@ public:
   /// one it is merely reading through. What promote() uses to decide whether a
   /// cell needs minting or already has a name.
   [[nodiscard]] bool holdsOwn(CellRef ref) const noexcept;
+
+  /// Number of base cells shadowed in this arena.
+  [[nodiscard]] std::size_t shadowCount() const noexcept {
+    return shadowOrder_.size();
+  }
 
   // -- read path: the same questions Manifold answers ------------------------
 
@@ -581,6 +617,21 @@ public:
   ArenaManifold *insertIntoRank(CellRef cell, CellRef anchor, DimRef dim,
                                 DimVector dir = DimVector::POS);
 
+  /**
+   * @brief Link an existing sequence of cells into a rank along @p dim.
+   *
+   * Chains @p cells consecutively -- cells[i] @p dir-ward of cells[i-1] --
+   * each a single link() that writes both reciprocal ends (RL1). This is the
+   * one shared home for "turn a vector of cells into a rank," promoted out of
+   * the per-element loops the VPL and VQL front ends used to hand-roll (each
+   * of which re-derived the reciprocal edge and could silently build a
+   * one-sided chain). noCell entries are skipped. Empty or single-element
+   * input is a no-op success. Returns the first refusal, or this arena for
+   * fluent chaining.
+   */
+  ArenaResult linkChain(std::span<const CellRef> cells, DimRef dim,
+                        DimVector dir = DimVector::POS);
+
   // -- choice points ---------------------------------------------------------
 
   /// Take a choice point. Reads seven lengths; allocates nothing.
@@ -621,6 +672,34 @@ public:
   [[nodiscard]] std::size_t deadLinks() const noexcept {
     return links_.size() - liveLinks_;
   }
+
+  /**
+   * @brief Contiguous [0..mark) prefix snapshot of an ArenaManifold for
+   *        Model 2 Shadow-Delta OR-parallel branch hydration at depth > 1.
+   */
+  struct PrefixSnapshot {
+    Mark mark;
+    std::vector<CellSlot> slots;
+    std::vector<DimLink> links;
+    std::vector<xanadu::PrimediaSpan> content;
+    std::string scratch;
+    std::vector<CellRef> shadowOrder;
+    std::unordered_map<std::string, DimRef> arenaDims;
+  };
+
+  /// Export the exact [0..m) arena prefix as of @p m without mutating this
+  /// arena, replaying any newer trail entries in reverse onto the exported
+  /// slot copy.
+  [[nodiscard]] PrefixSnapshot exportPrefix(const Mark &m) const;
+
+  /// Hydrate this arena with a parent's [0..m) prefix snapshot, rebuilding
+  /// overlay_ from shadowed base cells and pushing a split floor on floors_ so
+  /// subsequent child branch writes are trailed properly.
+  ArenaManifold *hydratePrefix(const PrefixSnapshot &snapshot);
+
+  /// Evict the oldest mark floor when a near-root choice point is stolen by
+  /// another OR-parallel worker and will never be backtracked locally.
+  ArenaManifold *evictOldestMark() noexcept;
 
 private:
   [[nodiscard]] DimLink *existingLink(std::uint32_t dense, DimRef dim) noexcept;
@@ -718,6 +797,9 @@ private:
   std::vector<ShadowEdgeKey> proxyShadowedEdgeOrder_;
   CellRef storesRankTail_{noCell};
   std::uint32_t allocationLimit_{ephemeralBit};
+  const xanadu::SpanReader *defaultReader_{nullptr};
+  mutable std::optional<std::size_t> workRemaining_;
+  std::optional<std::size_t> scratchLimit_;
 };
 
 /**
@@ -752,6 +834,12 @@ private:
 [[nodiscard]] std::optional<Promoted>
 promote(xanadu::Store &store, const xanadu::MicroversionId &parent,
         const ArenaManifold &from, CellRef root, PromotionBudget budget = {});
+
+[[nodiscard]] std::string
+encodeArenaPrefix(const ArenaManifold::PrefixSnapshot &snapshot);
+
+[[nodiscard]] std::optional<ArenaManifold::PrefixSnapshot>
+decodeArenaPrefix(std::string_view bytes);
 
 } // namespace zigzag
 

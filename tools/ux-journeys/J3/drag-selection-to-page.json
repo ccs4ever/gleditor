@@ -1,0 +1,60 @@
+{
+  "journey": "J3",
+  "stage": "drag-selection-to-page",
+  "driver": "ui",
+  "program": "xuzz",
+  "profile": "J3",
+  "source_evidence": "build/ux-green-20261011/harness-j3/drag-plan.json",
+  "notes": [
+    "Requires author-source and same source store.",
+    "Fixed drag coordinates assume the captured 1440x1000 geometry and seeded text positions."
+  ],
+  "plan": {
+    "launch_args": [
+      "${default_store}"
+    ],
+    "steps": [
+      "--mouse-down",
+      "205,286",
+      "--capture",
+      "${evidence}/selection-press.ppm",
+      "--mouse-move",
+      "273,286",
+      "--capture",
+      "${evidence}/selection-mid.ppm",
+      "--mouse-up",
+      "273,286",
+      "--dump-a11y",
+      "--capture",
+      "${evidence}/selection.ppm",
+      "--mouse-down",
+      "230,286",
+      "--mouse-move",
+      "1350,450",
+      "--capture",
+      "${evidence}/drag-void.ppm",
+      "--mouse-up",
+      "1350,450",
+      "--dump-a11y",
+      "--capture",
+      "${evidence}/void-drop.ppm",
+      "--click",
+      "90,140",
+      "--dump-a11y",
+      "--capture",
+      "${evidence}/source-return.ppm",
+      "--chord",
+      "Ctrl+Q"
+    ]
+  },
+  "variables": {
+    "evidence": {
+      "description": "Run-specific evidence output directory.",
+      "example": "/tmp/ux-run/Jx/stage"
+    },
+    "default_store": {
+      "description": "Default xanadoc store in this journey profile.",
+      "example": "/tmp/ux-run/data/xuzz/xanadocs/default"
+    }
+  }
+}
