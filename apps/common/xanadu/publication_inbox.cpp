@@ -5,6 +5,7 @@
 #include <charconv>
 #include <condition_variable>
 #include <cstring>
+#include <deque>
 #include <fstream>
 #include <limits>
 #include <lmdb.h>
@@ -356,6 +357,7 @@ struct PublicationInbox::Impl {
   mutable std::mutex guard;
   mutable std::condition_variable changed;
   std::map<std::string, Job> jobs;
+  std::deque<std::string> cleanupQueue;
   std::jthread worker;
 
   static V encodeJob(const Job &job) {
@@ -416,6 +418,163 @@ struct PublicationInbox::Impl {
           !std::filesystem::is_regular_file(status))
         throw PublicationInboxUnreadable(
             "Publication inbox format 1: special file in retained snapshot");
+    }
+  }
+
+  struct PartialAttempt {
+    std::filesystem::path path;
+  };
+
+  std::vector<PartialAttempt> ownedPartialAttempts(std::string_view id,
+                                                   std::uint64_t maximumAttempt,
+                                                   std::stop_token stop) const {
+    std::vector<PartialAttempt> result;
+    std::uint64_t totalBytes{};
+    const auto prefix = std::string(id) + ".attempt-";
+    for (const auto &entry :
+         std::filesystem::directory_iterator(options.directory)) {
+      if (stop.stop_requested())
+        throw std::runtime_error(
+            "Partial cleanup interrupted during preflight");
+      const auto name = entry.path().filename().string();
+      if (!name.starts_with(prefix)) continue;
+      const auto suffix = std::string_view(name).substr(prefix.size());
+      std::uint64_t attempt{};
+      const auto parsed = std::from_chars(
+          suffix.data(), suffix.data() + suffix.size(), attempt);
+      if (suffix.empty() || parsed.ec != std::errc{} ||
+          parsed.ptr != suffix.data() + suffix.size() ||
+          std::to_string(attempt) != suffix || attempt > maximumAttempt)
+        continue;
+
+      std::error_code error;
+      const auto rootStatus =
+          std::filesystem::symlink_status(entry.path(), error);
+      if (error || std::filesystem::is_symlink(rootStatus) ||
+          !std::filesystem::is_directory(rootStatus))
+        throw std::runtime_error("Unsafe partial publication attempt: " +
+                                 entry.path().string());
+      if (entry.path().parent_path() != options.directory)
+        throw std::runtime_error("Partial publication attempt escaped inbox");
+      validateRetainedPaths(entry.path());
+
+      std::uint64_t bytes{};
+      for (std::filesystem::recursive_directory_iterator it(entry.path()), end;
+           it != end; ++it) {
+        if (stop.stop_requested())
+          throw std::runtime_error(
+              "Partial cleanup interrupted during preflight");
+        const auto status = it->symlink_status();
+        if (std::filesystem::is_symlink(status))
+          throw std::runtime_error("Symlink in partial publication attempt");
+        if (std::filesystem::is_directory(status)) continue;
+        if (!std::filesystem::is_regular_file(status))
+          throw std::runtime_error(
+              "Special file in partial publication attempt");
+        const auto size = it->file_size();
+        if (size > std::numeric_limits<std::uint64_t>::max() - bytes)
+          throw std::overflow_error(
+              "Partial publication byte count exceeds uint64 range");
+        bytes += size;
+      }
+      if (bytes > std::numeric_limits<std::uint64_t>::max() - totalBytes)
+        throw std::overflow_error(
+            "Partial publication byte count exceeds uint64 range");
+      totalBytes += bytes;
+      result.push_back({.path = entry.path()});
+    }
+    return result;
+  }
+
+  void removePartialAttempt(const std::filesystem::path &root,
+                            std::stop_token stop,
+                            std::uint64_t &removedBytes) const {
+    struct Entry {
+      std::filesystem::path path;
+      bool postVisit{};
+    };
+    std::vector<Entry> pending{{.path = root}};
+    while (!pending.empty()) {
+      if (stop.stop_requested())
+        throw std::runtime_error("Partial cleanup interrupted; some files may "
+                                 "already have been removed");
+      auto current = std::move(pending.back());
+      pending.pop_back();
+      std::error_code error;
+      const auto status = std::filesystem::symlink_status(current.path, error);
+      if (error || std::filesystem::is_symlink(status))
+        throw std::runtime_error("Unsafe path during partial cleanup: " +
+                                 current.path.string());
+      if (std::filesystem::is_directory(status)) {
+        if (!current.postVisit) {
+          pending.push_back({.path = current.path, .postVisit = true});
+          for (const auto &child :
+               std::filesystem::directory_iterator(current.path))
+            pending.push_back({.path = child.path()});
+          continue;
+        }
+        if (!std::filesystem::remove(current.path, error) || error)
+          throw std::runtime_error("Cannot remove partial directory: " +
+                                   current.path.string());
+        continue;
+      }
+      if (!std::filesystem::is_regular_file(status))
+        throw std::runtime_error("Special file during partial cleanup: " +
+                                 current.path.string());
+      const auto size = std::filesystem::file_size(current.path);
+      if (size > std::numeric_limits<std::uint64_t>::max() - removedBytes)
+        throw std::overflow_error(
+            "Removed partial byte count exceeds uint64 range");
+      if (!std::filesystem::remove(current.path, error) || error)
+        throw std::runtime_error("Cannot remove partial file: " +
+                                 current.path.string());
+      removedBytes += size;
+    }
+  }
+
+  void setCleanupResult(const std::string &id,
+                        PublicationPartialCleanupStatus result) {
+    const std::scoped_lock lock(guard);
+    const auto found = jobs.find(id);
+    if (found == jobs.end() || !found->second.status.cleanup ||
+        found->second.status.cleanup->phase !=
+            PublicationPartialCleanupPhase::Pending)
+      return;
+    found->second.status.cleanup = std::move(result);
+    changed.notify_all();
+  }
+
+  void cleanupPartialData(const std::string &id, std::stop_token stop) {
+    std::uint64_t maximumAttempt{};
+    {
+      const std::scoped_lock lock(guard);
+      const auto found = jobs.find(id);
+      if (found == jobs.end()) return;
+      maximumAttempt = found->second.attempt;
+    }
+    std::uint64_t removedBytes{};
+    try {
+      if (stop.stop_requested())
+        throw std::runtime_error("Partial cleanup interrupted before starting");
+      const auto attempts = ownedPartialAttempts(id, maximumAttempt, stop);
+      for (const auto &attempt : attempts) {
+        if (stop.stop_requested())
+          throw std::runtime_error(
+              "Partial cleanup interrupted; some files may already have been "
+              "removed");
+        removePartialAttempt(attempt.path, stop, removedBytes);
+      }
+      if (stop.stop_requested())
+        throw std::runtime_error(
+            "Partial cleanup interrupted; some files may already have been "
+            "removed");
+      syncDirectory(options.directory);
+      setCleanupResult(id, {.phase = PublicationPartialCleanupPhase::Complete,
+                            .removedLogicalBytes = removedBytes});
+    } catch (const std::exception &error) {
+      setCleanupResult(id, {.phase = PublicationPartialCleanupPhase::Failed,
+                            .removedLogicalBytes = removedBytes,
+                            .error = boundedDiagnostic(error.what())});
     }
   }
 
@@ -1116,13 +1275,20 @@ struct PublicationInbox::Impl {
     while (!stop.stop_requested()) {
       std::unique_lock lock(guard);
       changed.wait(lock, [&] {
-        return stop.stop_requested() ||
+        return stop.stop_requested() || !cleanupQueue.empty() ||
                std::ranges::any_of(jobs, [](const auto &item) {
                  return item.second.status.phase ==
                         PublicationDownloadPhase::Queued;
                });
       });
       if (stop.stop_requested()) return;
+      if (!cleanupQueue.empty()) {
+        auto id = std::move(cleanupQueue.front());
+        cleanupQueue.pop_front();
+        lock.unlock();
+        cleanupPartialData(id, stop);
+        continue;
+      }
       const auto next = std::ranges::find_if(jobs, [](const auto &item) {
         return item.second.status.phase == PublicationDownloadPhase::Queued;
       });
@@ -1239,6 +1405,9 @@ void PublicationInbox::cancel(std::string_view id) {
 void PublicationInbox::retry(std::string_view id) {
   const std::scoped_lock lock(impl_->guard);
   auto &job = impl_->jobs.at(std::string(id));
+  if (job.status.cleanup &&
+      job.status.cleanup->phase == PublicationPartialCleanupPhase::Pending)
+    throw std::logic_error("Partial-data cleanup is still running");
   if (job.status.phase != PublicationDownloadPhase::Failed &&
       job.status.phase != PublicationDownloadPhase::Cancelled)
     throw std::logic_error("Only failed or cancelled downloads can be retried");
@@ -1252,6 +1421,7 @@ void PublicationInbox::retry(std::string_view id) {
   job.status.completedDependencies = 0;
   job.status.dependencyCount       = 0;
   job.status.verification          = PublicationDownloadVerification::Unchecked;
+  job.status.cleanup.reset();
   if (!job.verifyRetainedOnly) job.status.manifestHash = {};
   job.status.error.clear();
   ++job.attempt;
@@ -1259,6 +1429,26 @@ void PublicationInbox::retry(std::string_view id) {
     impl_->persist();
   } catch (...) {
     job = prior;
+    throw;
+  }
+  impl_->changed.notify_all();
+}
+void PublicationInbox::discardPartialData(std::string_view id) {
+  const std::scoped_lock lock(impl_->guard);
+  auto &job = impl_->jobs.at(std::string(id));
+  if (job.status.phase != PublicationDownloadPhase::Failed &&
+      job.status.phase != PublicationDownloadPhase::Cancelled)
+    throw std::logic_error(
+        "Only failed or cancelled requests can discard partial data");
+  if (job.status.cleanup &&
+      job.status.cleanup->phase == PublicationPartialCleanupPhase::Pending)
+    throw std::logic_error("Partial-data cleanup is already running");
+  job.status.cleanup = PublicationPartialCleanupStatus{
+      .phase = PublicationPartialCleanupPhase::Pending};
+  try {
+    impl_->cleanupQueue.push_back(std::string(id));
+  } catch (...) {
+    job.status.cleanup.reset();
     throw;
   }
   impl_->changed.notify_all();

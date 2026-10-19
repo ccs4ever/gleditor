@@ -7,6 +7,15 @@ session.
 
 ## Current checkpoint
 
+Twentieth checkpoint (2026-10-19), based on `806c464b`: Failed/Cancelled downloads offer explicit
+Discard partial data. The existing worker preflights all owned attempts before deletion, preserves
+installed roots and exact receipts, and reports transient Pending/Complete/Failed cleanup results
+with logical-byte counts. Pending blocks Retry; startup never resumes cleanup. The six-row form
+leads with the cleanup result and keeps the full pin. XPI1 is unchanged. Canonical Make, UI 248/248,
+Xuzz 107/107 and owning 77/77 pass. Final native/backend/text evidence is recorded in the
+[twentieth checkpoint](../reviews/spatial-ui-twentieth-increment/README.md). Aggregate staging
+bounds, completed-root ownership/release and normal production configuration remain open.
+
 Nineteenth checkpoint (2026-10-18), based on `7200fd17`: publication installation now syncs staged
 files/directories, manifest promotion and the installed root's parent before committing Ready on
 POSIX. Retained-root verification applies the same barrier. Relative and aliased-ancestor inbox
@@ -639,18 +648,19 @@ reviews pass.
 
 ## Exact next task
 
-Complete partial-cache lifecycle after the nineteenth checkpoint: add an explicit native control to
-discard incomplete attempt data for failed/cancelled requests while retaining the request receipt,
-full pin, attempt counter and all completed/referenced snapshots. Keep deletion on the owning
-worker, make restart behavior honest, and measure retained bytes before choosing a governed
-aggregate policy. Do not add Forget for completed/referenced roots before the pin-ownership audit.
-Keep observed filesystem ordering and process-restart evidence distinct from physical power-loss
-proof. Then continue normal publication transport configuration in `next-service-plan.md`: governed
-opt-in settings and a visible form, worker-owned factory setup, named-node-only privacy policy and a
-deliberate restart boundary. Keep receive/discovery distinct from real identity enrollment; never
-install the test mock verifier in a normal session. Establish authenticated trust roots and
-BEP46/fingerprint binding before reporting Verified. Capture real normal-mode acquisition,
-rejection, unavailable/retry/offline routes without simulated services.
+Complete measured, governed staging admission/retention after the twentieth checkpoint's explicit
+partial-data cleanup. First expose exact pre-write native-store and retained-copy sizing from shared
+writer/serialization logic and verify it against real staged files; do not use a guessed copy factor
+or post-install scan as a strict bound. Preserve receipts, installed roots and pinned consumers;
+failed attempts still have no aggregate disk bound and Discard does not free a request slot. Use the
+completed-root ownership audit before any Forget operation. Distinguish actual file/directory
+ordering and restart checks from physical power-loss recovery. Then continue normal publication
+transport configuration in `next-service-plan.md`: governed opt-in settings and a visible form,
+worker-owned factory setup, named-node-only privacy policy and a deliberate restart boundary. Keep
+receive/discovery distinct from real identity enrollment; never install the test mock verifier in a
+normal session. Establish authenticated trust roots and BEP46/fingerprint binding before reporting
+Verified. Capture real normal-mode acquisition, rejection, unavailable/retry/offline routes without
+simulated services.
 
 Validate the sixteenth comparison’s trust/availability variants below before D2. Continue the
 remaining J25 and exact cell/history variants through actual controls; preserve the five-visit

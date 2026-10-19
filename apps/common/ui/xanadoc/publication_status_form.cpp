@@ -24,6 +24,30 @@ std::string verification(PublicationDownloadVerification value) {
   }
   std::unreachable();
 }
+std::string cleanupSummary(const PublicationPartialCleanupStatus &cleanup) {
+  switch (cleanup.phase) {
+  case PublicationPartialCleanupPhase::Pending:
+    return "Partial-data cleanup is pending; refresh for its result";
+  case PublicationPartialCleanupPhase::Complete:
+    return "Discarded " + std::to_string(cleanup.removedLogicalBytes) +
+           " logical file bytes of partial data; request and completed copies "
+           "kept";
+  case PublicationPartialCleanupPhase::Failed:
+    return "Partial-data cleanup failed and may be incomplete: " +
+           cleanup.error;
+  }
+  std::unreachable();
+}
+std::string requestSummary(const PublicationDownloadStatus &status) {
+  auto note = status.pin && status.phase == PublicationDownloadPhase::Resolving
+                  ? std::string("Fetching pinned publication")
+                  : std::string(publicationDownloadPhaseName(status.phase));
+  if (status.dependencyCount)
+    note += " (" + std::to_string(status.completedDependencies) + "/" +
+            std::to_string(status.dependencyCount) + " dependencies)";
+  if (!status.error.empty()) note += ": " + status.error;
+  return note;
+}
 } // namespace
 std::string publicationCitationAvailability(
     const PublicationPin &pin,
@@ -48,13 +72,11 @@ std::string publicationCitationAvailability(
 }
 std::string
 publicationDownloadSummary(const PublicationDownloadStatus &status) {
-  auto note = status.pin && status.phase == PublicationDownloadPhase::Resolving
-                  ? std::string("Fetching pinned publication")
-                  : std::string(publicationDownloadPhaseName(status.phase));
-  if (status.dependencyCount)
-    note += " (" + std::to_string(status.completedDependencies) + "/" +
-            std::to_string(status.dependencyCount) + " dependencies)";
-  if (!status.error.empty()) note += ": " + status.error;
+  auto note = requestSummary(status);
+  if (status.cleanup) {
+    if (!note.ends_with('.')) note += '.';
+    note += ' ' + cleanupSummary(*status.cleanup);
+  }
   return note;
 }
 void openPublicationDownloadForm(
@@ -78,15 +100,31 @@ void openPublicationDownloadForm(
     add("Notify me of updates", PublicationDownloadAction::Subscribe);
   } else if (status.phase == Phase::Failed ||
              status.phase == Phase::Cancelled) {
-    add("Retry download", PublicationDownloadAction::Retry);
+    if (!status.cleanup ||
+        status.cleanup->phase != PublicationPartialCleanupPhase::Pending) {
+      add("Retry download", PublicationDownloadAction::Retry);
+      add("Discard partial data",
+          PublicationDownloadAction::DiscardPartialData);
+    }
   } else if (status.phase != Phase::Ready) {
     add("Cancel download", PublicationDownloadAction::Cancel);
   }
   add("Close", PublicationDownloadAction::Close);
-  auto note = publicationDownloadSummary(status);
+  auto note = requestSummary(status);
+  if (status.cleanup) {
+    auto cleanup = cleanupSummary(*status.cleanup);
+    if (!cleanup.ends_with('.')) cleanup += '.';
+    // The form fits only three note lines. Keep the operation's outcome
+    // first; accessibility retains both complete diagnostics if the tail clips.
+    note = std::move(cleanup) + ' ' + note;
+  }
   if (!note.ends_with('.')) note += '.';
   note += " Publisher enrollment is unchecked. Downloading never enters the "
           "publication.";
+  if ((status.phase == Phase::Failed || status.phase == Phase::Cancelled) &&
+      !status.cleanup)
+    note += " Discard removes incomplete attempts only; the request and "
+            "completed copies remain.";
   std::vector<Field> fields;
   fields.push_back(std::move(action));
   fields.push_back(display("Verification", verification(status.verification)));

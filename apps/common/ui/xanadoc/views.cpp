@@ -1796,6 +1796,8 @@ void Views::publicationDownloadStatus(const std::string &id) {
                   session.publicationInbox().retry(id);
                 if (action == PublicationDownloadAction::Cancel)
                   session.publicationInbox().cancel(id);
+                if (action == PublicationDownloadAction::DiscardPartialData)
+                  session.publicationInbox().discardPartialData(id);
                 if (action == PublicationDownloadAction::Subscribe) {
                   const auto subscription =
                       session.publicationSubscriptions().subscribe(id);
@@ -1812,7 +1814,7 @@ void Views::publicationDownloadStatus(const std::string &id) {
                 back.kind          = gleditor::Form::Kind::Choice;
                 back.options       = {"Back to download"};
                 back.submitOnEnter = true;
-                form.open("Could not open publication", error.what(),
+                form.open("Publication action failed", error.what(),
                           {std::move(back)}, [this, id](const auto &) {
                             publicationDownloadStatus(id);
                           });

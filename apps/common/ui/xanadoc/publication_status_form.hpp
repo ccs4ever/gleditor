@@ -14,7 +14,8 @@ enum class PublicationDownloadAction {
   Retry,
   Cancel,
   Close,
-  Subscribe
+  Subscribe,
+  DiscardPartialData
 };
 
 std::string publicationCitationAvailability(

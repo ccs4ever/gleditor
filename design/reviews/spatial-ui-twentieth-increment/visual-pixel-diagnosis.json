@@ -1,0 +1,32 @@
+{
+  "source_png": "build/validation-twentieth/native/zero-discard/raw/05-cleanup-settled.png",
+  "source_png_sha256": "e39b13d2d9e37326d18ab68f09bcf82d76dd672235ccff5e1e63cb977d078048",
+  "source_PPM_sha256": "43b15ce72e7e7d5e983b3e63ca1a57828ebbcfa868b11f57ff5ce3b2ff7b3c8d",
+  "inspection_rectangle_xywh": [
+    340,
+    337,
+    16,
+    16
+  ],
+  "foreground_test": "minimum RGB channel > 90",
+  "mask": [
+    "................",
+    "..#######.....##",
+    "..##...###....#.",
+    "..##.....##.....",
+    "..##......#...##",
+    "..##......##..##",
+    "..##......##..##",
+    "..##......##..##",
+    "..##......##..##",
+    "..##......#...##",
+    "..##.....##...##",
+    "..##...###....##",
+    "..#######.....##",
+    "................",
+    "................",
+    "................"
+  ],
+  "conclusion": "Capital D is present with full left stem and rounded right edge, at x342..351 y338..349. Initial missing-letter impression is rejected by actual pixels.",
+  "image_bytes_changed": false
+}

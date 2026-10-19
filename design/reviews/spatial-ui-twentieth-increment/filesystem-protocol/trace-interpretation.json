@@ -1,0 +1,13 @@
+{
+  "main_fixture_thread": 1905608,
+  "inbox_worker_thread": 1905609,
+  "worker_cleanup_trace_lines": [
+    253,
+    264
+  ],
+  "owning_request_id": "8174a99979992502cc929cc2f764f63fdc39b375344ad7fad6fd1b62b858e3a0",
+  "owned_attempt": 0,
+  "parent_sync_result": 0,
+  "later_main_thread_fixture_teardown_is_not_inbox_cleanup": true,
+  "power_cut_test": false
+}

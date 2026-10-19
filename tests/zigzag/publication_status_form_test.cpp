@@ -26,9 +26,9 @@ TEST(PublicationStatusFormTest, FailedRequestKeepsExactIdentityWithoutOpen) {
                               [&](auto action) { chosen = action; });
   const auto fields = form.current();
   ASSERT_EQ(fields.size(), 6U);
-  EXPECT_THAT(
-      fields[0].options,
-      testing::ElementsAre("Refresh progress", "Retry download", "Close"));
+  EXPECT_THAT(fields[0].options,
+              testing::ElementsAre("Refresh progress", "Retry download",
+                                   "Discard partial data", "Close"));
   EXPECT_EQ(fields[1].answer(), "Not checked");
   EXPECT_EQ(fields[2].answer(), status.pin->hash.hex());
   EXPECT_EQ(fields[3].answer(), "Café ideas / a34 #7");
@@ -115,6 +115,63 @@ TEST(PublicationStatusFormTest, UnresolvedNameDoesNotInventAnImmutableTarget) {
   EXPECT_EQ(form.current()[3].answer(), "Awaiting signed manifest");
   form.keyPressed(gleditor::Key::Escape, gleditor::KeyMods::None);
   EXPECT_TRUE(cancelled);
+}
+
+TEST(PublicationStatusFormTest,
+     CleanupIsExplicitAndDoesNotOfferRetryWhilePending) {
+  auto status  = requested(PublicationDownloadPhase::Cancelled);
+  status.error = "Cancelled by reader";
+  gleditor::Form form;
+  std::optional<PublicationDownloadAction> chosen;
+  openPublicationDownloadForm(form, status,
+                              [&](auto action) { chosen = action; });
+  form.keyPressed(gleditor::Key::Right, gleditor::KeyMods::None);
+  form.keyPressed(gleditor::Key::Right, gleditor::KeyMods::None);
+  form.keyPressed(gleditor::Key::Return, gleditor::KeyMods::None);
+  EXPECT_EQ(chosen, PublicationDownloadAction::DiscardPartialData);
+
+  status.cleanup = PublicationPartialCleanupStatus{
+      .phase = PublicationPartialCleanupPhase::Pending};
+  openPublicationDownloadForm(form, status,
+                              [&](auto action) { chosen = action; });
+  EXPECT_THAT(form.current()[0].options,
+              testing::ElementsAre("Refresh progress", "Close"));
+  EXPECT_EQ(form.current()[2].answer(), status.pin->hash.hex());
+  EXPECT_THAT(publicationDownloadSummary(status),
+              testing::HasSubstr("Cancelled by reader"));
+  EXPECT_THAT(publicationDownloadSummary(status),
+              testing::HasSubstr("cleanup is pending"));
+}
+
+TEST(PublicationStatusFormTest,
+     CleanupResultKeepsFailureAndExactRequestVisible) {
+  auto status    = requested(PublicationDownloadPhase::Failed);
+  status.error   = "Dependency transfer failed";
+  status.cleanup = PublicationPartialCleanupStatus{
+      .phase               = PublicationPartialCleanupPhase::Complete,
+      .removedLogicalBytes = 0};
+  gleditor::Form form;
+  openPublicationDownloadForm(form, status, [](auto) {});
+  EXPECT_THAT(publicationDownloadSummary(status),
+              testing::HasSubstr("Discarded 0 logical file bytes"));
+  EXPECT_THAT(publicationDownloadSummary(status),
+              testing::HasSubstr(status.error));
+  EXPECT_EQ(form.current()[2].answer(), status.pin->hash.hex());
+  EXPECT_THAT(form.current()[0].options, testing::Contains("Retry download"));
+  gleditor::a11y::Tree tree;
+  gleditor::a11y::Builder into(tree, 16);
+  form.describe(into);
+  ASSERT_TRUE(tree.find(into.id(2)));
+  EXPECT_THAT(tree.find(into.id(2))->value,
+              testing::StartsWith("Discarded 0 logical file bytes"));
+  EXPECT_THAT(tree.find(into.id(2))->value, testing::HasSubstr(status.error));
+  status.cleanup = PublicationPartialCleanupStatus{
+      .phase = PublicationPartialCleanupPhase::Failed,
+      .error = "A staged path is unsafe"};
+  EXPECT_THAT(publicationDownloadSummary(status),
+              testing::HasSubstr("may be incomplete: A staged path is unsafe"));
+  EXPECT_THAT(publicationDownloadSummary(status),
+              testing::HasSubstr(status.error));
 }
 
 TEST(PublicationStatusFormTest, CitationAvailabilityMatchesEveryPinnedField) {

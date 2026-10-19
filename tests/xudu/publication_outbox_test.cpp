@@ -3,12 +3,15 @@
 #include <lmdb.h>
 
 #include <atomic>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <future>
+#include <limits>
 #include <map>
 #include <mutex>
+#include <stdexcept>
 #include <thread>
 
 #ifndef _WIN32
@@ -424,6 +427,295 @@ protected:
     return result;
   }
 };
+
+std::uint64_t logicalFileBytes(const fs::path &root) {
+  std::uint64_t total{};
+  for (fs::recursive_directory_iterator it(root), end; it != end; ++it) {
+    if (!it->is_regular_file()) continue;
+    const auto size = it->file_size();
+    if (size > std::numeric_limits<std::uint64_t>::max() - total)
+      throw std::overflow_error("Test fixture byte count overflow");
+    total += size;
+  }
+  return total;
+}
+
+std::string readInboxJournal(const fs::path &directory) {
+  MDB_env *raw{};
+  if (mdb_env_create(&raw) != MDB_SUCCESS)
+    throw std::runtime_error("Cannot create test LMDB environment");
+  std::unique_ptr<MDB_env, decltype(&mdb_env_close)> env(raw, mdb_env_close);
+  if (mdb_env_open(raw, directory.c_str(), 0, 0600) != MDB_SUCCESS)
+    throw std::runtime_error("Cannot open test inbox journal");
+  MDB_txn *rawTransaction{};
+  if (mdb_txn_begin(raw, nullptr, MDB_RDONLY, &rawTransaction) != MDB_SUCCESS)
+    throw std::runtime_error("Cannot read test inbox journal");
+  std::unique_ptr<MDB_txn, decltype(&mdb_txn_abort)> transaction(rawTransaction,
+                                                                 mdb_txn_abort);
+  MDB_dbi db{};
+  if (mdb_dbi_open(rawTransaction, nullptr, 0, &db) != MDB_SUCCESS)
+    throw std::runtime_error("Cannot select test inbox journal");
+  std::string key = "requests";
+  MDB_val dbKey{key.size(), key.data()}, value{};
+  if (mdb_get(rawTransaction, db, &dbKey, &value) != MDB_SUCCESS)
+    throw std::runtime_error("Test inbox journal is absent");
+  return {static_cast<const char *>(value.mv_data), value.mv_size};
+}
+
+bool waitForCleanup(xanadu::PublicationInbox &inbox, const std::string &id,
+                    xanadu::PublicationPartialCleanupPhase phase,
+                    std::chrono::milliseconds timeout = 3s) {
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  do {
+    const auto status = inbox.status(id);
+    if (status.cleanup && status.cleanup->phase == phase) return true;
+    if (status.cleanup && status.cleanup->phase !=
+                              xanadu::PublicationPartialCleanupPhase::Pending)
+      return false;
+    std::this_thread::sleep_for(5ms);
+  } while (std::chrono::steady_clock::now() < deadline);
+  return false;
+}
+
+TEST_F(PublicationInboxTest,
+       DiscardsFailedAttemptsWithoutChangingReceiptOrCompletedRoot) {
+  downloads->failDependency = false;
+  std::string readyId, failedId;
+  xanadu::PublicationDownloadStatus failed;
+  {
+    xanadu::PublicationInbox inbox(incomingOptions());
+    readyId = inbox.submit(link);
+    ASSERT_TRUE(
+        inbox.waitFor(readyId, xanadu::PublicationDownloadPhase::Ready, 3s))
+        << inbox.status(readyId).error;
+    downloads->failDependency = true;
+    failedId                  = inbox.submit(link);
+    ASSERT_TRUE(
+        inbox.waitFor(failedId, xanadu::PublicationDownloadPhase::Failed, 3s));
+    failed = inbox.status(failedId);
+  }
+  ASSERT_TRUE(failed.pin);
+
+  const auto journalBefore = readInboxJournal(root / "inbox");
+  const auto attempt0      = root / "inbox" / (failedId + ".attempt-0");
+  const auto expectedBytes = logicalFileBytes(attempt0);
+  ASSERT_GT(expectedBytes, 0U);
+  testing::Test::RecordProperty("failed_attempt_logical_bytes", expectedBytes);
+
+  {
+    auto options = incomingOptions();
+    xanadu::PublicationInbox inbox(options);
+    EXPECT_THROW(inbox.discardPartialData(readyId), std::logic_error);
+    EXPECT_FALSE(inbox.status(readyId).cleanup);
+    EXPECT_TRUE(fs::exists(root / "inbox" / readyId / "publication.xanadoc"));
+
+    inbox.discardPartialData(failedId);
+    ASSERT_TRUE(waitForCleanup(
+        inbox, failedId, xanadu::PublicationPartialCleanupPhase::Complete));
+    const auto cleaned = inbox.status(failedId);
+    EXPECT_EQ(cleaned.cleanup->removedLogicalBytes, expectedBytes);
+    EXPECT_EQ(cleaned.phase, xanadu::PublicationDownloadPhase::Failed);
+    EXPECT_EQ(cleaned.pin, failed.pin);
+    EXPECT_EQ(cleaned.uri, failed.uri);
+    EXPECT_EQ(cleaned.error, failed.error);
+    EXPECT_FALSE(fs::exists(attempt0));
+    EXPECT_TRUE(fs::exists(root / "inbox" / readyId / "store" / "ops.nodes"));
+    inbox.discardPartialData(failedId);
+    ASSERT_TRUE(waitForCleanup(
+        inbox, failedId, xanadu::PublicationPartialCleanupPhase::Complete));
+    EXPECT_EQ(inbox.status(failedId).cleanup->removedLogicalBytes, 0U);
+    EXPECT_EQ(inbox.status(failedId).pin, failed.pin);
+    EXPECT_EQ(inbox.status(failedId).error, failed.error);
+    EXPECT_TRUE(fs::exists(root / "inbox" / readyId / "store" / "ops.nodes"));
+  }
+  EXPECT_EQ(readInboxJournal(root / "inbox"), journalBefore);
+
+  downloads->failDependency = false;
+  downloads->hold           = true;
+  {
+    xanadu::PublicationInbox inbox(incomingOptions());
+    inbox.retry(failedId);
+    ASSERT_TRUE(inbox.waitFor(failedId,
+                              xanadu::PublicationDownloadPhase::Resolving, 3s));
+    const auto attempt1        = root / "inbox" / (failedId + ".attempt-1");
+    const auto attemptDeadline = std::chrono::steady_clock::now() + 3s;
+    while (!fs::is_directory(attempt1) &&
+           std::chrono::steady_clock::now() < attemptDeadline)
+      std::this_thread::sleep_for(5ms);
+    EXPECT_TRUE(fs::is_directory(attempt1));
+    EXPECT_FALSE(fs::exists(attempt0));
+    inbox.cancel(failedId);
+    ASSERT_TRUE(inbox.waitFor(failedId,
+                              xanadu::PublicationDownloadPhase::Cancelled, 3s));
+    EXPECT_EQ(inbox.status(failedId).pin, failed.pin);
+  }
+  downloads->hold = false;
+}
+
+TEST_F(PublicationInboxTest,
+       CleanupPreflightsAllOwnedAttemptsAndPreservesUnsafeTrees) {
+#ifndef _WIN32
+  downloads->failDependency = true;
+  xanadu::PublicationInbox inbox(incomingOptions());
+  const auto id = inbox.submit(link);
+  ASSERT_TRUE(inbox.waitFor(id, xanadu::PublicationDownloadPhase::Failed, 3s));
+  const auto attempt  = root / "inbox" / (id + ".attempt-0");
+  const auto existing = logicalFileBytes(attempt);
+  ASSERT_GT(existing, 0U);
+  inbox.retry(id);
+  const auto secondAttempt         = root / "inbox" / (id + ".attempt-1");
+  const auto secondAttemptDeadline = std::chrono::steady_clock::now() + 3s;
+  while (!fs::is_directory(secondAttempt) &&
+         std::chrono::steady_clock::now() < secondAttemptDeadline)
+    std::this_thread::sleep_for(5ms);
+  ASSERT_TRUE(fs::is_directory(secondAttempt));
+  ASSERT_TRUE(inbox.waitFor(id, xanadu::PublicationDownloadPhase::Failed, 3s));
+  const auto secondExisting = logicalFileBytes(secondAttempt);
+  ASSERT_GT(secondExisting, 0U);
+
+  const auto outside = root / "outside-cleanup";
+  fs::create_directories(outside);
+  std::ofstream(outside / "keep") << "keep";
+  const auto linkPath = secondAttempt / "outside-link";
+  ASSERT_NO_THROW(fs::create_directory_symlink(outside, linkPath));
+  inbox.discardPartialData(id);
+  ASSERT_TRUE(waitForCleanup(inbox, id,
+                             xanadu::PublicationPartialCleanupPhase::Failed));
+  EXPECT_EQ(inbox.status(id).cleanup->removedLogicalBytes, 0U);
+  EXPECT_EQ(logicalFileBytes(attempt), existing);
+  EXPECT_EQ(logicalFileBytes(secondAttempt), secondExisting);
+  EXPECT_TRUE(fs::exists(outside / "keep"));
+  EXPECT_TRUE(fs::is_symlink(linkPath));
+
+  fs::remove(linkPath);
+  const auto fifo = secondAttempt / "unexpected-fifo";
+  ASSERT_EQ(::mkfifo(fifo.c_str(), 0600), 0);
+  inbox.discardPartialData(id);
+  ASSERT_TRUE(waitForCleanup(inbox, id,
+                             xanadu::PublicationPartialCleanupPhase::Failed));
+  EXPECT_EQ(inbox.status(id).cleanup->removedLogicalBytes, 0U);
+  EXPECT_EQ(logicalFileBytes(attempt), existing);
+  EXPECT_EQ(logicalFileBytes(secondAttempt), secondExisting);
+  EXPECT_TRUE(fs::exists(fifo));
+  EXPECT_TRUE(fs::exists(outside / "keep"));
+#else
+  GTEST_SKIP() << "Symlink and FIFO cleanup refusal is POSIX-specific";
+#endif
+}
+
+TEST_F(PublicationInboxTest,
+       CleanupPreservesMalformedFutureAndUnrelatedAttemptNames) {
+  downloads->failDependency = true;
+  xanadu::PublicationInbox inbox(incomingOptions());
+  const auto id = inbox.submit(link);
+  ASSERT_TRUE(inbox.waitFor(id, xanadu::PublicationDownloadPhase::Failed, 3s));
+  const auto owned = root / "inbox" / (id + ".attempt-0");
+  ASSERT_GT(logicalFileBytes(owned), 0U);
+
+  const auto malformed = root / "inbox" / (id + ".attempt-00");
+  const auto future    = root / "inbox" / (id + ".attempt-8");
+  const auto otherId   = xanadu::createMutableKeys().publicKey.hex();
+  const auto unrelated = root / "inbox" / (otherId + ".attempt-0");
+  fs::create_directories(malformed);
+  fs::create_directories(future);
+  fs::create_directories(unrelated);
+  std::ofstream(malformed / "marker") << "malformed";
+  std::ofstream(future / "marker") << "future";
+  std::ofstream(unrelated / "marker") << "unrelated";
+
+  inbox.discardPartialData(id);
+  ASSERT_TRUE(waitForCleanup(inbox, id,
+                             xanadu::PublicationPartialCleanupPhase::Complete));
+  EXPECT_FALSE(fs::exists(owned));
+  EXPECT_TRUE(fs::exists(malformed / "marker"));
+  EXPECT_TRUE(fs::exists(future / "marker"));
+  EXPECT_TRUE(fs::exists(unrelated / "marker"));
+}
+
+TEST_F(PublicationInboxTest,
+       CancelledCleanupIsExplicitAndDoesNotResumeAfterRestart) {
+  auto options    = incomingOptions();
+  downloads->hold = true;
+  std::string id;
+  xanadu::PublicationDownloadStatus cancelled;
+  const auto attempt = [&](const std::string &request) {
+    return root / "inbox" / (request + ".attempt-0");
+  };
+  {
+    xanadu::PublicationInbox inbox(options);
+    id = inbox.submit(link);
+    ASSERT_TRUE(
+        inbox.waitFor(id, xanadu::PublicationDownloadPhase::Resolving, 3s));
+    EXPECT_THROW(inbox.discardPartialData(id), std::logic_error);
+    inbox.cancel(id);
+    ASSERT_TRUE(
+        inbox.waitFor(id, xanadu::PublicationDownloadPhase::Cancelled, 3s));
+    cancelled = inbox.status(id);
+  }
+  downloads->hold = false;
+
+  const auto attemptRoot = attempt(id);
+  fs::create_directories(attemptRoot);
+  const auto removedBeforeRestart = attemptRoot / "first.part";
+  const auto remaining            = attemptRoot / "second.part";
+  std::ofstream(removedBeforeRestart) << "first fragment";
+  std::ofstream(remaining) << "remaining fragment";
+  const auto expectedBytes = fs::file_size(remaining);
+  fs::remove(removedBeforeRestart);
+  const auto journalBefore = readInboxJournal(root / "inbox");
+
+  std::atomic<int> factoryCalls{};
+  options.makeTransport = [state = downloads, &factoryCalls] {
+    ++factoryCalls;
+    return std::make_unique<TestDownloadTransport>(state);
+  };
+  {
+    xanadu::PublicationInbox reopened(options);
+    EXPECT_EQ(reopened.status(id).phase,
+              xanadu::PublicationDownloadPhase::Cancelled);
+    EXPECT_FALSE(reopened.status(id).cleanup);
+    EXPECT_TRUE(fs::exists(remaining));
+    EXPECT_EQ(factoryCalls.load(), 0);
+
+    reopened.discardPartialData(id);
+    ASSERT_TRUE(waitForCleanup(
+        reopened, id, xanadu::PublicationPartialCleanupPhase::Complete));
+    const auto after = reopened.status(id);
+    EXPECT_EQ(after.cleanup->removedLogicalBytes, expectedBytes);
+    EXPECT_EQ(after.phase, cancelled.phase);
+    EXPECT_EQ(after.error, cancelled.error);
+    EXPECT_FALSE(fs::exists(attemptRoot));
+    EXPECT_EQ(factoryCalls.load(), 0);
+  }
+  EXPECT_EQ(readInboxJournal(root / "inbox"), journalBefore);
+}
+
+TEST_F(PublicationInboxTest,
+       PendingCleanupBlocksDuplicateCleanupAndRetryUntilWorkerCompletes) {
+  downloads->failDependency = true;
+  xanadu::PublicationInbox inbox(incomingOptions());
+  const auto failedId = inbox.submit(link);
+  ASSERT_TRUE(
+      inbox.waitFor(failedId, xanadu::PublicationDownloadPhase::Failed, 3s));
+
+  downloads->failDependency = false;
+  downloads->hold           = true;
+  const auto blockingId     = inbox.submit(link);
+  ASSERT_TRUE(inbox.waitFor(blockingId,
+                            xanadu::PublicationDownloadPhase::Resolving, 3s));
+  inbox.discardPartialData(failedId);
+  EXPECT_EQ(inbox.status(failedId).cleanup->phase,
+            xanadu::PublicationPartialCleanupPhase::Pending);
+  EXPECT_THROW(inbox.discardPartialData(failedId), std::logic_error);
+  EXPECT_THROW(inbox.retry(failedId), std::logic_error);
+
+  downloads->hold = false;
+  inbox.cancel(blockingId);
+  ASSERT_TRUE(inbox.waitFor(blockingId,
+                            xanadu::PublicationDownloadPhase::Cancelled, 3s));
+  ASSERT_TRUE(waitForCleanup(inbox, failedId,
+                             xanadu::PublicationPartialCleanupPhase::Complete));
+}
 
 TEST_F(PublicationInboxTest,
        CompleteStoreRetainsSignedSnapshotAndReopensOffline) {

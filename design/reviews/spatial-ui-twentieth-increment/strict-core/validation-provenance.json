@@ -1,0 +1,123 @@
+{
+  "source_revision": "806c464bef3407bea4c4ee7594ac335b595d5a28",
+  "strict_core": {
+    "exit": 0,
+    "backends": [
+      "OpenGL",
+      "OpenGL ES",
+      "Vulkan"
+    ],
+    "GL_GLES_ordinary_differing_pixels": 0,
+    "Vulkan_ordinary_percent": 0.5104,
+    "Vulkan_overlay_percent": 0.5096,
+    "actual_threaded_split_exercised": false,
+    "frames": 22,
+    "comparison_log_sha256": "25bd6bcbc63865cc9aae2f071ca038724feabc85569c123b53ce54ac99127891"
+  },
+  "attempts": {
+    "canonical-build": {
+      "log": "attempts/canonical-build.log.gz",
+      "log_sha256": "5a4284839a55af6c5a5c2aa1fd03b8790cac642792adcd145fd2314471511467",
+      "exit": 0
+    },
+    "ui-final": {
+      "log": "attempts/ui-final.log.gz",
+      "log_sha256": "aab79a43c6b657ab909826938d9ae5051255cd1e76dd9f2a1877a9d2eb03a37f",
+      "exit": 0
+    },
+    "xuzz-final": {
+      "log": "attempts/xuzz-final.log.gz",
+      "log_sha256": "76c6103db8254cbac55c68824c73793c624e93b24d27cdc192baf1aa8cee936b",
+      "exit": 0
+    },
+    "owning-publication-packages": {
+      "log": "attempts/owning-publication-packages.log.gz",
+      "log_sha256": "5877a9126c87ca56c904373cacb5eb9ddf3183db4bd73d09651cff825155019f",
+      "exit": 0
+    },
+    "strict-core-backends": {
+      "log": "attempts/strict-core-backends.log.gz",
+      "log_sha256": "25bd6bcbc63865cc9aae2f071ca038724feabc85569c123b53ce54ac99127891",
+      "exit": 0
+    },
+    "format": {
+      "log": "attempts/format.log.gz",
+      "log_sha256": "1a6bda2e204fa82ed41900462b68fd1c673cb780292eaf01af9bef0f23ffe734",
+      "exit": 0
+    },
+    "lint": {
+      "log": "attempts/lint.log.gz",
+      "log_sha256": "679b0f827ee18eef0c98e365691877a3a2cc0b66aa93f9db6659ae3108e08fba",
+      "exit": 0
+    },
+    "text-policy": {
+      "log": "attempts/text-policy.log.gz",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "exit": 0
+    }
+  },
+  "hashes": {
+    "base_commit": "806c464bef3407bea4c4ee7594ac335b595d5a28",
+    "product_patch_sha256": "3e7f3ec920cd3f2728c994dd30545c16df03ae2204ddf4adc659061fda3996c2",
+    "test_patch_sha256": "1c942ad26ba451c4d4df06b213069695bb5ab6adc7fb6b6f51609d8574db1bc2",
+    "product_source_sha256": {
+      "apps/common/ui/xanadoc/publication_status_form.cpp": "999ba818f78950f98e2bdca564fbfca46419ea3b1e4462a4c99f8b3a13bcce66",
+      "apps/common/ui/xanadoc/publication_status_form.hpp": "b2feab5df1b496cc8a181ec4bd263d83f4ccfd608745eacaa291c47170255d33",
+      "apps/common/ui/xanadoc/views.cpp": "761d9323d5ea79467fec4d672363c5e8e0dd8d125a59283d423868522cdca524",
+      "apps/common/xanadu/publication_inbox.cpp": "e1abe5b69cbd2d76f9a166afd43d4a30ab2a95e6a1bf081094443fe3ec73ce35",
+      "apps/common/xanadu/publication_inbox.hpp": "e6eb6295d641b3e88e7168edd6466bef1143024586ae00718018e89fa159e6d7"
+    },
+    "test_source_sha256": {
+      "tests/xudu/publication_outbox_test.cpp": "95aa52c0e462b02af11de4340db55083110668cfeac0142433d3211d548a31dd",
+      "tests/zigzag/publication_status_form_test.cpp": "e853c9ce8a797a1401023fb6767d19d4a3808720a31ea80b9fd042e05b543eec"
+    },
+    "binary_sha256": {
+      "build/xuzz": "4b6e1a1386fa842f1715d1e93d9bf9582af5e62336e612cfa01a4fa15080a71d",
+      "build/gleditor": "5f8109b8174cba641700676cd4ccc5d6dbcee4ac0267d52c5baf53bf532a9bf9",
+      "build/gleditor_test": "44562f4e4ea437f8f3c575a8005d5847367860f9b4d4714d2d1b6516cf014f8a",
+      "build/xudu-dump": "7031847f950135234935ae67d06c3e59da6a945bd95a5202f14591064f00947c",
+      "build/libgleditor.so.0": "ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9",
+      "build/zigzag_test": "44cff2d6d187385c0a9a6cc4dbd5561bd7d157debddd5225774dda0daba0a2fd",
+      "build/xuzz_test": "23c369f0d6d5f4b3ce63e2b9e5273f2c00e5a24f5ec9f52e12994517e9ecfd5d",
+      "build/xudu_test": "e9d09b0ebe522040c43daea295f8e80d5d242bd68bb2a094623e5d056ab599ea"
+    },
+    "frozen_final_hashes_file_sha256": "6eed36f1d2a78a77b5b7f8be173480041f0730f373c0082d80378146648890a9",
+    "frozen_final_engine_binaries": {
+      "libgleditor.so.0": "ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9",
+      "xudu-dump": "7031847f950135234935ae67d06c3e59da6a945bd95a5202f14591064f00947c"
+    },
+    "current_engine_binaries": {
+      "build/libgleditor.so.0": "ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9",
+      "build/xudu-dump": "7031847f950135234935ae67d06c3e59da6a945bd95a5202f14591064f00947c"
+    },
+    "engine_binary_matches_frozen_final": {
+      "build/libgleditor.so.0": true,
+      "build/xudu-dump": true
+    }
+  },
+  "test_results": {
+    "final_ui": {
+      "passed": 248,
+      "total": 248,
+      "exit": 0
+    },
+    "fresh_xuzz": {
+      "passed": 107,
+      "total": 107,
+      "exit": 0
+    },
+    "owning_publication_packages": {
+      "passed": 77,
+      "total": 77,
+      "exit": 0
+    },
+    "library": "Reused default library 799/799 and mip/cache 53/53 only after byte-identical library/test hash checks; not new runs or A11y-variant evidence"
+  },
+  "excluded": [
+    "private GPG keys and profiles",
+    "XDG profiles and caches",
+    "permascroll or store binaries",
+    "application and test binaries",
+    "downloaded package payloads"
+  ]
+}

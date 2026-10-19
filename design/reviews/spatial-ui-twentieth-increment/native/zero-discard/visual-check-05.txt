@@ -1,0 +1,26 @@
+Frame: frames/05-cleanup-settled.png (1440x1000; pixel-identical RGB to raw PPM)
+The cleanup message visibly reads "Discarded 0 logical file bytes of partial data;
+request and completed copies kept." All three wrapped message lines, all six
+request fields, and the bottom keyboard-help row fit inside the dialog.
+
+The initial preview inspection appeared to miss the capital D. A pixel-level
+check confirms the complete D glyph is present at x=342..351, y=338..349. The
+threshold mask below marks pixels whose R, G, and B channels are all >90 in the
+16x12 crop x=340..355, y=338..349; # is foreground and . is background.
+338: ..#######.....##
+339: ..##...###....#.
+340: ..##.....##.....
+341: ..##......#...##
+342: ..##......##..##
+343: ..##......##..##
+344: ..##......##..##
+345: ..##......##..##
+346: ..##......#...##
+347: ..##.....##...##
+348: ..##...###....##
+349: ..#######.....##
+
+Frame 04 is retained as the actual intermediate Pending capture. It was taken
+before the refresh and shows a partial redraw with lower fields absent; it is
+not used as evidence that the pending layout fits or is accepted. The settled
+frame 05 is the visual check for the final cleanup result.

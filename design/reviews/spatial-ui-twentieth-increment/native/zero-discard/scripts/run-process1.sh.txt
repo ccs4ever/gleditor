@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -euo pipefail
+repo=$PWD
+run=$repo/build/validation-twentieth/native/zero-discard
+app=$repo/build/validation-twentieth/frozen/xuzz
+libdir=$repo/build/validation-twentieth/frozen
+export SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1
+export XDG_DATA_HOME=$run/data XDG_CONFIG_HOME=$run/config XDG_CACHE_HOME=$run/cache
+export GNUPGHOME=$run/gpg PATH=/tmp/spatial-xvfb/usr/bin:$PATH
+args=(--backend opengl --resize 1440,1000 --profile --wait-ms 5000
+  --chord Ctrl+O --wait-ms 800 --dump-a11y
+  --capture "$run/raw/01-open-list.ppm"
+  --key right --key right --key right --key right --key right
+  --key tab --wait-ms 100 --key enter --wait-ms 800 --dump-a11y
+  --capture "$run/raw/02-failed-before-discard.ppm"
+  --key right --key right --wait-ms 100 --dump-a11y
+  --capture "$run/raw/03-discard-selected.ppm"
+  --key enter --wait-ms 300 --dump-a11y
+  --capture "$run/raw/04-cleanup-pending.ppm"
+  --wait-ms 800 --key enter --wait-ms 500 --dump-a11y
+  --capture "$run/raw/05-cleanup-settled.ppm"
+  --wait-ms 200 --key escape --chord Ctrl+Q)
+printf '%q ' "$app" "${args[@]}" > "$run/argv-process1.txt"
+printf '\n' >> "$run/argv-process1.txt"
+printf '%s\n' 'SDL_VIDEODRIVER=x11' 'SDL_AUDIODRIVER=dummy' 'LIBGL_ALWAYS_SOFTWARE=1' \
+  "XDG_DATA_HOME=$run/data" "XDG_CONFIG_HOME=$run/config" "XDG_CACHE_HOME=$run/cache" \
+  "GNUPGHOME=$run/gpg" > "$run/environment-process1.txt"
+set +e
+LD_LIBRARY_PATH="$libdir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" timeout --signal=TERM --kill-after=5s 300s xvfb-run -a -s '-noreset -screen 0 1600x1200x24' dbus-run-session -- "$app" "${args[@]}" > "$run/logs/process1.log" 2>&1
+code=$?
+set -e
+printf '%s\n' "$code" > "$run/process1.exit"
+exit "$code"

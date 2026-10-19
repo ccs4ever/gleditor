@@ -1,0 +1,6 @@
+The application configured PublicationInbox::Options::directory as
+$XDG_DATA_HOME/xudu/publication-inbox. The after-restart inventory contains only
+publication-inbox/data.mdb and publication-inbox/lock.mdb. No <request-id>.attempt-*
+path or attempt file exists under $XDG_DATA_HOME/xudu or $XDG_CACHE_HOME/xudu.
+The UI cleanup result independently states: "Discarded 0 logical file bytes of
+partial data; request and completed copies kept."

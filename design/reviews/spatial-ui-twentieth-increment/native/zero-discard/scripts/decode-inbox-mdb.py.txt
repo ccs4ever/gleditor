@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+"""Strictly decode the post-exit default-hex mdb_dump output for XPI1."""
+from __future__ import annotations
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+
+def parse(data: bytes, at: int = 0):
+    if at >= len(data):
+        raise ValueError('truncated bencode')
+    marker = data[at:at + 1]
+    if marker == b'i':
+        end = data.find(b'e', at + 1)
+        if end < 0:
+            raise ValueError('unterminated integer')
+        token = data[at + 1:end]
+        if not token or (token.startswith(b'0') and len(token) > 1) or token == b'-0':
+            raise ValueError('noncanonical integer')
+        if token.startswith(b'-') and (len(token) == 1 or token[1:2] == b'0'):
+            raise ValueError('noncanonical negative integer')
+        return int(token), end + 1
+    if marker == b'l':
+        values = []
+        pos = at + 1
+        while True:
+            if pos >= len(data):
+                raise ValueError('unterminated list')
+            if data[pos:pos + 1] == b'e':
+                return values, pos + 1
+            value, pos = parse(data, pos)
+            values.append(value)
+    if marker == b'd':
+        values = {}
+        pos = at + 1
+        previous = None
+        while True:
+            if pos >= len(data):
+                raise ValueError('unterminated dictionary')
+            if data[pos:pos + 1] == b'e':
+                return values, pos + 1
+            key, pos = parse(data, pos)
+            if not isinstance(key, bytes):
+                raise ValueError('dictionary key is not a byte string')
+            if previous is not None and key <= previous:
+                raise ValueError('dictionary keys duplicated or unsorted')
+            previous = key
+            value, pos = parse(data, pos)
+            values[key] = value
+    if marker.isdigit():
+        colon = data.find(b':', at)
+        if colon < 0:
+            raise ValueError('missing byte-string colon')
+        token = data[at:colon]
+        if not token or (token.startswith(b'0') and len(token) > 1):
+            raise ValueError('noncanonical byte-string length')
+        size = int(token)
+        start = colon + 1
+        end = start + size
+        if end > len(data):
+            raise ValueError('truncated byte string')
+        return data[start:end], end
+    raise ValueError(f'invalid bencode marker {marker!r}')
+
+
+def json_safe(value):
+    if isinstance(value, bytes):
+        return value.decode('utf-8', 'strict')
+    if isinstance(value, list):
+        return [json_safe(item) for item in value]
+    if isinstance(value, dict):
+        return {key.decode('utf-8', 'strict'): json_safe(item) for key, item in value.items()}
+    return value
+
+
+def main(path: Path):
+    text = path.read_text(encoding='ascii').splitlines()
+    data_rows = []
+    in_data = False
+    for line in text:
+        if line == 'DATA=END':
+            break
+        if in_data:
+            item = line.strip()
+            if item:
+                if any(ch not in '0123456789abcdefABCDEF' for ch in item) or len(item) % 2:
+                    raise ValueError('non-hex mdb_dump row')
+                data_rows.append(bytes.fromhex(item))
+        elif line == 'HEADER=END':
+            in_data = True
+    if not in_data or len(data_rows) % 2:
+        raise ValueError('missing or incomplete mdb_dump DATA section')
+    records = {}
+    for index in range(0, len(data_rows), 2):
+        key, value = data_rows[index:index + 2]
+        if key in records:
+            raise ValueError('duplicate LMDB key')
+        records[key] = value
+    if set(records) != {b'requests'}:
+        raise ValueError(f'unexpected LMDB key set: {set(records)!r}')
+    blob = records[b'requests']
+    if not blob.startswith(b'XPI1'):
+        raise ValueError('unexpected inbox snapshot version')
+    snapshot, end = parse(blob[4:])
+    if end != len(blob) - 4 or not isinstance(snapshot, dict) or set(snapshot) != {b'requests'}:
+        raise ValueError('invalid XPI1 snapshot envelope')
+    requests = snapshot[b'requests']
+    if not isinstance(requests, list) or len(requests) != 1:
+        raise ValueError(f'expected one persisted request, found {len(requests) if isinstance(requests, list) else type(requests)}')
+    request = requests[0]
+    if not isinstance(request, dict) or len(request) != 21:
+        raise ValueError('request record does not have exactly 21 fields')
+    item = json_safe(request)
+    phases = ['Queued', 'Resolving', 'Downloading', 'Verifying', 'Ready', 'Failed', 'Cancelled']
+    verifications = ['Unchecked', 'ManifestVerified', 'Complete']
+    item['phase_name'] = phases[item['phase']]
+    item['verification_name'] = verifications[item['verification']]
+    item['snapshot_version'] = 'XPI1'
+    item['lmdb_dump_sha256'] = hashlib.sha256(path.read_bytes()).hexdigest()
+    print(json.dumps({'snapshot_version': 'XPI1', 'request_count': 1, 'request': item}, indent=2))
+
+if __name__ == '__main__':
+    if len(sys.argv) != 2:
+        raise SystemExit(f'usage: {sys.argv[0]} MDB_DUMP_HEX_FILE')
+    main(Path(sys.argv[1]))

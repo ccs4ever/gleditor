@@ -2,6 +2,7 @@
 #define XUDU_PUBLICATION_INBOX_HPP
 
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -34,6 +35,16 @@ enum class PublicationDownloadVerification : std::uint8_t {
   ManifestVerified,
   Complete
 };
+enum class PublicationPartialCleanupPhase : std::uint8_t {
+  Pending,
+  Complete,
+  Failed
+};
+struct PublicationPartialCleanupStatus {
+  PublicationPartialCleanupPhase phase{PublicationPartialCleanupPhase::Pending};
+  std::uint64_t removedLogicalBytes{};
+  std::string error;
+};
 [[nodiscard]] std::string_view
 publicationDownloadPhaseName(PublicationDownloadPhase phase);
 
@@ -52,6 +63,8 @@ struct PublicationDownloadStatus {
   std::int64_t sequence{-1};
   InfoHash manifestHash;
   std::string error;
+  // Transient cleanup progress/result; deliberately excluded from XPI1.
+  std::optional<PublicationPartialCleanupStatus> cleanup;
 };
 
 /// Constructed, called and destroyed on the inbox worker. Cancellation must
@@ -93,6 +106,7 @@ public:
   std::string submitPinned(const PublicationPin &pin);
   void cancel(std::string_view id);
   void retry(std::string_view id);
+  void discardPartialData(std::string_view id);
   [[nodiscard]] std::vector<PublicationDownloadStatus> statuses() const;
   [[nodiscard]] PublicationDownloadStatus status(std::string_view id) const;
   [[nodiscard]] bool waitFor(std::string_view id,

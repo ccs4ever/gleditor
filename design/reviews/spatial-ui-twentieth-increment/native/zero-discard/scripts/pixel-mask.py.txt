@@ -1,0 +1,14 @@
+from pathlib import Path
+import sys
+
+ppm = Path(sys.argv[1]).read_bytes()
+header_end = ppm.find(b"\n255\n") + len(b"\n255\n")
+assert ppm.startswith(b"P6\n1440 1000\n") and header_end > 0
+pixels = ppm[header_end:]
+assert len(pixels) == 1440 * 1000 * 3
+for y in range(338, 350):
+    row = []
+    for x in range(340, 356):
+        i = (y * 1440 + x) * 3
+        row.append("#" if min(pixels[i:i + 3]) > 90 else ".")
+    print(f"{y}: {''.join(row)}")

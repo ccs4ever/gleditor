@@ -1,0 +1,19 @@
+{
+  "reason": "Captured runner command transcripts use the existing .sh.txt evidence convention; preserve actual bytes rather than format past evidence as maintained source.",
+  "previous_checkpoint": "806c464b",
+  "nineteenth_manifest_before_sha256": "602927ac30564b1d033c6e3444e92df9fbcacdcca980c1dbf4a78dce9a88b80b",
+  "nineteenth_manifest_after_sha256": "82c8d7f7c051a2f636f153c37cea4bd944e5cf349d36cc24866f9b6d2b47dfe0",
+  "changes": [
+    {
+      "from": "design/reviews/spatial-ui-nineteenth-increment/filesystem-protocol/run-final-test.sh",
+      "to": "design/reviews/spatial-ui-nineteenth-increment/filesystem-protocol/run-final-test.sh.txt",
+      "captured_bytes_unchanged_sha256": "ff58bbb8f5c19a13865e4ed3c646ee808791ea420858fbb8f3c6221c865ec613"
+    },
+    {
+      "from": "design/reviews/spatial-ui-twentieth-increment/filesystem-protocol/run-final-test.sh",
+      "to": "design/reviews/spatial-ui-twentieth-increment/filesystem-protocol/run-final-test.sh.txt",
+      "captured_bytes_unchanged_sha256": "c47a3bd15839b5a4297b6f9478a23f1a6b1ec4b5af5efe1506f64da09e20cac1"
+    }
+  ],
+  "source_formatter_or_criteria_changed": false
+}

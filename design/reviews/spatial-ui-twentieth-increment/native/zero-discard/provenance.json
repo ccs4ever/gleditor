@@ -1,0 +1,81 @@
+{
+  "increment": 20,
+  "journey": "UI-authored zero-byte Discard partial data, then reopen the same request after restart",
+  "run_directory": "build/validation-twentieth/native/zero-discard",
+  "profile_lineage": "Fresh run root copied only data/ and config/ from the nineteenth-increment restart-smoke profile, which continued the exact request originally submitted through the eighteenth-increment UI journey. Cache and GNUPGHOME were fresh.",
+  "application": {
+    "path": "build/validation-twentieth/frozen/xuzz",
+    "sha256": "4b6e1a1386fa842f1715d1e93d9bf9582af5e62336e612cfa01a4fa15080a71d"
+  },
+  "library": {
+    "path": "build/validation-twentieth/frozen/libgleditor.so.0",
+    "sha256": "ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9"
+  },
+  "store_dumper": {
+    "path": "build/validation-twentieth/frozen/xudu-dump",
+    "sha256": "7031847f950135234935ae67d06c3e59da6a945bd95a5202f14591064f00947c"
+  },
+  "environment": {
+    "SDL_VIDEODRIVER": "x11",
+    "SDL_AUDIODRIVER": "dummy",
+    "LIBGL_ALWAYS_SOFTWARE": "1",
+    "XDG_DATA_HOME": "private run root/data",
+    "XDG_CONFIG_HOME": "private run root/config",
+    "XDG_CACHE_HOME": "private run root/cache",
+    "GNUPGHOME": "private run root/gpg (fresh empty home)",
+    "display": "private Xvfb 1600x1200x24, -noreset; app capture 1440x1000",
+    "dbus": "private dbus-run-session"
+  },
+  "request": {
+    "id": "319507aabff5973c66527f4a3398ef35750615642c3cd4ce25b751a9cbf1af28",
+    "publisher": "4c6e92c9b3e4abbd75ca25d8fc7cfaa3dc9d45ef2b8fa700e79f3cfca81abf79",
+    "salt": "document",
+    "sequence": 2,
+    "version": "a34",
+    "title": "document",
+    "carrier_hash": "f8ff688c5680ab88c27e4297decb5e7640b86a31",
+    "phase": "Failed",
+    "verification": "Unchecked",
+    "attempt": 1,
+    "error": "No publication connection is configured. Content availability has not been checked."
+  },
+  "cleanup": {
+    "action": "Discard partial data (visually and via UI tree selected before submit)",
+    "settled_result": "Discarded 0 logical file bytes of partial data; request and completed copies kept.",
+    "partial_attempt_files_after_restart": 0,
+    "request_persisted": true,
+    "cleanup_notice_after_restart": false,
+    "initial_partial_attempt_files": 0
+  },
+  "processes": [
+    {
+      "name": "process1",
+      "exit": 0,
+      "actions": "open existing request, select Discard partial data, submit, refresh settled result, quit"
+    },
+    {
+      "name": "process2",
+      "exit": 0,
+      "actions": "restart, open download list, reopen same request, inspect status, quit"
+    }
+  ],
+  "source_and_activity": {
+    "source_ops_hashes_match_nineteenth_checkpoint": true,
+    "source_ops_dump_matches_nineteenth_checkpoint": true,
+    "package_visibility_hash_matches_nineteenth_checkpoint": true,
+    "completed_visit_count_before_and_after": 1,
+    "current_visit_before_and_after": 1,
+    "activity_operation_dump": "Shutdown appends activity metadata operations; the decoded visit count/current visit remain unchanged.",
+    "published_manifest_sha256": "1e12cad0883ad264b4a38ded6db204a018c54fdbfb9db40c764289c3ac434ed3",
+    "published_manifest_and_all_link_package_file_hashes_match_nineteenth_checkpoint": true
+  },
+  "frames": "frames/*.png and matching deterministic frames/*.ppm.gz; RGB hashes are in frames/*.hashes.txt and all pixel_difference values are 0",
+  "archive_exclusions": [
+    "profile roots",
+    "GNUPGHOME/key material",
+    "LMDB data.mdb/lock.mdb",
+    "application binaries"
+  ],
+  "frames_note": "Frame 04 is the actual intermediate Pending capture; lower fields are absent due to partial redraw, so it is not used as a layout acceptance check. Frame 05 is the settled cleanup result and visually fits all six fields and footer.",
+  "ui_visual_scope": "Failure state and cleanup are shown for a request with zero staged bytes only; nonzero partial-data cleanup was not visually exercised in this native journey."
+}
