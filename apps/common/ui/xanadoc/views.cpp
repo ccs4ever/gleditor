@@ -2215,10 +2215,16 @@ void Views::openDocumentPalette() {
   std::string downloadError;
   try {
     for (const auto &download : session.publicationInbox().statuses()) {
-      const auto title =
-          download.title.empty() ? "Publication download" : download.title;
+      const auto identity =
+          download.pin ? (download.pin->title.empty()
+                              ? std::string("Untitled publication")
+                              : download.pin->title) +
+                             " / " + download.pin->version.str() + " #" +
+                             std::to_string(download.pin->sequence) + " [" +
+                             download.pin->hash.hex() + "]"
+                       : download.uri;
       choiceField.options.push_back(
-          "[Download] " + title + " — " +
+          "[Download] " + identity + " — " +
           std::string(publicationDownloadPhaseName(download.phase)));
       choiceField.optionValues.push_back("__download__" + download.id);
     }

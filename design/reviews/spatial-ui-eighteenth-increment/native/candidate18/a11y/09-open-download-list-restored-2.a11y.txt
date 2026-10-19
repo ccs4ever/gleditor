@@ -1,0 +1,76 @@
+window "Xuzz"
+  multiline text input "default"
+    text run
+  multiline text input "Untitled · a" [caret 20 from 0]
+    text run = "Harbor left passage.
+"
+    text run = "Meadow second passage.
+"
+    text run = "Right one.
+"
+    text run = "Right two.
+"
+    text run = "Right three.
+"
+    text run
+  multiline text input "Untitled · b"
+    text run = "Harbor left passage."
+  group "Xanadu ZigZag: Xudu/Zigzag unified store"
+    group "Active View Dimensions: X=d.1, Y=d.2, Z=d.3"
+  list "Open Documents"
+    list item "default" [off]
+    button "Close default"
+    list item "Untitled · a" = "selected" [on]
+    button "Close Untitled · a"
+    list item "Untitled · b" [off]
+    button "Close Untitled · b"
+    button "Store Object Manager"
+    button "New Document"
+  list "links between the open documents"
+    link "comment link, 2 left and 3 right members"
+    link "comment link, 2 left and 3 right members"
+    link "comment link, 2 left and 3 right members"
+  group
+    label "comment · link 0 · Spatial review — curator 4c6e92c9b3e4 / local_author"
+    label "Left 2/2 · place 1/1 · bytes
+21–43
+untitled-20261018-154726 · page 1/1"
+    label "▸ Right 3/3 · place 1/1 · bytes
+66–78
+untitled-20261018-154726 · page 1/1"
+    label "reading: left member 1"
+    label "origin: untitled-20261018-154726 · page 1/1 · bytes 0–20"
+    label "Reader package: retained · disabled · emphasis quiet"
+    label "Package drawing disabled · retain and enable to enter; Link context kept"
+    group
+      button "Previous link"
+      button "Next link"
+      button "‹ member"
+      button "member ›"
+      button "‹ place"
+      button "place ›"
+      button "Cross"
+      button "Enter unavailable"
+      button "Origin"
+      button "Back"
+      button "×"
+      button "Normal package emphasis"
+      button "Remove package from reader"
+      button "Re-enable package"
+      button "Inspect members"
+  button "Overview: move camera to scene centre"
+  dialog "Open Document or System Xanadoc" [modal]
+    label = "Open Document or System Xanadoc"
+    label = "Select a system xanadoc, local store, or file to open alongside"
+    combo box "Document" = "⚙ system://keymap — Keyboard shortcuts and bindings" (select a store, cached publication, or system xanadoc)
+      list item "⚙ system://keymap — Keyboard shortcuts and bindings"
+      list item "⚙ system://settings — Typography and editor preferences"
+      list item "⚙ system://layout — Multi-column layout and ribbons"
+      list item "⚙ system://ui — Chrome, status bar, and notifications"
+      list item "⚙ system://pouches — Drop zones and persistent span storage"
+      list item "[Download] document / a34 #2 [f8ff688c5680ab88c27e4297decb5e7640b86a31] — Download failed"
+      list item "Custom path or file..."
+    text input "Custom path" (store, signed .xanadoc, or author publication link)
+      text run
+focus: Document
+wrote screenshot /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-eighteenth/native/candidate18/raw/09-open-download-list-restored-2.ppm (1440x1000)

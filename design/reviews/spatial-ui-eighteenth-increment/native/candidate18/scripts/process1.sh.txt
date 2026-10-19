@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+repo=$PWD
+run=$repo/build/validation-eighteenth/native/candidate18
+app=$repo/build/validation-eighteenth/frozen/xuzz
+libdir=$repo/build/validation-eighteenth/frozen
+export SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1
+export XDG_DATA_HOME=$run/data XDG_CONFIG_HOME=$run/config XDG_CACHE_HOME=$run/cache
+export GNUPGHOME=$run/gpg
+export PATH=/tmp/spatial-xvfb/usr/bin:$PATH
+args=(--backend opengl --resize 1440,1000 --profile --wait-ms 5000
+  --chord Ctrl+Alt+Shift+L --key right --key enter --wait-ms 500
+  --key tab --key right --chord Shift+Tab --key enter --wait-ms 500
+  --key right --key enter --wait-ms 500 --key right
+  --dump-a11y --capture "$run/raw/00-review-before-open.ppm"
+  --wait-ms 300 --key enter --wait-ms 700 --dump-a11y
+  --capture "$run/raw/01-open-immediate.ppm"
+  --wait-ms 1800 --dump-a11y --capture "$run/raw/02-open-stale.ppm"
+  --key enter --wait-ms 400 --dump-a11y --capture "$run/raw/03-open-refresh-one.ppm"
+  --wait-ms 1800 --key enter --wait-ms 400 --dump-a11y
+  --capture "$run/raw/04-open-failed-before-retry.ppm"
+  --key escape --wait-ms 300 --chord Ctrl+O --wait-ms 600 --dump-a11y
+  --capture "$run/raw/05-failed-download-list.ppm"
+  --key escape --chord Ctrl+Q)
+printf '%q ' "$app" "${args[@]}" > "$run/argv-process1.txt"
+printf '\n' >> "$run/argv-process1.txt"
+set +e
+LD_LIBRARY_PATH="$libdir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" timeout --signal=TERM --kill-after=5s 300s xvfb-run -a -s '-noreset -screen 0 1600x1200x24' dbus-run-session -- "$app" "${args[@]}" > "$run/logs/process1.log" 2>&1
+code=$?
+set -e
+printf '%s\n' "$code" > "$run/process1.exit"
+exit "$code"

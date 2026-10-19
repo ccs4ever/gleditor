@@ -1,0 +1,53 @@
+from pathlib import Path
+import json, re, sys
+
+run = Path(sys.argv[1])
+perma = (run / "data/xuzz/permascroll/default/active.primedia").read_bytes()
+result = []
+for name in ("activity-before.ops.txt", "activity-after.ops.txt"):
+    text = (run / "evidence" / name).read_text()
+    cells, edges, dims, subjects = {}, {}, {}, {}
+    for line in text.splitlines():
+        match = re.search(r"op (\d+) .*?span=\[(\d+),(\d+)\)", line)
+        if not match:
+            continue
+        op, start, end = map(int, match.groups())
+        if "[make cell" in line:
+            content = perma[start:end].decode("utf-8")
+            cells[op] = content
+            subjects[op] = op
+            if content.startswith("d.activity-"):
+                dims[content] = op
+        link = re.search(r"\[setLink posward dim=(\d+) -> (\d+) cell@(\d+)", line)
+        if link:
+            dim, target, previous = map(int, link.groups())
+            subject = subjects[previous]
+            subjects[op] = subject
+            edges[subject, dim] = target
+
+    def rank(name):
+        dim = dims.get(name)
+        pos = 2
+        seen, values = set(), []
+        while dim is not None and (pos, dim) in edges:
+            pos = edges[pos, dim]
+            if pos in seen:
+                raise RuntimeError(f"cycle in {name}")
+            seen.add(pos)
+            values.append(cells[pos])
+        return values
+
+    visits = rank("d.activity-visits")
+    current = rank("d.activity-current")
+    result.append({
+        "dump": name,
+        "completed_visit_count": len(visits),
+        "current_visit": int(current[-1]) if current else None,
+        "visit_payloads": visits,
+        "references": rank("d.activity-references"),
+        "annotations": rank("d.activity-annotations"),
+    })
+
+out = run / "evidence/activity-visit-summary.json"
+out.write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n")
+print(json.dumps(result, indent=2, ensure_ascii=False))

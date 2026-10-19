@@ -1,0 +1,73 @@
+{
+  "base_commit": "bce65b1f26aea2a6d7208c523338fbd6c030ae57",
+  "canonical_build_exits": {
+    "initial": 0,
+    "after_test_matrix": 0
+  },
+  "ui": {
+    "passed": 246,
+    "total": 246,
+    "exit": 0
+  },
+  "xuzz": {
+    "passed": 107,
+    "total": 107,
+    "exit": 0
+  },
+  "owning_publication_packages": {
+    "passed": 70,
+    "total": 70,
+    "exit": 0
+  },
+  "library_799_and_mip_cache_53_reused_after_hash_verification": true,
+  "reused_library_evidence": "../spatial-ui-seventeenth-increment/final-checks.json",
+  "reused_binary_sha256": {
+    "build/libgleditor.so.0": "ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9",
+    "build/gleditor_test": "44562f4e4ea437f8f3c575a8005d5847367860f9b4d4714d2d1b6516cf014f8a"
+  },
+  "accepted_app_sha256": "9dc89cd770437c5bf93da0645ff2f8101d9ee179a2890fd5e15afafda9153c91",
+  "strict_core": {
+    "exit": 0,
+    "GL_GLES_ordinary_overlay_differing_pixels": 0,
+    "Vulkan_ordinary_percent": 0.5104,
+    "Vulkan_overlay_percent": 0.5096,
+    "channel_tolerance": 1,
+    "limit_percent": 1,
+    "actual_split_recording": false
+  },
+  "format_check_exit": 0,
+  "lint_exit": 0,
+  "text_policy_exit": 0,
+  "native_AT_SPI_new_run": false,
+  "native_AT_SPI_prior_subset_only": "../spatial-ui-seventeenth-increment/native-atspi-validation.md",
+  "optimized_performance_accepted": false,
+  "broad_E2E": false,
+  "power_loss_install_durability_accepted": false,
+  "aggregate_partial_disk_policy_implemented": false,
+  "native_GL_restart": {
+    "application_sha256": "9dc89cd770437c5bf93da0645ff2f8101d9ee179a2890fd5e15afafda9153c91",
+    "invocations": 7,
+    "all_exits": 0,
+    "request_id": "319507aabff5973c66527f4a3398ef35750615642c3cd4ce25b751a9cbf1af28",
+    "full_pin_preserved": true,
+    "attempt_changed_only_on_explicit_retry": [
+      0,
+      1
+    ],
+    "source_and_package_unchanged": true,
+    "completed_visits_before_after": [
+      1,
+      1
+    ],
+    "current_visit_before_after": [
+      1,
+      1
+    ],
+    "scope": "real no-connection failure, not remote unavailability; keyboard and internal accessibility only",
+    "evidence": "native-restart-validation.md"
+  },
+  "final_touched_markdown_exit": 0,
+  "source_only_mutation_matrix_test_exit": 0,
+  "native_archive_raw_PPMs": 20,
+  "native_archive_RGB_equality": true
+}

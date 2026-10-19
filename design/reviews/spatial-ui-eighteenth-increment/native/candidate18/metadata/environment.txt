@@ -1,0 +1,7 @@
+SDL_VIDEODRIVER=x11
+SDL_AUDIODRIVER=dummy
+LIBGL_ALWAYS_SOFTWARE=1
+XDG_DATA_HOME=/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-eighteenth/native/candidate18/data
+XDG_CONFIG_HOME=/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-eighteenth/native/candidate18/config
+XDG_CACHE_HOME=/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-eighteenth/native/candidate18/cache
+GNUPGHOME=/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-eighteenth/native/candidate18/gpg

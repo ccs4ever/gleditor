@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <future>
+#include <map>
 #include <mutex>
 #include <thread>
 
@@ -337,10 +338,12 @@ struct DownloadState {
   xanadu::MutablePointer pointer;
   std::vector<std::thread::id> threads;
   std::atomic<bool> hold{false};
+  std::atomic<bool> holdAfterCancel{false};
   std::atomic<bool> fail{false};
   std::atomic<bool> failFetch{false};
   std::atomic<bool> failDependency{false};
   std::atomic<bool> holdFetch{false};
+  std::atomic<std::uint64_t> fetchEntered{};
 };
 
 class TestDownloadTransport final
@@ -356,6 +359,8 @@ public:
     record();
     while (state_->hold && !stop.stop_requested())
       std::this_thread::sleep_for(5ms);
+    while (state_->holdAfterCancel && stop.stop_requested())
+      std::this_thread::sleep_for(5ms);
     if (stop.stop_requested()) throw std::runtime_error("cancelled");
     if (state_->fail) throw std::runtime_error("injected network failure");
     const std::scoped_lock lock(state_->guard);
@@ -364,6 +369,7 @@ public:
   void fetch(const xanadu::InfoHash &hash, const fs::path &directory,
              std::uint64_t, std::stop_token stop) override {
     record();
+    ++state_->fetchEntered;
     while (state_->holdFetch && !stop.stop_requested())
       std::this_thread::sleep_for(5ms);
     if (stop.stop_requested()) throw std::runtime_error("fetch cancelled");
@@ -562,6 +568,441 @@ TEST_F(PublicationInboxTest, PinnedSnapshotDoesNotResolveNewerMutableHead) {
       inbox.waitFor(stale, xanadu::PublicationDownloadPhase::Failed, 3s));
 }
 
+TEST_F(PublicationInboxTest,
+       FailedPinnedRequestSurvivesRestartAndRetriesOnlyOnRequest) {
+  auto pin     = xanadu::PublicationPin{.publisher = keys.publicKey,
+                                        .salt      = publication.salt,
+                                        .hash      = downloads->pointer.hash,
+                                        .sequence  = publication.sequence,
+                                        .version   = publication.version,
+                                        .title = publication.title + " changed"};
+  auto options = incomingOptions();
+  std::string id;
+  {
+    xanadu::PublicationInbox inbox(options);
+    id = inbox.submitPinned(pin);
+    ASSERT_TRUE(
+        inbox.waitFor(id, xanadu::PublicationDownloadPhase::Failed, 3s));
+    EXPECT_EQ(inbox.status(id).pin, pin);
+  }
+
+  auto calls            = std::make_shared<std::atomic<int>>(0);
+  options.makeTransport = [state = downloads, calls] {
+    ++*calls;
+    return std::make_unique<TestDownloadTransport>(state);
+  };
+  {
+    xanadu::PublicationInbox reopened(options);
+    const auto failed = reopened.status(id);
+    EXPECT_EQ(failed.phase, xanadu::PublicationDownloadPhase::Failed);
+    EXPECT_EQ(failed.pin, pin);
+    EXPECT_EQ(reopened.submitPinned(pin), id);
+    EXPECT_EQ(calls->load(), 0);
+    reopened.retry(id);
+    ASSERT_TRUE(
+        reopened.waitFor(id, xanadu::PublicationDownloadPhase::Failed, 3s));
+    EXPECT_EQ(reopened.status(id).pin, pin);
+    EXPECT_EQ(calls->load(), 1);
+  }
+}
+
+TEST_F(PublicationInboxTest,
+       InterruptedMutableRequestRetainsPointerFloorWithoutAutoNetwork) {
+  downloads->holdFetch = true;
+  auto options         = incomingOptions();
+  std::string id;
+  {
+    xanadu::PublicationInbox inbox(options);
+    id                  = inbox.submit(link);
+    const auto deadline = std::chrono::steady_clock::now() + 3s;
+    while (downloads->fetchEntered.load() == 0 &&
+           std::chrono::steady_clock::now() < deadline)
+      std::this_thread::sleep_for(5ms);
+    ASSERT_GT(downloads->fetchEntered.load(), 0U);
+  }
+
+  auto calls            = std::make_shared<std::atomic<int>>(0);
+  options.makeTransport = [state = downloads, calls] {
+    ++*calls;
+    return std::make_unique<TestDownloadTransport>(state);
+  };
+  downloads->holdFetch        = false;
+  downloads->pointer.sequence = 0;
+  xanadu::PublicationInbox reopened(options);
+  const auto interrupted = reopened.status(id);
+  EXPECT_EQ(interrupted.phase, xanadu::PublicationDownloadPhase::Cancelled);
+  EXPECT_THAT(interrupted.error, testing::HasSubstr("retry explicitly"));
+  EXPECT_FALSE(interrupted.pin);
+  EXPECT_EQ(calls->load(), 0);
+  reopened.retry(id);
+  ASSERT_TRUE(
+      reopened.waitFor(id, xanadu::PublicationDownloadPhase::Failed, 3s));
+  EXPECT_THAT(reopened.status(id).error, testing::HasSubstr("rolls back"));
+  EXPECT_EQ(calls->load(), 1);
+}
+
+TEST_F(PublicationInboxTest, InstalledOrphanIsRecoveredOnlyWhenFullPinMatches) {
+  auto options = incomingOptions();
+  xanadu::PublicationPin pin{.publisher = keys.publicKey,
+                             .salt      = publication.salt,
+                             .hash      = downloads->pointer.hash,
+                             .sequence  = publication.sequence,
+                             .version   = publication.version,
+                             .title     = publication.title};
+  std::string id;
+  {
+    xanadu::PublicationInbox inbox(options);
+    id = inbox.submitPinned(pin);
+    ASSERT_TRUE(inbox.waitFor(id, xanadu::PublicationDownloadPhase::Ready, 3s))
+        << inbox.status(id).error;
+  }
+  MDB_env *raw{};
+  ASSERT_EQ(mdb_env_create(&raw), MDB_SUCCESS);
+  std::unique_ptr<MDB_env, decltype(&mdb_env_close)> env(raw, mdb_env_close);
+  ASSERT_EQ(mdb_env_open(raw, (root / "inbox").c_str(), 0, 0600), MDB_SUCCESS);
+  MDB_txn *rawTransaction{};
+  ASSERT_EQ(mdb_txn_begin(raw, nullptr, 0, &rawTransaction), MDB_SUCCESS);
+  std::unique_ptr<MDB_txn, decltype(&mdb_txn_abort)> transaction(rawTransaction,
+                                                                 mdb_txn_abort);
+  MDB_dbi db{};
+  ASSERT_EQ(mdb_dbi_open(rawTransaction, nullptr, 0, &db), MDB_SUCCESS);
+  std::string key = "requests";
+  MDB_val dbKey{key.size(), key.data()}, value{};
+  ASSERT_EQ(mdb_get(rawTransaction, db, &dbKey, &value), MDB_SUCCESS);
+  const std::string journal(static_cast<const char *>(value.mv_data),
+                            value.mv_size);
+  const auto decoded =
+      xanadu::bencode::decode(std::string_view(journal).substr(4));
+  auto records = decoded.find("requests")->asList();
+  auto fields  = records.front().asDict();
+  fields.insert_or_assign("phase", xanadu::bencode::Value::integer(3));
+  fields.insert_or_assign(
+      "verification",
+      xanadu::bencode::Value::integer(static_cast<int>(
+          xanadu::PublicationDownloadVerification::ManifestVerified)));
+  records.front() = xanadu::bencode::Value::dict(std::move(fields));
+  auto replacement =
+      std::string("XPI1") +
+      xanadu::bencode::Value::dict(
+          {{"requests", xanadu::bencode::Value::list(std::move(records))}})
+          .encode();
+  MDB_val newValue{replacement.size(), replacement.data()};
+  ASSERT_EQ(mdb_put(rawTransaction, db, &dbKey, &newValue, 0), MDB_SUCCESS);
+  ASSERT_EQ(mdb_txn_commit(transaction.release()), MDB_SUCCESS);
+  env.reset();
+
+  auto calls            = std::make_shared<std::atomic<int>>(0);
+  options.makeTransport = [state = downloads, calls] {
+    ++*calls;
+    return std::make_unique<TestDownloadTransport>(state);
+  };
+  xanadu::PublicationInbox recovered(options);
+  ASSERT_TRUE(
+      recovered.waitFor(id, xanadu::PublicationDownloadPhase::Ready, 3s))
+      << recovered.status(id).error;
+  EXPECT_EQ(recovered.status(id).pin, pin);
+  EXPECT_EQ(recovered.status(id).verification,
+            xanadu::PublicationDownloadVerification::Complete);
+  EXPECT_EQ(calls->load(), 0);
+}
+
+TEST_F(PublicationInboxTest,
+       JournalRefusesVerifiedStageWithoutMatchingManifestHash) {
+  auto options = incomingOptions();
+  xanadu::PublicationPin pin{.publisher = keys.publicKey,
+                             .salt      = publication.salt,
+                             .hash      = downloads->pointer.hash,
+                             .sequence  = publication.sequence,
+                             .version   = publication.version,
+                             .title     = publication.title};
+  std::string id;
+  {
+    xanadu::PublicationInbox inbox(options);
+    id = inbox.submitPinned(pin);
+    ASSERT_TRUE(inbox.waitFor(id, xanadu::PublicationDownloadPhase::Ready, 3s))
+        << inbox.status(id).error;
+  }
+  MDB_env *raw{};
+  ASSERT_EQ(mdb_env_create(&raw), MDB_SUCCESS);
+  std::unique_ptr<MDB_env, decltype(&mdb_env_close)> env(raw, mdb_env_close);
+  ASSERT_EQ(mdb_env_open(raw, (root / "inbox").c_str(), 0, 0600), MDB_SUCCESS);
+  MDB_txn *rawTransaction{};
+  ASSERT_EQ(mdb_txn_begin(raw, nullptr, 0, &rawTransaction), MDB_SUCCESS);
+  std::unique_ptr<MDB_txn, decltype(&mdb_txn_abort)> transaction(rawTransaction,
+                                                                 mdb_txn_abort);
+  MDB_dbi db{};
+  ASSERT_EQ(mdb_dbi_open(rawTransaction, nullptr, 0, &db), MDB_SUCCESS);
+  std::string key = "requests";
+  MDB_val dbKey{key.size(), key.data()}, value{};
+  ASSERT_EQ(mdb_get(rawTransaction, db, &dbKey, &value), MDB_SUCCESS);
+  const std::string journal(static_cast<const char *>(value.mv_data),
+                            value.mv_size);
+  const auto decoded =
+      xanadu::bencode::decode(std::string_view(journal).substr(4));
+  auto records = decoded.find("requests")->asList();
+  auto fields  = records.front().asDict();
+  fields.insert_or_assign("manifest", xanadu::bencode::Value::string(""));
+  records.front() = xanadu::bencode::Value::dict(std::move(fields));
+  auto replacement =
+      std::string("XPI1") +
+      xanadu::bencode::Value::dict(
+          {{"requests", xanadu::bencode::Value::list(std::move(records))}})
+          .encode();
+  MDB_val newValue{replacement.size(), replacement.data()};
+  ASSERT_EQ(mdb_put(rawTransaction, db, &dbKey, &newValue, 0), MDB_SUCCESS);
+  ASSERT_EQ(mdb_txn_commit(transaction.release()), MDB_SUCCESS);
+  env.reset();
+
+  EXPECT_THROW((xanadu::PublicationInbox(options)),
+               xanadu::PublicationInboxUnreadable);
+  EXPECT_TRUE(
+      std::filesystem::exists(root / "inbox" / id / "publication.xanadoc"));
+}
+
+TEST_F(PublicationInboxTest,
+       MalformedJournalMutationsRefuseWithoutChangingBytesOrRetainedFiles) {
+  auto options = incomingOptions();
+  xanadu::PublicationPin pin{.publisher = keys.publicKey,
+                             .salt      = publication.salt,
+                             .hash      = downloads->pointer.hash,
+                             .sequence  = publication.sequence,
+                             .version   = publication.version,
+                             .title     = publication.title};
+  std::string id;
+  {
+    xanadu::PublicationInbox inbox(options);
+    id = inbox.submitPinned(pin);
+    ASSERT_TRUE(inbox.waitFor(id, xanadu::PublicationDownloadPhase::Ready, 3s))
+        << inbox.status(id).error;
+  }
+
+  const auto journalPath = root / "inbox";
+  auto readJournal       = [&] {
+    MDB_env *raw{};
+    EXPECT_EQ(mdb_env_create(&raw), MDB_SUCCESS);
+    std::unique_ptr<MDB_env, decltype(&mdb_env_close)> env(raw, mdb_env_close);
+    EXPECT_EQ(mdb_env_open(raw, journalPath.c_str(), 0, 0600), MDB_SUCCESS);
+    MDB_txn *rawTransaction{};
+    EXPECT_EQ(mdb_txn_begin(raw, nullptr, MDB_RDONLY, &rawTransaction),
+                    MDB_SUCCESS);
+    std::unique_ptr<MDB_txn, decltype(&mdb_txn_abort)> transaction(
+        rawTransaction, mdb_txn_abort);
+    MDB_dbi db{};
+    EXPECT_EQ(mdb_dbi_open(rawTransaction, nullptr, 0, &db), MDB_SUCCESS);
+    std::string key = "requests";
+    MDB_val dbKey{key.size(), key.data()}, value{};
+    EXPECT_EQ(mdb_get(rawTransaction, db, &dbKey, &value), MDB_SUCCESS);
+    return std::string(static_cast<const char *>(value.mv_data), value.mv_size);
+  };
+  auto writeJournal = [&](const std::string &bytes) {
+    MDB_env *raw{};
+    ASSERT_EQ(mdb_env_create(&raw), MDB_SUCCESS);
+    std::unique_ptr<MDB_env, decltype(&mdb_env_close)> env(raw, mdb_env_close);
+    ASSERT_EQ(mdb_env_open(raw, journalPath.c_str(), 0, 0600), MDB_SUCCESS);
+    MDB_txn *rawTransaction{};
+    ASSERT_EQ(mdb_txn_begin(raw, nullptr, 0, &rawTransaction), MDB_SUCCESS);
+    std::unique_ptr<MDB_txn, decltype(&mdb_txn_abort)> transaction(
+        rawTransaction, mdb_txn_abort);
+    MDB_dbi db{};
+    ASSERT_EQ(mdb_dbi_open(rawTransaction, nullptr, 0, &db), MDB_SUCCESS);
+    std::string key = "requests";
+    MDB_val dbKey{key.size(), key.data()};
+    MDB_val value{bytes.size(), const_cast<char *>(bytes.data())};
+    ASSERT_EQ(mdb_put(rawTransaction, db, &dbKey, &value, 0), MDB_SUCCESS);
+    ASSERT_EQ(mdb_txn_commit(transaction.release()), MDB_SUCCESS);
+  };
+  auto snapshotFiles = [&] {
+    std::map<fs::path, std::string> files;
+    const auto retained = root / "inbox" / id;
+    for (const auto &entry : fs::recursive_directory_iterator(retained)) {
+      if (!entry.is_regular_file()) continue;
+      std::ifstream input(entry.path(), std::ios::binary);
+      files.emplace(fs::relative(entry.path(), retained),
+                    std::string(std::istreambuf_iterator<char>(input),
+                                std::istreambuf_iterator<char>()));
+    }
+    return files;
+  };
+
+  const auto originalJournal = readJournal();
+  ASSERT_TRUE(originalJournal.starts_with("XPI1"));
+  const auto originalFiles = snapshotFiles();
+  ASSERT_FALSE(originalFiles.empty());
+  auto corrupt = [&](auto mutation) {
+    auto envelope =
+        xanadu::bencode::decode(std::string_view(originalJournal).substr(4));
+    auto records = envelope.find("requests")->asList();
+    mutation(records);
+    return std::string("XPI1") +
+           xanadu::bencode::Value::dict(
+               {{"requests", xanadu::bencode::Value::list(std::move(records))}})
+               .encode();
+  };
+  auto setField = [](xanadu::bencode::Value &record, std::string key,
+                     xanadu::bencode::Value value) {
+    auto fields = record.asDict();
+    fields.insert_or_assign(std::move(key), std::move(value));
+    record = xanadu::bencode::Value::dict(std::move(fields));
+  };
+  auto expectRefusalPreservesBytes = [&](const std::string &badJournal) {
+    writeJournal(badJournal);
+    EXPECT_THROW((xanadu::PublicationInbox(options)),
+                 xanadu::PublicationInboxUnreadable);
+    EXPECT_EQ(readJournal(), badJournal);
+    EXPECT_EQ(snapshotFiles(), originalFiles);
+  };
+
+  expectRefusalPreservesBytes("XPI1d3:key");
+  expectRefusalPreservesBytes(
+      corrupt([&](auto &records) { records.push_back(records.front()); }));
+  expectRefusalPreservesBytes(corrupt([&](auto &records) {
+    setField(records.front(), "id",
+             xanadu::bencode::Value::string("../escape"));
+  }));
+  expectRefusalPreservesBytes(corrupt([&](auto &records) {
+    setField(records.front(), "minimum_sequence",
+             xanadu::bencode::Value::integer(pin.sequence + 1));
+    setField(records.front(), "minimum_hash",
+             xanadu::bencode::Value::string(pin.hash.hex()));
+  }));
+  expectRefusalPreservesBytes(corrupt([&](auto &records) {
+    setField(records.front(), "pin_title",
+             xanadu::bencode::Value::string("another publication"));
+  }));
+  expectRefusalPreservesBytes(corrupt([&](auto &records) {
+    setField(records.front(), "manifest",
+             xanadu::bencode::Value::string(xanadu::InfoHash{}.hex()));
+  }));
+  expectRefusalPreservesBytes(corrupt([&](auto &records) {
+    setField(records.front(), "title",
+             xanadu::bencode::Value::string("other title"));
+  }));
+  expectRefusalPreservesBytes(corrupt([&](auto &records) {
+    setField(records.front(), "sequence",
+             xanadu::bencode::Value::integer(pin.sequence + 1));
+  }));
+  expectRefusalPreservesBytes(corrupt([&](auto &records) {
+    setField(records.front(), "version",
+             xanadu::bencode::Value::string("not-a-version"));
+  }));
+  expectRefusalPreservesBytes(corrupt([&](auto &records) {
+    setField(records.front(), "phase",
+             xanadu::bencode::Value::integer(
+                 static_cast<int>(xanadu::PublicationDownloadPhase::Failed)));
+  }));
+  expectRefusalPreservesBytes(corrupt([&](auto &records) {
+    setField(records.front(), "verification",
+             xanadu::bencode::Value::integer(static_cast<int>(
+                 xanadu::PublicationDownloadVerification::ManifestVerified)));
+  }));
+
+  writeJournal(originalJournal);
+}
+
+TEST_F(PublicationInboxTest,
+       StagedManifestAfterCrashIsNotImportedAsAnInstalledSnapshot) {
+  auto options    = incomingOptions();
+  downloads->hold = true;
+  std::string id;
+  {
+    xanadu::PublicationInbox inbox(options);
+    id = inbox.submit(link);
+    ASSERT_TRUE(
+        inbox.waitFor(id, xanadu::PublicationDownloadPhase::Resolving, 3s));
+    inbox.cancel(id);
+    ASSERT_TRUE(
+        inbox.waitFor(id, xanadu::PublicationDownloadPhase::Cancelled, 3s));
+  }
+  downloads->hold        = false;
+  const auto attemptRoot = root / "inbox" / (id + ".attempt-0");
+  fs::create_directories(attemptRoot);
+  fs::copy_file(downloads->seeds.at(downloads->pointer.hash) / "publication" /
+                    "publication.xanadoc",
+                attemptRoot / "publication.xanadoc");
+
+  std::atomic<int> factoryCalls{};
+  options.makeTransport = [state = downloads, &factoryCalls] {
+    ++factoryCalls;
+    return std::make_unique<TestDownloadTransport>(state);
+  };
+  xanadu::PublicationInbox reopened(options);
+  EXPECT_EQ(reopened.status(id).phase,
+            xanadu::PublicationDownloadPhase::Cancelled);
+  EXPECT_EQ(factoryCalls.load(), 0);
+  EXPECT_TRUE(fs::exists(attemptRoot / "publication.xanadoc"));
+  EXPECT_FALSE(fs::exists(root / "inbox" / id / "publication.xanadoc"));
+}
+
+TEST_F(PublicationInboxTest,
+       RetainedSnapshotSymlinkIsRefusedBeforeManifestOrStoreRead) {
+  const auto options = incomingOptions();
+  std::string id;
+  {
+    xanadu::PublicationInbox inbox(options);
+    id = inbox.submit(link);
+    ASSERT_TRUE(inbox.waitFor(id, xanadu::PublicationDownloadPhase::Ready, 3s))
+        << inbox.status(id).error;
+  }
+  const auto outside = root / "outside-published";
+  fs::create_directories(outside);
+  std::ofstream(outside / "marker") << "preserve";
+  const auto published = root / "inbox" / id / "store" / "published";
+  fs::remove_all(published);
+  fs::create_directory_symlink(outside, published);
+
+  EXPECT_THROW((xanadu::PublicationInbox(options)),
+               xanadu::PublicationInboxUnreadable);
+  EXPECT_TRUE(fs::exists(outside / "marker"));
+}
+
+TEST_F(PublicationInboxTest, JournalLimitAndUnknownVersionRefuseWithoutLoss) {
+  auto options            = incomingOptions();
+  options.maximumRequests = 1;
+  std::string id;
+  {
+    xanadu::PublicationInbox inbox(options);
+    id = inbox.submit(link);
+    ASSERT_TRUE(inbox.waitFor(id, xanadu::PublicationDownloadPhase::Ready, 3s))
+        << inbox.status(id).error;
+    EXPECT_THROW((void)inbox.submit(link), std::length_error);
+  }
+  MDB_env *raw{};
+  ASSERT_EQ(mdb_env_create(&raw), MDB_SUCCESS);
+  std::unique_ptr<MDB_env, decltype(&mdb_env_close)> env(raw, mdb_env_close);
+  ASSERT_EQ(mdb_env_open(raw, (root / "inbox").c_str(), 0, 0600), MDB_SUCCESS);
+  MDB_txn *rawTransaction{};
+  ASSERT_EQ(mdb_txn_begin(raw, nullptr, 0, &rawTransaction), MDB_SUCCESS);
+  std::unique_ptr<MDB_txn, decltype(&mdb_txn_abort)> transaction(rawTransaction,
+                                                                 mdb_txn_abort);
+  MDB_dbi db{};
+  ASSERT_EQ(mdb_dbi_open(rawTransaction, nullptr, 0, &db), MDB_SUCCESS);
+  std::string key = "requests";
+  MDB_val dbKey{key.size(), key.data()}, value{};
+  ASSERT_EQ(mdb_get(rawTransaction, db, &dbKey, &value), MDB_SUCCESS);
+  const std::string original(static_cast<const char *>(value.mv_data),
+                             value.mv_size);
+  std::string unknown = "XPI9malformed";
+  MDB_val newValue{unknown.size(), unknown.data()};
+  ASSERT_EQ(mdb_put(rawTransaction, db, &dbKey, &newValue, 0), MDB_SUCCESS);
+  ASSERT_EQ(mdb_txn_commit(transaction.release()), MDB_SUCCESS);
+  env.reset();
+
+  EXPECT_THROW((xanadu::PublicationInbox(options)),
+               xanadu::PublicationInboxUnreadable);
+  ASSERT_EQ(mdb_env_create(&raw), MDB_SUCCESS);
+  env.reset(raw);
+  ASSERT_EQ(mdb_env_open(raw, (root / "inbox").c_str(), 0, 0600), MDB_SUCCESS);
+  ASSERT_EQ(mdb_txn_begin(raw, nullptr, MDB_RDONLY, &rawTransaction),
+            MDB_SUCCESS);
+  transaction.reset(rawTransaction);
+  ASSERT_EQ(mdb_dbi_open(rawTransaction, nullptr, 0, &db), MDB_SUCCESS);
+  ASSERT_EQ(mdb_get(rawTransaction, db, &dbKey, &value), MDB_SUCCESS);
+  EXPECT_EQ(
+      std::string(static_cast<const char *>(value.mv_data), value.mv_size),
+      unknown);
+  EXPECT_TRUE(fs::exists(root / "inbox" / id));
+}
+
 TEST_F(PublicationInboxTest, RejectsDifferentKeySaltAndPointerSequence) {
   xanadu::PublicationInbox inbox(incomingOptions());
   auto wrong = link;
@@ -586,6 +1027,7 @@ TEST_F(PublicationInboxTest, CancelsActiveWaitAndRetriesTheSameRequest) {
   ASSERT_TRUE(
       inbox.waitFor(id, xanadu::PublicationDownloadPhase::Resolving, 2s));
   inbox.cancel(id);
+  EXPECT_THROW(inbox.retry(id), std::logic_error);
   ASSERT_TRUE(
       inbox.waitFor(id, xanadu::PublicationDownloadPhase::Cancelled, 2s));
   EXPECT_FALSE(fs::exists(root / "inbox" / id));
@@ -594,6 +1036,26 @@ TEST_F(PublicationInboxTest, CancelsActiveWaitAndRetriesTheSameRequest) {
   ASSERT_TRUE(inbox.waitFor(id, xanadu::PublicationDownloadPhase::Ready, 3s))
       << inbox.status(id).error;
   EXPECT_THROW(inbox.retry(id), std::logic_error);
+}
+
+TEST_F(PublicationInboxTest, RetryWaitsForActiveCancellationAcknowledgement) {
+  downloads->hold            = true;
+  downloads->holdAfterCancel = true;
+  xanadu::PublicationInbox inbox(incomingOptions());
+  const auto id = inbox.submit(link);
+  ASSERT_TRUE(
+      inbox.waitFor(id, xanadu::PublicationDownloadPhase::Resolving, 2s));
+  inbox.cancel(id);
+  EXPECT_FALSE(
+      inbox.waitFor(id, xanadu::PublicationDownloadPhase::Cancelled, 50ms));
+  EXPECT_THROW(inbox.retry(id), std::logic_error);
+  downloads->holdAfterCancel = false;
+  ASSERT_TRUE(
+      inbox.waitFor(id, xanadu::PublicationDownloadPhase::Cancelled, 2s));
+  downloads->hold = false;
+  inbox.retry(id);
+  ASSERT_TRUE(inbox.waitFor(id, xanadu::PublicationDownloadPhase::Ready, 3s))
+      << inbox.status(id).error;
 }
 
 TEST_F(PublicationInboxTest, NetworkFailureLeavesNoStoreAndAllowsRetry) {
@@ -693,7 +1155,13 @@ TEST_F(PublicationInboxTest, ShutdownCancelsWorkerAndQueuedRequests) {
     (void)inbox.submit(link);
   }
   EXPECT_LT(std::chrono::steady_clock::now() - start, 2s);
-  EXPECT_TRUE(fs::is_empty(root / "inbox"));
+  EXPECT_TRUE(fs::exists(root / "inbox" / "data.mdb"));
+  auto offlineOptions          = incomingOptions();
+  offlineOptions.makeTransport = {};
+  xanadu::PublicationInbox offline(offlineOptions);
+  ASSERT_EQ(offline.statuses().size(), 2U);
+  for (const auto &status : offline.statuses())
+    EXPECT_EQ(status.phase, xanadu::PublicationDownloadPhase::Cancelled);
 }
 
 class PublicationSubscriptionsTest : public PublicationInboxTest {
@@ -1174,8 +1642,9 @@ TEST_F(PublicationOutboxNetworkTest,
         author ? " --chord Ctrl+Shift+D --chord Right --chord Tab --type " +
                      quote(keys.publicKey.hex()) + " --chord Tab --chord Return"
                : " --chord F3 --type Ideas --chord Return";
-    // Only Alice's key is typed for Bob. Carl supplies just the topic. No
-    // manifest, publication magnet, cache or direct BT peer is supplied.
+    // Only Alice's key is typed for Bob. Carl supplies just the topic.
+    // No manifest, publication magnet, cache or direct BT peer is
+    // supplied.
     const auto command =
         "ip netns exec " + quote(readerNamespace) +
         " env SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy "
@@ -1329,7 +1798,8 @@ TEST_F(PublicationOutboxNetworkTest,
         selected ? " --chord Tab --chord Right --chord Shift+Tab" : "";
     const auto command =
         base +
-        " --chord Ctrl+Alt+Shift+L --chord Return --wait-ms 35000 --chord "
+        " --chord Ctrl+Alt+Shift+L --chord Return --wait-ms 35000 "
+        "--chord "
         "Return "
         "--dump-a11y --capture " +
         quote((evidence / (stem + "-catalog.ppm")).string()) + select +
@@ -1338,14 +1808,17 @@ TEST_F(PublicationOutboxNetworkTest,
         quote((evidence / (stem + "-ready.ppm")).string()) +
         " --chord Right --chord Return --dump-a11y --capture " +
         quote((evidence / (stem + "-review.ppm")).string()) +
-        " --chord Right --chord Right --chord Right --chord Right --chord "
+        " --chord Right --chord Right --chord Right --chord Right "
+        "--chord "
         "Return --dump-a11y --capture " +
         quote((evidence / (stem + "-keys.ppm")).string()) +
         " --chord Tab --chord Tab --chord Tab --chord Space --dump-a11y "
         "--capture " +
         quote((evidence / (stem + "-key-parts.ppm")).string()) +
-        " --chord Return --chord Shift+Tab --chord Shift+Tab --chord Shift+Tab "
-        "--chord Return --chord Right --chord Return --wait-ms 30000 --chord "
+        " --chord Return --chord Shift+Tab --chord Shift+Tab --chord "
+        "Shift+Tab "
+        "--chord Return --chord Right --chord Return --wait-ms 30000 "
+        "--chord "
         "Return "
         "--dump-a11y --capture " +
         quote((evidence / (stem + "-download.ppm")).string()) +
@@ -1375,8 +1848,9 @@ TEST_F(PublicationOutboxNetworkTest,
       {.directory = profile / "data/xudu/publication-discovery"});
   EXPECT_TRUE(discovered.followedAuthors().empty());
   EXPECT_EQ(authored->opCount(), originalOps);
-  // This source snapshot is fixture setup. The controls below prove package
-  // preparation/review, without claiming commentary authorship was driven here.
+  // This source snapshot is fixture setup. The controls below prove
+  // package preparation/review, without claiming commentary authorship
+  // was driven here.
   const auto devinProfile = root / "devin-publisher";
   const auto devinKeys    = xanadu::createMutableKeys();
   fs::create_directories(devinProfile / "workspace/published");
@@ -1390,13 +1864,16 @@ TEST_F(PublicationOutboxNetworkTest,
       uiBase(devinProfile, false) +
       " --chord Ctrl+Alt+Shift+P --chord Tab --chord Tab --type " +
       quote("Devin's links") +
-      " --chord Shift+Tab --chord Shift+Tab --chord Return --wait-ms 2000 "
+      " --chord Shift+Tab --chord Shift+Tab --chord Return --wait-ms "
+      "2000 "
       "--chord Return --dump-a11y --capture " +
       quote((evidence / "prepared.ppm").string()) +
       " --chord Right --chord Return --dump-a11y --capture " +
       quote((evidence / "prepared-review.ppm").string()) +
-      " --chord Right --chord Right --chord Return --chord Right --chord Right "
-      "--chord Right --chord Right --chord Right --chord Return --wait-ms "
+      " --chord Right --chord Right --chord Return --chord Right "
+      "--chord Right "
+      "--chord Right --chord Right --chord Right --chord Return "
+      "--wait-ms "
       "35000 --chord Return --wait-ms 20000 --chord Return --dump-a11y "
       "--capture " +
       quote((evidence / "prepared-published.ppm").string()) + " > " +
@@ -1439,13 +1916,16 @@ TEST_F(PublicationOutboxNetworkTest,
     const auto userLog  = layerEvidence / (user + "-fetch.log");
     const auto fetch =
         userBase +
-        " --chord Ctrl+Alt+Shift+L --chord Return --wait-ms 35000 --chord "
+        " --chord Ctrl+Alt+Shift+L --chord Return --wait-ms 35000 "
+        "--chord "
         "Return --dump-a11y --capture " +
         quote((layerEvidence / (user + "-catalog.ppm")).string()) +
-        " --chord Right --chord Return --wait-ms 35000 --chord Return --chord "
+        " --chord Right --chord Return --wait-ms 35000 --chord Return "
+        "--chord "
         "Right --chord Return --dump-a11y --capture " +
         quote((layerEvidence / (user + "-review.ppm")).string()) +
-        " --chord Right --chord Return --wait-ms 30000 --chord Return --chord "
+        " --chord Right --chord Return --wait-ms 30000 --chord Return "
+        "--chord "
         "Right --chord Return --dump-a11y --capture " +
         quote((layerEvidence / (user + "-opened.ppm")).string()) + " > " +
         quote(userLog.string()) + " 2>&1";
@@ -1470,14 +1950,15 @@ TEST_F(PublicationOutboxNetworkTest,
     offlineBase.replace(offlineBase.find(workspace), workspace.size(),
                         quote(native.string()));
     const std::string reviewControls =
-        " --chord Ctrl+Alt+Shift+L --chord Right --chord Return --chord Return "
+        " --chord Ctrl+Alt+Shift+L --chord Right --chord Return --chord "
+        "Return "
         "--chord Right --chord Return";
-    const std::string toggle = " --chord Right --chord Right --chord Right "
-                               "--chord Right --chord Right --chord Return";
-    const std::string navigate =
-        " --chord Right --chord Right --chord Right --chord Right --chord "
-        "Right --chord Right --chord Return";
-    const auto enableLog = layerEvidence / (user + "-enabled.log");
+    const std::string toggle   = " --chord Right --chord Right --chord Right "
+                                 "--chord Right --chord Right --chord Return";
+    const std::string navigate = " --chord Right --chord Right --chord "
+                                 "Right --chord Right --chord "
+                                 "Right --chord Right --chord Return";
+    const auto enableLog       = layerEvidence / (user + "-enabled.log");
     const auto enable =
         offlineBase + reviewControls + toggle + " --dump-a11y --capture " +
         quote((layerEvidence / (user + "-enabled.ppm")).string()) + navigate +
@@ -1485,7 +1966,8 @@ TEST_F(PublicationOutboxNetworkTest,
         "--chord Alt+Shift+Return "
         "--dump-a11y --capture " +
         quote((layerEvidence / (user + "-navigated.ppm")).string()) +
-        " --chord Alt+Shift+X --chord Alt+Shift+Return --dump-a11y --capture " +
+        " --chord Alt+Shift+X --chord Alt+Shift+Return --dump-a11y "
+        "--capture " +
         quote((layerEvidence / (user + "-cell-navigated.ppm")).string()) +
         " > " + quote(enableLog.string()) + " 2>&1";
     ASSERT_EQ(std::system(enable.c_str()), 0) << read(enableLog);
@@ -1508,7 +1990,8 @@ TEST_F(PublicationOutboxNetworkTest,
         quote((layerEvidence / (user + "-restart.ppm")).string()) + toggle +
         " --dump-a11y --capture " +
         quote((layerEvidence / (user + "-disabled.ppm")).string()) +
-        " --chord Right --chord Right --chord Right --chord Return --dump-a11y "
+        " --chord Right --chord Right --chord Right --chord Return "
+        "--dump-a11y "
         "--capture " +
         quote((layerEvidence / (user + "-disabled-document.ppm")).string()) +
         " > " + quote(disableLog.string()) + " 2>&1";
@@ -1585,10 +2068,12 @@ TEST_F(PublicationOutboxNetworkTest,
     return " --chord Ctrl+O --chord Tab --type " + quote(link.uri()) +
            " --chord Return" + " --wait-ms 35000 --chord Return" +
            capture(name + "-download") +
-           " --chord Right --chord Right --chord Right --chord Right --chord "
+           " --chord Right --chord Right --chord Right --chord Right "
+           "--chord "
            "Right --chord Return" +
            capture(name + "-subscribed") +
-           " --chord Right --chord Right --chord Right --chord Right --chord "
+           " --chord Right --chord Right --chord Right --chord Right "
+           "--chord "
            "Right --chord Right --chord Right --chord Return";
   };
   const auto review = [&](const std::string &name) {
@@ -1718,7 +2203,8 @@ TEST_F(PublicationOutboxNetworkTest,
     EXPECT_EQ(job.identity, xanadu::PublicationIdentity::MockVerified);
     EXPECT_GT(job.attempts, 0U);
   }
-  // The publisher has stopped: its own DHT cache cannot answer this lookup.
+  // The publisher has stopped: its own DHT cache cannot answer this
+  // lookup.
   xanadu::SwarmContentSource reader(network);
   reader.addDhtNode(host, static_cast<std::uint16_t>(std::stoul(port)));
   const auto link =
@@ -1745,8 +2231,9 @@ TEST_F(PublicationOutboxNetworkTest,
   EXPECT_EQ(received->topics, (std::vector<std::string>{"ideas"}));
   EXPECT_EQ(xanadu::encodePublication(*received),
             xanadu::encodePublication(publication));
-  // A fresh process in the other namespace starts with an empty cache. Its
-  // only inputs are the author publication link and a named DHT bootstrap node.
+  // A fresh process in the other namespace starts with an empty cache.
+  // Its only inputs are the author publication link and a named DHT
+  // bootstrap node.
   const auto readerNamespace = std::getenv("XUDU_PEER_NAMESPACE");
   const auto publisherHost   = std::getenv("XUDU_TEST_HOST");
   const auto readerHost      = std::getenv("XUDU_READER_HOST");
@@ -1774,8 +2261,9 @@ TEST_F(PublicationOutboxNetworkTest,
                       std::to_string(publication.opsSegments.front().length) +
                       " " + std::to_string(publication.inventory.size()) +
                       " 0");
-  // The child and its BitTorrent session have exited. Reopening consults only
-  // the reader's retained cache and deployment metadata, across no sockets.
+  // The child and its BitTorrent session have exited. Reopening consults
+  // only the reader's retained cache and deployment metadata, across no
+  // sockets.
   xanadu::Store offline(std::make_shared<xanadu::UserPermascroll>());
   const auto copies = fs::directory_iterator(cache / "inbox");
   ASSERT_NE(copies, fs::directory_iterator{});
@@ -1783,8 +2271,9 @@ TEST_F(PublicationOutboxNetworkTest,
   EXPECT_EQ(offline.documentId(), publication.storeId);
   EXPECT_EQ(offline.textOf(publication.version), "Story Ideas");
   EXPECT_EQ(offline.opCount(), publication.opsSegments.front().length);
-  // The keyboard path uses no incoming cache fixture: the running publisher
-  // is reached by DHT peer discovery, while --wait-ms stands in for waiting.
+  // The keyboard path uses no incoming cache fixture: the running
+  // publisher is reached by DHT peer discovery, while --wait-ms stands
+  // in for waiting.
   const auto evidence =
       fs::current_path() / "build/publication-download/network-ui";
   fs::create_directories(evidence);

@@ -7,6 +7,25 @@ session.
 
 ## Current checkpoint
 
+Eighteenth checkpoint (2026-10-18), based on `bce65b1f`: the publication inbox now persists strict
+`XPI1` request records in LMDB. Stable IDs, full pins, mutable pointer floors, failure and
+cancellation outcomes survive restart. Interrupted work requires explicit Retry and starts no
+network transport. Verified manifest pins stay frozen on retry. Active cancellation waits for worker
+acknowledgement; request-scoped staging, signed-root reconciliation and recursive path checks
+preserve retained content. The Open dialog distinguishes title/version/sequence/carrier.
+
+Canonical GNU Make, full UI 246/246, Xuzz 107/107 and owning publication/package 70/70 pass. The new
+corruption matrix checks typed refusal and byte preservation. Byte-identical default library and
+library-test hashes retain 799/799 and mip/cache 53/53 evidence. Fresh strict GL/GLES/Vulkan
+comparison passes unchanged criteria, without actual split recording or broad E2E. Final native
+restart, format/lint and archive details are in the
+[eighteenth checkpoint](../reviews/spatial-ui-eighteenth-increment/README.md).
+
+Installation power-loss sync and an aggregate partial-transfer retention policy remain open before
+normal network traffic is enabled. Production connection settings, real identity enrollment and
+BEP46/fingerprint binding, remote availability/rejection variants, complete journeys and measured
+performance remain open; this is a bounded request-lifecycle increment.
+
 Seventeenth checkpoint (2026-10-18), based on `f3841729`: cited-publication status now preserves and
 displays the full requested pin independently of transfer phase and Unchecked/ManifestVerified/
 Complete verification. Exact requests are reused; only explicit Retry restarts. Review correlates
@@ -609,9 +628,10 @@ reviews pass.
 
 ## Exact next task
 
-First implement the seventeenth checkpoint's `request-persistence-plan.md`: preserve stable request
-IDs, exact pins and known failures through restart; interrupted requests require explicit Retry.
-Validate safe journal/install recovery without deleting retained content. Then continue normal
+Complete the remaining installation/partial-cache lifecycle after the eighteenth checkpoint: add
+file/directory durability ordering around immutable-root installation and journal Ready, and a
+bounded, explicit policy for incomplete attempt data without deleting completed snapshots or losing
+request pins. Keep process-restart evidence distinct from power-loss proof. Then continue normal
 publication transport configuration in `next-service-plan.md`: governed opt-in settings and a
 visible form, worker-owned factory setup, named-node-only privacy policy and a deliberate restart
 boundary. Keep receive/discovery distinct from real identity enrollment; never install the test mock

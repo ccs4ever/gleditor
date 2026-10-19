@@ -1,0 +1,13 @@
+# Frozen seventeenth-build restart baseline
+
+This is a read-only baseline against `build/validation-seventeenth/frozen-final/xuzz`, SHA-256 `a1ff64ffb8462dec9594cf4523a3879940140a7f55123ec7e61da00ff628637c`, with `libgleditor.so.0` SHA-256 `ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9` and `xudu-dump` SHA-256 `7031847f950135234935ae67d06c3e59da6a945bd95a5202f14591064f00947c`.
+
+Fresh run-local XDG data/config/cache and GPG directories were used. Only data and config were copied from the sixteenth-increment UI-authored profile. Both main process launches and the supplemental UI captures exited 0 under Xvfb, OpenGL software rendering and ordinary key input.
+
+Process 1 opened the UI-authored citation through the existing link/package controls and reached the actual status `Download failed: No publication connection is configured. Content availability has not been checked.` The pinned fields were carrier `f8ff688c5680ab88c27e4297decb5e7640b86a31`, edition `document / a34 #2`, publication name `document`, publisher `1: 4c6e92c9b3e4abbd75ca25d8fc7cfaa3`, and verification `Not checked`. Before quitting, the real `Ctrl+O` Open dialog included `[Download] Publication download — Download failed`. A separate clean profile run selected that unique row with five ordinary Right inputs; its screenshot and accessibility dump show the selected row.
+
+After process 1 exited 0, process 2 reopened the same XDG profile and used `Ctrl+O`. The accessibility tree listed only the five system xanadocs and `Custom path or file...`; the failed download row was absent. The inbox directory had no retained files after process 1 or process 2. Process 2 exited 0. A supplementary third launch captured the same empty list; its rendered frame was black except for the selected system-document control while the app accessibility dump correctly reported the Open dialog, so the absent-row claim relies on the dump and empty inbox directory, not that frame.
+
+Source operation dumps and package-visibility bytes match before and after. Activity decoding reports one completed visit and current visit 1 both before and after. All argv, environments, logs, PPM captures, source/package/activity checkpoints, raw PPM hashes, and exit files are retained in this directory. The `baseline17-list` sibling is a separate fresh copy used only to capture the selected pre-restart failed row.
+
+This establishes the frozen seventeenth-build behavior only: failed pinned requests lived in the process inbox and did not return after restart. It makes no claim about the eighteenth-increment implementation or remote publication availability.

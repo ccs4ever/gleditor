@@ -1,0 +1,16 @@
+The app processes were first confirmed exited (exit 0). The database was read only afterward.
+
+/usr/bin/mdb_dump -f build/validation-eighteenth/native/candidate18/checkpoints/after-process1/inbox-mdb.hex.txt build/validation-eighteenth/native/candidate18/data/xudu/publication-inbox
+Exit: 0; decoded from default hexadecimal output.
+
+/usr/bin/mdb_dump -f build/validation-eighteenth/native/candidate18/checkpoints/after-process2/inbox-mdb.hex.txt build/validation-eighteenth/native/candidate18/data/xudu/publication-inbox
+Exit: 0; decoded from default hexadecimal output. This checkpoint follows process2b, which opened the restored status form. Process2 was a non-submitting choice-list attempt and has no separate dump.
+
+/usr/bin/mdb_dump -f build/validation-eighteenth/native/candidate18/checkpoints/after-process3/inbox-mdb.hex.txt build/validation-eighteenth/native/candidate18/data/xudu/publication-inbox
+Exit: 0; decoded from default hexadecimal output.
+
+/usr/bin/mdb_dump -f build/validation-eighteenth/native/candidate18/checkpoints/after-process4/inbox-mdb.hex.txt build/validation-eighteenth/native/candidate18/data/xudu/publication-inbox
+Exit: 0; decoded from default hexadecimal output.
+
+/usr/bin/mdb_dump -f build/validation-eighteenth/native/candidate18/checkpoints/after-process6/inbox-mdb.hex.txt build/validation-eighteenth/native/candidate18/data/xudu/publication-inbox
+Exit: 0; decoded from default hexadecimal output. Process5 and process6 were read-only visual checks; process6 is the final post-exit checkpoint.

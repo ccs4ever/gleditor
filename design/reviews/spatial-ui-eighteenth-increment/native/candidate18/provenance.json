@@ -1,0 +1,207 @@
+{
+  "candidate": "frozen eighteenth-increment native application",
+  "binaries": {
+    "xuzz": {
+      "path": "build/validation-eighteenth/frozen/xuzz",
+      "sha256": "9dc89cd770437c5bf93da0645ff2f8101d9ee179a2890fd5e15afafda9153c91"
+    },
+    "libgleditor.so.0": {
+      "path": "build/validation-eighteenth/frozen/libgleditor.so.0",
+      "sha256": "ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9"
+    },
+    "xudu-dump": {
+      "path": "build/validation-eighteenth/frozen/xudu-dump",
+      "sha256": "7031847f950135234935ae67d06c3e59da6a945bd95a5202f14591064f00947c"
+    }
+  },
+  "profile_seed": "Copied only data/ and config/ from build/validation-sixteenth/native; run-local cache and GNUPGHOME were fresh.",
+  "environment": {
+    "SDL_VIDEODRIVER": "x11",
+    "SDL_AUDIODRIVER": "dummy",
+    "LIBGL_ALWAYS_SOFTWARE": "1",
+    "XDG_DATA_HOME": "run-local data",
+    "XDG_CONFIG_HOME": "run-local config",
+    "XDG_CACHE_HOME": "run-local cache",
+    "GNUPGHOME": "fresh run-local directory",
+    "display": "Xvfb -noreset -screen 0 1600x1200x24",
+    "session": "private dbus-run-session"
+  },
+  "request_id": "319507aabff5973c66527f4a3398ef35750615642c3cd4ce25b751a9cbf1af28",
+  "pin": {
+    "publisher": "4c6e92c9b3e4abbd75ca25d8fc7cfaa3dc9d45ef2b8fa700e79f3cfca81abf79",
+    "salt": "document",
+    "carrier_hash": "f8ff688c5680ab88c27e4297decb5e7640b86a31",
+    "sequence": 2,
+    "version": "a34",
+    "title": "document"
+  },
+  "process_invocations": [
+    {
+      "process": "process1",
+      "description": "UI-created request and initial failure",
+      "classification": "lifecycle",
+      "exit": 0
+    },
+    {
+      "process": "process2",
+      "description": "Ctrl+O row selected; Return opened choice list, not status form",
+      "classification": "non-submitting menu attempt",
+      "exit": 0
+    },
+    {
+      "process": "process2b",
+      "description": "Ctrl+O row selected; Tab then Return reopened Failed request without action",
+      "classification": "restored failure",
+      "exit": 0
+    },
+    {
+      "process": "process3",
+      "description": "Explicit Retry, queued observation, scheduled refresh back to Failed",
+      "classification": "explicit retry",
+      "exit": 0
+    },
+    {
+      "process": "process4",
+      "description": "Post-retry restart, row and Failed form reopened without action",
+      "classification": "final restart proof",
+      "exit": 0
+    },
+    {
+      "process": "process5",
+      "description": "Read-only expanded Ctrl+O list inspection; first five entries in initial viewport",
+      "classification": "visual inspection",
+      "exit": 0
+    },
+    {
+      "process": "process6",
+      "description": "Read-only expanded Ctrl+O list inspection; Down navigation shows failed row",
+      "classification": "visual inspection",
+      "exit": 0
+    }
+  ],
+  "post_exit_request_checkpoints": [
+    {
+      "checkpoint": "after-process1",
+      "description": "Initial no-connection failure",
+      "lmdb_dump_sha256": "38d74c14c39972e4383b2d1be338a4f0a26bc0764a3cadafbee462b8135da161",
+      "request_id": "319507aabff5973c66527f4a3398ef35750615642c3cd4ce25b751a9cbf1af28",
+      "pin": {
+        "pin_publisher": "4c6e92c9b3e4abbd75ca25d8fc7cfaa3dc9d45ef2b8fa700e79f3cfca81abf79",
+        "pin_salt": "document",
+        "pin_hash": "f8ff688c5680ab88c27e4297decb5e7640b86a31",
+        "pin_sequence": 2,
+        "pin_version": "a34",
+        "pin_title": "document"
+      },
+      "phase": "Failed",
+      "verification": "Unchecked",
+      "attempt": 0,
+      "error": "No publication connection is configured. Content availability has not been checked."
+    },
+    {
+      "checkpoint": "after-process2",
+      "description": "After process2b reopened the failure form via Tab then Return; process2 first only selected the row and opened the choice list.",
+      "lmdb_dump_sha256": "38d74c14c39972e4383b2d1be338a4f0a26bc0764a3cadafbee462b8135da161",
+      "request_id": "319507aabff5973c66527f4a3398ef35750615642c3cd4ce25b751a9cbf1af28",
+      "pin": {
+        "pin_publisher": "4c6e92c9b3e4abbd75ca25d8fc7cfaa3dc9d45ef2b8fa700e79f3cfca81abf79",
+        "pin_salt": "document",
+        "pin_hash": "f8ff688c5680ab88c27e4297decb5e7640b86a31",
+        "pin_sequence": 2,
+        "pin_version": "a34",
+        "pin_title": "document"
+      },
+      "phase": "Failed",
+      "verification": "Unchecked",
+      "attempt": 0,
+      "error": "No publication connection is configured. Content availability has not been checked."
+    },
+    {
+      "checkpoint": "after-process3",
+      "description": "After explicit Retry and real no-connection failure",
+      "lmdb_dump_sha256": "0559a4cf684202b52e23255279f39d8e18ffcebab5223a4c4ab3ced292a41bd3",
+      "request_id": "319507aabff5973c66527f4a3398ef35750615642c3cd4ce25b751a9cbf1af28",
+      "pin": {
+        "pin_publisher": "4c6e92c9b3e4abbd75ca25d8fc7cfaa3dc9d45ef2b8fa700e79f3cfca81abf79",
+        "pin_salt": "document",
+        "pin_hash": "f8ff688c5680ab88c27e4297decb5e7640b86a31",
+        "pin_sequence": 2,
+        "pin_version": "a34",
+        "pin_title": "document"
+      },
+      "phase": "Failed",
+      "verification": "Unchecked",
+      "attempt": 1,
+      "error": "No publication connection is configured. Content availability has not been checked."
+    },
+    {
+      "checkpoint": "after-process4",
+      "description": "After restart and reopening failed form",
+      "lmdb_dump_sha256": "0559a4cf684202b52e23255279f39d8e18ffcebab5223a4c4ab3ced292a41bd3",
+      "request_id": "319507aabff5973c66527f4a3398ef35750615642c3cd4ce25b751a9cbf1af28",
+      "pin": {
+        "pin_publisher": "4c6e92c9b3e4abbd75ca25d8fc7cfaa3dc9d45ef2b8fa700e79f3cfca81abf79",
+        "pin_salt": "document",
+        "pin_hash": "f8ff688c5680ab88c27e4297decb5e7640b86a31",
+        "pin_sequence": 2,
+        "pin_version": "a34",
+        "pin_title": "document"
+      },
+      "phase": "Failed",
+      "verification": "Unchecked",
+      "attempt": 1,
+      "error": "No publication connection is configured. Content availability has not been checked."
+    },
+    {
+      "checkpoint": "after-process6",
+      "description": "After read-only final list visual check",
+      "lmdb_dump_sha256": "0559a4cf684202b52e23255279f39d8e18ffcebab5223a4c4ab3ced292a41bd3",
+      "request_id": "319507aabff5973c66527f4a3398ef35750615642c3cd4ce25b751a9cbf1af28",
+      "pin": {
+        "pin_publisher": "4c6e92c9b3e4abbd75ca25d8fc7cfaa3dc9d45ef2b8fa700e79f3cfca81abf79",
+        "pin_salt": "document",
+        "pin_hash": "f8ff688c5680ab88c27e4297decb5e7640b86a31",
+        "pin_sequence": 2,
+        "pin_version": "a34",
+        "pin_title": "document"
+      },
+      "phase": "Failed",
+      "verification": "Unchecked",
+      "attempt": 1,
+      "error": "No publication connection is configured. Content availability has not been checked."
+    }
+  ],
+  "source_package_sha256": {
+    "ops.nodes": "ac9f7eed1c1b6ee7b3cb17b33c52e1eeb4859c6eefb6b5b5a1419b381b0f0843",
+    "store.tables": "fc15f548fddd5e8b4cb642ff53d8fc18ecdf00b02499fd08eecba1b0a2b919b4",
+    "package-visibility": "37ff1e81ec961c07c063bc5e2a57d8a686c88d31b6784a6c51ee84b42d6f0c50"
+  },
+  "activity": {
+    "completed_visit_count_before": 1,
+    "current_visit_before": 1,
+    "completed_visit_count_after": 1,
+    "current_visit_after": 1,
+    "visit_payload_before": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0",
+    "visit_payload_after": "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0"
+  },
+  "visual_review": {
+    "resolution": "1440x1000",
+    "download_row": "Full carrier hash, title, version, sequence and phase fit after normal Down navigation scrolls the lower row into view.",
+    "status_form": "All rows and no-connection status fit. Publisher key visually shows its first half; internal a11y lists both halves."
+  },
+  "limits": [
+    "No remote availability or signature rejection claim.",
+    "No interrupted-transport/cancel/restart native run.",
+    "Internal --dump-a11y only; no native AT-SPI claim.",
+    "Process2 Return on Document choice opened the list; it did not submit. Process2b used Tab then Return."
+  ],
+  "archive_exclusions": [
+    "Profile data/config/cache",
+    "GNUPGHOME/private keys",
+    "LMDB database/lock files",
+    "executables"
+  ],
+  "process_invocation_count": 7,
+  "primary_lifecycle_phases": 4,
+  "non_submitting_choice_attempt": "Process2 selected the download row, then Return opened the expanded Document choice instead of submitting; no request action occurred."
+}

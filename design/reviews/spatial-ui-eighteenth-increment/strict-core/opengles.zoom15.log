@@ -1,0 +1,9 @@
+MESA-EGL: warning: Not allowed to force software rendering when API explicitly selects a hardware device.
+backend: opengles, SDL3
+file: tests/samples/quick_brown_fox.txt
+accessibility: not in this build
+render: opengles device, version OpenGL ES 3.2 Mesa 26.2.4-arch3.1
+glyph cache: atlas 512x512 x1 layers, growing to at most 16384x16384 x64 (device allows 16384x16384 x2048, the vertex encoding 64 layers)
+[TIMING] First page rendered: 62.18 ms (docs in render: 1)
+wrote screenshot /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-eighteenth/strict-core/opengles.zoom15.ppm (800x600)
+[TIMING] Complete render settled: 474.97 ms (docs: 1, total pages: 1, built pages: 1)

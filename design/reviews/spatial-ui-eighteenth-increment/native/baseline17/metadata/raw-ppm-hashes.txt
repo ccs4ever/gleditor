@@ -1,0 +1,8 @@
+c81d47f59e43a966710ad76f66231e8ac02c1982041bdc05e606c19e332af86f  /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-eighteenth/native/baseline17/raw/00-review-before-open.ppm
+1d113ff07ae2449c3b82639915e78c2b147eb1e593af57ab3bbc10da259100a5  /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-eighteenth/native/baseline17/raw/01-open-immediate.ppm
+1d113ff07ae2449c3b82639915e78c2b147eb1e593af57ab3bbc10da259100a5  /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-eighteenth/native/baseline17/raw/02-open-stale.ppm
+c908b323c8eb90ac2df423bc16741f3f86bc339672afe0940fbc8fbb3398974a  /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-eighteenth/native/baseline17/raw/03-open-refresh-one.ppm
+c908b323c8eb90ac2df423bc16741f3f86bc339672afe0940fbc8fbb3398974a  /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-eighteenth/native/baseline17/raw/04-failed-before-restart.ppm
+e18d889612ea40159f0186efb093f541d12d1a9da223a8360437eb5929734b40  /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-eighteenth/native/baseline17/raw/05-failed-in-download-list.ppm
+e18d889612ea40159f0186efb093f541d12d1a9da223a8360437eb5929734b40  /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-eighteenth/native/baseline17/raw/06-restart-download-list.ppm
+e18d889612ea40159f0186efb093f541d12d1a9da223a8360437eb5929734b40  /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-eighteenth/native/baseline17/raw/07-restart-empty-download-list-settled.ppm

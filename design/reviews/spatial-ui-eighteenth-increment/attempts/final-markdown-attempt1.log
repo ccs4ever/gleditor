@@ -1,0 +1,4 @@
+design/reviews/spatial-ui-eighteenth-increment/next-installation-lifecycle-plan.md:58: MD013 Line length
+
+Further documentation is available for these failures:
+ - MD013: https://github.com/markdownlint/markdownlint/blob/main/docs/RULES.md#md013---line-length

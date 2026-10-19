@@ -1,0 +1,82 @@
+window "Xuzz"
+  multiline text input "default"
+    text run
+  multiline text input "Untitled · a" [caret 20 from 0]
+    text run = "Harbor left passage.
+"
+    text run = "Meadow second passage.
+"
+    text run = "Right one.
+"
+    text run = "Right two.
+"
+    text run = "Right three.
+"
+    text run
+  multiline text input "Untitled · b"
+    text run = "Harbor left passage."
+  group "Xanadu ZigZag: Xudu/Zigzag unified store"
+    group "Active View Dimensions: X=d.1, Y=d.2, Z=d.3"
+  list "Open Documents"
+    list item "default" [off]
+    button "Close default"
+    list item "Untitled · a" = "selected" [on]
+    button "Close Untitled · a"
+    list item "Untitled · b" [off]
+    button "Close Untitled · b"
+    button "Store Object Manager"
+    button "New Document"
+  list "links between the open documents"
+    link "comment link, 2 left and 3 right members"
+    link "comment link, 2 left and 3 right members"
+    link "comment link, 2 left and 3 right members"
+  group "Publication download"
+  group
+    label "comment · link 0 · Spatial review — curator 4c6e92c9b3e4 / local_author"
+    label "Left 2/2 · place 1/1 · bytes
+21–43
+untitled-20261018-154726 · page 1/1"
+    label "▸ Right 3/3 · place 1/1 · bytes
+66–78
+untitled-20261018-154726 · page 1/1"
+    label "reading: left member 1"
+    label "origin: untitled-20261018-154726 · page 1/1 · bytes 0–20"
+    label "Reader package: retained · disabled · emphasis quiet"
+    label "Package drawing disabled · retain and enable to enter; Link context kept"
+    group
+      button "Previous link"
+      button "Next link"
+      button "‹ member"
+      button "member ›"
+      button "‹ place"
+      button "place ›"
+      button "Cross"
+      button "Enter unavailable"
+      button "Origin"
+      button "Back"
+      button "×"
+      button "Normal package emphasis"
+      button "Remove package from reader"
+      button "Re-enable package"
+      button "Inspect members"
+  button "Overview: move camera to scene centre"
+  dialog "Download publication" [modal]
+    label = "Download publication"
+    label = "Download failed: No publication connection is configured. Content availability has not been checked. Publisher enrollment is unchecked. Downloading never enters the publication."
+    combo box "Action" = "Refresh progress"
+      list item "Refresh progress"
+      list item "Retry download"
+      list item "Close"
+    combo box "Verification" = "Not checked"
+      list item "Not checked"
+    combo box "Requested carrier" = "f8ff688c5680ab88c27e4297decb5e7640b86a31"
+      list item "f8ff688c5680ab88c27e4297decb5e7640b86a31"
+    combo box "Requested edition" = "document / a34 #2"
+      list item "document / a34 #2"
+    combo box "Publication name" = "document"
+      list item "document"
+    combo box "Requested publisher" = "1: 4c6e92c9b3e4abbd75ca25d8fc7cfaa3"
+      list item "1: 4c6e92c9b3e4abbd75ca25d8fc7cfaa3"
+      list item "2: dc9d45ef2b8fa700e79f3cfca81abf79"
+focus: Action
+wrote screenshot /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-eighteenth/native/candidate18/raw/17-final-restart-failed-form.ppm (1440x1000)

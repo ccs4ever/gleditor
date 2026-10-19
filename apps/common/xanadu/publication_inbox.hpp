@@ -6,6 +6,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <stop_token>
 #include <string>
 #include <vector>
@@ -13,6 +14,11 @@
 #include "publication_outbox.hpp"
 
 namespace xanadu {
+
+class PublicationInboxUnreadable : public std::runtime_error {
+public:
+  using std::runtime_error::runtime_error;
+};
 
 enum class PublicationDownloadPhase : std::uint8_t {
   Queued,
@@ -71,6 +77,7 @@ public:
     std::uint64_t maximumManifestBytes{16 * 1024 * 1024};
     std::uint64_t maximumDependencyBytes{1024ULL * 1024 * 1024};
     std::size_t maximumDependencies{4096};
+    std::size_t maximumRequests{128};
     std::function<std::unique_ptr<PublicationDownloadTransport>()>
         makeTransport;
   };

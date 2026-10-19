@@ -1,0 +1,31 @@
+{
+  "snapshot_version": "XPI1",
+  "request_count": 1,
+  "request": {
+    "attempt": 0,
+    "cancel_requested": 0,
+    "error": "No publication connection is configured. Content availability has not been checked.",
+    "exact": 1,
+    "id": "319507aabff5973c66527f4a3398ef35750615642c3cd4ce25b751a9cbf1af28",
+    "manifest": "0000000000000000000000000000000000000000",
+    "minimum_hash": "0000000000000000000000000000000000000000",
+    "minimum_sequence": -1,
+    "phase": 5,
+    "pin_hash": "f8ff688c5680ab88c27e4297decb5e7640b86a31",
+    "pin_publisher": "4c6e92c9b3e4abbd75ca25d8fc7cfaa3dc9d45ef2b8fa700e79f3cfca81abf79",
+    "pin_salt": "document",
+    "pin_sequence": 2,
+    "pin_title": "document",
+    "pin_version": "a34",
+    "pinned": 1,
+    "sequence": -1,
+    "title": "",
+    "uri": "magnet:?xs=urn:btpk:4c6e92c9b3e4abbd75ca25d8fc7cfaa3dc9d45ef2b8fa700e79f3cfca81abf79&s=646f63756d656e74",
+    "verification": 0,
+    "version": "0",
+    "phase_name": "Failed",
+    "verification_name": "Unchecked",
+    "snapshot_version": "XPI1",
+    "lmdb_dump_sha256": "38d74c14c39972e4383b2d1be338a4f0a26bc0764a3cadafbee462b8135da161"
+  }
+}

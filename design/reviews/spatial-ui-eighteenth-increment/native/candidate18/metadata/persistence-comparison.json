@@ -1,0 +1,49 @@
+{
+  "request_id": "319507aabff5973c66527f4a3398ef35750615642c3cd4ce25b751a9cbf1af28",
+  "pin": {
+    "pin_hash": "f8ff688c5680ab88c27e4297decb5e7640b86a31",
+    "pin_publisher": "4c6e92c9b3e4abbd75ca25d8fc7cfaa3dc9d45ef2b8fa700e79f3cfca81abf79",
+    "pin_salt": "document",
+    "pin_sequence": 2,
+    "pin_title": "document",
+    "pin_version": "a34"
+  },
+  "checks": [
+    {
+      "checkpoint": "after-process1/inbox-decoded.json",
+      "same_request_id": true,
+      "same_full_pin": true,
+      "phase": "Failed",
+      "verification": "Unchecked",
+      "attempt": 0,
+      "error": "No publication connection is configured. Content availability has not been checked."
+    },
+    {
+      "checkpoint": "after-process2/inbox-decoded.json",
+      "same_request_id": true,
+      "same_full_pin": true,
+      "phase": "Failed",
+      "verification": "Unchecked",
+      "attempt": 0,
+      "error": "No publication connection is configured. Content availability has not been checked."
+    },
+    {
+      "checkpoint": "after-process3/inbox-decoded.json",
+      "same_request_id": true,
+      "same_full_pin": true,
+      "phase": "Failed",
+      "verification": "Unchecked",
+      "attempt": 1,
+      "error": "No publication connection is configured. Content availability has not been checked."
+    },
+    {
+      "checkpoint": "after-process4/inbox-decoded.json",
+      "same_request_id": true,
+      "same_full_pin": true,
+      "phase": "Failed",
+      "verification": "Unchecked",
+      "attempt": 1,
+      "error": "No publication connection is configured. Content availability has not been checked."
+    }
+  ]
+}

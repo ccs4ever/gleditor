@@ -1,0 +1,29 @@
+{
+  "phase": "baseline17-list",
+  "baseline_executable_sha256": "a1ff64ffb8462dec9594cf4523a3879940140a7f55123ec7e61da00ff628637c",
+  "library_sha256": "ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9",
+  "dumper_sha256": "7031847f950135234935ae67d06c3e59da6a945bd95a5202f14591064f00947c",
+  "profile_origin": "Only data/ and config/ were copied from the UI-authored sixteenth-increment workspace; fresh cache and GNUPGHOME were used.",
+  "scope": "Frozen seventeenth-build baseline; no eighteenth-increment candidate behavior is claimed.",
+  "evidence": "All PPM frames are retained as deterministic gzip streams and paired with RGB-equivalent PNGs. Exact argv/environment/logs and decoded source/package/activity checkpoints are archived.",
+  "frames": [
+    {
+      "phase": "baseline17-list",
+      "frame": "00-failed",
+      "ppm_source_sha256": "c908b323c8eb90ac2df423bc16741f3f86bc339672afe0940fbc8fbb3398974a",
+      "ppm_gzip_archive_sha256": "e1a82fe1ee36cfef3202ff261ce0c616a76a34c52f83f601e72c6635ac80b4e2",
+      "png_archive_sha256": "34a3abf004acb2898db4276f34ebf3ef8fe25bdd4d0341b7ab41e6d83390ab65",
+      "rgb_sha256": "86e51dfbe0a40e6dcc787af603ddba055b153a99604f705ec85e4caf7ee9dd3a",
+      "pixel_compare_absolute_error": "0 (0)"
+    },
+    {
+      "phase": "baseline17-list",
+      "frame": "01-failed-download-selected",
+      "ppm_source_sha256": "d7d1eb0867d293509ac7457f17a1e01541b6c858c743f18543ade1cb8288a87c",
+      "ppm_gzip_archive_sha256": "27c5726a7e1f78a03fb5b917d07ef00f5f4cbd633d6a66c6474efb8822d4c155",
+      "png_archive_sha256": "6e352f0adefaf8bbb0e016a2fb7a0ed55ead95d469fed25a8737d7e48228d6c6",
+      "rgb_sha256": "e08cfee8757d26079c3e9ea66815eec6bcaddcf9836b7f42434287f23f8b702f",
+      "pixel_compare_absolute_error": "0 (0)"
+    }
+  ]
+}

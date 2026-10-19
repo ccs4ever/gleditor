@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+run=$PWD/build/validation-eighteenth/native/candidate18
+dumper=$PWD/build/validation-eighteenth/frozen/xudu-dump
+phase=${1:?phase name}
+dest=$run/checkpoints/$phase
+mkdir -p "$dest"
+source_doc=$(find "$run/data/xudu/xanadocs" -mindepth 1 -maxdepth 1 -type d ! -name default | sort | head -n 1)
+"$dumper" --section=ops --permascroll="$run/data/xuzz/permascroll/default" "$source_doc" > "$dest/source.ops.txt"
+"$dumper" --section=ops --permascroll="$run/data/xuzz/permascroll/default" "$run/data/xudu/activity" > "$dest/activity.ops.txt"
+cp "$run/data/xudu/package-visibility" "$dest/package-visibility.bencode"
+(cd "$run" && sha256sum "${source_doc#"$run"/}/ops.nodes" "${source_doc#"$run"/}/store.tables" "data/xudu/package-visibility") > "$dest/source-package.sha256"
+find "$run/data/xudu/publication-inbox" -maxdepth 2 -type f -printf '%P\n' 2>/dev/null | sort > "$dest/inbox-files.txt" || true
+sha256sum "$dest"/* > "$dest/checkpoint.sha256"

@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+repo=$PWD
+run=$repo/build/validation-eighteenth/native/candidate18
+app=$repo/build/validation-eighteenth/frozen/xuzz
+libdir=$repo/build/validation-eighteenth/frozen
+export SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1
+export XDG_DATA_HOME=$run/data XDG_CONFIG_HOME=$run/config XDG_CACHE_HOME=$run/cache
+export GNUPGHOME=$run/gpg PATH=/tmp/spatial-xvfb/usr/bin:$PATH
+args=(--backend opengl --resize 1440,1000 --profile --wait-ms 5000
+  --chord Ctrl+O --wait-ms 700
+  --key right --key right --key right --key right --key right
+  --key tab --key enter --wait-ms 700 --dump-a11y
+  --capture "$run/raw/13-failed-before-explicit-retry.ppm"
+  --key right --key enter --wait-ms 100 --dump-a11y
+  --capture "$run/raw/14-explicit-retry-immediate.ppm"
+  --wait-ms 1800 --key enter --wait-ms 400 --dump-a11y
+  --capture "$run/raw/15-explicit-retry-refreshed.ppm"
+  --wait-ms 300 --key escape --chord Ctrl+Q)
+printf '%q ' "$app" "${args[@]}" > "$run/argv-process3.txt"
+printf '\n' >> "$run/argv-process3.txt"
+set +e
+LD_LIBRARY_PATH="$libdir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" timeout --signal=TERM --kill-after=5s 300s xvfb-run -a -s '-noreset -screen 0 1600x1200x24' dbus-run-session -- "$app" "${args[@]}" > "$run/logs/process3.log" 2>&1
+code=$?
+set -e
+printf '%s\n' "$code" > "$run/process3.exit"
+exit "$code"

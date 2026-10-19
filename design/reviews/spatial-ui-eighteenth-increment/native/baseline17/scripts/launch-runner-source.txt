@@ -1,0 +1,1 @@
+No standalone shell runner was used for this baseline. The exact command lines are preserved in metadata/argv-process1.txt through metadata/argv-process3.txt; environment.txt preserves the launch environment. The run was driven by direct xuzz key-event arguments. The decoder source is copied as decode-activity.py.txt.

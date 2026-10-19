@@ -1,19 +1,67 @@
 #include "publication_inbox.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <condition_variable>
 #include <fstream>
+#include <limits>
+#include <lmdb.h>
 #include <map>
 #include <mutex>
 #include <set>
 #include <thread>
 
+#include "bencode.hpp"
 #include "store.hpp"
 #include "user_permascroll.hpp"
 
 namespace xanadu {
 namespace {
 using namespace std::chrono_literals;
+using V                                   = bencode::Value;
+constexpr std::string_view journalKey     = "requests";
+constexpr std::size_t maximumJournalBytes = 4 * 1024 * 1024;
+// The title is stored both in the request pin and the visible status record.
+// Keep their combined worst case below the bounded journal envelope.
+constexpr std::size_t maximumTitleBytes = maximumJournalBytes / 2 - 4096;
+std::string boundedDiagnostic(std::string message) {
+  constexpr std::size_t maximumBytes = 4096;
+  if (message.size() <= maximumBytes) return message;
+  constexpr std::string_view suffix = " [truncated at 4096 bytes]";
+  message.resize(maximumBytes - suffix.size());
+  message.append(suffix);
+  return message;
+}
+void dbCheck(int rc) {
+  if (rc != MDB_SUCCESS)
+    throw std::runtime_error("Publication inbox: " +
+                             std::string(mdb_strerror(rc)));
+}
+const V &field(const V &value, std::string_view name) {
+  const auto &dict = value.asDict();
+  const auto found = dict.find(std::string(name));
+  if (found == dict.end())
+    throw PublicationInboxUnreadable("Publication inbox format 1: missing " +
+                                     std::string(name));
+  return found->second;
+}
+bool flag(const V &value) {
+  if (!value.isInteger() || (value.asInteger() != 0 && value.asInteger() != 1))
+    throw PublicationInboxUnreadable(
+        "Publication inbox format 1: invalid boolean");
+  return value.asInteger() != 0;
+}
+std::string hashText(const InfoHash &hash) { return hash.hex(); }
+InfoHash parseHash(const V &value) {
+  if (!value.isString())
+    throw PublicationInboxUnreadable(
+        "Publication inbox format 1: invalid hash field");
+  const auto parsed = InfoHash::parseHex(value.asString());
+  if (!parsed)
+    throw PublicationInboxUnreadable(
+        "Publication inbox format 1: invalid hash");
+  return *parsed;
+}
 void checkCancelled(std::stop_token stop) {
   if (stop.stop_requested()) throw std::runtime_error("Download cancelled");
 }
@@ -156,45 +204,334 @@ struct PublicationInbox::Impl {
     MutableLink link;
     std::optional<MutablePointer> minimum;
     std::optional<PublicationPin> pin;
+    // Caller submission mode; mutable requests may freeze a pin after signed
+    // manifest validation and intentionally retry against that frozen pin.
+    bool exactPin{};
+    std::uint64_t attempt{};
+    bool cancellationRequested{};
     bool verifyRetainedOnly{};
     PublicationDownloadStatus status;
     std::stop_source cancel;
   };
   Options options;
+  std::unique_ptr<MDB_env, decltype(&mdb_env_close)> env{nullptr,
+                                                         mdb_env_close};
+  MDB_dbi db{};
   mutable std::mutex guard;
   mutable std::condition_variable changed;
   std::map<std::string, Job> jobs;
   std::jthread worker;
 
+  static V encodeJob(const Job &job) {
+    const auto &status = job.status;
+    const auto &pin    = job.pin;
+    if (status.id.size() != 64 || !PublicKey::parseHex(status.id) ||
+        job.attempt > static_cast<std::uint64_t>(
+                          std::numeric_limits<std::int64_t>::max()) ||
+        status.error.size() > 4096 || status.title.size() > maximumTitleBytes ||
+        (pin && pin->title.size() > maximumTitleBytes))
+      throw std::runtime_error(
+          "Publication inbox request metadata exceeds its format limit");
+    const auto minimumHash = job.minimum ? job.minimum->hash : InfoHash{};
+    return V::dict({
+        {"attempt", V::integer(static_cast<std::int64_t>(job.attempt))},
+        {"cancel_requested", V::integer(job.cancellationRequested)},
+        {"exact", V::integer(job.exactPin)},
+        {"error", V::string(status.error)},
+        {"id", V::string(status.id)},
+        {"manifest", V::string(hashText(status.manifestHash))},
+        {"minimum_hash", V::string(hashText(minimumHash))},
+        {"minimum_sequence",
+         V::integer(job.minimum ? job.minimum->sequence : -1)},
+        {"phase", V::integer(static_cast<int>(status.phase))},
+        {"pin_hash", V::string(pin ? hashText(pin->hash) : std::string{})},
+        {"pin_publisher",
+         V::string(pin ? pin->publisher.hex() : PublicKey{}.hex())},
+        {"pin_salt", V::string(pin ? pin->salt : std::string{})},
+        {"pin_sequence", V::integer(pin ? pin->sequence : -1)},
+        {"pin_title", V::string(pin ? pin->title : std::string{})},
+        {"pin_version", V::string(pin ? pin->version.str() : std::string{})},
+        {"pinned", V::integer(pin.has_value())},
+        {"sequence", V::integer(status.sequence)},
+        {"title", V::string(status.title)},
+        {"uri", V::string(status.uri)},
+        {"verification", V::integer(static_cast<int>(status.verification))},
+        {"version", V::string(status.version.str())},
+    });
+  }
+
+  void validateRetainedPaths(const std::filesystem::path &root) const {
+    std::error_code error;
+    const auto rootStatus = std::filesystem::symlink_status(root, error);
+    if (error == std::errc::no_such_file_or_directory ||
+        rootStatus.type() == std::filesystem::file_type::not_found)
+      return;
+    if (error || std::filesystem::is_symlink(rootStatus) ||
+        !std::filesystem::is_directory(rootStatus))
+      throw PublicationInboxUnreadable(
+          "Publication inbox format 1: unsafe retained snapshot root");
+    for (std::filesystem::recursive_directory_iterator it(root), end; it != end;
+         ++it) {
+      if (it->is_symlink())
+        throw PublicationInboxUnreadable(
+            "Publication inbox format 1: symlink in retained snapshot");
+    }
+  }
+
+  Job decodeJob(const V &record) const {
+    if (!record.isDict() || record.asDict().size() != 21)
+      throw PublicationInboxUnreadable(
+          "Publication inbox format 1: invalid request fields");
+    Job job;
+    auto &status        = job.status;
+    status.id           = field(record, "id").asString();
+    status.uri          = field(record, "uri").asString();
+    job.link            = MutableLink::parse(status.uri);
+    const auto parsedId = PublicKey::parseHex(status.id);
+    if (!parsedId || parsedId->hex() != status.id || job.link.key.isZero() ||
+        job.link.salt.empty() || job.link.salt.size() > 64)
+      throw PublicationInboxUnreadable(
+          "Publication inbox format 1: invalid request identity");
+    status.title    = field(record, "title").asString();
+    status.sequence = field(record, "sequence").asInteger();
+    status.version = MicroversionId::parse(field(record, "version").asString());
+    status.manifestHash     = parseHash(field(record, "manifest"));
+    status.error            = field(record, "error").asString();
+    const auto phase        = field(record, "phase").asInteger();
+    const auto verification = field(record, "verification").asInteger();
+    const auto attempt      = field(record, "attempt").asInteger();
+    if (status.error.size() > 4096 || status.title.size() > maximumTitleBytes ||
+        status.sequence < -1 || phase < 0 ||
+        phase > static_cast<int>(PublicationDownloadPhase::Cancelled) ||
+        verification < 0 ||
+        verification >
+            static_cast<int>(PublicationDownloadVerification::Complete) ||
+        attempt < 0)
+      throw PublicationInboxUnreadable(
+          "Publication inbox format 1: invalid phase or attempt");
+    status.phase = static_cast<PublicationDownloadPhase>(phase);
+    status.verification =
+        static_cast<PublicationDownloadVerification>(verification);
+    job.attempt                = static_cast<std::uint64_t>(attempt);
+    job.cancellationRequested  = flag(field(record, "cancel_requested"));
+    job.exactPin               = flag(field(record, "exact"));
+    const bool pinned          = flag(field(record, "pinned"));
+    const auto minimumSequence = field(record, "minimum_sequence").asInteger();
+    const auto minimumHash     = parseHash(field(record, "minimum_hash"));
+    if (minimumSequence >= 0) {
+      if (minimumHash.isZero())
+        throw PublicationInboxUnreadable(
+            "Publication inbox format 1: invalid mutable lower bound");
+      job.minimum = MutablePointer{minimumHash, minimumSequence};
+    } else if (minimumSequence != -1 || !minimumHash.isZero()) {
+      throw PublicationInboxUnreadable(
+          "Publication inbox format 1: invalid empty lower bound");
+    }
+    if (pinned) {
+      const auto publisher =
+          PublicKey::parseHex(field(record, "pin_publisher").asString());
+      if (!publisher)
+        throw PublicationInboxUnreadable(
+            "Publication inbox format 1: invalid pinned publisher");
+      PublicationPin pin{.publisher = *publisher,
+                         .salt      = field(record, "pin_salt").asString(),
+                         .hash      = parseHash(field(record, "pin_hash")),
+                         .sequence  = field(record, "pin_sequence").asInteger(),
+                         .version   = MicroversionId::parse(
+                             field(record, "pin_version").asString()),
+                         .title = field(record, "pin_title").asString()};
+      if (pin.publisher != job.link.key || pin.salt != job.link.salt ||
+          pin.hash.isZero() || pin.sequence < 0 || pin.salt.empty() ||
+          pin.salt.size() > 64 || pin.title.size() > maximumTitleBytes)
+        throw PublicationInboxUnreadable(
+            "Publication inbox format 1: invalid publication pin");
+      job.pin    = pin;
+      status.pin = pin;
+    } else if (job.exactPin || !field(record, "pin_hash").asString().empty() ||
+               !field(record, "pin_salt").asString().empty() ||
+               field(record, "pin_sequence").asInteger() != -1 ||
+               !field(record, "pin_title").asString().empty() ||
+               !field(record, "pin_version").asString().empty()) {
+      throw PublicationInboxUnreadable(
+          "Publication inbox format 1: inconsistent empty publication pin");
+    }
+    if (job.exactPin && !pinned)
+      throw PublicationInboxUnreadable(
+          "Publication inbox format 1: exact request lacks pin");
+    if ((status.verification != PublicationDownloadVerification::Unchecked &&
+         (!job.pin || status.manifestHash.isZero() ||
+          status.manifestHash != job.pin->hash ||
+          status.title != job.pin->title ||
+          status.sequence != job.pin->sequence ||
+          status.version != job.pin->version)) ||
+        (!status.manifestHash.isZero() &&
+         (!job.pin || status.manifestHash != job.pin->hash)) ||
+        (!status.title.empty() && job.pin && status.title != job.pin->title) ||
+        (status.sequence >= 0 && job.pin &&
+         status.sequence != job.pin->sequence) ||
+        (status.version != MicroversionId{} && job.pin &&
+         status.version != job.pin->version) ||
+        (!job.pin && (!status.title.empty() || status.sequence != -1 ||
+                      status.version != MicroversionId{})) ||
+        (job.minimum && job.pin &&
+         (job.minimum->hash != job.pin->hash ||
+          job.minimum->sequence != job.pin->sequence)) ||
+        ((status.phase == PublicationDownloadPhase::Ready) !=
+         (status.verification == PublicationDownloadVerification::Complete)))
+      throw PublicationInboxUnreadable(
+          "Publication inbox format 1: inconsistent request pin status");
+    job.verifyRetainedOnly = false;
+    const auto root        = options.directory / status.id;
+    validateRetainedPaths(root);
+    const auto manifest    = root / "publication.xanadoc";
+    job.verifyRetainedOnly = std::filesystem::exists(manifest);
+    if (job.verifyRetainedOnly) {
+      status.storePath = options.directory / status.id / "store";
+      if (!job.pin)
+        throw PublicationInboxUnreadable(
+            "Publication inbox format 1: retained request lacks exact pin");
+      if (!std::filesystem::exists(root / "store" / "store.tables"))
+        throw PublicationInboxUnreadable(
+            "Publication inbox format 1: retained store tables are missing");
+    }
+    return job;
+  }
+
+  std::string encodeJournal() const {
+    bencode::List records;
+    for (const auto &[id, job] : jobs) {
+      (void)id;
+      records.push_back(encodeJob(job));
+    }
+    return "XPI1" +
+           V::dict({{"requests", V::list(std::move(records))}}).encode();
+  }
+
+  void persist() {
+    const auto encoded = encodeJournal();
+    if (encoded.size() > maximumJournalBytes)
+      throw std::runtime_error("Publication inbox request journal is full");
+    MDB_txn *raw{};
+    dbCheck(mdb_txn_begin(env.get(), nullptr, 0, &raw));
+    std::unique_ptr<MDB_txn, decltype(&mdb_txn_abort)> txn(raw, mdb_txn_abort);
+    std::string key(journalKey);
+    MDB_val dbKey{key.size(), key.data()};
+    MDB_val value{encoded.size(), const_cast<char *>(encoded.data())};
+    dbCheck(mdb_put(txn.get(), db, &dbKey, &value, 0));
+    dbCheck(mdb_txn_commit(txn.release()));
+  }
+
   explicit Impl(Options supplied) : options(std::move(supplied)) {
     if (options.directory.empty() || !options.maximumManifestBytes ||
-        !options.maximumDependencyBytes || !options.maximumDependencies)
+        !options.maximumDependencyBytes || !options.maximumDependencies ||
+        !options.maximumRequests)
       throw std::invalid_argument("Invalid publication inbox options");
+    if (std::filesystem::is_symlink(options.directory))
+      throw PublicationInboxUnreadable(
+          "Publication inbox format 1: unsafe cache root");
     std::filesystem::create_directories(options.directory);
-    // Interrupted requests are not subscriptions and are never silently
-    // resolved again at startup. Retained dependencies are verified by the
-    // worker before a restored snapshot is exposed as Ready.
+    if (std::filesystem::is_symlink(options.directory / "data.mdb") ||
+        std::filesystem::is_symlink(options.directory / "lock.mdb"))
+      throw PublicationInboxUnreadable(
+          "Publication inbox format 1: unsafe LMDB file");
+    MDB_env *raw{};
+    dbCheck(mdb_env_create(&raw));
+    env.reset(raw);
+    dbCheck(mdb_env_set_mapsize(raw, 16ULL * 1024 * 1024));
+    dbCheck(mdb_env_open(raw, options.directory.string().c_str(), 0, 0600));
+    MDB_txn *readRaw{};
+    dbCheck(mdb_txn_begin(raw, nullptr, MDB_RDONLY, &readRaw));
+    std::unique_ptr<MDB_txn, decltype(&mdb_txn_abort)> readTxn(readRaw,
+                                                               mdb_txn_abort);
+    dbCheck(mdb_dbi_open(readTxn.get(), nullptr, 0, &db));
+    std::string key(journalKey);
+    MDB_val dbKey{key.size(), key.data()}, value{};
+    const auto found = mdb_get(readTxn.get(), db, &dbKey, &value);
+    bool hadJournal  = found == MDB_SUCCESS;
+    if (hadJournal) {
+      const std::string_view bytes(static_cast<const char *>(value.mv_data),
+                                   value.mv_size);
+      if (bytes.size() < 4 || !bytes.starts_with("XPI"))
+        throw PublicationInboxUnreadable(
+            "Publication inbox format 1: XPI signature missing");
+      if (bytes[3] != '1')
+        throw PublicationInboxUnreadable(
+            "Publication inbox version 1 expected, got byte " +
+            std::to_string(static_cast<unsigned char>(bytes[3])));
+      if (bytes.size() > maximumJournalBytes)
+        throw PublicationInboxUnreadable(
+            "Publication inbox format 1: journal byte limit exceeded");
+      try {
+        const auto root = bencode::decode(bytes.substr(4));
+        if (!root.isDict() || root.asDict().size() != 1)
+          throw std::runtime_error("unexpected journal fields");
+        const auto &records = field(root, "requests");
+        if (!records.isList() ||
+            records.asList().size() > options.maximumRequests)
+          throw std::runtime_error("request count limit exceeded");
+        for (const auto &record : records.asList()) {
+          auto job = decodeJob(record);
+          if (!jobs.emplace(job.status.id, std::move(job)).second)
+            throw std::runtime_error("duplicate request ID");
+        }
+      } catch (const PublicationInboxUnreadable &) {
+        throw;
+      } catch (const std::exception &error) {
+        throw PublicationInboxUnreadable("Publication inbox format 1: " +
+                                         std::string(error.what()));
+      }
+    } else if (found != MDB_NOTFOUND) {
+      dbCheck(found);
+    }
+    readTxn.reset();
+
+    // Import completed snapshots created before the request journal existed.
+    // Their identities come only from their signed manifest and carrier hash.
     for (const auto &entry :
          std::filesystem::directory_iterator(options.directory)) {
+      if (entry.is_symlink())
+        throw PublicationInboxUnreadable(
+            "Publication inbox format 1: symlink in cache root");
       const auto manifestPath = entry.path() / "publication.xanadoc";
-      if (!entry.is_directory() || !std::filesystem::exists(manifestPath))
-        continue;
-      const auto id = entry.path().filename().string();
-      if (!PublicKey::parseHex(id) || std::filesystem::is_symlink(entry.path()))
-        throw std::runtime_error(
-            "Publication inbox: invalid retained snapshot directory");
+      if (!entry.is_directory()) continue;
+      const auto id            = entry.path().filename().string();
+      const auto attemptMarker = id.find(".attempt-");
+      if (attemptMarker != std::string::npos) {
+        const auto requestId     = id.substr(0, attemptMarker);
+        const auto attemptText   = id.substr(attemptMarker + 9);
+        const auto parsedRequest = PublicKey::parseHex(requestId);
+        std::uint64_t attemptNumber{};
+        const auto parsedAttempt = std::from_chars(
+            attemptText.data(), attemptText.data() + attemptText.size(),
+            attemptNumber);
+        if (parsedRequest && parsedRequest->hex() == requestId &&
+            jobs.contains(requestId) && !attemptText.empty() &&
+            parsedAttempt.ec == std::errc{} &&
+            parsedAttempt.ptr == attemptText.data() + attemptText.size() &&
+            std::to_string(attemptNumber) == attemptText &&
+            attemptNumber <= jobs.at(requestId).attempt) {
+          validateRetainedPaths(entry.path());
+          continue;
+        }
+      }
+      const auto parsedId = PublicKey::parseHex(id);
+      if (!parsedId || parsedId->hex() != id)
+        throw PublicationInboxUnreadable(
+            "Publication inbox format 1: invalid retained snapshot directory");
+      validateRetainedPaths(entry.path());
+      if (!std::filesystem::exists(manifestPath)) continue;
       if (std::filesystem::file_size(manifestPath) >
           options.maximumManifestBytes)
-        throw std::runtime_error(
-            "Publication inbox: retained manifest exceeds byte limit");
+        throw PublicationInboxUnreadable(
+            "Publication inbox format 1: retained manifest exceeds byte limit");
       std::ifstream manifest(manifestPath, std::ios::binary);
       const std::string encoded{std::istreambuf_iterator<char>(manifest),
                                 std::istreambuf_iterator<char>()};
       const auto pub = decodePublication(encoded);
       if (!pub ||
           !std::filesystem::exists(entry.path() / "store" / "store.tables"))
-        throw std::runtime_error(
-            "Publication inbox: invalid retained signed snapshot");
+        throw PublicationInboxUnreadable(
+            "Publication inbox format 1: invalid retained signed snapshot");
       const std::vector<TorrentContent> files{
           {.path = "publication.xanadoc", .data = encoded}};
       const auto hash = makeTorrent(files, "publication").hash;
@@ -219,7 +556,64 @@ struct PublicationInbox::Impl {
       job.status.version      = pub->version;
       job.status.sequence     = pub->sequence;
       job.status.manifestHash = hash;
-      jobs.emplace(id, std::move(job));
+      const auto foundJob     = jobs.find(id);
+      if (foundJob == jobs.end()) {
+        if (jobs.size() >= options.maximumRequests)
+          throw PublicationInboxUnreadable(
+              "Publication inbox format 1: request count limit exceeded");
+        jobs.emplace(id, std::move(job));
+      } else {
+        if (!foundJob->second.pin || *foundJob->second.pin != *job.pin)
+          throw PublicationInboxUnreadable(
+              "Publication inbox format 1: installed snapshot does not match "
+              "request pin");
+        foundJob->second.verifyRetainedOnly  = true;
+        foundJob->second.status.storePath    = entry.path() / "store";
+        foundJob->second.status.version      = pub->version;
+        foundJob->second.status.sequence     = pub->sequence;
+        foundJob->second.status.manifestHash = hash;
+        if (foundJob->second.status.phase != PublicationDownloadPhase::Failed &&
+            foundJob->second.status.phase !=
+                PublicationDownloadPhase::Cancelled) {
+          foundJob->second.status.phase = PublicationDownloadPhase::Queued;
+          foundJob->second.status.verification =
+              PublicationDownloadVerification::ManifestVerified;
+          foundJob->second.status.error.clear();
+        }
+      }
+    }
+    for (auto &[id, job] : jobs) {
+      (void)id;
+      if (job.status.phase == PublicationDownloadPhase::Ready &&
+          !job.verifyRetainedOnly) {
+        job.status.phase        = PublicationDownloadPhase::Failed;
+        job.status.verification = PublicationDownloadVerification::Unchecked;
+        job.status.error =
+            "Installed publication snapshot is missing; retained request "
+            "was not opened";
+      }
+    }
+    if (!hadJournal && !jobs.empty()) persist();
+    if (hadJournal) {
+      for (auto &[id, job] : jobs) {
+        (void)id;
+        if (job.verifyRetainedOnly) {
+          if (job.status.phase != PublicationDownloadPhase::Failed &&
+              job.status.phase != PublicationDownloadPhase::Cancelled) {
+            job.status.phase = PublicationDownloadPhase::Queued;
+            job.status.verification =
+                PublicationDownloadVerification::ManifestVerified;
+            job.status.error.clear();
+          }
+        } else if (job.status.phase != PublicationDownloadPhase::Ready &&
+                   job.status.phase != PublicationDownloadPhase::Failed &&
+                   job.status.phase != PublicationDownloadPhase::Cancelled) {
+          job.status.phase = PublicationDownloadPhase::Cancelled;
+          job.status.error =
+              "Interrupted when the application closed; retry explicitly";
+        }
+      }
+      persist();
     }
     worker = std::jthread([this](std::stop_token stop) { run(stop); });
   }
@@ -232,15 +626,46 @@ struct PublicationInbox::Impl {
     changed.notify_all();
     worker.join();
   }
-  template <class Fun> void update(const std::string &id, Fun fun) {
+  template <class Fun>
+  void update(const std::string &id, Fun fun, bool durable = true,
+              std::optional<std::uint64_t> expectedAttempt = std::nullopt) {
     const std::scoped_lock lock(guard);
-    fun(jobs.at(id).status);
+    auto &job = jobs.at(id);
+    if (expectedAttempt && job.attempt != *expectedAttempt) return;
+    const auto prior = job.status;
+    fun(job.status);
+    if (durable) {
+      try {
+        persist();
+      } catch (...) {
+        job.status = prior;
+        throw;
+      }
+    }
+    changed.notify_all();
+  }
+  template <class Fun>
+  void mutate(const std::string &id, Fun fun,
+              std::optional<std::uint64_t> expectedAttempt = std::nullopt) {
+    const std::scoped_lock lock(guard);
+    auto &job = jobs.at(id);
+    if (expectedAttempt && job.attempt != *expectedAttempt) return;
+    const auto prior = job;
+    fun(job);
+    try {
+      persist();
+    } catch (...) {
+      job = prior;
+      throw;
+    }
     changed.notify_all();
   }
   void download(Job job) {
     const auto id   = job.status.id;
     const auto stop = job.cancel.get_token();
     const auto root = options.directory / id;
+    const auto attemptRoot =
+        options.directory / (id + ".attempt-" + std::to_string(job.attempt));
     try {
       checkCancelled(stop);
       if (job.verifyRetainedOnly) {
@@ -259,10 +684,13 @@ struct PublicationInbox::Impl {
         if (makeTorrent(files, "publication").hash != job.pin->hash)
           throw std::runtime_error(
               "Retained publication carrier hash does not match its citation");
-        update(id, [&](auto &status) {
-          status.verification =
-              PublicationDownloadVerification::ManifestVerified;
-        });
+        update(
+            id,
+            [&](auto &status) {
+              status.verification =
+                  PublicationDownloadVerification::ManifestVerified;
+            },
+            true, job.attempt);
         const auto published = root / "store" / "published";
         const auto dependencies =
             reviewPublicationDependencies(*pub, {published});
@@ -340,12 +768,15 @@ struct PublicationInbox::Impl {
               "Retained native deployment segments do not match the signed "
               "publication");
         checkCancelled(stop);
-        update(id, [&](auto &status) {
-          checkCancelled(stop);
-          status.phase        = PublicationDownloadPhase::Ready;
-          status.verification = PublicationDownloadVerification::Complete;
-          status.storePath    = root / "store";
-        });
+        update(
+            id,
+            [&](auto &status) {
+              checkCancelled(stop);
+              status.phase        = PublicationDownloadPhase::Ready;
+              status.verification = PublicationDownloadVerification::Complete;
+              status.storePath    = root / "store";
+            },
+            true, job.attempt);
         return;
       }
       if (!options.makeTransport)
@@ -354,7 +785,11 @@ struct PublicationInbox::Impl {
             "has not been checked.");
       // Each attempt owns a fresh session and cache. A failed attempt cannot
       // share active torrent writers with verified installation or a retry.
-      std::filesystem::remove_all(root);
+      if (std::filesystem::exists(root))
+        throw std::runtime_error(
+            "An installed publication already occupies this request ID");
+      validateRetainedPaths(attemptRoot);
+      std::filesystem::create_directories(attemptRoot);
       auto transport = options.makeTransport();
       if (!transport)
         throw std::runtime_error("Publication transport unavailable");
@@ -366,7 +801,11 @@ struct PublicationInbox::Impl {
                            pointer.hash != job.minimum->hash)))
         throw std::runtime_error("Publication pointer rolls back or conflicts "
                                  "with the subscription's observed sequence");
-      const auto cache = root / "cache";
+      if (!job.pin)
+        mutate(
+            id, [&](auto &current) { current.minimum = pointer; }, job.attempt);
+      checkCancelled(stop);
+      const auto cache = attemptRoot / "cache";
       transport->fetch(pointer.hash, cache / pointer.hash.hex(),
                        options.maximumManifestBytes, stop);
       const auto seed =
@@ -392,16 +831,20 @@ struct PublicationInbox::Impl {
                                        .sequence  = pub->sequence,
                                        .version   = pub->version,
                                        .title     = pub->title};
-      {
-        const std::scoped_lock lock(guard);
-        auto &current               = jobs.at(id);
-        current.pin                 = verifiedPin;
-        current.status.pin          = verifiedPin;
-        current.status.manifestHash = pointer.hash;
-        current.status.verification =
-            PublicationDownloadVerification::ManifestVerified;
-        changed.notify_all();
-      }
+      mutate(
+          id,
+          [&](auto &current) {
+            current.pin                 = verifiedPin;
+            current.status.pin          = verifiedPin;
+            current.status.title        = pub->title;
+            current.status.sequence     = pub->sequence;
+            current.status.version      = pub->version;
+            current.status.manifestHash = pointer.hash;
+            current.status.verification =
+                PublicationDownloadVerification::ManifestVerified;
+          },
+          job.attempt);
+      checkCancelled(stop);
       std::set<InfoHash> dependencies;
       for (const auto &[name, scroll] : pub->scrolls) {
         (void)name;
@@ -412,11 +855,14 @@ struct PublicationInbox::Impl {
         dependencies.insert(segment.torrent);
       if (dependencies.size() > options.maximumDependencies)
         throw std::runtime_error("Publication has too many dependencies");
-      update(id, [&](auto &status) {
-        status.title           = pub->title;
-        status.phase           = PublicationDownloadPhase::Downloading;
-        status.dependencyCount = dependencies.size();
-      });
+      update(
+          id,
+          [&](auto &status) {
+            status.title           = pub->title;
+            status.phase           = PublicationDownloadPhase::Downloading;
+            status.dependencyCount = dependencies.size();
+          },
+          true, job.attempt);
       auto remaining = options.maximumDependencyBytes;
       for (const auto &hash : dependencies) {
         checkCancelled(stop);
@@ -426,47 +872,88 @@ struct PublicationInbox::Impl {
           throw std::runtime_error(
               "Publication dependencies exceed configured byte limit");
         remaining -= dependency.bytes;
-        update(id, [](auto &status) { ++status.completedDependencies; });
+        update(
+            id, [](auto &status) { ++status.completedDependencies; }, false,
+            job.attempt);
       }
       // Destroy the session before copying retained files: libtorrent flushes
       // disk writes at shutdown, and the installer requires stable bytes.
       transport.reset();
       checkCancelled(stop);
-      update(id, [](auto &status) {
-        status.phase = PublicationDownloadPhase::Verifying;
-      });
-      (void)installPublication(
-          *pub, {cache}, std::make_shared<UserPermascroll>(), root / "store");
+      update(
+          id,
+          [](auto &status) {
+            status.phase = PublicationDownloadPhase::Verifying;
+          },
+          true, job.attempt);
+      (void)installPublication(*pub, {cache},
+                               std::make_shared<UserPermascroll>(),
+                               attemptRoot / "store");
       checkCancelled(stop);
       std::filesystem::remove_all(cache);
-      std::ofstream manifest(root / "publication.xanadoc.partial",
+      std::ofstream manifest(attemptRoot / "publication.xanadoc.partial",
                              std::ios::binary);
       manifest << encoded;
       manifest.close();
       if (!manifest)
         throw std::runtime_error("Cannot retain signed publication manifest");
-      update(id, [&](auto &status) {
-        checkCancelled(stop);
-        std::filesystem::rename(root / "publication.xanadoc.partial",
-                                root / "publication.xanadoc");
-        status.phase        = PublicationDownloadPhase::Ready;
-        status.verification = PublicationDownloadVerification::Complete;
-        status.version      = pub->version;
-        status.sequence     = pub->sequence;
-        status.manifestHash = pointer.hash;
-        status.storePath    = root / "store";
-      });
+      update(
+          id,
+          [&](auto &status) {
+            checkCancelled(stop);
+            std::filesystem::rename(attemptRoot / "publication.xanadoc.partial",
+                                    attemptRoot / "publication.xanadoc");
+            if (std::filesystem::exists(root))
+              throw std::runtime_error(
+                  "Publication snapshot root already exists");
+            std::filesystem::rename(attemptRoot, root);
+            status.phase        = PublicationDownloadPhase::Ready;
+            status.verification = PublicationDownloadVerification::Complete;
+            status.version      = pub->version;
+            status.sequence     = pub->sequence;
+            status.manifestHash = pointer.hash;
+            status.storePath    = root / "store";
+          },
+          true, job.attempt);
     } catch (const std::exception &error) {
-      if (!job.verifyRetainedOnly) {
-        std::error_code ignored;
-        std::filesystem::remove_all(root, ignored);
+      try {
+        mutate(
+            id,
+            [&](auto &current) {
+              auto &status = current.status;
+              if (status.phase == PublicationDownloadPhase::Ready) return;
+              status.phase = stop.stop_requested()
+                                 ? PublicationDownloadPhase::Cancelled
+                                 : PublicationDownloadPhase::Failed;
+              status.error = stop.stop_requested()
+                                 ? (current.cancellationRequested
+                                        ? "Cancelled by reader"
+                                        : "Interrupted when the application "
+                                          "closed; retry explicitly")
+                                 : boundedDiagnostic(error.what());
+            },
+            job.attempt);
+      } catch (const std::exception &persistError) {
+        const std::scoped_lock lock(guard);
+        auto &status = jobs.at(id).status;
+        if (status.phase != PublicationDownloadPhase::Ready) {
+          const bool readerCancelled = jobs.at(id).cancellationRequested;
+          status.phase               = stop.stop_requested()
+                                           ? PublicationDownloadPhase::Cancelled
+                                           : PublicationDownloadPhase::Failed;
+          status.error =
+              stop.stop_requested()
+                  ? (readerCancelled ? "Cancelled by reader; request state "
+                                       "could not be saved"
+                                     : "Interrupted when the application "
+                                       "closed; request state could not be "
+                                       "saved")
+                  : boundedDiagnostic(std::string(error.what()) +
+                                      "; request state could not be saved: " +
+                                      persistError.what());
+        }
+        changed.notify_all();
       }
-      update(id, [&](auto &status) {
-        status.phase = stop.stop_requested()
-                           ? PublicationDownloadPhase::Cancelled
-                           : PublicationDownloadPhase::Failed;
-        status.error = error.what();
-      });
     }
   }
   void run(std::stop_token stop) {
@@ -486,7 +973,17 @@ struct PublicationInbox::Impl {
       next->second.status.phase = next->second.verifyRetainedOnly
                                       ? PublicationDownloadPhase::Verifying
                                       : PublicationDownloadPhase::Resolving;
-      const auto job            = next->second;
+      try {
+        persist();
+      } catch (const std::exception &error) {
+        next->second.status.phase = PublicationDownloadPhase::Failed;
+        next->second.status.error = boundedDiagnostic(
+            std::string("Cannot save publication request state: ") +
+            error.what());
+        changed.notify_all();
+        continue;
+      }
+      const auto job = next->second;
       changed.notify_all();
       lock.unlock();
       download(job);
@@ -505,6 +1002,8 @@ std::string PublicationInbox::submit(const MutableLink &link,
   if (minimum && (minimum->sequence < 0 || minimum->hash.isZero()))
     throw std::invalid_argument("Invalid subscription pointer lower bound");
   const std::scoped_lock lock(impl_->guard);
+  if (impl_->jobs.size() >= impl_->options.maximumRequests)
+    throw std::length_error("Publication inbox request limit reached");
   std::string id;
   do {
     id = createMutableKeys().publicKey.hex();
@@ -516,17 +1015,26 @@ std::string PublicationInbox::submit(const MutableLink &link,
   job.status.id  = id;
   job.status.uri = link.uri();
   impl_->jobs.emplace(id, std::move(job));
+  try {
+    impl_->persist();
+  } catch (...) {
+    impl_->jobs.erase(id);
+    throw;
+  }
   impl_->changed.notify_all();
   return id;
 }
 std::string PublicationInbox::submitPinned(const PublicationPin &pin) {
   if (pin.publisher.isZero() || pin.salt.empty() || pin.salt.size() > 64 ||
-      pin.hash.isZero() || pin.sequence < 0)
+      pin.hash.isZero() || pin.sequence < 0 ||
+      pin.title.size() > maximumTitleBytes)
     throw std::invalid_argument("Invalid pinned publication");
   const std::scoped_lock lock(impl_->guard);
   for (const auto &[existingId, job] : impl_->jobs) {
     if (job.status.pin == pin) return existingId;
   }
+  if (impl_->jobs.size() >= impl_->options.maximumRequests)
+    throw std::length_error("Publication inbox request limit reached");
   std::string id;
   do {
     id = createMutableKeys().publicKey.hex();
@@ -540,7 +1048,14 @@ std::string PublicationInbox::submitPinned(const PublicationPin &pin) {
   job.status.id               = id;
   job.status.uri              = job.link.uri();
   job.status.pin              = pin;
+  job.exactPin                = true;
   impl_->jobs.emplace(id, std::move(job));
+  try {
+    impl_->persist();
+  } catch (...) {
+    impl_->jobs.erase(id);
+    throw;
+  }
   impl_->changed.notify_all();
   return id;
 }
@@ -551,9 +1066,18 @@ void PublicationInbox::cancel(std::string_view id) {
       job.status.phase == PublicationDownloadPhase::Failed ||
       job.status.phase == PublicationDownloadPhase::Cancelled)
     return;
+  const auto prior  = job;
+  const bool queued = job.status.phase == PublicationDownloadPhase::Queued;
+  job.cancellationRequested = true;
+  if (queued) job.status.phase = PublicationDownloadPhase::Cancelled;
+  job.status.error = queued ? "Cancelled by reader" : "Cancellation requested";
+  try {
+    impl_->persist();
+  } catch (...) {
+    job = prior;
+    throw;
+  }
   job.cancel.request_stop();
-  if (job.status.phase == PublicationDownloadPhase::Queued)
-    job.status.phase = PublicationDownloadPhase::Cancelled;
   impl_->changed.notify_all();
 }
 void PublicationInbox::retry(std::string_view id) {
@@ -562,13 +1086,25 @@ void PublicationInbox::retry(std::string_view id) {
   if (job.status.phase != PublicationDownloadPhase::Failed &&
       job.status.phase != PublicationDownloadPhase::Cancelled)
     throw std::logic_error("Only failed or cancelled downloads can be retried");
+  if (job.attempt >=
+      static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()))
+    throw std::overflow_error("Publication retry counter exhausted");
+  const auto prior                 = job;
   job.cancel                       = std::stop_source{};
+  job.cancellationRequested        = false;
   job.status.phase                 = PublicationDownloadPhase::Queued;
   job.status.completedDependencies = 0;
   job.status.dependencyCount       = 0;
   job.status.verification          = PublicationDownloadVerification::Unchecked;
   if (!job.verifyRetainedOnly) job.status.manifestHash = {};
   job.status.error.clear();
+  ++job.attempt;
+  try {
+    impl_->persist();
+  } catch (...) {
+    job = prior;
+    throw;
+  }
   impl_->changed.notify_all();
 }
 std::vector<PublicationDownloadStatus> PublicationInbox::statuses() const {
