@@ -23,6 +23,7 @@
 #include "common/xanadu/zigzag/cell_views.hpp"
 #include "common/xanadu/zigzag/dimension_registry.hpp"
 #include "publication.hpp"
+#include "session_container.hpp"
 #include "store_tables.hpp"
 #include "user_permascroll.hpp"
 #include "windows_quoting.hpp"
@@ -1389,9 +1390,11 @@ void Store::setProvenance(SignedProvenance prov, const SigningOptions &where) {
 
 ResolveResult Store::resolve(const PrimediaSpan &span) const {
   if (span.isLocal()) {
-    if (!bootstrapPermascrollKey_.empty() && userPermascroll_->size() == 0 &&
-        bootstrapReader_) {
-      return bootstrapReader_(span);
+    if (!bootstrapPermascrollKey_.empty() && bootstrapReader_) {
+      auto bRes = bootstrapReader_(span);
+      if (bRes.status == ResolutionStatus::VerifiedBytes) {
+        return bRes;
+      }
     }
     return ResolveResult{.status = ResolutionStatus::VerifiedBytes,
                          .text   = userPermascroll_->read(span)};
@@ -1426,9 +1429,11 @@ ResolveResult Store::resolve(const PrimediaSpan &span) const {
 
 std::string Store::read(const PrimediaSpan &span) const {
   if (span.isLocal()) {
-    if (!bootstrapPermascrollKey_.empty() && userPermascroll_->size() == 0 &&
-        bootstrapReader_) {
-      return bootstrapReader_(span).text;
+    if (!bootstrapPermascrollKey_.empty() && bootstrapReader_) {
+      auto bRes = bootstrapReader_(span);
+      if (bRes.status == ResolutionStatus::VerifiedBytes) {
+        return bRes.text;
+      }
     }
     return userPermascroll_->read(span);
   }
@@ -3969,29 +3974,7 @@ void Store::save(const std::string &directory) const {
     // different times -- both are per-store side tables replayed at load --
     // and being plaintext was buying only that they could be read with `less`,
     // which tools/xudu-dump buys back. See R11 and store_tables.hpp.
-    std::vector<ScrollSegment> deploymentSegments = localSegments.segments;
-    for (const auto &sc : externals) {
-      for (const auto &seg : sc.segments) {
-        if (!seg.path.empty() || !seg.torrent.isZero()) {
-          bool already = false;
-          for (const auto &existing : deploymentSegments) {
-            if (existing == seg) {
-              already = true;
-              break;
-            }
-          }
-          if (!already) {
-            deploymentSegments.push_back(seg);
-          }
-        }
-      }
-    }
-    writeStoreTables(
-        dir / storeTablesName,
-        StoreTables{.documentId           = documentId_,
-                    .localSegments        = deploymentSegments,
-                    .deployedScrolls      = externals,
-                    .publishedLocalScroll = publishedLocalScroll_});
+    writeStoreTables(dir / storeTablesName, storeTables());
     // The files this container replaced, taken with it. Leaving them would
     // leave two answers to what the scrolls are, and load() refuses a
     // directory holding both rather than choosing.
@@ -4002,6 +3985,172 @@ void Store::save(const std::string &directory) const {
       std::filesystem::remove(dir / superseded, ignored);
     }
   }
+}
+
+StoreTables Store::storeTables() const {
+  sealPendingMetadataAsCells();
+  std::vector<ScrollSegment> deploymentSegments = localSegments.segments;
+  for (const auto &sc : externals) {
+    for (const auto &seg : sc.segments) {
+      if (!seg.path.empty() || !seg.torrent.isZero()) {
+        bool already = false;
+        for (const auto &existing : deploymentSegments) {
+          if (existing == seg) {
+            already = true;
+            break;
+          }
+        }
+        if (!already) {
+          deploymentSegments.push_back(seg);
+        }
+      }
+    }
+  }
+  return StoreTables{.documentId           = documentId_,
+                     .localSegments        = std::move(deploymentSegments),
+                     .deployedScrolls      = externals,
+                     .publishedLocalScroll = publishedLocalScroll_};
+}
+
+SpanDependencyAnalysis Store::analyzeSpanDependencies(
+    std::span<const LinkPackage> linkPackages,
+    std::span<const CompactOpNode> explicitOps) const {
+  sealPendingMetadataAsCells();
+  if (!explicitOps.empty()) {
+    return xanadu::analyzeSpanDependencies(explicitOps, linkTable,
+                                           linkPackages);
+  }
+  std::span<const CompactOpNode> ops;
+  if (opsSpool.size() > 0) {
+    ops =
+        std::span<const CompactOpNode>(opsSpool.rawOps() + 1, opsSpool.size());
+  }
+  return xanadu::analyzeSpanDependencies(ops, linkTable, linkPackages);
+}
+
+std::vector<CompactOpNode>
+Store::opsInAncestryOf(std::span<const MicroversionId> targets) const {
+  if (targets.empty() || opsSpool.size() == 0) {
+    return {};
+  }
+  std::set<std::uint32_t> neededIndices;
+  std::vector<std::uint32_t> queue;
+  for (const auto &v : targets) {
+    const auto idx = opsSpool.indexOf(v);
+    if (idx != 0 && idx <= opsSpool.size()) {
+      queue.push_back(idx);
+    }
+  }
+  while (!queue.empty()) {
+    const auto curr = queue.back();
+    queue.pop_back();
+    if (!neededIndices.insert(curr).second) {
+      continue;
+    }
+    const auto *node = opsSpool.get(curr);
+    if (!node) {
+      continue;
+    }
+    if (node->parentIndex != 0 && node->parentIndex < curr) {
+      queue.push_back(node->parentIndex);
+    }
+    if (node->sourceOpIndex != 0 && node->sourceOpIndex <= opsSpool.size()) {
+      queue.push_back(node->sourceOpIndex);
+    }
+  }
+
+  std::vector<CompactOpNode> result;
+  result.reserve(neededIndices.size());
+  for (const auto idx : neededIndices) {
+    const auto *node = opsSpool.get(idx);
+    if (node) {
+      result.push_back(*node);
+    }
+  }
+  return result;
+}
+
+std::vector<MicroversionId>
+Store::resolveVersionTargets(std::span<const std::string> versionOrAliasStrings,
+                             std::span<const std::string> editionNames) const {
+  std::vector<MicroversionId> result;
+  for (const auto &s : versionOrAliasStrings) {
+    std::stringstream ss(s);
+    std::string item;
+    while (std::getline(ss, item, ',')) {
+      while (!item.empty() &&
+             std::isspace(static_cast<unsigned char>(item.front()))) {
+        item.erase(item.begin());
+      }
+      while (!item.empty() &&
+             std::isspace(static_cast<unsigned char>(item.back()))) {
+        item.pop_back();
+      }
+      if (item.empty()) {
+        continue;
+      }
+      if (const auto aliased = resolveAlias(item)) {
+        result.push_back(*aliased);
+      } else {
+        const auto parsed = MicroversionId::parse(item);
+        if (!parsed.isZero()) {
+          result.push_back(parsed);
+        }
+      }
+    }
+  }
+
+  for (const auto &s : editionNames) {
+    std::stringstream ss(s);
+    std::string item;
+    while (std::getline(ss, item, ',')) {
+      while (!item.empty() &&
+             std::isspace(static_cast<unsigned char>(item.front()))) {
+        item.erase(item.begin());
+      }
+      while (!item.empty() &&
+             std::isspace(static_cast<unsigned char>(item.back()))) {
+        item.pop_back();
+      }
+      if (item.empty()) {
+        continue;
+      }
+
+      auto addEditionTargets = [&](const EditionInfo &e) {
+        if (!e.targetVersion.isZero()) {
+          result.push_back(e.targetVersion);
+        }
+        for (std::uint32_t i = opsSpool.size(); i >= 1; --i) {
+          const auto *node = opsSpool.get(i);
+          if (node && node->kind == OpKind::Structure &&
+              structureVerbOf(node->flags) == StructureVerb::SetLink) {
+            if ((e.handle != zigzag::noCell && node->to == e.handle) ||
+                (e.cell != zigzag::noCell && node->to == e.cell)) {
+              const auto opId = opsSpool.idOf(i);
+              if (!opId.isZero()) {
+                result.push_back(opId);
+                break;
+              }
+            }
+          }
+        }
+      };
+
+      auto ed = editionNamed(latest(), item);
+      if (ed) {
+        addEditionTargets(*ed);
+      } else {
+        for (const auto &head : currentVersions()) {
+          ed = editionNamed(head, item);
+          if (ed) {
+            addEditionTargets(*ed);
+            break;
+          }
+        }
+      }
+    }
+  }
+  return result;
 }
 
 void Store::saveOsmicText(const std::string &directory) const {
@@ -4022,29 +4171,7 @@ void Store::saveOsmicText(const std::string &directory) const {
     // scroll and link tables being plaintext alongside them was incidental,
     // and writing them that way now would produce a directory that load()
     // reads the operations out of and silently finds no scrolls in.
-    std::vector<ScrollSegment> deploymentSegments = localSegments.segments;
-    for (const auto &sc : externals) {
-      for (const auto &seg : sc.segments) {
-        if (!seg.path.empty() || !seg.torrent.isZero()) {
-          bool already = false;
-          for (const auto &existing : deploymentSegments) {
-            if (existing == seg) {
-              already = true;
-              break;
-            }
-          }
-          if (!already) {
-            deploymentSegments.push_back(seg);
-          }
-        }
-      }
-    }
-    writeStoreTables(
-        dir / storeTablesName,
-        StoreTables{.documentId           = documentId_,
-                    .localSegments        = deploymentSegments,
-                    .deployedScrolls      = externals,
-                    .publishedLocalScroll = publishedLocalScroll_});
+    writeStoreTables(dir / storeTablesName, storeTables());
   }
 }
 

@@ -2,7 +2,7 @@
 
 An architectural specification and design document for 3D volumetric transclusion ribbons, butterfly
 xanalinks, multi-document spring physics, perspective camera framing, and multi-tier blessing
-discovery across `gleditor` and `xudu`.
+discovery across `gleditor` and `xuzz`.
 
 ______________________________________________________________________
 
@@ -67,7 +67,7 @@ levels documents by their vertical geometric centers:
 ### 3. Analytical Perspective Framing (`framingDistance`)
 
 To ensure that all active documents and their connecting link beams remain fully visible within the
-viewport without manual zooming, `xudu` computes the exact camera standoff distance $D$:
+viewport without manual zooming, `xuzz` computes the exact camera standoff distance $D$:
 
 ```math
 D = \max\left(\frac{H \cdot m}{2 \tan(\text{fov}_Y / 2)}, \frac{W \cdot m}{2 \cdot \text{aspect} \cdot \tan(\text{fov}_Y / 2)}\right)
@@ -148,8 +148,9 @@ ______________________________________________________________________
 To indicate link presence without obscuring page typography:
 
 - Anchor brackets render inside the document margins flush with the text baseline.
-- When multiple links overlap a single paragraph, [`drawMarginAnchorLane()`](apps/xudu/beams.cpp)
-  partitions the margin into up to **4 parallel vertical lanes**, preventing color collisions.
+- When multiple links overlap a single paragraph,
+  [`drawMarginAnchorLane()`](apps/common/ui/xanadoc/beams.cpp) partitions the margin into up to **4
+  parallel vertical lanes**, preventing color collisions.
 
 ```
   Margin Lane 0: [===] Author Link (Gold)
@@ -162,8 +163,8 @@ ______________________________________________________________________
 ## 5. Multi-Tier Link Discovery & Blessing Hierarchy
 
 In the Docuverse, anyone may publish links to any document without asking permission. To prevent
-spam and visual clutter while preserving freedom of annotation, `xudu` implements a three-tier
-prominence hierarchy ([`LinkDiscoveryEngine`](apps/xudu/core/link_discovery.hpp)):
+spam and visual clutter while preserving freedom of annotation, `xuzz` implements a three-tier
+prominence hierarchy ([`LinkDiscoveryEngine`](apps/common/xanadu/link_discovery.hpp)):
 
 ```mermaid
 graph TD
@@ -193,11 +194,11 @@ ______________________________________________________________________
 
 | Component              | Source Files                                                                                                        | Description                                                  |
 | :--------------------- | :------------------------------------------------------------------------------------------------------------------ | :----------------------------------------------------------- |
-| **Beam Manager**       | [`apps/xudu/beams.hpp/.cpp`](apps/xudu/beams.hpp)                                                                   | `LinkBeams`, strand layout, and dangling link resolution     |
+| **Beam Manager**       | [`apps/common/ui/xanadoc/beams.hpp/.cpp`](apps/common/ui/xanadoc/beams.hpp)                                         | `LinkBeams`, strand layout, and dangling link resolution     |
 | **GPU Beam Pipeline**  | [`include/gleditor/beams.hpp`](include/gleditor/beams.hpp), [`src/beams.cpp`](src/beams.cpp)                        | Hardware instanced quad ribbon renderer and picking          |
-| **Spatial Framing**    | [`apps/xudu/core/framing.hpp/.cpp`](apps/xudu/core/framing.hpp)                                                     | Centroid alignment, camera distance, and bypass routing      |
-| **Link Layout**        | [`apps/xudu/core/link_layout.hpp/.cpp`](apps/xudu/core/link_layout.hpp)                                             | Span intersection, anchor placement, and strand grouping     |
-| **Blessings Registry** | [`apps/xudu/core/blessing.hpp/.cpp`](apps/xudu/core/blessing.hpp)                                                   | Cryptographic author endorsements for external link packages |
-| **Discovery Engine**   | [`apps/xudu/core/link_discovery.hpp/.cpp`](apps/xudu/core/link_discovery.hpp)                                       | Prominence ranking and subscription filtering                |
+| **Spatial Framing**    | [`apps/common/xanadu/framing.hpp/.cpp`](apps/common/xanadu/framing.hpp)                                             | Centroid alignment, camera distance, and bypass routing      |
+| **Link Layout**        | [`apps/common/xanadu/link_layout.hpp/.cpp`](apps/common/xanadu/link_layout.hpp)                                     | Span intersection, anchor placement, and strand grouping     |
+| **Blessings Registry** | [`apps/common/xanadu/blessing.hpp/.cpp`](apps/common/xanadu/blessing.hpp)                                           | Cryptographic author endorsements for external link packages |
+| **Discovery Engine**   | [`apps/common/xanadu/link_discovery.hpp/.cpp`](apps/common/xanadu/link_discovery.hpp)                               | Prominence ranking and subscription filtering                |
 | **Shaders**            | [`assets/shaders/beam.vert.glsl`](assets/shaders/beam.vert.glsl), [`beam.frag.glsl`](assets/shaders/beam.frag.glsl) | GLSL vertex geometry and fragment optical shading            |
-| **Unit Tests**         | [`tests/xudu/beams.cpp`](tests/xudu/beams.cpp), [`tests/lib/beams.cpp`](tests/lib/beams.cpp)                        | Framing geometry, strand generation, and optical tests       |
+| **Unit Tests**         | [`tests/xuzz/beams.cpp`](tests/xuzz/beams.cpp), [`tests/lib/beams.cpp`](tests/lib/beams.cpp)                        | Framing geometry, strand generation, and optical tests       |

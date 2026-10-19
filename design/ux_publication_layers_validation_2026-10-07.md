@@ -37,10 +37,9 @@ with the same exact package enabled, and disable it. Native `ops.nodes` and `sto
 must remain unchanged. Evidence lives under `build/publication-layers/network-ui/`.
 
 The fixture supplies Alice's store and commentary links; it does not certify authoring the complete
-P1–P7 story through the UI. Its provenance fixture uses placeholder OpenPGP authorship, while
-package and catalog signatures, DHT exchange and torrent piece integrity are real. Enrollment/Oracle
-election remain mocked. The separate local runner checks real temporary GPG signing and publication
-controls.
+P1–P7 story through the UI. Its provenance fixture uses placeholder authorship, while package and
+catalog signatures, DHT exchange and torrent piece integrity are real. Enrollment/Oracle election
+remain mocked. The separate local runner checks real temporary signing and publication controls.
 
 An initial namespace run incorrectly asserted that the right endpoint was unavailable. The signed
 snapshot also contains its Research slice cell, which the resolver correctly found and entered. The
@@ -75,7 +74,7 @@ overlapped linking reported executable permission failures; stable runs cleared 
 failures.
 
 The corrected namespace package journey passed in 618 seconds, and all 12 separate namespace
-transport/name tests passed. The real temporary-GPG local runner passed three UI publications,
+transport/name tests passed. The real temporary-key local runner passed three UI publications,
 edition choices, cached opening, offline reopening and download controls, with evidence in
 `build/publication-local/run-5ul8r2c0/`. The final resolver exercise indexed 50,000 pieces in 8.4 ms
 and resolved 2,000 members in 4.4 ms; these measurements exclude rendering and include the test's

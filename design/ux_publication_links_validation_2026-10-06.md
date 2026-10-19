@@ -16,10 +16,10 @@ through the interface. No curator keys, incoming catalogs, incoming packages or 
 endpoints are supplied to the reader. The source manifest is supplied as Alice's already published
 work.
 
-The fixture's history/permascroll provenance records use placeholder OpenPGP signatures.
+The fixture's history/permascroll provenance records use placeholder signatures.
 Package/catalog/manifest Ed25519 signatures, DHT signatures and piece hashes are real. This network
-fixture does not certify OpenPGP provenance verification. The separate local publication runner
-exercises actual GPG signing.
+fixture does not certify full provenance verification. The separate local publication runner
+exercises actual Ed25519 signing.
 
 ## Changes
 
@@ -102,11 +102,11 @@ engine run passed its unchanged assertion at 14×. No benchmark assertion was re
 The final `gleditor-swarm-test:local` image (`485bcd8f427d`) passed 129 smoke tests during its build
 and again with Docker networking disabled. All 32 changed/new C++ source hashes match the host. An
 audit under `/opt/gleditor` and `/work` found no private identity files, generated publication-state
-or GPG private-key directories. The build reused local dependency/compiled layers and ran the
-tracked recipe's Make/test tail, forcing changed objects to rebuild. Live UI acceptance used
-rootless namespaces rather than Docker containers. Repository format-check and lint passed. The
-separate clang-format 19 comparison found no new deviations; unchanged regions retain identical
-baseline differences.
+or private-key directories. The build reused local dependency/compiled layers and ran the tracked
+recipe's Make/test tail, forcing changed objects to rebuild. Live UI acceptance used rootless
+namespaces rather than Docker containers. Repository format-check and lint passed. The separate
+clang-format 19 comparison found no new deviations; unchanged regions retain identical baseline
+differences.
 
 ## Remaining findings
 

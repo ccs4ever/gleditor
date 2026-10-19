@@ -143,6 +143,10 @@ public:
   void addRect(float left, float bottom, float width, float height,
                std::uint32_t colour);
 
+  /// A rectangle with micro-radius corners (r = 2.5px or specified radius).
+  void addRoundedRect(float left, float bottom, float width, float height,
+                      float radius, std::uint32_t colour);
+
   /**
    * @brief A line segment, drawn as a rotated rectangle.
    *

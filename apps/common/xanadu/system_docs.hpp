@@ -123,7 +123,25 @@ inline constexpr std::string_view kDimSchemas        = "d.schemas";
 inline constexpr std::string_view kDimAlternates     = "d.alternates";
 inline constexpr std::string_view kDimDefault        = "d.default";
 
+namespace palette {
+// WCAG AAA OkLCH Palette constants
+inline constexpr std::uint32_t kIdentityGold   = 0xE5C07BFFU;
+inline constexpr std::uint32_t kCelestialCyan  = 0x38BDF8FFU;
+inline constexpr std::uint32_t kAmethystPurple = 0xC084FCFFU;
+inline constexpr std::uint32_t kEmeraldMint    = 0x34D399FFU;
+inline constexpr std::uint32_t kCoralCrimson   = 0xFB7185FFU;
+} // namespace palette
+
 namespace settings {
+// WCAG AAA OkLCH Palette Tokens
+inline constexpr std::string_view kPaletteIdentityGold = "palette.identityGold";
+inline constexpr std::string_view kPaletteCelestialCyan =
+    "palette.celestialCyan";
+inline constexpr std::string_view kPaletteAmethystPurple =
+    "palette.amethystPurple";
+inline constexpr std::string_view kPaletteEmeraldMint  = "palette.emeraldMint";
+inline constexpr std::string_view kPaletteCoralCrimson = "palette.coralCrimson";
+
 inline constexpr std::string_view kUiScale           = "ui.scale";
 inline constexpr std::string_view kUiFontScale       = "ui.fontScale";
 inline constexpr std::string_view kUiSafeMarginShare = "ui.safeMarginShare";
@@ -446,6 +464,16 @@ inline constexpr std::string_view kKeymapQuotationToggle =
 inline constexpr std::string_view kKeymapQuotationToggleF9 =
     "std:xuzz/quotation_toggle_f9";
 
+// Keymap - Branch Convergence Assistant Actions
+inline constexpr std::string_view kKeymapConvergenceToggle =
+    "std:xuzz/convergence_toggle";
+inline constexpr std::string_view kKeymapConvergenceAdoptSpan =
+    "std:xuzz/convergence_adopt_span";
+inline constexpr std::string_view kKeymapConvergenceRetainEditions =
+    "std:xuzz/convergence_retain_editions";
+inline constexpr std::string_view kKeymapConvergenceSynthesizeEdition =
+    "std:xuzz/convergence_synthesize_edition";
+
 // Keymap - Zigzag Visualizer & Pure Vortex Actions
 inline constexpr std::string_view kKeymapViewModeContent1 =
     "std:ui/view_mode_content_1";
@@ -581,8 +609,12 @@ inline constexpr std::string_view kKeymapLinkOccurrenceNext =
     "std:xuzz/link_occurrence_next";
 inline constexpr std::string_view kKeymapLinkOccurrencePrevious =
     "std:xuzz/link_occurrence_previous";
-inline constexpr std::string_view kKeymapLinkCross   = "std:xuzz/link_cross";
-inline constexpr std::string_view kKeymapLinkEnter   = "std:xuzz/link_enter";
+inline constexpr std::string_view kKeymapLinkCross  = "std:xuzz/link_cross";
+inline constexpr std::string_view kKeymapLinkEnter  = "std:xuzz/link_enter";
+inline constexpr std::string_view kKeymapLinkFollow = "std:nav/link_follow";
+inline constexpr std::string_view kKeymapLeaderMode = "std:nav/leader_mode";
+inline constexpr std::string_view kKeymapRestoreDismissed =
+    "std:nav/restore_dismissed";
 inline constexpr std::string_view kKeymapLinkOrigin  = "std:xuzz/link_origin";
 inline constexpr std::string_view kKeymapLinkDismiss = "std:xuzz/link_dismiss";
 inline constexpr std::string_view kKeymapOverviewToggle =

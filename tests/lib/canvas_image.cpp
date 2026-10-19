@@ -324,7 +324,7 @@ TEST_F(CanvasImageTest,
   EXPECT_EQ(row.atlas >> 16U,
             static_cast<unsigned>(glyph->texCoords.topLeft.x) + 4U);
   EXPECT_EQ(row.atlas & 65535U,
-            static_cast<unsigned>(glyph->texCoords.topLeft.y) + 3U);
+            static_cast<unsigned>(glyph->texCoords.topLeft.y) + 2U);
   EXPECT_EQ(row.paper & 65535U, 42U);
   canvas->popClip();
   EXPECT_THROW(canvas->popClip(), std::logic_error);

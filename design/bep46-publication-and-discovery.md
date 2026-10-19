@@ -2,7 +2,8 @@
 
 An architectural specification and design document for publishing xanadocs as BEP 46 mutable
 torrents, incremental republishing with sequence-numbered DHT pointers, and discovering an author's
-entire body of published work using their public key across `gleditor`, `xudu`, and `zigzag`.
+entire body of published work using their public key across `gleditor`, `xuzz`, and the underlying
+`xanadu` engine.
 
 ______________________________________________________________________
 
@@ -60,7 +61,7 @@ local coordinate space into a globally addressable publication:
 ```mermaid
 sequenceDiagram
     autonumber
-    actor Author as Author Client (Xudu / Gleditor)
+    actor Author as Author Client (Xuzz / Gleditor)
     participant Spool as UserPermascroll (Slot 0)
     participant Torrent as BitTorrent Engine (libtorrent)
     participant DHT as Mainline DHT (BEP 46)
@@ -80,9 +81,9 @@ sequenceDiagram
   file.
 - **Byte Invariance**: The content is always located at file index 0, starting at stream offset 0.
   Local span offsets map 1:1 to global stream coordinates.
-- **Signed Provenance**: The torrent bundles the author's OpenPGP provenance claim and detached
-  signature directly into the metainfo file, binding the author's identity to the exact piece
-  hashes.
+- **Signed Provenance**: The torrent bundles the author's Ed25519 provenance claim (with standard
+  X.509 delegation certificates) and detached signature directly into the metainfo file, binding the
+  author's identity to the exact piece hashes.
 
 ### 2. Global Coordinate Translation (`globalise`)
 
@@ -163,8 +164,8 @@ ______________________________________________________________________
 A central challenge in decentralized publishing is discovering all works created by an author
 without relying on a centralized search engine or central platform.
 
-`xudu` achieves complete author corpus discovery through **deterministic DHT salt namespacing**
-anchored to the author's sovereign public key:
+`xuzz` and `xanadu` achieve complete author corpus discovery through **deterministic DHT salt
+namespacing** anchored to the author's sovereign public key:
 
 ```
                               [ Author Ed25519 PublicKey ]
@@ -185,7 +186,7 @@ anchored to the author's sovereign public key:
 | `salt = "permascroll"`     | **Author Permascroll**    | Lifelong append-only primedia stream carrying all raw text typed by this author.               |
 | `salt = "doc:<slug>"`      | **Specific Xanadoc**      | Individual published documents (e.g. `doc:possiplex-chapter-1`).                               |
 | `salt = "curations"`       | **Curated Link Packages** | Standalone link packages curated by this author referencing external documents.                |
-| `salt = "identity_ledger"` | **Identity Declaration**  | Signed OpenPGP / BEP 46 cross-attestation and identity consensus record.                       |
+| `salt = "identity_ledger"` | **Identity Declaration**  | Signed Ed25519 / BEP 46 cross-attestation and identity consensus record.                       |
 
 ### Discovering the Entire Corpus in Practice
 
@@ -199,7 +200,7 @@ anchored to the author's sovereign public key:
    by the author:
 
    ```yaml
-   author: "9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c"
+   author: "9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c11223344556677889900aabb"
    updated: 1700000000
    documents:
      - salt: "doc:hypertext-foundations"
@@ -217,42 +218,42 @@ anchored to the author's sovereign public key:
 
 ______________________________________________________________________
 
-## 5. Dual-Key Delegation: Bridging OpenPGP and BEP 46
+## 5. Hierarchical Key Delegation: Decoupled X.509 Delegation and StandardCryptoEngine
 
 To support multi-device authoring without exposing master keys on untrusted or mobile hardware,
-`xudu` implements **Dual-Key Delegation** (`DeviceDelegation` in
-[`user_permascroll.hpp`](apps/xudu/core/user_permascroll.hpp)):
+`xanadu` implements **Hierarchical Key Delegation** (`DeviceDelegation` in
+[`user_permascroll.hpp`](apps/common/xanadu/user_permascroll.hpp) via `StandardCryptoEngine`):
 
 ```mermaid
 graph TD
-    MasterPGP["Master OpenPGP Key<br/>(Cold Storage / Offline YubiKey)"]
-    Cert["DeviceDelegation Certificate<br/>(Signed by OpenPGP Master)"]
+    MasterKey["Master Ed25519 Key<br/>(Cold Storage / Offline Root)"]
+    Cert["X.509 Delegation Certificate<br/>(Signed by Master Root)"]
     DeviceKey["Device-Specific BEP 46 Keypair<br/>(Laptop / Workstation Ed25519)"]
     DHT["BEP 46 Mutable DHT Announce<br/>(Signed with Device Key)"]
 
-    MasterPGP -->|Signs| Cert
+    MasterKey -->|Signs| Cert
     Cert -->|Authorizes| DeviceKey
     DeviceKey -->|Publishes| DHT
 ```
 
-1. **Master Identity**: The author's canonical identity is an OpenPGP key registered in the Merkle
-   identity ledger.
-1. **Delegation Certificate**: The master key signs an offline `DeviceDelegation` certificate
-   granting publishing authority to a specific device's Ed25519 key (`DeviceKeys`) for a bounded
-   time window.
+1. **Master Identity**: The author's canonical identity is an Ed25519 master root key registered in
+   the Merkle identity ledger.
+1. **Delegation Certificate**: The master key signs an offline standard X.509 v3 delegation
+   certificate granting publishing authority to a specific device's Ed25519 key (`DeviceKeys`) for a
+   bounded time window.
 1. **Transparent Verification**: Readers resolve BEP 46 updates signed by the device key and verify
-   the delegation certificate against the author's master fingerprint.
+   the X.509 delegation certificate against the author's master fingerprint.
 
 ______________________________________________________________________
 
 ## 6. Security and Consistency Analysis
 
-| Threat Scenario                   | Vector                                                                                    | Mitigation                                                                                                                |
-| :-------------------------------- | :---------------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------ |
-| **Unauthorized Pointer Mutation** | Malicious peer attempts to point an author's name to a phishing torrent.                  | DHT nodes verify Ed25519 signature against the public key; rejected at DHT routing layer.                                 |
-| **Stale Read / Eclipse Attack**   | Malicious node returns an old sequence number ($\text{seq}=1$ instead of $\text{seq}=5$). | Reader queries multiple DHT nodes across distinct routing buckets and takes $\max(\text{seq})$.                           |
-| **Key Loss / Rotation**           | Device key is lost or compromised.                                                        | Master OpenPGP key publishes a `revoked = true` tombstone to the Merkle ledger and issues a fresh delegation certificate. |
-| **Spool Re-Indexing Corruption**  | Authoring tool shifts offsets during edits.                                               | Spool is strictly append-only; byte coordinates are immutable and never re-indexed.                                       |
+| Threat Scenario                   | Vector                                                                                    | Mitigation                                                                                                       |
+| :-------------------------------- | :---------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------- |
+| **Unauthorized Pointer Mutation** | Malicious peer attempts to point an author's name to a phishing torrent.                  | DHT nodes verify Ed25519 signature against the public key; rejected at DHT routing layer.                        |
+| **Stale Read / Eclipse Attack**   | Malicious node returns an old sequence number ($\text{seq}=1$ instead of $\text{seq}=5$). | Reader queries multiple DHT nodes across distinct routing buckets and takes $\max(\text{seq})$.                  |
+| **Key Loss / Rotation**           | Device key is lost or compromised.                                                        | Master Ed25519 key publishes a revocation record to the Merkle ledger and issues a fresh delegation certificate. |
+| **Spool Re-Indexing Corruption**  | Authoring tool shifts offsets during edits.                                               | Spool is strictly append-only; byte coordinates are immutable and never re-indexed.                              |
 
 ______________________________________________________________________
 
@@ -260,9 +261,9 @@ ______________________________________________________________________
 
 | Component                      | Files                                                                                                                                              | Description                                                                           |
 | :----------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------ |
-| **BEP 46 Math & Link Parsing** | [`apps/xudu/core/mutable_link.hpp/.cpp`](apps/xudu/core/mutable_link.hpp)                                                                          | `MutableLink`, `PublicKey`, `SecretKey`, `DhtTarget`, and `mutableSigningBuffer`      |
-| **Publication Pipeline**       | [`apps/xudu/core/publication.hpp/.cpp`](apps/xudu/core/publication.hpp)                                                                            | `publish()`, `publishDocument()`, `sealLocalSpool()`, `globalise()`, and `localise()` |
-| **DHT Swarm Resolver**         | [`apps/xudu/core/swarm.hpp/.cpp`](apps/xudu/core/swarm.hpp)                                                                                        | `SwarmContentSource::resolveMutableLink()` and DHT `get`/`put` integration            |
-| **Device Delegation**          | [`apps/xudu/core/user_permascroll.hpp/.cpp`](apps/xudu/core/user_permascroll.hpp)                                                                  | `DeviceDelegation` certificate generation and verification                            |
-| **Discovery Engine**           | [`apps/xudu/core/link_discovery.hpp/.cpp`](apps/xudu/core/link_discovery.hpp)                                                                      | Multi-tier author, curator, and public package ranking                                |
-| **Automated Tests**            | [`tests/xudu/mutable_link.cpp`](tests/xudu/mutable_link.cpp), [`publication.cpp`](tests/xudu/publication.cpp), [`swarm.cpp`](tests/xudu/swarm.cpp) | BEP 44/46 test vectors, round-trip serialization, and swarm netns tests               |
+| **BEP 46 Math & Link Parsing** | [`apps/common/xanadu/mutable_link.hpp/.cpp`](apps/common/xanadu/mutable_link.hpp)                                                                  | `MutableLink`, `PublicKey`, `SecretKey`, `DhtTarget`, and `mutableSigningBuffer`      |
+| **Publication Pipeline**       | [`apps/common/xanadu/publication.hpp/.cpp`](apps/common/xanadu/publication.hpp)                                                                    | `publish()`, `publishDocument()`, `sealLocalSpool()`, `globalise()`, and `localise()` |
+| **DHT Swarm Resolver**         | [`apps/common/xanadu/swarm.hpp/.cpp`](apps/common/xanadu/swarm.hpp)                                                                                | `SwarmContentSource::resolveMutableLink()` and DHT `get`/`put` integration            |
+| **Device Delegation**          | [`apps/common/xanadu/user_permascroll.hpp/.cpp`](apps/common/xanadu/user_permascroll.hpp)                                                          | `DeviceDelegation` certificate generation and verification                            |
+| **Discovery Engine**           | [`apps/common/xanadu/link_discovery.hpp/.cpp`](apps/common/xanadu/link_discovery.hpp)                                                              | Multi-tier author, curator, and public package ranking                                |
+| **Automated Tests**            | [`tests/xuzz/mutable_link.cpp`](tests/xuzz/mutable_link.cpp), [`publication.cpp`](tests/xuzz/publication.cpp), [`swarm.cpp`](tests/xuzz/swarm.cpp) | BEP 44/46 test vectors, round-trip serialization, and swarm netns tests               |

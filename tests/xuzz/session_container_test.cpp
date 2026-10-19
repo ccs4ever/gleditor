@@ -5,7 +5,10 @@
  * invariant.
  */
 #include "common/xanadu/compact_op.hpp"
+#include "common/xanadu/link_package.hpp"
 #include "common/xanadu/session_container.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/store_tables.hpp"
 
 #include <array>
 #include <cstring>
@@ -676,6 +679,146 @@ TEST(SessionContainerTest, ContainerImportRejectsPathTraversal) {
   auto res = importPackage(corruptTar, "master_fp");
   ASSERT_FALSE(res.has_value());
   EXPECT_EQ(res.error(), SessionValidationError::CorruptArchive);
+}
+
+TEST(SessionContainerTest, SpanDependencyAnalysisCoversOpsAndLinks) {
+  CompactOpNode op1                    = makeTestOp(0, 100, 20);
+  CompactOpNode op2                    = makeTestOp(20, 110, 30);
+  CompactOpNode op3                    = makeTestOp(50, 500, 50);
+  const std::vector<CompactOpNode> ops = {op1, op2, op3};
+
+  Link link1;
+  link1.left.push_back(PrimediaSpan{.scroll = 0, .start = 130, .length = 30});
+  link1.right.push_back(PrimediaSpan{.scroll = 1, .start = 50, .length = 25});
+  std::map<zigzag::CellRef, Link> links;
+  links[1] = link1;
+
+  LinkPackage pkg;
+  pkg.title = "Test Curation";
+  GlobalLink glink;
+  glink.left.push_back(GlobalSpan{.scroll = "0", .start = 540, .length = 20});
+  pkg.links.push_back(glink);
+  const std::vector<LinkPackage> linkPackages = {pkg};
+
+  const auto analysis = analyzeSpanDependencies(ops, links, linkPackages);
+  EXPECT_TRUE(analysis.requiresScroll(0));
+  EXPECT_TRUE(analysis.requiresScroll(1));
+
+  const auto intervals0 = analysis.intervalsFor(0);
+  ASSERT_EQ(intervals0.size(), 2U);
+  EXPECT_EQ(intervals0[0].start, 100U);
+  EXPECT_EQ(intervals0[0].length, 60U);
+  EXPECT_EQ(intervals0[1].start, 500U);
+  EXPECT_EQ(intervals0[1].length, 60U);
+
+  const auto intervals1 = analysis.intervalsFor(1);
+  ASSERT_EQ(intervals1.size(), 1U);
+  EXPECT_EQ(intervals1[0].start, 50U);
+  EXPECT_EQ(intervals1[0].length, 25U);
+}
+
+TEST(SessionContainerTest, FatStorePackageClearExportImportRoundTrip) {
+  const auto masterKeys = generateKeyPair();
+  const auto deviceKeys = generateKeyPair();
+  const auto masterFp   = computeSha256Hex(masterKeys.pub);
+
+  Store store;
+  auto v1 = store.insert(MicroversionId{}, 0,
+                         "Hello World from Fat Store Packaging!");
+  auto v2 = store.insert(v1, 11, " Spectacular");
+
+  LinkPackage lp;
+  lp.curator = PublicKey{deviceKeys.pub};
+  lp.title   = "Curated Annotations";
+  lp.salt    = "test_salt_123";
+  GlobalLink glink;
+  glink.type  = LinkType::Quotation;
+  glink.owner = "curator";
+  glink.left.push_back(GlobalSpan{.scroll = "0", .start = 0, .length = 5});
+  glink.right.push_back(GlobalSpan{.scroll = "0", .start = 12, .length = 11});
+  lp.links.push_back(glink);
+
+  const auto pkgRes = createFatStorePackage(
+      store, "laptop", deviceKeys.priv, masterFp, "0", v2.str(),
+      /*encrypted=*/false, /*passphrase=*/"", {&lp, 1},
+      /*existingDeviceCert=*/std::nullopt,
+      /*masterPrivateKey=*/masterKeys.priv);
+  ASSERT_TRUE(pkgRes.has_value());
+  const auto &pkg = *pkgRes;
+
+  EXPECT_TRUE(pkg.isFatPackage());
+  EXPECT_FALSE(pkg.getStoreTables().empty());
+  EXPECT_FALSE(pkg.getScrollFragments().empty());
+  EXPECT_EQ(pkg.getLinkPackages().size(), 1U);
+
+  auto exportRes = exportPackage(pkg);
+  ASSERT_TRUE(exportRes.has_value());
+  const auto &tarBytes = *exportRes;
+
+  auto importRes = importPackage(tarBytes, masterFp, /*verifySignature=*/true,
+                                 masterKeys.pub);
+  ASSERT_TRUE(importRes.has_value());
+  const auto &imported = *importRes;
+
+  EXPECT_TRUE(imported.isFatPackage());
+  EXPECT_EQ(imported.getStoreTables().size(), pkg.getStoreTables().size());
+  EXPECT_EQ(imported.storeTablesSha256, pkg.storeTablesSha256);
+  EXPECT_EQ(imported.getScrollFragments().size(),
+            pkg.getScrollFragments().size());
+  EXPECT_EQ(imported.getLinkPackages().size(), 1U);
+  EXPECT_EQ(imported.getLinkPackages()[0].title, "Curated Annotations");
+
+  const auto *frag = imported.findFragment(localScroll, 0);
+  ASSERT_NE(frag, nullptr);
+  EXPECT_EQ(frag->start, 0U);
+  const std::string fragText(frag->bytes.begin(), frag->bytes.end());
+  EXPECT_THAT(fragText, ::testing::HasSubstr("Hello World"));
+  EXPECT_THAT(fragText, ::testing::HasSubstr("Spectacular"));
+}
+
+TEST(SessionContainerTest, FatStorePackageEncryptedExportImportRoundTrip) {
+  const auto masterKeys = generateKeyPair();
+  const auto deviceKeys = generateKeyPair();
+  const auto masterFp   = computeSha256Hex(masterKeys.pub);
+
+  Store store;
+  auto v1 =
+      store.insert(MicroversionId{}, 0, "Confidential air-gapped payload");
+
+  const std::string passphrase = "CorrectHorseBatteryStaple!";
+
+  auto pkgRes = createFatStorePackage(
+      store, "laptop", deviceKeys.priv, masterFp, "0", v1.str(),
+      /*encrypted=*/true, passphrase, /*selectedLinkPackages=*/{},
+      /*existingDeviceCert=*/std::nullopt,
+      /*masterPrivateKey=*/masterKeys.priv);
+  ASSERT_TRUE(pkgRes.has_value());
+  const auto &pkg = *pkgRes;
+
+  EXPECT_TRUE(pkg.isFatPackage());
+  EXPECT_TRUE(pkg.encrypted);
+
+  auto exportRes = exportPackage(pkg);
+  ASSERT_TRUE(exportRes.has_value());
+  const auto &tarBytes = *exportRes;
+
+  auto noPassRes = importPackage(tarBytes, masterFp, true, masterKeys.pub, "");
+  ASSERT_FALSE(noPassRes.has_value());
+  EXPECT_EQ(noPassRes.error(), SessionValidationError::MissingDecryptionKey);
+
+  auto wrongPassRes = importPackage(tarBytes, masterFp, true, masterKeys.pub,
+                                    "WrongPassphrase");
+  ASSERT_FALSE(wrongPassRes.has_value());
+  EXPECT_EQ(wrongPassRes.error(), SessionValidationError::DecryptionFailed);
+
+  auto successRes =
+      importPackage(tarBytes, masterFp, true, masterKeys.pub, passphrase);
+  ASSERT_TRUE(successRes.has_value());
+  const auto &imported = *successRes;
+
+  EXPECT_TRUE(imported.isFatPackage());
+  EXPECT_FALSE(imported.getStoreTables().empty());
+  EXPECT_FALSE(imported.getScrollFragments().empty());
 }
 
 } // namespace

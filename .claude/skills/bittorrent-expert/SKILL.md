@@ -114,8 +114,9 @@ Rules that hold across the layer:
 A connection is challenged with a random nonce and answers with a signature from its device key. The
 challenge is unpredictable, not secret. A peer that fails is isolated and disconnected, and the
 controller tracks quarantined peers. `DeviceDelegation` (`user_permascroll.hpp`) is how a master
-OpenPGP fingerprint hands signing authority to a device key; the controller records a delegation
-only when it verifies against the master's public key.
+Ed25519 identity hands signing authority to a device key via standard X.509 delegation certificates
+(`StandardCryptoEngine`); the controller records a delegation only when it verifies against the
+master's public key.
 
 ## BEP 46 mutable names and discovery
 
@@ -136,9 +137,10 @@ only when it verifies against the master's public key.
 
 ## The identity ledger
 
-- **`MerkleLedger`** is an append-only log linking an OpenPGP fingerprint to a verified email
-  address, hashed with SHA-256 into an incremental Merkle tree (merklecpp). A revocation is another
-  entry, not an edit. The ledger can be sealed into a torrent and announced through a mutable name.
+- **`MerkleLedger`** is an append-only log linking an Ed25519 public key fingerprint (64-hex
+  SHA-256) to a verified email address, hashed with SHA-256 into an incremental Merkle tree
+  (merklecpp). A revocation is another entry, not an edit. The ledger can be sealed into a torrent
+  and announced through a mutable name.
 - **`EnginePipeline`** validates what arrives: it stages blocks, appends votes, generates and
   verifies inclusion proofs, and decides whether an oracle is authorised. A voter must be at least
   30 days old (`kMinVoterAgeSeconds`), and timestamps may be off by at most 300 s
@@ -183,7 +185,7 @@ reference a hole stay valid.
 
 ## Testing
 
-- Unit and wire tests are in `tests/xudu/`: `swarm.cpp`, `torrent.cpp`, `identity_test.cpp`,
+- Unit and wire tests are in `tests/xuzz/`: `swarm.cpp`, `torrent.cpp`, `identity_test.cpp`,
   `merkle_ledger_test.cpp`, `managed_torrent_test.cpp`, `author_catalog_test.cpp`,
   `swarm_catalog_index_test.cpp`, the `publication*` files and the three `transcopyright_*` files.
 - `make test/swarm` and `make test/publication-swarm` run `tools/swarm-netns-test.sh`, which puts

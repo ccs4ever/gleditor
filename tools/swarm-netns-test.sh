@@ -61,8 +61,8 @@ done
   echo "swarm-netns-test: build/xudu-swarm-peer is missing; run 'make xudu-swarm-peer'" >&2
   exit 1
 }
-[ -x build/xudu_test ] || {
-  echo "swarm-netns-test: build/xudu_test is missing; run 'make xudu_test'" >&2
+[ -x build/xuzz_test ] || [ -x build/xudu_test ] || {
+  echo "swarm-netns-test: build/xuzz_test is missing; run 'make xuzz_test'" >&2
   exit 1
 }
 
@@ -156,7 +156,7 @@ ip netns exec "$TEST_NS" env \
   XUDU_PEER_TEXT="$WORK/seed/sample.txt" \
   XUDU_PEER_PUBKEY="$PEER_PUBKEY" \
   LD_LIBRARY_PATH="$PWD/build" \
-  ./build/xudu_test --gtest_filter="${XUDU_SWARM_TEST_FILTER:-SwarmTest.*:MutableNameTest.*}"
+  "$([ -x ./build/xuzz_test ] && echo ./build/xuzz_test || echo ./build/xudu_test)" --gtest_filter="${XUDU_SWARM_TEST_FILTER:-SwarmTest.*:MutableNameTest.*}"
 STATUS=$?
 set -e
 

@@ -32,7 +32,7 @@ std::string Config::toTsv() const {
   std::string out;
   common::tsv::write(out, "author", author.name);
   common::tsv::write(out, "email", author.email);
-  common::tsv::write(out, "gpg_key", author.gpgKey);
+  common::tsv::write(out, "gpg_key", author.signingKey);
   common::tsv::write(out, "gpg_home", gpgHome);
   return out;
 }
@@ -48,8 +48,8 @@ std::optional<Config> Config::fromTsv(const std::string_view text) {
       out.author.name = value;
     } else if ("email" == key) {
       out.author.email = value;
-    } else if ("gpg_key" == key) {
-      out.author.gpgKey = value;
+    } else if ("gpg_key" == key || "signing_key" == key) {
+      out.author.signingKey = value;
     } else if ("gpg_home" == key) {
       out.gpgHome = value;
     }

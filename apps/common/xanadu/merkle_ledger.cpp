@@ -1,6 +1,6 @@
 /**
  * @file merkle_ledger.cpp
- * @brief Implementation of the append-only Merkle ledger for GPG identity.
+ * @brief Implementation of the append-only Merkle ledger for Ed25519 identity.
  */
 #include "merkle_ledger.hpp"
 
@@ -104,15 +104,18 @@ std::optional<std::array<std::uint8_t, 32>> fromHex32(std::string_view hex) {
   return out;
 }
 
-std::string GpgKeyLink::canonicalForm() const {
+std::string IdentityKeyLink::canonicalForm() const {
   std::string s;
   s.reserve(128 + publicKeyArmored.size() + signature.size());
   s += "seq:" + std::to_string(sequence) + "\n";
   s += "fp:" + normalizeFingerprint(fingerprint) + "\n";
   s += "email:" + normalizeEmail(email) + "\n";
   s += "name:" + identity + "\n";
-  if (!gpgKeyId.empty()) {
-    s += "key_id:" + gpgKeyId + "\n";
+  if (!keyId.empty()) {
+    s += "key_id:" + keyId + "\n";
+  }
+  if (!algorithm.empty()) {
+    s += "alg:" + algorithm + "\n";
   }
   s += "time:" + std::to_string(timestamp) + "\n";
   s += "revoked:" + std::string(revoked ? "1" : "0") + "\n";
@@ -125,14 +128,14 @@ std::string GpgKeyLink::canonicalForm() const {
   return s;
 }
 
-std::array<std::uint8_t, 32> GpgKeyLink::leafHash() const {
+std::array<std::uint8_t, 32> IdentityKeyLink::leafHash() const {
   // Tagged, to keep this out of the domain sha256_lt hashes interior nodes
   // into. sha256Digest stays an untagged SHA-256 because its other callers
   // want a plain digest rather than a tree leaf.
   return sha256Digest(kLeafDomain + canonicalForm());
 }
 
-std::string GpgKeyLink::leafHashHex() const { return toHex32(leafHash()); }
+std::string IdentityKeyLink::leafHashHex() const { return toHex32(leafHash()); }
 
 bool MerkleProof::verify(
     const std::array<std::uint8_t, 32> &expectedRoot) const {
@@ -199,7 +202,7 @@ std::optional<MerkleProof> MerkleProof::fromTsv(const std::string_view tsv) {
 
 struct MerkleLedger::Impl {
   LedgerTree tree;
-  std::vector<GpgKeyLink> entries;
+  std::vector<IdentityKeyLink> entries;
   std::map<std::string, std::size_t> byFingerprint;
   std::map<std::string, std::vector<std::size_t>> byEmail;
 };
@@ -227,7 +230,7 @@ MerkleLedger &MerkleLedger::operator=(const MerkleLedger &other) {
 }
 
 std::pair<std::uint64_t, std::array<std::uint8_t, 32>>
-MerkleLedger::appendKey(GpgKeyLink entry) {
+MerkleLedger::appendKey(IdentityKeyLink entry) {
   entry.fingerprint = normalizeFingerprint(entry.fingerprint);
   entry.email       = normalizeEmail(entry.email);
   entry.sequence    = impl_->entries.size();
@@ -260,14 +263,14 @@ std::size_t MerkleLedger::size() const { return impl_->entries.size(); }
 
 bool MerkleLedger::empty() const { return impl_->entries.empty(); }
 
-const GpgKeyLink &MerkleLedger::entry(std::size_t index) const {
+const IdentityKeyLink &MerkleLedger::entry(std::size_t index) const {
   if (index >= impl_->entries.size()) {
     throw std::out_of_range("MerkleLedger entry index out of range");
   }
   return impl_->entries[index];
 }
 
-const std::vector<GpgKeyLink> &MerkleLedger::entries() const {
+const std::vector<IdentityKeyLink> &MerkleLedger::entries() const {
   return impl_->entries;
 }
 
@@ -298,7 +301,7 @@ MerkleProof MerkleLedger::generateProof(std::size_t index) const {
 }
 
 bool MerkleLedger::verifyInclusion(
-    const GpgKeyLink &entry, const MerkleProof &proof,
+    const IdentityKeyLink &entry, const MerkleProof &proof,
     const std::array<std::uint8_t, 32> &expectedRoot) {
   if (entry.leafHash() != proof.leafHash) {
     return false;
@@ -306,7 +309,7 @@ bool MerkleLedger::verifyInclusion(
   return proof.verify(expectedRoot);
 }
 
-const GpgKeyLink *
+const IdentityKeyLink *
 MerkleLedger::findByFingerprint(std::string_view fingerprint) const {
   const std::string norm = normalizeFingerprint(fingerprint);
   const auto it          = impl_->byFingerprint.find(norm);
@@ -316,10 +319,10 @@ MerkleLedger::findByFingerprint(std::string_view fingerprint) const {
   return &impl_->entries[it->second];
 }
 
-std::vector<const GpgKeyLink *>
+std::vector<const IdentityKeyLink *>
 MerkleLedger::findByEmail(std::string_view email) const {
   const std::string norm = normalizeEmail(email);
-  std::vector<const GpgKeyLink *> result;
+  std::vector<const IdentityKeyLink *> result;
   const auto it = impl_->byEmail.find(norm);
   if (it != impl_->byEmail.end()) {
     for (const auto idx : it->second) {
@@ -340,7 +343,7 @@ std::string MerkleLedger::toTsv() const {
     common::tsv::write(out, "fingerprint", e.fingerprint);
     common::tsv::write(out, "email", e.email);
     common::tsv::write(out, "identity", e.identity);
-    common::tsv::write(out, "key_id", e.gpgKeyId);
+    common::tsv::write(out, "key_id", e.keyId);
     common::tsv::write(out, "timestamp", std::to_string(e.timestamp));
     common::tsv::write(out, "revoked", e.revoked ? "true" : "false");
     common::tsv::write(out, "public_key", e.publicKeyArmored);
@@ -355,12 +358,12 @@ MerkleLedger MerkleLedger::fromTsv(const std::string_view tsv) {
   if (!entries) {
     return ledger;
   }
-  GpgKeyLink link;
+  IdentityKeyLink link;
   bool hasEntry     = false;
   const auto append = [&] {
     if (hasEntry) {
       ledger.appendKey(std::move(link));
-      link     = GpgKeyLink{};
+      link     = IdentityKeyLink{};
       hasEntry = false;
     }
   };
@@ -377,7 +380,7 @@ MerkleLedger MerkleLedger::fromTsv(const std::string_view tsv) {
     } else if ("identity" == entry.key) {
       link.identity = entry.value;
     } else if ("key_id" == entry.key) {
-      link.gpgKeyId = entry.value;
+      link.keyId = entry.value;
     } else if ("timestamp" == entry.key) {
       link.timestamp = std::stoull(entry.value);
     } else if ("revoked" == entry.key) {
@@ -454,9 +457,9 @@ bool MerkleLedger::verifyProvenanceAuthor(
     return false;
   }
 
-  const GpgKeyLink *matched = nullptr;
+  const IdentityKeyLink *matched = nullptr;
   const std::string wantedFp =
-      !author.gpgKey.empty() ? normalizeFingerprint(author.gpgKey) : "";
+      !author.signingKey.empty() ? normalizeFingerprint(author.signingKey) : "";
 
   for (const auto *link : links) {
     if (link->revoked) {
@@ -465,7 +468,7 @@ bool MerkleLedger::verifyProvenanceAuthor(
     if (!wantedFp.empty()) {
       if (link->fingerprint == wantedFp ||
           link->fingerprint.ends_with(wantedFp) ||
-          link->gpgKeyId == author.gpgKey) {
+          link->keyId == author.signingKey) {
         matched = link;
         break;
       }
@@ -496,7 +499,7 @@ bool MerkleLedger::verifyProvenanceAuthor(
     const auto check = verifyProvenance(prov);
     if (!check.signatureValid) {
       if (errorMsg) {
-        *errorMsg = "OpenPGP signature verification failed: " + check.detail;
+        *errorMsg = "Signature verification failed: " + check.detail;
       }
       return false;
     }

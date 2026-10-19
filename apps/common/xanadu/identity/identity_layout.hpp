@@ -6,8 +6,8 @@
  * comparison, strict bounds validation, and standard layout structs for ledger
  * entries, Oracle consensus, and BEP 10 wire messages.
  */
-#ifndef XUDU_IDENTITY_LAYOUT_HPP
-#define XUDU_IDENTITY_LAYOUT_HPP
+#ifndef XANADU_IDENTITY_LAYOUT_HPP
+#define XANADU_IDENTITY_LAYOUT_HPP
 
 #include <algorithm>
 #include <array>
@@ -53,7 +53,7 @@ constantTimeEquals(const std::array<char, N> &a,
   return diff == 0;
 }
 
-/// 40-character normalized uppercase hexadecimal OpenPGP v4 fingerprint.
+/// 40-character normalized uppercase hexadecimal identity fingerprint.
 struct Fingerprint {
   std::array<char, 40> hex{};
 
@@ -670,4 +670,4 @@ template <> struct std::hash<xanadu::identity::Fingerprint> {
   }
 };
 
-#endif // XUDU_IDENTITY_LAYOUT_HPP
+#endif // XANADU_IDENTITY_LAYOUT_HPP

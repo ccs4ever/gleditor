@@ -33,6 +33,7 @@
 #include <gleditor/ui/overlay.hpp>
 #include <gleditor/ui/widgets.hpp>
 
+#include "common/xanadu/link_package.hpp"
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/system_docs.hpp"
@@ -113,7 +114,22 @@ public:
     return packagePassphrase_;
   }
 
+  BranchConvergenceOverlay *
+  setIncludedLinkPackages(std::vector<LinkPackage> packages) noexcept;
+  [[nodiscard]] const std::vector<LinkPackage> &
+  includedLinkPackages() const noexcept {
+    return includedLinkPackages_;
+  }
+
+  BranchConvergenceOverlay *
+  setSelectedLinkPackageKeys(std::vector<std::string> keys) noexcept;
+  [[nodiscard]] const std::vector<std::string> &
+  selectedLinkPackageKeys() const noexcept {
+    return selectedLinkPackageKeys_;
+  }
+
   // -- Detection & Notification Banner ---------------------------------------
+  BranchConvergenceOverlay *detectConcurrentEdits();
   BranchConvergenceOverlay *
   detectConcurrentEdits(std::string_view deviceId,
                         const MicroversionId &branchVersion,
@@ -235,13 +251,15 @@ private:
   bool convergenceActive_{false};
   bool encryptPackage_{false};
   std::string packagePassphrase_{};
+  std::vector<LinkPackage> includedLinkPackages_;
+  std::vector<std::string> selectedLinkPackageKeys_;
 
   std::optional<MultiVersionDiffResult> diffResult_;
 
   std::unique_ptr<gleditor::ui::ScreenOverlay> bannerOverlay_;
   std::unique_ptr<gleditor::ui::ScreenOverlay> paletteOverlay_;
 
-  mutable std::mutex guard_;
+  mutable std::recursive_mutex guard_;
   std::uint64_t revision_{1};
 };
 

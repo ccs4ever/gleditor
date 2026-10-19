@@ -994,7 +994,17 @@ void IdentityNetworkController::handleIncomingVote(const VoteEntry &vote) {
 bool IdentityNetworkController::trustDelegation(
     const DeviceDelegation &delegation,
     const std::string_view masterPublicKeyArmored) {
-  if (!delegation.verify(masterPublicKeyArmored)) {
+  const auto pkOpt = identity::StandardCryptoEngine::publicKeyFromAnyFormat(
+      masterPublicKeyArmored);
+  if (!pkOpt) {
+    return false;
+  }
+  return trustDelegation(delegation, *pkOpt);
+}
+
+bool IdentityNetworkController::trustDelegation(
+    const DeviceDelegation &delegation, const PubKey32 &masterPubKey) {
+  if (!delegation.verify(masterPubKey)) {
     return false;
   }
   std::scoped_lock lock(delegationMutex_);

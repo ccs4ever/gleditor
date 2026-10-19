@@ -205,7 +205,7 @@ ComputeIdentity makeIdentity(std::string name) {
   xanadu::PublicKey publicMaster;
   publicMaster.bytes = master->publicKey().bytes;
   result.master      = publicMaster.hex();
-  if (!result.delegation.verify(result.master))
+  if (!result.delegation.verify(master->publicKey()))
     throw std::runtime_error("mesh CLI fixture delegation failed verification");
   return result;
 }

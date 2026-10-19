@@ -1,6 +1,7 @@
 /**
  * @file merkle_ledger_test.cpp
- * @brief Unit tests for the append-only Merkle ledger and GPG identity linking.
+ * @brief Unit tests for the append-only Merkle ledger and Ed25519 identity
+ * linking.
  */
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -18,12 +19,12 @@ using ::testing::Ne;
 using ::testing::NotNull;
 
 TEST(MerkleLedgerTest, EntryNormalizationAndLeafHashing) {
-  GpgKeyLink link1;
+  IdentityKeyLink link1;
   link1.fingerprint =
       "4a 5b 6c 7d 8e 9f 00 11 22 33 44 55 66 77 88 99 aa bb cc dd";
   link1.identity  = "Ada Lovelace";
   link1.email     = "Ada@Example.ORG";
-  link1.gpgKeyId  = "0x8E9F001122334455";
+  link1.keyId     = "0x8E9F001122334455";
   link1.timestamp = 1700000000;
   link1.sequence  = 0;
 
@@ -32,11 +33,11 @@ TEST(MerkleLedgerTest, EntryNormalizationAndLeafHashing) {
 
   // Same content with different case/spaces in fingerprint and email must
   // produce identical hash
-  GpgKeyLink link2;
+  IdentityKeyLink link2;
   link2.fingerprint = "4A5B6C7D8E9F00112233445566778899AABBCCDD";
   link2.identity    = "Ada Lovelace";
   link2.email       = "ada@example.org";
-  link2.gpgKeyId    = "0x8E9F001122334455";
+  link2.keyId       = "0x8E9F001122334455";
   link2.timestamp   = 1700000000;
   link2.sequence    = 0;
 
@@ -52,7 +53,7 @@ TEST(MerkleLedgerTest, AppendEntriesAndRootProgression) {
   EXPECT_TRUE(ledger.empty());
   EXPECT_THAT(ledger.size(), Eq(0U));
 
-  GpgKeyLink entry1;
+  IdentityKeyLink entry1;
   entry1.fingerprint = "1111222233334444555566667777888899990000";
   entry1.identity    = "Alice";
   entry1.email       = "alice@example.com";
@@ -65,7 +66,7 @@ TEST(MerkleLedgerTest, AppendEntriesAndRootProgression) {
   EXPECT_THAT(ledger.root(), Eq(root1));
   EXPECT_FALSE(ledger.rootHex().empty());
 
-  GpgKeyLink entry2;
+  IdentityKeyLink entry2;
   entry2.fingerprint = "AAAA22223333444455556666777788889999BBBB";
   entry2.identity    = "Bob";
   entry2.email       = "bob@example.com";
@@ -86,7 +87,7 @@ TEST(MerkleLedgerTest, InclusionProofGenerationAndVerification) {
                                            "user4@test.org", "user5@test.org"};
 
   for (std::size_t i = 0; i < emails.size(); ++i) {
-    GpgKeyLink link;
+    IdentityKeyLink link;
     link.fingerprint = std::format("{:040d}", i + 1);
     link.identity    = std::format("User {}", i);
     link.email       = emails[i];
@@ -116,7 +117,7 @@ TEST(MerkleLedgerTest, InclusionProofGenerationAndVerification) {
 TEST(MerkleLedgerTest, ProofSerializationRoundTrip) {
   MerkleLedger ledger;
   for (int i = 0; i < 4; ++i) {
-    GpgKeyLink link;
+    IdentityKeyLink link;
     link.fingerprint =
         std::format("111122223333444455556666777788889999000{}", i);
     link.identity  = std::format("Person {}", i);
@@ -142,15 +143,15 @@ TEST(MerkleLedgerTest, ProofSerializationRoundTrip) {
 TEST(MerkleLedgerTest, LedgerTsvSerializationAndLookup) {
   MerkleLedger ledger;
 
-  GpgKeyLink link1;
+  IdentityKeyLink link1;
   link1.fingerprint = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
   link1.identity    = "Alice Adams";
   link1.email       = "alice@wonderland.org";
-  link1.gpgKeyId    = "0xAAAA111122223333";
+  link1.keyId       = "0xAAAA111122223333";
   link1.timestamp   = 500;
   ledger.appendKey(link1);
 
-  GpgKeyLink link2;
+  IdentityKeyLink link2;
   link2.fingerprint = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
   link2.identity    = "Bob Baker";
   link2.email       = "bob@bakery.org";
@@ -158,7 +159,7 @@ TEST(MerkleLedgerTest, LedgerTsvSerializationAndLookup) {
   ledger.appendKey(link2);
 
   // Second key for Alice (revoking old key)
-  GpgKeyLink link3;
+  IdentityKeyLink link3;
   link3.fingerprint = "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC";
   link3.identity    = "Alice Adams";
   link3.email       = "alice@wonderland.org";
@@ -186,13 +187,14 @@ TEST(MerkleLedgerTest, LedgerTsvSerializationAndLookup) {
 
 TEST(MerkleLedgerTest, SealToTorrent) {
   MerkleLedger ledger;
-  GpgKeyLink link;
+  IdentityKeyLink link;
   link.fingerprint = "1234567890123456789012345678901234567890";
   link.identity    = "Test Author";
   link.email       = "author@test.com";
   link.publicKeyArmored =
-      "-----BEGIN PGP PUBLIC KEY BLOCK-----\ntest\n-----END PGP PUBLIC KEY "
-      "BLOCK-----";
+      "-----BEGIN PUBLIC KEY-----\n"
+      "MCowBQYDK2VwAyEAI1L40Zt5HSRFMkLhXy6rbLfP+ntqXtMAl5YOBpiB2xI=\n"
+      "-----END PUBLIC KEY-----\n";
   link.timestamp = 1000;
   ledger.appendKey(link);
 
@@ -210,20 +212,20 @@ TEST(MerkleLedgerTest, SealToTorrent) {
 
 TEST(MerkleLedgerTest, VerifyProvenanceAuthorAgainstRoot) {
   MerkleLedger ledger;
-  GpgKeyLink link;
+  IdentityKeyLink link;
   link.fingerprint = "E2B1A4D89C3F0174A55280BCFE491370D6A284E1";
   link.identity    = "Ada Lovelace <ada@example.org>";
   link.email       = "ada@example.org";
-  link.gpgKeyId    = "FE491370D6A284E1";
+  link.keyId       = "FE491370D6A284E1";
   link.timestamp   = 1700000000;
   ledger.appendKey(link);
 
   const auto root = ledger.root();
 
   Author author;
-  author.name   = "Ada Lovelace";
-  author.email  = "ada@example.org";
-  author.gpgKey = "FE491370D6A284E1";
+  author.name       = "Ada Lovelace";
+  author.email      = "ada@example.org";
+  author.signingKey = "FE491370D6A284E1";
 
   SignedProvenance prov; // unsigned/empty signature path
   std::string error;

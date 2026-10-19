@@ -82,6 +82,48 @@ void CliParser::buildParser(argparse::ArgumentParser &parser,
             "repeatable")
       .append();
 
+  parser.add_argument("--compare-diff")
+      .help("show hypertime map in comparison diff HUD page")
+      .default_value(false)
+      .implicit_value(true);
+
+  parser.add_argument("--link-directory")
+      .help("open Link Directory dialog on startup")
+      .default_value(false)
+      .implicit_value(true);
+
+  parser.add_argument("--link-directory-drawer")
+      .help("open Link Directory dialog as docked sidebar drawer")
+      .default_value(false)
+      .implicit_value(true);
+
+  parser.add_argument("--link-directory-search")
+      .help("initial search query for Link Directory")
+      .default_value(std::string{});
+
+  parser.add_argument("--link-directory-filter")
+      .help("initial link type filter for Link Directory")
+      .default_value(std::string{});
+
+  parser.add_argument("--link-directory-balance")
+      .help("initial link balance filter for Link Directory (1:1, 1:N, N:M)")
+      .default_value(std::string{});
+
+  parser.add_argument("--link-directory-advanced")
+      .help("open advanced primedia span inspection in Link Directory")
+      .default_value(false)
+      .implicit_value(true);
+
+  parser.add_argument("--width")
+      .help("initial window width in pixels")
+      .default_value(0)
+      .scan<'i', int>();
+
+  parser.add_argument("--height")
+      .help("initial window height in pixels")
+      .default_value(0)
+      .scan<'i', int>();
+
   parser.add_argument("--alias")
       .help("assign alias to microversion as VERSION:ALIAS; repeatable")
       .append();
@@ -289,11 +331,158 @@ void CliParser::buildParser(argparse::ArgumentParser &parser,
       .help("open a sovereign system xanadoc (keymap, settings, layout, ui, "
             "pouches); repeatable")
       .append();
+
+  hiddenUnlessDetailed(parser.add_argument("--session-export"))
+      .help("export self-contained session package (.xuzzpkg) to destination "
+            "path")
+      .default_value(std::string{});
+  hiddenUnlessDetailed(parser.add_argument("--session-import"))
+      .help("import self-contained session package (.xuzzpkg) from source path")
+      .default_value(std::string{});
+  hiddenUnlessDetailed(parser.add_argument("--session-doc"))
+      .help("document name or store path to export into session package")
+      .default_value(std::string{});
+  hiddenUnlessDetailed(parser.add_argument("--session-password"))
+      .help("passphrase for ChaCha20-Poly1305 container encryption/decryption")
+      .default_value(std::string{});
+  hiddenUnlessDetailed(parser.add_argument("--session-station"))
+      .help("destination station directory when importing a session package")
+      .default_value(std::string{});
+  hiddenUnlessDetailed(parser.add_argument("--session-links"))
+      .help("link package keys to bundle into session package; repeatable")
+      .append();
+  hiddenUnlessDetailed(parser.add_argument("--editions"))
+      .help("comma-separated edition names to export into session package; "
+            "repeatable")
+      .append();
 }
 
 std::optional<CliOptions> CliParser::parse(argparse::ArgumentParser &parser,
                                            AppStateRef state, const int argc,
                                            char **argv) {
+  if (argc > 1 && std::string_view(argv[1]) == "session") {
+    CliOptions opts;
+    opts.isSessionCommand = true;
+    if (argc < 3) {
+      std::cerr << "Usage: xuzz session <export|import> [options]\n";
+      return std::nullopt;
+    }
+    const std::string_view action = argv[2];
+    if (action == "export") {
+      opts.isSessionExport = true;
+      argparse::ArgumentParser exportParser("xuzz session export");
+      exportParser.add_argument("--out", "-o")
+          .help("output .xuzzpkg path")
+          .required();
+      exportParser.add_argument("--doc", "-d")
+          .help("document name or store path")
+          .default_value(std::string{});
+      exportParser.add_argument("--store", "-s")
+          .help("store path")
+          .default_value(std::string{});
+      exportParser.add_argument("--password", "-p")
+          .help("passphrase for encryption")
+          .default_value(std::string{});
+      exportParser.add_argument("--version-id", "-v")
+          .help("version IDs or aliases to include (comma-separated)")
+          .append();
+      exportParser.add_argument("--editions", "-e")
+          .help("editions to include (comma-separated)")
+          .append();
+      exportParser.add_argument("--links", "-l")
+          .help("link package keys to include")
+          .append();
+      exportParser.add_argument("--permascroll")
+          .help("custom permascroll path")
+          .default_value(std::string{});
+      exportParser.add_argument("--headless", "--batch")
+          .help("run headless")
+          .default_value(false)
+          .implicit_value(true);
+
+      std::vector<std::string> subArgs;
+      subArgs.push_back("xuzz session export");
+      for (int i = 3; i < argc; ++i) {
+        subArgs.push_back(argv[i]);
+      }
+      try {
+        exportParser.parse_args(subArgs);
+      } catch (const std::exception &err) {
+        std::cerr << err.what() << "\n" << exportParser;
+        return std::nullopt;
+      }
+
+      opts.sessionExportPath = exportParser.get<std::string>("--out");
+      opts.sessionDoc        = exportParser.get<std::string>("--doc");
+      opts.storePath         = exportParser.get<std::string>("--store");
+      if (opts.storePath.empty() && !opts.sessionDoc.empty()) {
+        opts.storePath = opts.sessionDoc;
+      }
+      if (opts.storePath.empty()) {
+        opts.storePath = (xanadu::xanadocsDirectory() / "default").string();
+      }
+      opts.sessionPassword = exportParser.get<std::string>("--password");
+      opts.permascrollPath = exportParser.get<std::string>("--permascroll");
+      opts.headless        = (exportParser["--headless"] == true ||
+                              exportParser["--batch"] == true);
+      if (exportParser.present<std::vector<std::string>>("--version-id")) {
+        opts.sessionVersions =
+            exportParser.get<std::vector<std::string>>("--version-id");
+      }
+      if (exportParser.present<std::vector<std::string>>("--editions")) {
+        opts.sessionEditions =
+            exportParser.get<std::vector<std::string>>("--editions");
+      }
+      if (exportParser.present<std::vector<std::string>>("--links")) {
+        opts.sessionLinks =
+            exportParser.get<std::vector<std::string>>("--links");
+      }
+      return opts;
+    } else if (action == "import") {
+      opts.isSessionImport = true;
+      argparse::ArgumentParser importParser("xuzz session import");
+      importParser.add_argument("--in", "-i")
+          .help("input .xuzzpkg path")
+          .required();
+      importParser.add_argument("--station", "-s")
+          .help("destination station directory")
+          .default_value(std::string{});
+      importParser.add_argument("--password", "-p")
+          .help("passphrase for decryption")
+          .default_value(std::string{});
+      importParser.add_argument("--permascroll")
+          .help("custom permascroll path")
+          .default_value(std::string{});
+      importParser.add_argument("--headless", "--batch")
+          .help("run headless")
+          .default_value(false)
+          .implicit_value(true);
+
+      std::vector<std::string> subArgs;
+      subArgs.push_back("xuzz session import");
+      for (int i = 3; i < argc; ++i) {
+        subArgs.push_back(argv[i]);
+      }
+      try {
+        importParser.parse_args(subArgs);
+      } catch (const std::exception &err) {
+        std::cerr << err.what() << "\n" << importParser;
+        return std::nullopt;
+      }
+
+      opts.sessionImportPath = importParser.get<std::string>("--in");
+      opts.sessionStationDir = importParser.get<std::string>("--station");
+      opts.sessionPassword   = importParser.get<std::string>("--password");
+      opts.permascrollPath   = importParser.get<std::string>("--permascroll");
+      opts.headless          = (importParser["--headless"] == true ||
+                                importParser["--batch"] == true);
+      return opts;
+    } else {
+      std::cerr << "Unknown session command: " << action << "\n";
+      return std::nullopt;
+    }
+  }
+
   try {
     parser.parse_args(argc, argv);
   } catch (const std::exception &err) {
@@ -353,6 +542,7 @@ std::optional<CliOptions> CliParser::parse(argparse::ArgumentParser &parser,
 
   opts.onionSkin        = (parser["--onion-skin"] == true);
   opts.mapVisible       = (parser["--map"] == true);
+  opts.compareDiff      = (parser["--compare-diff"] == true);
   opts.pouchOpen        = (parser["--pouch"] == true);
   opts.telescopeVisible = (parser["--telescope"] == true);
   opts.physicsEnabled =
@@ -360,6 +550,19 @@ std::optional<CliOptions> CliParser::parse(argparse::ArgumentParser &parser,
   opts.noBeams    = (parser["--no-beams"] == true);
   opts.noSworph   = (parser["--no-sworph"] == true);
   opts.wholePages = (parser["--whole-pages"] == true);
+
+  opts.linkDirectoryVisible = (parser["--link-directory"] == true);
+  opts.linkDirectoryDrawer  = (parser["--link-directory-drawer"] == true);
+  opts.linkDirectorySearch = parser.get<std::string>("--link-directory-search");
+  opts.linkDirectoryFilter = parser.get<std::string>("--link-directory-filter");
+  opts.linkDirectoryBalance =
+      parser.get<std::string>("--link-directory-balance");
+  opts.linkDirectoryAdvanced = (parser["--link-directory-advanced"] == true);
+
+  const int winW = parser.get<int>("--width");
+  const int winH = parser.get<int>("--height");
+  if (winW > 0) state->view.screenWidth = winW;
+  if (winH > 0) state->view.screenHeight = winH;
 
   if (parser.present<std::vector<std::string>>("--audio")) {
     opts.audioMrls = parser.get<std::vector<std::string>>("--audio");
@@ -378,6 +581,25 @@ std::optional<CliOptions> CliParser::parse(argparse::ArgumentParser &parser,
          parser.get<std::vector<std::string>>("--background")) {
       opts.background.push_back(xanadu::MicroversionId::parse(verStr));
     }
+  }
+  opts.sessionExportPath = parser.get<std::string>("--session-export");
+  opts.sessionImportPath = parser.get<std::string>("--session-import");
+  opts.sessionDoc        = parser.get<std::string>("--session-doc");
+  opts.sessionPassword   = parser.get<std::string>("--session-password");
+  opts.sessionStationDir = parser.get<std::string>("--session-station");
+  if (!opts.sessionExportPath.empty()) {
+    opts.isSessionCommand = true;
+    opts.isSessionExport  = true;
+  }
+  if (!opts.sessionImportPath.empty()) {
+    opts.isSessionCommand = true;
+    opts.isSessionImport  = true;
+  }
+  if (parser.present<std::vector<std::string>>("--session-links")) {
+    opts.sessionLinks = parser.get<std::vector<std::string>>("--session-links");
+  }
+  if (parser.present<std::vector<std::string>>("--editions")) {
+    opts.sessionEditions = parser.get<std::vector<std::string>>("--editions");
   }
 
   opts.backend = gleditor::applyCommonArguments(parser, state, argc, argv);

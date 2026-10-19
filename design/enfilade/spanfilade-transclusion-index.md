@@ -157,7 +157,7 @@ ______________________________________________________________________
 
 ## 6. Performance Benchmarks
 
-Microbenchmarks executed on Linux x86_64 (`tests/xudu/spanfilade_benchmark_test.cpp`) demonstrate
+Microbenchmarks executed on Linux x86_64 (`tests/xuzz/spanfilade_benchmark_test.cpp`) demonstrate
 decisive improvements over legacy linear scans:
 
 ### 6.1 Query Stabbing Speedup ((N = 500) pieces, 5,000 queries)

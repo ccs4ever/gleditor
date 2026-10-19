@@ -50,13 +50,13 @@ and both build paths pass the same concept and behavior tests.
    sizes, then copy from the view in one pass. Keep the sources alive through that copy and preserve
    the existing result order. Leave the VQL compiler's separate stream assembly unchanged until
    direct engine parity is confirmed.
-1. Add focused tests for the view in `tests/xudu/`: both empty, either side empty, duplicate cells,
+1. Add focused tests for the view in `tests/xuzz/`: both empty, either side empty, duplicate cells,
    source order, and `std::ranges::input_range` with `const CellRef&` elements. Extend
    `VQLEngineTest.CreationSugarAndYieldModes` with `!both` and a clone case; compare direct-engine
    output to the existing compiler/VM behavior where the test fixture supports it.
 1. Let CI's existing normal `make -j$(nproc)` and `test/all` steps cover the native branch where the
    runner provides it. Extend the SDL2 forced-fallback step to run the new view and VQL cases after
-   rebuilding `xudu_test` with `GLEDITOR_CPP26_FORCE_FALLBACK=1`. Locally run the filtered tests
+   rebuilding `xuzz_test` with `GLEDITOR_CPP26_FORCE_FALLBACK=1`. Locally run the filtered tests
    headlessly after both a normal `make -j$(nproc)` and a forced-fallback build. Run
    `make format-check` and update the C++26 compatibility plan with the final contract and evidence.
 

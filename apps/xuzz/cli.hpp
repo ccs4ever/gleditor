@@ -76,9 +76,23 @@ struct CliOptions {
   std::string dumpPermascrollPath;
   bool exportOsmic{false};
 
+  // Session Exchange Packages (.xuzzpkg)
+  std::string sessionExportPath;
+  std::string sessionImportPath;
+  std::string sessionDoc;
+  std::string sessionPassword;
+  std::string sessionStationDir;
+  std::vector<std::string> sessionLinks;
+  std::vector<std::string> sessionEditions;
+  std::vector<std::string> sessionVersions;
+  bool isSessionCommand{false};
+  bool isSessionExport{false};
+  bool isSessionImport{false};
+
   // UI state
   bool onionSkin{false};
   bool mapVisible{false};
+  bool compareDiff{false};
   bool pouchOpen{false};
   bool telescopeVisible{false};
   bool physicsEnabled{false};
@@ -86,6 +100,14 @@ struct CliOptions {
   bool noSworph{false};
   bool wholePages{false};
   bool hasExplicitStore{false};
+
+  // Link Directory UI
+  bool linkDirectoryVisible{false};
+  bool linkDirectoryDrawer{false};
+  std::string linkDirectorySearch;
+  std::string linkDirectoryFilter;
+  std::string linkDirectoryBalance;
+  bool linkDirectoryAdvanced{false};
 
   // Media & Widgets
   std::vector<std::string> audioMrls;

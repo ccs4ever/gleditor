@@ -29,25 +29,6 @@
 
 namespace xanadu {
 
-namespace {
-[[nodiscard]] std::string toHex(std::span<const std::uint8_t> data) {
-  static constexpr char hexChars[] = "0123456789abcdef";
-  std::string s;
-  s.reserve(data.size() * 2);
-  for (const auto b : data) {
-    s.push_back(hexChars[(b >> 4) & 0x0F]);
-    s.push_back(hexChars[b & 0x0F]);
-  }
-  return s;
-}
-
-[[nodiscard]] std::string computeSha256Hex(std::span<const std::uint8_t> data) {
-  std::array<std::uint8_t, 32> hash{};
-  SHA256(data.data(), data.size(), hash.data());
-  return toHex(hash);
-}
-} // namespace
-
 BranchConvergenceOverlay::BranchConvergenceOverlay()
     : BranchConvergenceOverlay(nullptr, {}) {}
 
@@ -186,6 +167,34 @@ BranchConvergenceOverlay *BranchConvergenceOverlay::setPackagePassphrase(
     OPENSSL_cleanse(packagePassphrase_.data(), packagePassphrase_.size());
   }
   packagePassphrase_ = std::move(passphrase);
+  return this;
+}
+
+BranchConvergenceOverlay *BranchConvergenceOverlay::setIncludedLinkPackages(
+    std::vector<LinkPackage> packages) noexcept {
+  const std::scoped_lock lock(guard_);
+  includedLinkPackages_ = std::move(packages);
+  revision_++;
+  return this;
+}
+
+BranchConvergenceOverlay *BranchConvergenceOverlay::setSelectedLinkPackageKeys(
+    std::vector<std::string> keys) noexcept {
+  const std::scoped_lock lock(guard_);
+  selectedLinkPackageKeys_ = std::move(keys);
+  revision_++;
+  return this;
+}
+
+BranchConvergenceOverlay *BranchConvergenceOverlay::detectConcurrentEdits() {
+  if (!store_) {
+    return this;
+  }
+  const auto versions = store_->currentVersions();
+  if (versions.size() > 1) {
+    const std::string devId = (!deviceId_.empty()) ? deviceId_ : "peer";
+    return detectConcurrentEdits(devId, versions[1], versions[0]);
+  }
   return this;
 }
 
@@ -345,51 +354,38 @@ BranchConvergenceOverlay::dispatchAction(std::string_view action) {
       masterFp = computeSha256Hex(config.deviceKeys.publicKey.bytes);
     }
 
-    auto certRes = createX509DelegationCertificate(
-        config.deviceKeys.publicKey.bytes,
-        std::span<const std::uint8_t, 32>(
-            config.deviceKeys.secretKey.bytes.data(), 32),
-        effectiveDeviceId);
-    if (!certRes) {
-      return std::unexpected(
-          std::string(validationErrorToString(certRes.error())));
-    }
-
-    std::vector<CompactOpNode> ops;
-    ops.reserve(store_->opCount());
-    for (std::uint32_t i = 1; i <= store_->opCount(); ++i) {
-      if (const auto *node = store_->getCompactOp(i)) {
-        ops.push_back(*node);
+    std::vector<LinkPackage> selectedPkgs;
+    {
+      const std::scoped_lock lock(guard_);
+      if (!selectedLinkPackageKeys_.empty()) {
+        for (const auto &pkg : includedLinkPackages_) {
+          const auto key = pkg.packageKey();
+          if (std::ranges::find(selectedLinkPackageKeys_, key) !=
+              selectedLinkPackageKeys_.end()) {
+            selectedPkgs.push_back(pkg);
+          }
+        }
+      } else {
+        selectedPkgs = includedLinkPackages_;
       }
     }
 
-    const std::string primediaStr = std::string(userScroll.bytes());
+    std::span<const std::uint8_t, 32> privKey(
+        config.deviceKeys.secretKey.bytes.data(), 32);
 
-    SessionPackage pkg;
-    pkg.setManifestVersion(1)
-        ->setMasterFingerprint(masterFp)
-        ->setDeviceId(effectiveDeviceId)
-        ->setDeviceKey(toHex(config.deviceKeys.publicKey.bytes))
-        ->setBaseVersion(!activeHead_.isZero() ? activeHead_.str() : "0")
-        ->setHeadVersion(!peerHead_.isZero() ? peerHead_.str() : "0")
-        ->setPrimediaOffset(0)
-        ->setPrimediaLength(primediaStr.size())
-        ->setTimestamp(static_cast<std::uint64_t>(std::time(nullptr)))
-        ->setPrimediaSlice(std::string_view(primediaStr))
-        ->setOpsNodes(ops)
-        ->setDeviceCert(*certRes)
-        ->setEncrypted(encryptPackage_)
-        ->setPassphrase(packagePassphrase_);
+    const std::string baseVer = !activeHead_.isZero() ? activeHead_.str() : "0";
+    const std::string headVer = !peerHead_.isZero() ? peerHead_.str() : "0";
 
-    auto signRes = pkg.signWithDeviceKey(std::span<const std::uint8_t, 32>(
-        config.deviceKeys.secretKey.bytes.data(), 32));
-    if (!signRes) {
+    auto pkgRes = createFatStorePackage(
+        *store_, effectiveDeviceId, privKey, masterFp, baseVer, headVer,
+        encryptPackage_, packagePassphrase_, selectedPkgs);
+    if (!pkgRes) {
       return std::unexpected(
-          std::string(validationErrorToString(signRes.error())));
+          std::string(validationErrorToString(pkgRes.error())));
     }
 
     const auto exportPath = std::filesystem::path("convergence_export.xuzzpkg");
-    auto expRes           = exportPackage(pkg, exportPath);
+    auto expRes           = exportPackage(*pkgRes, exportPath);
     if (!expRes) {
       return std::unexpected(
           std::string(validationErrorToString(expRes.error())));

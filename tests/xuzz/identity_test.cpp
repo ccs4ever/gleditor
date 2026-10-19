@@ -82,12 +82,15 @@ TEST(IdentitySerializationTest, IdentityEntryRoundTrip) {
   IdentityEntry entry;
   entry.fingerprint =
       *Fingerprint::fromString("1111222233334444555566667777888899990000");
-  entry.email            = "alice@example.org";
-  entry.identityName     = "Alice Adams";
-  entry.publicKeyArmored = "-----BEGIN PGP PUBLIC KEY BLOCK-----\ntest\n";
-  entry.timestamp        = 1700000000;
-  entry.sequence         = 42;
-  entry.revoked          = false;
+  entry.email        = "alice@example.org";
+  entry.identityName = "Alice Adams";
+  entry.publicKeyArmored =
+      "-----BEGIN PUBLIC KEY-----\n"
+      "MCowBQYDK2VwAyEAI1L40Zt5HSRFMkLhXy6rbLfP+ntqXtMAl5YOBpiB2xI=\n"
+      "-----END PUBLIC KEY-----\n";
+  entry.timestamp = 1700000000;
+  entry.sequence  = 42;
+  entry.revoked   = false;
   entry.signature.bytes.fill(0x7A);
 
   const std::string serialized = serialize(entry);

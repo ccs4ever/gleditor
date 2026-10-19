@@ -19,6 +19,7 @@ struct UiMetrics {
   float contentScale{1.0F};
   float userScale{1.0F};
   float fontScale{1.0F};
+  bool touchModality{false};
   /// Canvas pixel extents; chrome uses the same coordinates.
   int screenWidth{}, screenHeight{};
   ScreenInsets chrome;

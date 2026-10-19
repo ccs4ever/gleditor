@@ -10,6 +10,8 @@
 
 namespace xuzz {
 
+struct CliOptions;
+
 class XuzzApp {
 public:
   XuzzApp();
@@ -24,6 +26,8 @@ private:
   int executeCheckAuthorship(const std::string &where);
   int executeRaster(const std::string &slicePath, const std::string &storePath);
   int executeLensRaster(const std::string &lensPath);
+  int executeSessionExport(const CliOptions &opts);
+  int executeSessionImport(CliOptions &opts, int argc, char **argv);
 };
 
 } // namespace xuzz

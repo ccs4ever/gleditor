@@ -16,12 +16,12 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 BIN="${ROOT}/build/xuzz"
-TEST_BIN="${ROOT}/build/xudu_test"
+TEST_BIN="${ROOT}/build/xuzz_test"
 SCREENSHOT_DIR="${ROOT}/build/integration_screenshots"
 
 if [ ! -x "$BIN" ] || [ ! -x "$TEST_BIN" ]; then
-  echo "==> Building xuzz and xudu_test..."
-  make -C "$ROOT" -j"$(nproc)" xuzz xudu_test
+  echo "==> Building xuzz and xuzz_test..."
+  make -C "$ROOT" -j"$(nproc)" xuzz xuzz_test
 fi
 
 echo "==> Running E2E Binary Orchestration Test Suite..."

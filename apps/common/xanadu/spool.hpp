@@ -6,6 +6,7 @@
 #define XUDU_SPOOL_H
 
 #include <algorithm>
+#include <compare>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -84,7 +85,8 @@ struct PrimediaSpan {
             .length = std::min(count, length - from)};
   }
 
-  bool operator==(const PrimediaSpan &) const = default;
+  bool operator==(const PrimediaSpan &) const  = default;
+  auto operator<=>(const PrimediaSpan &) const = default;
 };
 
 /**

@@ -1,13 +1,13 @@
 # Decentralized Topic Ledgers, Publication Metadata & Xanadulogical Search Specification
 
 An architectural specification and investigation for deriving topic swarms, publication metadata,
-and decentralized indexing across `gleditor`, `xudu`, and `zigzag`.
+and decentralized indexing across `gleditor`, `xuzz`, and the underlying `xanadu` engine.
 
 ______________________________________________________________________
 
 ## 1. Executive Summary & The Dialectical Challenge
 
-Stage 7 of the Xudu UI overhaul introduces the **Decentralized Swarm Telescope**—an astronomical
+Stage 7 of the Xuzz UI overhaul introduces the **Decentralized Swarm Telescope**—an astronomical
 instrument peering into the collective writings of the Universal Docuverse. However, for the
 Telescope to navigate millions of distributed publications, it must solve two fundamental problems:
 
@@ -70,7 +70,7 @@ ______________________________________________________________________
 
 #### Vector 3: The Append-Only Publication & Topic Merkle Ledger (`PublicationLedger`)
 
-Directly mirroring `MerkleLedger` (`apps/xudu/core/merkle_ledger.hpp`), we define the
+Directly mirroring `MerkleLedger` (`apps/common/xanadu/merkle_ledger.hpp`), we define the
 **Decentralized Publication Ledger**:
 
 - **Data Structure**: An incremental binary Merkle tree implemented via `microsoft/merklecpp`.
@@ -83,7 +83,7 @@ Directly mirroring `MerkleLedger` (`apps/xudu/core/merkle_ledger.hpp`), we defin
     std::string bep46Uri;            // "btpk:<pubkey>:<salt>"
     std::string title;               // Document title
     std::string authorName;          // Display author identity
-    std::string authorFingerprint;   // OpenPGP 40-hex fingerprint
+    std::string authorFingerprint;   // Ed25519 64-hex fingerprint
     std::vector<std::string> topics; // Normalized tags ["hypertext", "osmic"]
     std::string abstract;            // Brief summary / abstract
     std::uint64_t timestamp{};       // Registration timestamp
@@ -107,7 +107,7 @@ ______________________________________________________________________
 
 ## 3. Search Engine Technical Evaluation
 
-To select the most appropriate search engine for `gleditor` and `xudu`, we evaluate the leading
+To select the most appropriate search engine for `gleditor` and `xuzz`, we evaluate the leading
 open-source options against our architectural constraints:
 
 - **C++23 GNU Make compatibility** (zero external build tools like Cargo, Gradle, or npm).
@@ -176,12 +176,12 @@ expressions and SQL predicates:
 
 ______________________________________________________________________
 
-## 5. Architectural Implementation in `xudu`
+## 5. Architectural Implementation in `xanadu`
 
-### 5.1 The `SwarmCatalogIndex` Class (`apps/xudu/core/swarm_catalog_index.hpp/.cpp`)
+### 5.1 The `SwarmCatalogIndex` Class (`apps/common/xanadu/swarm_catalog_index.hpp/.cpp`)
 
 ```cpp
-namespace xudu {
+namespace xanadu {
 
 class SwarmCatalogIndex {
 public:
@@ -214,7 +214,7 @@ private:
   std::unique_ptr<Impl> impl_;
 };
 
-} // namespace xudu
+} // namespace xanadu
 ```
 
 ### 5.2 interactive Frame Budget Guarantee

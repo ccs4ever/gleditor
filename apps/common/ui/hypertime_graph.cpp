@@ -141,34 +141,29 @@ void HypertimeGraph::drawDisc(gleditor::Canvas &canvas, const float cX,
     return;
   }
 
-  // Draw outer border disc if specified
-  if (borderWidth > 0.0F && borderCol != 0) {
-    const float rOut     = radius;
-    const auto nStepsOut = static_cast<int>(std::ceil(rOut));
-    for (int yStep = -nStepsOut; yStep <= nStepsOut; ++yStep) {
-      const auto y = static_cast<float>(yStep);
-      if (std::abs(y) > rOut) {
-        continue;
-      }
-      const float dx = std::sqrt(std::max(0.0F, rOut * rOut - y * y));
-      canvas.addRect(cX - dx, cY + y, 2.0F * dx, 1.0F, borderCol);
-    }
+  // Phase 1: Lineage Aura (3px subtle diffusion glow)
+  const std::uint32_t glowSource = borderCol != 0 ? borderCol : fillCol;
+  if (glowSource != 0) {
+    const float auraRadius = radius + 3.0F;
+    const std::uint32_t auraCol =
+        (glowSource & 0xFFFFFF00U) | 0x33U; // ~20% alpha glow
+    canvas.addRoundedRect(cX - auraRadius, cY - auraRadius, 2.0F * auraRadius,
+                          2.0F * auraRadius, auraRadius, auraCol);
   }
 
-  // Draw inner fill disc
+  // Phase 2: Luminous Ring / Border
+  if (borderWidth > 0.0F && borderCol != 0) {
+    canvas.addRoundedRect(cX - radius, cY - radius, 2.0F * radius,
+                          2.0F * radius, radius, borderCol);
+  }
+
+  // Phase 3: Obsidian Core / Fill
   const float rIn = (borderWidth > 0.0F && borderCol != 0)
                         ? std::max(0.0F, radius - borderWidth)
                         : radius;
   if (rIn > 0.0F) {
-    const auto nStepsIn = static_cast<int>(std::ceil(rIn));
-    for (int yStep = -nStepsIn; yStep <= nStepsIn; ++yStep) {
-      const auto y = static_cast<float>(yStep);
-      if (std::abs(y) > rIn) {
-        continue;
-      }
-      const float dx = std::sqrt(std::max(0.0F, rIn * rIn - y * y));
-      canvas.addRect(cX - dx, cY + y, 2.0F * dx, 1.0F, fillCol);
-    }
+    canvas.addRoundedRect(cX - rIn, cY - rIn, 2.0F * rIn, 2.0F * rIn, rIn,
+                          fillCol);
   }
 }
 
@@ -177,11 +172,22 @@ void HypertimeGraph::drawPolyline(gleditor::Canvas &canvas, const float fromX,
                                   const float toY, const float thickness,
                                   const std::uint32_t colour) {
   if (std::abs(fromY - toY) < 0.5F || std::abs(fromX - toX) < 0.5F) {
+    // 4px diffusion aura
+    const std::uint32_t auraCol = (colour & 0xFFFFFF00U) | 0x24U;
+    canvas.addLine(fromX, fromY, toX, toY, thickness + 4.0F, auraCol);
+    // Crisp core rail
     canvas.addLine(fromX, fromY, toX, toY, thickness, colour);
     return;
   }
-  // Orthogonal elbow routing (horizontal -> vertical -> horizontal)
-  const float midX = (fromX + toX) * 0.5F;
+  // Orthogonal elbow routing (horizontal -> vertical -> horizontal) with
+  // diffusion aura
+  const float midX            = (fromX + toX) * 0.5F;
+  const std::uint32_t auraCol = (colour & 0xFFFFFF00U) | 0x24U;
+
+  canvas.addLine(fromX, fromY, midX, fromY, thickness + 4.0F, auraCol);
+  canvas.addLine(midX, fromY, midX, toY, thickness + 4.0F, auraCol);
+  canvas.addLine(midX, toY, toX, toY, thickness + 4.0F, auraCol);
+
   canvas.addLine(fromX, fromY, midX, fromY, thickness, colour);
   canvas.addLine(midX, fromY, midX, toY, thickness, colour);
   canvas.addLine(midX, toY, toX, toY, thickness, colour);
@@ -495,6 +501,14 @@ HypertimeGraph *HypertimeGraph::setVisible(bool show) {
     if (openedHandler_) openedHandler_();
   } else
     deactivate();
+  return this;
+}
+HypertimeGraph *HypertimeGraph::setComparisonPage(const bool comp) {
+  const std::scoped_lock lock(guard_);
+  if (comparisonPage_ != comp) {
+    comparisonPage_ = comp;
+    changed(true);
+  }
   return this;
 }
 HypertimeGraph *HypertimeGraph::setCurrent(const MicroversionId &id) {
@@ -877,9 +891,12 @@ void HypertimeGraph::rebuildDecoration() {
       const bool selected = node.id == current_;
       const bool compared = std::ranges::find(comparedVersions_, node.id) !=
                             comparedVersions_.end();
-      if (selected || compared)
-        drawDisc(*canvas_, node.x, node.y, node.radius + 2,
-                 selected ? 0x10B981FF : 0xFFD700FF);
+      const std::uint32_t borderCol = selected   ? 0x10B981FF
+                                      : compared ? 0xFFD700FF
+                                                 : 0x38BDF8AA;
+      const std::uint32_t fillCol   = 0x12141AFF; // Obsidian core
+      drawDisc(*canvas_, node.x, node.y, node.radius + (selected ? 2.0F : 0.0F),
+               fillCol, borderCol, 1.5F);
     }
   }
   canvas_->commit();

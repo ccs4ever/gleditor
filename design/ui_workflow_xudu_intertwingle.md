@@ -286,8 +286,8 @@ ______________________________________________________________________
   - Document title, description, and canonical infohash.
   - Root `MicroversionId` and cryptographic Merkle root hash.
   - Hashcash PoW ticket preventing catalog spamming.
-- In the UI, users can follow known author public keys or GPG fingerprints. The catalog updates
-  quietly in the background via DHT polling.
+- In the UI, users can follow known author public keys or Ed25519 64-hex fingerprints. The catalog
+  updates quietly in the background via DHT polling.
 
 ### 7.2 DHT Topic Rendezvous Swarms
 

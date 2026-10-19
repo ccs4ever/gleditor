@@ -594,8 +594,8 @@ Author Session::author() {
     if (!who->email.empty()) {
       chosen.email = who->email;
     }
-    if (!who->gpgKey.empty()) {
-      chosen.gpgKey = who->gpgKey;
+    if (!who->signingKey.empty()) {
+      chosen.signingKey = who->signingKey;
     }
   }
   return chosen;
@@ -972,8 +972,8 @@ std::string Session::publishDocument(const MicroversionId &version,
   if (!request.author.email.empty()) {
     who.email = request.author.email;
   }
-  if (!request.author.gpgKey.empty()) {
-    who.gpgKey = request.author.gpgKey;
+  if (!request.author.signingKey.empty()) {
+    who.signingKey = request.author.signingKey;
   }
   if (!who.named()) {
     throw std::runtime_error(

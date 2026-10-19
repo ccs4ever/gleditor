@@ -48,9 +48,53 @@ struct PanelLine {
   bool operator==(const PanelLine &) const = default;
 };
 
-/// Names the location; the panel supplies exact byte ranges from the site.
+/// Names a site for a reader without raw byte dumps, emitting 4-tier semantic
+/// passage anchors.
 using SiteNamer =
     gleditor::cpp26::function_ref<std::string(const OccurrenceSite &)>;
+
+/**
+ * @brief Returns a compact valence badge for a link type.
+ *
+ * In Nelsonian hypertext, links carry valence/polarity representing the
+ * relationship between endsets (comment, quotation, disagreement, etc.).
+ */
+[[nodiscard]] std::string_view valenceBadge(LinkType type) noexcept;
+
+/**
+ * @brief A 4-tier semantic passage anchor replacing raw byte dump coordinates.
+ *
+ * Tiers:
+ * 1. Valence badge (e.g. "[~]", "[-]", "[+]")
+ * 2. Document title / container name (e.g. "twobythree", "cell 42")
+ * 3. Microversion tag (e.g. "v2a1", "v1")
+ * 4. Passage excerpt with 12px right alpha-fade mask
+ */
+struct SemanticPassageAnchor {
+  std::string valenceBadge;
+  std::string documentTitle;
+  std::string microversionTag;
+  std::string excerpt;
+  bool alphaFadeMask{true};
+  float alphaFadeWidthPx{12.0F};
+
+  bool operator==(const SemanticPassageAnchor &) const = default;
+};
+
+/**
+ * @brief Construct a 4-tier semantic passage anchor for an occurrence site.
+ */
+[[nodiscard]] SemanticPassageAnchor makeSemanticPassageAnchor(
+    const OccurrenceSite &site, LinkType type = LinkType::Comment,
+    std::string_view documentTitle = {}, std::string_view excerpt = {});
+
+/**
+ * @brief Format a 4-tier semantic passage anchor into a human-readable string.
+ *
+ * Guarantees zero raw byte dumps (no "document %u, bytes %u").
+ */
+[[nodiscard]] std::string
+formatSemanticPassageAnchor(const SemanticPassageAnchor &anchor);
 
 /// Where the reader is, for the panel's "reading" line.
 struct ReadingPosition {

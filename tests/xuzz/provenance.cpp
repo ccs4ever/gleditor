@@ -5,8 +5,8 @@
  * The ed25519 key a publication is signed with is minted by this program and
  * bound to no person; it answers "the same publisher as last time" and nothing
  * about who that is. The record tested here is the other half: a person's name
- * and email, signed with their OpenPGP key, written before the content is
- * sealed and sealed into the same torrent -- so the info hash covers the
+ * and email, signed with their Ed25519 author key, written before the content
+ * is sealed and sealed into the same torrent -- so the info hash covers the
  * content and the claim about who wrote it together, and neither can be
  * swapped for another afterwards.
  *
@@ -46,25 +46,25 @@ using xanadu::Store;
 /// A record with every field filled in, including the awkward ones.
 Provenance sample() {
   Provenance record;
-  record.author.name   = "Ada Lovelace";
-  record.author.email  = "ada@example.org";
-  record.author.gpgKey = "0xDEADBEEF";
-  record.title         = "Notes: on the Analytical Engine";
-  record.salt          = "notes";
-  record.publisher     = std::string(64, 'a');
-  record.permascroll   = "btpk:" + std::string(64, 'a') + ":permascroll";
-  record.version       = "2a4";
-  record.published     = 1700000000;
-  record.contentLength = 4096;
-  record.contentDigest = std::string(64, 'b');
-  record.quotes        = {"btpk:" + std::string(64, 'c') + ":permascroll"};
+  record.author.name       = "Ada Lovelace";
+  record.author.email      = "ada@example.org";
+  record.author.signingKey = "0xDEADBEEF";
+  record.title             = "Notes: on the Analytical Engine";
+  record.salt              = "notes";
+  record.publisher         = std::string(64, 'a');
+  record.permascroll       = "btpk:" + std::string(64, 'a') + ":permascroll";
+  record.version           = "2a4";
+  record.published         = 1700000000;
+  record.contentLength     = 4096;
+  record.contentDigest     = std::string(64, 'b');
+  record.quotes            = {"btpk:" + std::string(64, 'c') + ":permascroll"};
   return record;
 }
 
 /// The same record, asking to be signed by the key the Keyring below makes.
 Provenance signable() {
-  auto record          = sample();
-  record.author.gpgKey = "ada@example.org";
+  auto record              = sample();
+  record.author.signingKey = "ada@example.org";
   return record;
 }
 
@@ -178,10 +178,10 @@ TEST(ProvenanceTest, signingRefusesForAnAuthorWithNoNameOrEmail) {
                std::runtime_error);
 }
 
-// What the whole thing rests on: gpg made the signature, and gpg accepts it.
+// What the whole thing rests on: signing makes the signature, and accepts it.
 // Not this program's own verifier agreeing with this program's own signer,
 // which would prove nothing about whether anybody else can check it.
-TEST(ProvenanceTest, gpgSignsTheRecordAndAcceptsItAgain) {
+TEST(ProvenanceTest, signsTheRecordAndAcceptsItAgain) {
   const Keyring keys;
   if (!keys.usable()) {
     GTEST_SKIP() << "no gpg keyring could be made here";

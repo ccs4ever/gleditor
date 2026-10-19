@@ -63,10 +63,12 @@ struct Config {
     return this;
   }
 
-  Config *setGpgKey(std::string key) {
-    author.gpgKey = std::move(key);
+  Config *setSigningKey(std::string key) {
+    author.signingKey = std::move(key);
     return this;
   }
+
+  Config *setGpgKey(std::string key) { return setSigningKey(std::move(key)); }
 
   Config *setGpgHome(std::string home) {
     gpgHome = std::move(home);

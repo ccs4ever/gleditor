@@ -17,11 +17,11 @@ using ::testing::Eq;
 TEST(ZzMerkleTest, VerifySliceAuthorAgainstLedgerRoot) {
   xanadu::MerkleLedger ledger;
 
-  xanadu::GpgKeyLink authorLink;
+  xanadu::IdentityKeyLink authorLink;
   authorLink.fingerprint = "E2B1A4D89C3F0174A55280BCFE491370D6A284E1";
   authorLink.identity    = "Ted Nelson <ted@xanadu.net>";
   authorLink.email       = "ted@xanadu.net";
-  authorLink.gpgKeyId    = "FE491370D6A284E1";
+  authorLink.keyId       = "FE491370D6A284E1";
   authorLink.timestamp   = 1700000000;
   ledger.appendKey(authorLink);
 
@@ -51,7 +51,7 @@ TEST(ZzMerkleTest, VerifySliceAuthorAgainstLedgerRoot) {
 TEST(ZzMerkleTest, RevokedAuthorVerificationFails) {
   xanadu::MerkleLedger ledger;
 
-  xanadu::GpgKeyLink authorLink;
+  xanadu::IdentityKeyLink authorLink;
   authorLink.fingerprint = "1111222233334444555566667777888899990000";
   authorLink.identity    = "Revoked Author <revoked@example.com>";
   authorLink.email       = "revoked@example.com";

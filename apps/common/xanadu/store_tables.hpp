@@ -117,6 +117,16 @@ struct StoreTables {
   ScrollId publishedLocalScroll{localScroll};
 };
 
+/// Serialize @p tables to an in-memory byte buffer, header and all.
+[[nodiscard]] std::vector<std::uint8_t>
+serializeStoreTables(const StoreTables &tables);
+
+/// Deserialize @p tables from an in-memory byte buffer.
+/// @throws StoreTablesUnreadable naming what was wrong: a missing signature, a
+///         version this build does not know, or a section it cannot parse.
+[[nodiscard]] StoreTables
+deserializeStoreTables(std::span<const std::uint8_t> bytes);
+
 /// Write @p tables to @p path, header and all.
 /// @throws StoreTablesUnreadable if the file cannot be written.
 void writeStoreTables(const std::filesystem::path &path,

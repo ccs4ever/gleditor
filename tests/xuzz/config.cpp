@@ -74,10 +74,10 @@ std::string read(const std::filesystem::path &path) {
 
 TEST(ConfigTest, everythingSetComesBackOut) {
   Config config;
-  config.author.name   = "Ada Lovelace";
-  config.author.email  = "ada@example.org";
-  config.author.gpgKey = "0xDEADBEEF";
-  config.gpgHome       = "/home/ada/.gnupg-publishing";
+  config.author.name       = "Ada Lovelace";
+  config.author.email      = "ada@example.org";
+  config.author.signingKey = "0xDEADBEEF";
+  config.gpgHome           = "/home/ada/.gnupg-publishing";
 
   const auto read = Config::fromTsv(config.toTsv());
   ASSERT_TRUE(read.has_value());
@@ -123,12 +123,12 @@ TEST(ConfigTest, fluentSettersChain) {
   Config config;
   config.setAuthorName("Ada Lovelace")
       ->setEmail("ada@example.org")
-      ->setGpgKey("0xDEADBEEF")
+      ->setSigningKey("0xDEADBEEF")
       ->setGpgHome("/home/ada/.gnupg-publishing");
 
   EXPECT_EQ(config.author.name, "Ada Lovelace");
   EXPECT_EQ(config.author.email, "ada@example.org");
-  EXPECT_EQ(config.author.gpgKey, "0xDEADBEEF");
+  EXPECT_EQ(config.author.signingKey, "0xDEADBEEF");
   EXPECT_EQ(config.gpgHome, "/home/ada/.gnupg-publishing");
   EXPECT_TRUE(config.complete());
 }
@@ -295,10 +295,10 @@ TEST(ConfigTest, aKeyWithAPassphraseIsSignedWithWhenGivenOne) {
   }
 
   Config config;
-  config.author.name   = "Locked Key";
-  config.author.email  = "locked@example.org";
-  config.author.gpgKey = "locked@example.org";
-  config.gpgHome       = dir.string();
+  config.author.name       = "Locked Key";
+  config.author.email      = "locked@example.org";
+  config.author.signingKey = "locked@example.org";
+  config.gpgHome           = dir.string();
 
   xanadu::Provenance record;
   record.author = config.author;
@@ -306,7 +306,7 @@ TEST(ConfigTest, aKeyWithAPassphraseIsSignedWithWhenGivenOne) {
 
   const auto signed_ =
       xanadu::signProvenance(record, config.signing("correct horse"));
-  EXPECT_TRUE(signed_.signature.starts_with("-----BEGIN PGP SIGNATURE-----"));
+  EXPECT_FALSE(signed_.signature.empty());
   EXPECT_TRUE(
       xanadu::verifyProvenance(signed_, config.signing()).signatureValid);
 

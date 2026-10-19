@@ -1463,7 +1463,7 @@ came back byte-identical across every regenerated fixture.
    R12), with `verifyAgainstFullRebuild()` and its test. CSR link runs, `d.dims` and the two genesis
    cells, `ephemeralBit` and the `applyStructure` rejection of ephemeral link targets.~~ **Done.**
    `apps/common/xanadu/zigzag/manifold.{hpp,cpp}`, `Store::rebuildManifold()` beside `rebuild()`,
-   and twenty-two tests in `tests/xudu/manifold_test.cpp`. Nothing consumes it yet, as planned: no
+   and twenty-two tests in `tests/xuzz/manifold_test.cpp`. Nothing consumes it yet, as planned: no
    app, overlay or engine changed in this step.
 
    **The subject of a `SetLink` is not in a field, and that was the design working rather than a gap
@@ -1554,7 +1554,7 @@ came back byte-identical across every regenerated fixture.
    double.~~ **Done.** `apps/common/xanadu/scalar.{hpp,cpp}` holds the canonicalisation and the
    rendering; `Store::makeScalarCell()`/`setScalar()` mint and restate; `Manifold::asDouble()`,
    `asBool()`, `asInt64()` and `valueKindOf()` read the bits. Ten tests in
-   `tests/xudu/scalar_test.cpp`, over a list of doubles chosen one failure mode at a time rather
+   `tests/xuzz/scalar_test.cpp`, over a list of doubles chosen one failure mode at a time rather
    than sampled.
 
    **The verbs are `makeScalarCell`/`setScalar`, not overloads of `makeCell`/`setValue`.** Two
@@ -1592,7 +1592,7 @@ came back byte-identical across every regenerated fixture.
    budget: `readSegment` verifies whole 64 KiB pieces and the resolved-text cache was removed and
    never replaced, so `stageVisibleCells` re-verifies per visible cell per frame.~~ **Done.**
    `VerifiedPieceCache` in `resolver.hpp`, consulted and filled by `readSegment()`, with eight tests
-   in `tests/xudu/resolver.cpp`.
+   in `tests/xuzz/resolver.cpp`.
 
    **Measured: 4–5x on the shape of a frame.** Sixty short reads scattered over a 1 MiB torrent at
    this tree's 64 KiB piece size — the radius-3 BFS `stageVisibleCells` performs — land in eight
@@ -1652,7 +1652,7 @@ came back byte-identical across every regenerated fixture.
    standalone TSan build of `segmented_primedia_spool.cpp` plus `virtual_memory_arena.cpp`; the
    in-tree test (`readingWhileAnotherThreadAppendsNeverSeesAHalfSpan`) exercises the same path but
    the ordinary build cannot see an ordering bug, only a wrong answer. Wiring a TSan run for
-   `xudu_test` into CI is worth doing and is not this step.
+   `xuzz_test` into CI is worth doing and is not this step.
 
    **What the lock still covers, stated because it is now a narrower promise.** `clear()`,
    `adopt()`, `openActiveSegment()` and `sealActive()` re-address the arena rather than extending
@@ -1849,7 +1849,7 @@ came back byte-identical across every regenerated fixture.
    [VPL](vpl-array-language.md), and [Vlog](vlog-logic-extension.md) §5.2 — and a class three
    documents are written against is better built and measured than deferred until one of their
    interpreters exists. The tests were the driver that was missing;
-   `tests/xudu/arena_manifold_test.cpp` is it.
+   `tests/xuzz/arena_manifold_test.cpp` is it.
 
    Its shape, as those three settled it and the implementation corrected it:
 

@@ -50,8 +50,7 @@ using xanadu::UserPermascroll;
 SignedProvenance makeTestProvenance() {
   SignedProvenance prov;
   prov.tsv       = "title\tSystem Doc Test\nauthor\tNelson\n";
-  prov.signature = "-----BEGIN PGP SIGNATURE-----\ntest-signature\n-----END "
-                   "PGP SIGNATURE-----\n";
+  prov.signature = "ed25519-sig:test-signature\n";
   return prov;
 }
 
@@ -618,8 +617,11 @@ TEST(SystemDocsTest, StoreExclusiveConfigLoaders) {
   EXPECT_EQ(kmCfg.bindingFor("new-doc"), "Ctrl+N");
   EXPECT_EQ(kmCfg.bindingFor(xanadu::settings::kKeymapNewDoc), "Ctrl+N");
   EXPECT_EQ(kmCfg.bindingFor("std:xuzz/new_doc"), "Ctrl+N");
+  EXPECT_EQ(kmCfg.bindingFor("std:xudu/new_doc"), "Ctrl+N");
   EXPECT_EQ(xanadu::canonicalKeymapAction("new-doc"), "std:xuzz/new_doc");
   EXPECT_EQ(xanadu::legacyKeymapAction("std:xuzz/new_doc"), "new-doc");
+  EXPECT_EQ(xanadu::canonicalKeymapAction("std:xudu/new_doc"),
+            "std:xuzz/new_doc");
   EXPECT_EQ(xanadu::canonicalKeymapAction("std:xuzz/new_doc"),
             "std:xuzz/new_doc");
   EXPECT_EQ(xanadu::legacyKeymapAction("new-doc"), "new-doc");
@@ -636,9 +638,13 @@ TEST(SystemDocsTest, StoreExclusiveConfigLoaders) {
   EXPECT_EQ(xanadu::legacyKeymapAction("std:xuzz/format_underline"),
             "format-underline");
   EXPECT_EQ(xanadu::canonicalKeymapAction("save-document"), "std:xuzz/save");
+  EXPECT_EQ(xanadu::canonicalKeymapAction("std:xudu/save_document"),
+            "std:xuzz/save");
   EXPECT_EQ(xanadu::canonicalKeymapAction("std:xuzz/save_document"),
             "std:xuzz/save");
   EXPECT_EQ(xanadu::canonicalKeymapAction("insert-break"),
+            "std:xuzz/page_break");
+  EXPECT_EQ(xanadu::canonicalKeymapAction("std:xudu/insert_break"),
             "std:xuzz/page_break");
   EXPECT_EQ(xanadu::canonicalKeymapAction("std:xuzz/insert_break"),
             "std:xuzz/page_break");

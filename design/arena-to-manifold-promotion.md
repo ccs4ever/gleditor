@@ -18,7 +18,7 @@ ______________________________________________________________________
 
 ## 1. The Architectural Divide: Ephemeral Evaluation vs. Persistent History
 
-In the Nelsonian hyperstructural model implemented across `gleditor`, `xudu`, and `zigzag`, every
+In the Nelsonian hyperstructural model implemented across `gleditor`, `xuzz`, and `zigzag`, every
 permanent state mutation is recorded as an immutable, append-only operation within a
 `SegmentedOpsSpool` (`CompactOpNode`), forming a cryptographically authenticated microversion DAG in
 a `xanadu::Store`. A persistent [`zigzag::Manifold`](../apps/common/xanadu/zigzag/manifold.hpp) is
@@ -363,7 +363,7 @@ The arena-to-manifold promotion architecture is systematically verified by unit 
 
 - **Graph Pruning & Reachability**:
   `ArenaManifoldTest.promotionCarriesReachableSubgraphAndDropsTheRest` in
-  [`tests/xudu/arena_manifold_test.cpp`](../tests/xudu/arena_manifold_test.cpp).
+  [`tests/xuzz/arena_manifold_test.cpp`](../tests/xuzz/arena_manifold_test.cpp).
 - **Link Topology Preservation**: `ArenaManifoldTest.promotionCarriesTheLinksWithBothEndsIntact`.
 - **R6 Scalar Duality Restoration**:
   `ArenaManifoldTest.aPromotedScalarRegainsTheRenderingTheArenaDeferred`.
@@ -372,7 +372,7 @@ The arena-to-manifold promotion architecture is systematically verified by unit 
 - **Overlay Non-Duplication**:
   `ArenaManifoldTest.promotingAnOverlayMintsOnlyWhatTheEvaluationInvented`.
 - **Persistent Compiler Serialization**: `VPLCompilerTest.ExportToStorePersistence` in
-  [`tests/xudu/vpl_compiler_test.cpp`](../tests/xudu/vpl_compiler_test.cpp).
+  [`tests/xuzz/vpl_compiler_test.cpp`](../tests/xuzz/vpl_compiler_test.cpp).
 
 Together, these mechanisms guarantee that speculative computation remains fast, memory-dense, and
 zero-allocation, while ensuring that persisted Xanadu documents remain pristine, cryptographically

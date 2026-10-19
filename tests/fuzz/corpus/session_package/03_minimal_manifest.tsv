@@ -1,0 +1,9 @@
+manifest_version	1
+master_fingerprint	ea8800c264b8684d24576592a9879fd6334c8321a204bca5328161253350e535
+device_id	fuzz-device
+device_key	d3be1690df92d14817c936b86496ba3759afb92a88ad40781b03badd76e941cf
+base_version	0
+head_version	0a1
+primedia_offset	0
+primedia_length	0
+timestamp	1791480000

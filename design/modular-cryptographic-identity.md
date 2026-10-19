@@ -762,7 +762,7 @@ Specific test suites to run and expand:
 #### 1. Cryptographic Engine & Key Tests
 
 ```bash
-./build/xudu_test --gtest_filter='StandardCryptoEngineTest.*'
+./build/xuzz_test --gtest_filter='StandardCryptoEngineTest.*'
 ```
 
 - Verify Ed25519 keypair generation, BIP-39 seed round-trip, and PKCS#8 encrypted serialization.
@@ -772,7 +772,7 @@ Specific test suites to run and expand:
 #### 2. Standard X.509 v3 Delegation Certificate & CSR Tests
 
 ```bash
-./build/xudu_test --gtest_filter='X509CertificateTest.*'
+./build/xuzz_test --gtest_filter='X509CertificateTest.*'
 ```
 
 - Verify PKCS#10 CSR generation and offline authorization workflow.
@@ -785,7 +785,7 @@ Specific test suites to run and expand:
 #### 3. Merkle Ledger Revocation & Temporal Verification Tests
 
 ```bash
-./build/xudu_test --gtest_filter='MerkleLedgerRevocationTest.*'
+./build/xuzz_test --gtest_filter='MerkleLedgerRevocationTest.*'
 ```
 
 - Verify appending `DeviceRevocationRecord` with RFC 5280 reason codes.
@@ -797,7 +797,7 @@ Specific test suites to run and expand:
 #### 4. Manifest Hardening & TSV Injection Defense Tests
 
 ```bash
-./build/xudu_test --gtest_filter='ProvenanceHardeningTest.*'
+./build/xuzz_test --gtest_filter='ProvenanceHardeningTest.*'
 ```
 
 - Test rejection of field names with invalid characters, spaces, or tabs.
@@ -808,7 +808,7 @@ Specific test suites to run and expand:
 #### 5. Consensus Engine Signature Verification Tests
 
 ```bash
-./build/xudu_test --gtest_filter='IdentityValidationTest.*'
+./build/xuzz_test --gtest_filter='IdentityValidationTest.*'
 ```
 
 - Verify that `verifyOracleAttestation` rejects invalid `oracleSignature`.
@@ -818,7 +818,7 @@ Specific test suites to run and expand:
 #### 6. End-to-End Publication & Permascroll Bootstrap Tests
 
 ```bash
-./build/xudu_test --gtest_filter='ProvenanceTest.*:PublicationTest.*'
+./build/xuzz_test --gtest_filter='ProvenanceTest.*:PublicationTest.*'
 ```
 
 - Publish a xanadoc with an author identity, emitting Base64-DER X.509 cert and raw 64-byte

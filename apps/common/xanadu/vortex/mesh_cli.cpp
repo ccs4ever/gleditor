@@ -159,7 +159,7 @@ Launch load(const std::filesystem::path &configuration) {
   xanadu::Author who{field(value, "name").asString(),
                      field(value, "email").asString(), author->toString()};
   if (const auto signingKey = value.find("gpg_key"))
-    who.gpgKey = signingKey->asString();
+    who.signingKey = signingKey->asString();
   if (!who.named())
     throw std::runtime_error("mesh command: named signing author required");
   xanadu::SigningOptions signing;

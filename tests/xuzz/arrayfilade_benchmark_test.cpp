@@ -149,12 +149,17 @@ TEST(ArrayfiladeBenchmarkTest, VQLPredicatePushdownPruning) {
   // Selective query: value > 9,800 (matches 200 / 10,000 cells)
   const auto pred = Predicate::gt(9800.0);
 
+  constexpr std::size_t BenchmarkIterations = 20;
+
   // 1. Linear scan
   const auto t0 = std::chrono::steady_clock::now();
   std::vector<ArrayCellEntry> linearResults{};
-  for (const auto &c : entries) {
-    if (pred.matches(c)) {
-      linearResults.push_back(c);
+  for (std::size_t it = 0; it < BenchmarkIterations; ++it) {
+    linearResults.clear();
+    for (const auto &c : entries) {
+      if (pred.matches(c)) {
+        linearResults.push_back(c);
+      }
     }
   }
   const auto t1 = std::chrono::steady_clock::now();
@@ -163,9 +168,13 @@ TEST(ArrayfiladeBenchmarkTest, VQLPredicatePushdownPruning) {
 
   // 2. Query planning with predicate pushdown
   QueryPlanStats stats{};
-  const auto t2             = std::chrono::steady_clock::now();
-  const auto plannedResults = filade.planQueryWithStats(pred, stats);
-  const auto t3             = std::chrono::steady_clock::now();
+  std::vector<ArrayCellEntry> plannedResults{};
+  const auto t2 = std::chrono::steady_clock::now();
+  for (std::size_t it = 0; it < BenchmarkIterations; ++it) {
+    stats          = {};
+    plannedResults = filade.planQueryWithStats(pred, stats);
+  }
+  const auto t3 = std::chrono::steady_clock::now();
   const auto planDurationUs =
       std::chrono::duration_cast<std::chrono::microseconds>(t3 - t2).count();
 

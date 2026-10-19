@@ -813,10 +813,10 @@ void Views::publishCurrent(const std::string &salt) {
     for (const auto &key : signingKeys(session.settings().signing())) {
       keys.options.push_back(key.describe());
       keys.optionValues.push_back(key.fingerprint);
-      const bool wanted = who.gpgKey.empty()
+      const bool wanted = who.signingKey.empty()
                               ? key.preferred
-                              : key.fingerprint.ends_with(who.gpgKey) ||
-                                    key.identity.contains(who.gpgKey);
+                              : key.fingerprint.ends_with(who.signingKey) ||
+                                    key.identity.contains(who.signingKey);
       if (wanted) {
         keys.chosen = keys.options.size() - 1;
       }
@@ -957,12 +957,12 @@ void Views::publishAnswers(const MicroversionId &version,
                            const std::size_t storeIdx,
                            const std::vector<gleditor::Form::Field> &answers) {
   Session::PublishRequest request;
-  request.salt          = answers[0].answer();
-  request.title         = answers[1].answer();
-  request.author.name   = answers[2].answer();
-  request.author.email  = answers[3].answer();
-  request.author.gpgKey = answers[4].answer();
-  request.passphrase    = answers[5].answer();
+  request.salt              = answers[0].answer();
+  request.title             = answers[1].answer();
+  request.author.name       = answers[2].answer();
+  request.author.email      = answers[3].answer();
+  request.author.signingKey = answers[4].answer();
+  request.passphrase        = answers[5].answer();
   if (!answers[7].answer().empty()) {
     request.extra.emplace_back("rights", answers[7].answer());
   }

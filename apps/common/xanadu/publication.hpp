@@ -278,9 +278,9 @@ publicationPrimedia(std::string_view bytes, std::uint64_t at,
  * scroll.hpp for why the carrier and the address have to be separable.
  *
  * The torrent carries three files: the content, the authorship record, and the
- * OpenPGP signature over that record. The record is signed before any of this
- * happens and is sealed in unchanged, so the info hash covers the content and
- * the claim about who wrote it together -- neither can be substituted for
+ * cryptographic signature over that record. The record is signed before any of
+ * this happens and is sealed in unchanged, so the info hash covers the content
+ * and the claim about who wrote it together -- neither can be substituted for
  * another afterwards without the address changing. The content is file zero
  * and begins at offset zero of the stream, which is what keeps every address
  * already handed out pointing where it always did.

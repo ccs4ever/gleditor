@@ -2,7 +2,10 @@
 
 #include <gleditor/text/diagnostics.hpp>
 #include <gleditor/text/fit.hpp>
+#include <gleditor/ui/button_metrics.hpp>
 #include <gleditor/ui/overlay.hpp>
+#include <gleditor/ui/recessed_well.hpp>
+#include <gleditor/ui/segmented_pill.hpp>
 #include <gleditor/ui/widgets.hpp>
 
 #include <limits>
@@ -344,6 +347,205 @@ TEST(UiWidgetTest,
   EXPECT_TRUE(scene->find(2)->fitted.truncated);
   EXPECT_GT(scene->find(3)->fitted.shaping.lines.size(), 1U);
   EXPECT_LE(scene->find(3)->fitted.shaping.lines.size(), 3U);
+}
+
+TEST(UiWidgetTest, buttonMetricsValuesAndModalityAwareEvaluation) {
+  ButtonMetrics metrics;
+  EXPECT_FLOAT_EQ(metrics.heightCompactPx, 28.0F);
+  EXPECT_FLOAT_EQ(metrics.heightStandardPx, 32.0F);
+  EXPECT_FLOAT_EQ(metrics.heightTouchPx, 44.0F);
+  EXPECT_FLOAT_EQ(metrics.radiusMicroPx, 2.5F);
+  EXPECT_FLOAT_EQ(metrics.radiusPillShare, 0.5F);
+  EXPECT_FLOAT_EQ(metrics.radiusChamferPx, 2.0F);
+  EXPECT_FLOAT_EQ(metrics.radiusSoftPx, 4.0F);
+  EXPECT_FLOAT_EQ(metrics.virtualHitTargetMinPx, 36.0F);
+  EXPECT_FLOAT_EQ(metrics.seamWidthPx, 1.0F);
+
+  EXPECT_FLOAT_EQ(metrics.height(InputModality::Pointer, true), 28.0F);
+  EXPECT_FLOAT_EQ(metrics.height(InputModality::Pointer, false), 32.0F);
+  EXPECT_FLOAT_EQ(metrics.height(InputModality::Touch, true), 44.0F);
+  EXPECT_FLOAT_EQ(metrics.height(InputModality::Touch, false), 44.0F);
+
+  EXPECT_FLOAT_EQ(metrics.cornerRadius(ButtonShapeKind::Pill, 32.0F), 16.0F);
+  EXPECT_FLOAT_EQ(metrics.cornerRadius(ButtonShapeKind::Micro, 32.0F), 2.5F);
+  EXPECT_FLOAT_EQ(metrics.cornerRadius(ButtonShapeKind::Chamfered, 32.0F),
+                  2.0F);
+  EXPECT_FLOAT_EQ(metrics.cornerRadius(ButtonShapeKind::SoftRect, 32.0F), 4.0F);
+  EXPECT_FLOAT_EQ(metrics.cornerRadius(ButtonShapeKind::Ghost, 32.0F), 2.5F);
+
+  // Modality-aware button sizing in WidgetScene
+  gleditor::text::ShapingCache cache;
+  Widget root{.id = 1, .model = Button{"Action", "commit"}};
+
+  UiMetrics pointerMetrics{.screenWidth = 640, .screenHeight = 480};
+  pointerMetrics.touchModality = false;
+  Theme theme;
+  const auto pointerScene =
+      layoutWidgets(root, {0, 0, 200, 100}, pointerMetrics, theme, cache);
+  const auto *pointerBox = pointerScene.layout.find(1);
+  ASSERT_NE(pointerBox, nullptr);
+  EXPECT_FLOAT_EQ(pointerBox->rect.height, 32.0F);
+
+  UiMetrics touchMetrics{.screenWidth = 640, .screenHeight = 480};
+  touchMetrics.touchModality = true;
+  const auto touchScene =
+      layoutWidgets(root, {0, 0, 200, 100}, touchMetrics, theme, cache);
+  const auto *touchBox = touchScene.layout.find(1);
+  ASSERT_NE(touchBox, nullptr);
+  EXPECT_FLOAT_EQ(touchBox->rect.height, 44.0F);
+
+  // Virtual hit target expansion:
+  // pointerBox has height 32px (from bottom to top).
+  // The virtual hit target expands by (36 - 32) * 0.5 = 2px on top and bottom.
+  // Click at pointerBox->rect.bottom - 1.0 is within the 36px virtual target
+  // and should hit widget 1.
+  const float centerX = pointerBox->rect.left + pointerBox->rect.width * 0.5F;
+  EXPECT_EQ(
+      pointerScene.layout.hitTest(centerX, pointerBox->rect.bottom - 1.0F),
+      nullptr); // raw layout misses
+  const auto *hit = pointerScene.hitTest(
+      centerX, pointerBox->rect.bottom - 1.0F); // virtual hit target hits
+  ASSERT_NE(hit, nullptr);
+  EXPECT_EQ(hit->id, 1U);
+
+  // A point far outside the virtual hit target (bottom - 10.0F) returns nullptr
+  EXPECT_EQ(pointerScene.hitTest(centerX, pointerBox->rect.bottom - 10.0F),
+            nullptr);
+}
+
+TEST(UiWidgetTest, opticalCenteringCalculations) {
+  const Rect box{10.0F, 20.0F, 120.0F, 32.0F};
+  const auto font = gleditor::text::FontManager::instance().getFont("Sans 12");
+  ASSERT_NE(font, nullptr);
+  const auto &fm = font->metrics();
+  const float capHeight =
+      fm.capHeight > 0.0F ? fm.capHeight : fm.ascent * 0.72F;
+  const float xHeight = fm.xHeight > 0.0F ? fm.xHeight : fm.ascent * 0.52F;
+  EXPECT_GT(capHeight, 0.0F);
+  EXPECT_GT(xHeight, 0.0F);
+
+  // Text without descenders: centers against capHeight
+  const std::string upperText = "OK 100";
+  bool upperHasDescender      = false;
+  for (char c : upperText) {
+    if (c == 'g' || c == 'j' || c == 'p' || c == 'q' || c == 'y') {
+      upperHasDescender = true;
+    }
+  }
+  EXPECT_FALSE(upperHasDescender);
+
+  const float upperBaseline =
+      box.bottom + std::round((box.height - capHeight) * 0.5F);
+  const float upperDrawTop = upperBaseline + fm.ascent;
+  EXPECT_GT(upperDrawTop, box.bottom + fm.ascent);
+
+  // Text with descenders: centers against full extent (ascent + descent)
+  const std::string descenderText = "apply";
+  bool descHasDescender           = false;
+  for (char c : descenderText) {
+    if (c == 'g' || c == 'j' || c == 'p' || c == 'q' || c == 'y') {
+      descHasDescender = true;
+    }
+  }
+  EXPECT_TRUE(descHasDescender);
+
+  const float descBaseline =
+      box.bottom +
+      std::round((box.height - (fm.ascent + std::abs(fm.descent))) * 0.5F +
+                 std::abs(fm.descent));
+  const float descDrawTop = descBaseline + fm.ascent;
+  EXPECT_GT(descDrawTop, box.bottom + fm.ascent);
+
+  // Horizontal optical centering against fitted width
+  const float fittedWidth = 48.0F;
+  const float drawLeft =
+      box.left + std::round((box.width - fittedWidth) * 0.5F);
+  EXPECT_FLOAT_EQ(drawLeft, box.left + std::round((120.0F - 48.0F) * 0.5F));
+  EXPECT_FLOAT_EQ(drawLeft, 46.0F);
+
+  // Synthetic metrics with pronounced descent differences
+  const float testHeight     = 32.0F;
+  const float synthAscent    = 14.0F;
+  const float synthDescent   = 2.0F;
+  const float synthCap       = 9.0F;
+  const float synthUpperBase = std::round((testHeight - synthCap) * 0.5F);
+  const float synthDescBase  = std::round(
+      (testHeight - (synthAscent + synthDescent)) * 0.5F + synthDescent);
+  EXPECT_NE(synthUpperBase, synthDescBase);
+}
+
+TEST(UiWidgetTest, segmentedPillLayoutAndHairlineSeams) {
+  SegmentedPill pill;
+  pill.setContainerId(10)
+      .setOuterShape(ButtonShapeKind::Pill)
+      .setCompact(true)
+      .addSegment(SegmentItem{}
+                      .setId(11)
+                      .setLabel("◀")
+                      .setAction("prev")
+                      .setCustomWidthPx(28.0F))
+      .addSegment(SegmentItem{}
+                      .setId(12)
+                      .setLabel("Link 42 of 108")
+                      .setAction("inspect")
+                      .setIsMonospace(true))
+      .addSegment(SegmentItem{}
+                      .setId(13)
+                      .setLabel("▶")
+                      .setAction("next")
+                      .setCustomWidthPx(28.0F));
+
+  EXPECT_EQ(pill.containerId, 10U);
+  EXPECT_EQ(pill.segments.size(), 3U);
+  EXPECT_TRUE(pill.compact);
+  EXPECT_EQ(pill.outerShape, ButtonShapeKind::Pill);
+
+  UiMetrics metrics{.screenWidth = 640, .screenHeight = 480};
+  Theme theme;
+  gleditor::text::ShapingCache cache;
+
+  const Rect bounds{50.0F, 50.0F, 240.0F, 0.0F};
+  const auto result = layoutSegmentedPill(pill, bounds, metrics, theme, &cache);
+
+  EXPECT_FLOAT_EQ(result.bounds.height, 28.0F); // compact height
+  EXPECT_EQ(result.boxes.size(), 4U);           // 1 container + 3 segments
+
+  const auto *containerBox = result.find(10);
+  const auto *prevBox      = result.find(11);
+  const auto *centerBox    = result.find(12);
+  const auto *nextBox      = result.find(13);
+
+  ASSERT_NE(containerBox, nullptr);
+  ASSERT_NE(prevBox, nullptr);
+  ASSERT_NE(centerBox, nullptr);
+  ASSERT_NE(nextBox, nullptr);
+
+  EXPECT_FLOAT_EQ(prevBox->rect.width, 28.0F);
+  EXPECT_FLOAT_EQ(nextBox->rect.width, 28.0F);
+  EXPECT_GT(centerBox->rect.width, 50.0F); // expanded center
+
+  // 1px inner hairline seams
+  EXPECT_FLOAT_EQ(centerBox->rect.left,
+                  prevBox->rect.left + prevBox->rect.width + 1.0F);
+  EXPECT_FLOAT_EQ(nextBox->rect.left,
+                  centerBox->rect.left + centerBox->rect.width + 1.0F);
+
+  // Focus order contains segment IDs
+  EXPECT_EQ(result.focusOrder, (std::vector<std::uint32_t>{11, 12, 13}));
+}
+
+TEST(UiWidgetTest, recessedWellStylingTokens) {
+  RecessedWellStyle well;
+  EXPECT_FLOAT_EQ(well.cornerRadiusPx, 3.0F);
+  EXPECT_FLOAT_EQ(well.creaseThicknessPx, 1.5F);
+
+  well.setCornerRadiusPx(4.0F).setCreaseThicknessPx(2.0F);
+  EXPECT_FLOAT_EQ(well.cornerRadiusPx, 4.0F);
+  EXPECT_FLOAT_EQ(well.creaseThicknessPx, 2.0F);
+
+  const glm::vec4 fill{0.1F, 0.12F, 0.15F, 1.0F};
+  well.setBackgroundFill(fill);
+  EXPECT_EQ(well.backgroundFill, fill);
 }
 
 } // namespace

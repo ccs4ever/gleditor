@@ -2,7 +2,7 @@
 
 An architectural specification and design document for the decentralized Merkle identity ledger,
 weighted Oracle consensus, SMTP/DKIM attestation pipeline, and BEP 10 wire extensions across
-`gleditor`, `xudu`, and `zigzag`.
+`gleditor`, `xuzz`, and the underlying `xanadu` engine.
 
 ______________________________________________________________________
 
@@ -10,17 +10,17 @@ ______________________________________________________________________
 
 In Project Xanadu and the Docuverse, content is permanently addressed and transcluded across
 document boundaries. To establish trust, an author's edits must be bound to an immutable
-cryptographic identity (an OpenPGP key fingerprint or BEP 46 Ed25519 keypair).
+cryptographic identity (an Ed25519 keypair or master identity fingerprint).
 
-However, raw 40-character hexadecimal fingerprints (e.g. `9B8C7D6E5F4A3B2C1D0E9F8A7B6C5D4E3F2A1B0C`)
-are opaque to human readers. Traditional solutions rely on centralized Certificate Authorities (CAs)
-or corporate OAuth providers (e.g. Google, GitHub), re-introducing the very centralization,
-censorship vulnerabilities, and platform capture that Xanadu was designed to eliminate.
+However, raw 64-character hexadecimal fingerprints (e.g. standard 32-byte SHA-256 digests) are
+opaque to human readers. Traditional solutions rely on centralized Certificate Authorities (CAs) or
+corporate OAuth providers (e.g. Google, GitHub), re-introducing the very centralization, censorship
+vulnerabilities, and platform capture that Xanadu was designed to eliminate.
 
 The **Decentralized Oracle Identity Model** provides a sovereign, trustless identity verification
 architecture:
 
-1. **Append-Only Merkle Identity Ledger**: An immutable, publicly auditable log linking OpenPGP keys
+1. **Append-Only Merkle Identity Ledger**: An immutable, publicly auditable log linking Ed25519 keys
    to verified real-world email addresses and profiles.
 1. **$O(\log N)$ Inclusion Proofs**: Clients verify author authenticity in sub-millisecond time via
    lightweight Merkle audit paths without downloading the full global ledger.
@@ -36,8 +36,8 @@ ______________________________________________________________________
 ## 2. Merkle Identity Ledger Architecture
 
 The ledger is implemented as an append-only tree of identity records and consensus votes using
-`microsoft/merklecpp` (in [`merkle_ledger.hpp`](apps/xudu/core/merkle_ledger.hpp) and
-[`identity_validation.hpp`](apps/xudu/core/identity/identity_validation.hpp)).
+`microsoft/merklecpp` (in [`merkle_ledger.hpp`](apps/common/xanadu/merkle_ledger.hpp) and
+[`identity_validation.hpp`](apps/common/xanadu/identity/identity_validation.hpp)).
 
 ```
                       [ Block Header ]
@@ -59,10 +59,10 @@ The ledger is implemented as an append-only tree of identity records and consens
 ```cpp
 /// A single verified identity record in the Merkle ledger.
 struct IdentityEntry {
-  Fingerprint fingerprint{};       // 20-byte / 40-hex PGP fingerprint
+  Fingerprint fingerprint{};       // 32-byte / 64-hex SHA-256 digest of Ed25519 key
   std::string email;              // Normalized email (e.g. "ada@example.org")
   std::string identityName;       // Display name ("Ada Lovelace")
-  std::string publicKeyArmored;   // ASCII-armored OpenPGP public key
+  std::string publicKeyPem;       // Base64-DER / PEM SubjectPublicKeyInfo
   std::uint64_t timestamp{};      // Registration Unix epoch
   std::uint64_t sequence{};       // Monotonic sequence index
   bool revoked{false};            // Revocation / tombstone marker
@@ -71,7 +71,7 @@ struct IdentityEntry {
 
 /// A weighted consensus vote endorsing an Oracle candidate.
 struct VoteEntry {
-  Fingerprint voterFingerprint{}; // Endorsing voter's PGP fingerprint
+  Fingerprint voterFingerprint{}; // Endorsing voter's Ed25519 fingerprint
   Fingerprint candidateOracle{};  // Endorsed Oracle candidate
   std::uint64_t timestamp{};      // Vote timestamp
   std::uint64_t sequence{};       // Monotonic sequence index
@@ -192,12 +192,12 @@ sequenceDiagram
 
 ```cpp
 struct OracleAttestation {
-  Fingerprint oracleFingerprint;   // PGP fingerprint of issuing Oracle
-  Fingerprint targetFingerprint;   // PGP fingerprint of verified author
+  Fingerprint oracleFingerprint;   // Ed25519 fingerprint of issuing Oracle
+  Fingerprint targetFingerprint;   // Ed25519 fingerprint of verified author
   std::string verifiedEmail;       // Attested email ("ada@example.org")
   std::uint64_t issuedTimestamp;   // Issuance epoch
   std::uint64_t expiresTimestamp;  // Expiration epoch (typically 1 year)
-  Signature64 oracleSignature;     // Ed25519/PGP signature over token fields
+  Signature64 oracleSignature;     // Ed25519 signature over token fields
 };
 ```
 
@@ -254,7 +254,7 @@ ______________________________________________________________________
 
 To prevent distributed denial-of-service (DoS) attacks on Oracles and peer lookups, all verification
 and handshake requests require a valid **Hashcash Proof-of-Work** token (`HashcashEngine` in
-[`identity_validation.hpp`](apps/xudu/core/identity/identity_validation.hpp)):
+[`identity_validation.hpp`](apps/common/xanadu/identity/identity_validation.hpp)):
 
 ```math
 \text{SHA-256}(\text{Header} \parallel \text{Salt} \parallel \text{Nonce}) < 2^{256 - \text{DifficultyBits}}
@@ -285,16 +285,17 @@ ______________________________________________________________________
 
 ### 2D Document Model & Gleditor View
 
-When a document is loaded in `gleditor` or `xudu`:
+When a document is loaded in `gleditor` or `xuzz`:
 
-1. `Provenance::verify()` checks the document's PGP/device signature.
+1. `Provenance::verify()` checks the document's Ed25519 device signature (validating X.509
+   delegation certificates).
 1. `EnginePipeline::verifyInclusion()` validates the author's key against the latest Merkle ledger
    root.
 1. If verified, the UI renders the **Verified Author Badge**:
    - `[✓ Ada Lovelace <ada@example.org>]` (Green `#10B981` pill badge).
    - Tooltip displays the key fingerprint, Oracle attestation signer, and Merkle block index.
 
-### 3D Visualizer & Zigzag Manifolds (`apps/zigzag`)
+### 3D Visualizer & Zigzag Manifolds
 
 - **Zigzag Slices (`ZzMerkleTest`)**: Cell metadata references the author's Merkle leaf. The
   visualizer validates slice authenticity before projecting cells into multidimensional spaces.
@@ -311,7 +312,7 @@ ______________________________________________________________________
 | **Sybil Oracle Takeover**    | Attacker spins up 10,000 ephemeral nodes to vote for a malicious Oracle. | Blocked by the 30-day maturation gate (`kMinVoterAgeSeconds`). Ephemeral keys have zero voting power.                                         |
 | **Plutocratic Dominance**    | A wealthy actor buys old keys to dominate elections.                     | Logarithmic aging curve ($\lfloor\log_2(\text{days})\rfloor + 1$) sharply limits the maximum power of any single identity.                    |
 | **Rogue Oracle Attestation** | A compromised Oracle signs false identity claims.                        | Quorum requires consensus; rogue Oracles are voted out in subsequent blocks. Compromised records are tombstoned via `revoked = true` entries. |
-| **Email Spoofing (SMTP)**    | Attacker intercepts verification emails.                                 | Oracles verify DKIM/SPF DNS records and require PGP-signed email challenge ACKs.                                                              |
+| **Email Spoofing (SMTP)**    | Attacker intercepts verification emails.                                 | Oracles verify DKIM/SPF DNS records and require Ed25519-signed email challenge ACKs.                                                          |
 | **Peer Lookup Flooding**     | DoS attack spamming `IdentityQuery` requests.                            | Gated by `HashcashEngine` (20-bit PoW) and peer disconnect penalties.                                                                         |
 | **Ledger History Forking**   | Malicious seeders present conflicting ledger branches.                   | BitTorrent v2 SHA-256 Merkle root binding + sequential block chaining (`previousHash`).                                                       |
 
@@ -319,13 +320,13 @@ ______________________________________________________________________
 
 ## 9. Implementation File Map
 
-| Component               | Source Files                                                                                                                  | Description                                                                                |
-| :---------------------- | :---------------------------------------------------------------------------------------------------------------------------- | :----------------------------------------------------------------------------------------- |
-| **Merkle Tree Core**    | [`apps/xudu/core/merkle_ledger.hpp/.cpp`](apps/xudu/core/merkle_ledger.hpp)                                                   | Append-only Merkle ledger using `microsoft/merklecpp`                                      |
-| **Validation Engine**   | [`apps/xudu/core/identity/identity_validation.hpp/.cpp`](apps/xudu/core/identity/identity_validation.hpp)                     | `EnginePipeline`, quorum election, and `HashcashEngine`                                    |
-| **Layout & Structs**    | [`apps/xudu/core/identity/identity_layout.hpp`](apps/xudu/core/identity/identity_layout.hpp)                                  | `IdentityEntry`, `VoteEntry`, `BlockHeader`, `OracleAttestation`                           |
-| **Serialization**       | [`apps/xudu/core/identity/identity_serialization.hpp/.cpp`](apps/xudu/core/identity/identity_serialization.hpp)               | Zero-copy Bencode encoders and decoders for all identity frames                            |
-| **Peer Controller**     | [`apps/xudu/core/identity/identity_network_controller.hpp/.cpp`](apps/xudu/core/identity/identity_network_controller.hpp)     | BEP 10 extensions (`xanadu_identity_lookup`, `xanadu_oracle_vote`, `xanadu_oracle_verify`) |
-| **Provenance Engine**   | [`apps/xudu/core/provenance.hpp/.cpp`](apps/xudu/core/provenance.hpp)                                                         | OpenPGP document signature creation and verification                                       |
-| **Zigzag Verification** | [`tests/zigzag/zz_merkle_test.cpp`](tests/zigzag/zz_merkle_test.cpp)                                                          | Zigzag slice author verification against ledger root                                       |
-| **Unit Test Suites**    | [`tests/xudu/identity_test.cpp`](tests/xudu/identity_test.cpp), [`merkle_ledger_test.cpp`](tests/xudu/merkle_ledger_test.cpp) | Full test coverage for validation, consensus, and wire encoding                            |
+| Component               | Source Files                                                                                                                             | Description                                                                                  |
+| :---------------------- | :--------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------- |
+| **Merkle Tree Core**    | [`apps/common/xanadu/merkle_ledger.hpp/.cpp`](apps/common/xanadu/merkle_ledger.hpp)                                                      | Append-only Merkle ledger using `microsoft/merklecpp`                                        |
+| **Validation Engine**   | [`apps/common/xanadu/identity/identity_validation.hpp/.cpp`](apps/common/xanadu/identity/identity_validation.hpp)                        | `EnginePipeline`, quorum election, and `HashcashEngine`                                      |
+| **Layout & Structs**    | [`apps/common/xanadu/identity/identity_layout.hpp`](apps/common/xanadu/identity/identity_layout.hpp)                                     | `IdentityEntry`, `VoteEntry`, `BlockHeader`, `OracleAttestation`                             |
+| **Serialization**       | [`apps/common/xanadu/identity/identity_serialization.hpp/.cpp`](apps/common/xanadu/identity/identity_serialization.hpp)                  | Zero-copy Bencode encoders and decoders for all identity frames                              |
+| **Peer Controller**     | [`apps/common/xanadu/identity/identity_network_controller.hpp/.cpp`](apps/common/xanadu/identity/identity_network_controller.hpp)        | BEP 10 extensions (`xanadu_identity_lookup`, `xanadu_oracle_vote`, `xanadu_oracle_verify`)   |
+| **Provenance Engine**   | [`apps/common/xanadu/provenance.hpp/.cpp`](apps/common/xanadu/provenance.hpp)                                                            | Ed25519 document signature creation and verification                                         |
+| **Zigzag Verification** | [`tests/zigzag/zz_merkle_test.cpp`](tests/zigzag/zz_merkle_test.cpp)                                                                     | Zigzag slice author verification against ledger root                                         |
+| **Unit Test Suites**    | [`tests/xuzz/identity_test.cpp`](tests/xuzz/identity_test.cpp), [`tests/xuzz/merkle_ledger_test.cpp`](tests/xuzz/merkle_ledger_test.cpp) | Full test coverage for validation, consensus, and wire encoding                              |

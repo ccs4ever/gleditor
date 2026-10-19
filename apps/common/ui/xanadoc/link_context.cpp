@@ -162,6 +162,18 @@ LinkContext::presentationLinks(const int cellRadius) const {
   return result;
 }
 
+std::vector<LinkOccurrences>
+LinkContext::packagePresentation(const int cellRadius) const {
+  const auto keys = session.readerLinkPackages().links();
+  if (keys.empty()) return {};
+  const auto index = packageIndex(cellRadius);
+  std::vector<LinkOccurrences> result;
+  for (const auto &key : keys)
+    result.push_back(
+        index.resolve(key, *session.readerLinkPackages().package(key)));
+  return result;
+}
+
 std::optional<xanadu::OccurrenceSite> LinkContext::caretSite() const {
   const auto caret = caretQuery ? caretQuery() : std::nullopt;
   if (!caret || caret->view >= session.views().size()) {

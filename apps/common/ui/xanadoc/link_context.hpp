@@ -128,6 +128,8 @@ public:
                          std::optional<int> cellRadius = std::nullopt) const;
   [[nodiscard]] std::vector<LinkOccurrences>
   presentationLinks(int cellRadius) const;
+  [[nodiscard]] std::vector<LinkOccurrences>
+  packagePresentation(int cellRadius = -1) const;
   [[nodiscard]] std::optional<Link> recordOf(std::uint64_t renderId) const;
   void packageVisibilityChanged();
   void recordReadingOrigin() { noteOrigin(); }
@@ -188,6 +190,9 @@ public:
 
   /// Bumped by every change a reader of selection() might care about.
   [[nodiscard]] std::uint64_t revision() const noexcept { return changes; }
+
+  [[nodiscard]] Session &sessionRef() noexcept { return session; }
+  [[nodiscard]] const Session &sessionRef() const noexcept { return session; }
 
 private:
   [[nodiscard]] bool readerStore(std::size_t index) const;

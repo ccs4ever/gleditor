@@ -200,7 +200,7 @@ TEST(TranscopyrightStorageTest, userPermascrollSealsHolesAsZeroFillOnWire) {
 
   SignedProvenance prov;
   prov.tsv       = "author\tTest Author\n";
-  prov.signature = "-----BEGIN PGP SIGNATURE-----\ntest\n";
+  prov.signature = "ed25519-sig:test-signature\n";
 
   const auto segment = scroll.sealIncremental(tempDir, prov, {hole});
   ASSERT_TRUE(segment.has_value());

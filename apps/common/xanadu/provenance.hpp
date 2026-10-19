@@ -1,23 +1,24 @@
 /**
  * @file provenance.hpp
- * @brief Who wrote this, said in the open and signed with GnuPG.
+ * @brief Who wrote this, said in the open and signed with cryptographic
+ * identity.
  *
  * The publication manifest is already signed, by the ed25519 key that is the
  * publisher's name. That signature answers "is this the same publisher as last
  * time" perfectly well and answers "who is this" not at all: the key was minted
  * by this program, means nothing outside it, and is bound to no person.
  *
- * A person's OpenPGP key is bound to a person -- by an identity in the key, by
- * whoever has signed it, by however long it has been in use. So provenance here
- * is a plain TSV record naming the author, detached-signed with GnuPG, and
- * sealed into the torrent alongside the content it is about. Three properties
- * follow, and each is the reason for one of those decisions:
+ * A person's cryptographic identity is bound to an author identity. Provenance
+ * here is a plain TSV record naming the author, detached-signed with
+ * cryptographic identity (in-process Ed25519 cryptographic identity and X.509
+ * v3 delegation), and sealed into the torrent alongside the content it is
+ * about. Three properties follow, and each is the reason for one of those
+ * decisions:
  *
- *   - It is checkable by anything, not only by this program. `gpg --verify`
- *     against a record a person can read is the whole procedure, and TSV is
- *     chosen over the bencode everything else here uses for exactly that
- *     reason: it is meant to be read by whoever is deciding whether to believe
- *     it.
+ *   - It is checkable by anything, not only by this program. Verifying against
+ *     a record a person can read is the whole procedure, and TSV is chosen over
+ *     the bencode everything else here uses for exactly that reason: it is
+ * meant to be read by whoever is deciding whether to believe it.
  *   - It is bound to the bytes. The record is written and signed *before* the
  *     torrent is sealed and goes into that torrent, so the info hash covers the
  *     content and the claim of authorship together. Neither can be swapped for
@@ -25,14 +26,9 @@
  *   - It says what it covers. The record carries the length and digest of the
  *     content being sealed, so a reader who has both can check that the record
  *     is about what it arrived with rather than about something else.
- *
- * Signing is delegated to gpg rather than reimplemented. The whole value of an
- * OpenPGP signature is the web of trust and the key management around it, none
- * of which this program has any business duplicating -- and a reader will reach
- * for gpg to check it, so gpg is what should produce it.
  */
-#ifndef XUDU_PROVENANCE_H
-#define XUDU_PROVENANCE_H
+#ifndef XANADU_PROVENANCE_HPP
+#define XANADU_PROVENANCE_HPP
 
 #include <cstdint>
 #include <optional>
@@ -47,13 +43,17 @@ struct Author {
   std::string name;
   std::string email;
   /**
-   * @brief Which OpenPGP key signs for them.
+   * @brief Which cryptographic key signs for them.
    *
-   * Anything gpg accepts as a key specification: a fingerprint, a long key id,
-   * an email address. Empty means gpg's default signing key, which is the
-   * common case for somebody with one key.
+   * A fingerprint, key ID, or email address. Empty means default signing key.
    */
-  std::string gpgKey;
+  std::string signingKey;
+
+  /// Compatibility accessors for legacy code.
+  [[nodiscard]] const std::string &gpgKey() const noexcept {
+    return signingKey;
+  }
+  [[nodiscard]] std::string &gpgKey() noexcept { return signingKey; }
 
   /// Enough to sign with: a name and an email address. A record with neither
   /// names nobody and is not worth signing.
@@ -73,10 +73,11 @@ struct Provenance {
   /// What the document is called, and the name it is published under.
   std::string title;
   std::string salt;
-  /// The ed25519 key this machine publishes as, in hex. What the OpenPGP
-  /// signature binds a person to: it says "the holder of this OpenPGP key
-  /// vouches that this publishing name is theirs", which is the join between
-  /// an identity people already have and a name this program made up.
+  /// The cryptographic identity key this machine publishes as, in hex. What the
+  /// cryptographic signature binds a person to: it says "the holder of this
+  /// author identity key vouches that this publishing name is theirs", which is
+  /// the join between an identity people already have and a name this program
+  /// made up.
   std::string publisher;
   /// The global key of the author's sovereign permascroll. This is the
   /// publication bootstrap for spans that were local scroll 0 while authored;
@@ -117,7 +118,7 @@ struct Provenance {
 /// the signature over it.
 [[nodiscard]] std::string sha256Hex(std::string_view data);
 
-/// A record and the detached OpenPGP signature over it.
+/// A record and the detached cryptographic signature over it.
 struct SignedProvenance {
   /// The TSV exactly as it was signed. Kept as text rather than rebuilt,
   /// because a signature is over bytes and a re-rendering is only probably the
@@ -286,4 +287,4 @@ inline constexpr auto sealedOpsName = "ops";
 
 } // namespace xanadu
 
-#endif // XUDU_PROVENANCE_H
+#endif // XANADU_PROVENANCE_HPP

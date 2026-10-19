@@ -288,7 +288,7 @@ bool ScreenOverlay::pointerEvent(const PointerEvent &event) {
       pressedNode_ = 0;
       return true;
     }
-    const auto *hit = scene_->layout.hitTest(
+    const auto *hit = scene_->hitTest(
         event.x, static_cast<float>(metrics_.screenHeight) - event.y);
     const auto *visual = hit ? scene_->find(hit->id) : nullptr;
     if (event.phase == PointerPhase::Wheel) {
