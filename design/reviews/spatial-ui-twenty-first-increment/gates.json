@@ -1,0 +1,14 @@
+{
+  "format-final": {
+    "exit": 0
+  },
+  "lint-final": {
+    "exit": 0
+  },
+  "text-policy-final": {
+    "exit": 0
+  },
+  "touched-md-final": {
+    "exit": 0
+  }
+}
