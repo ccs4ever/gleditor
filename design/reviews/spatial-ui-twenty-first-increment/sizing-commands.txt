@@ -1,0 +1,20 @@
+Read-only commands used from the worktree root:
+
+  find tests/samples/xudu -type f \( -name ops.nodes -o -name store.tables -o -path '*/published/*' \) -printf '%p %s bytes\n' | sort
+
+For every store directory with both native files, query the persisted header and native file sizes:
+
+  build/validation-twentieth/frozen/xudu-dump --section=header <store-directory>
+  stat -c '%n logical=%s blocks=%b blocksize=%B' <store-directory>/ops.nodes <store-directory>/store.tables
+
+For published roots, split retained metainfo from payload files and record file sizes and allocated
+blocks (`st_blocks * 512`). Measure directory-inclusive allocation in this current filesystem with:
+
+  du -B1 -s <store-directory>/published
+  du --apparent-size -B1 -s <store-directory>/published
+
+The machine table uses the header's independently decoded `nodeCount`, `headerBytes`, and `nodeSize`
+to check `ops.nodes logical size == headerBytes + nodeCount * nodeSize`. It does not infer the
+recorded operation count from file size. The separate lower-bound column is `native ops.nodes +
+store.tables + 2 * (retained metainfo + payload)`, describing the observed cache-plus-retained
+copy overlap only. It excludes the signed manifest and directory/filesystem overhead.

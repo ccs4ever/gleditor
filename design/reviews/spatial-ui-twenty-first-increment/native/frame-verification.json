@@ -1,0 +1,27 @@
+[
+  {
+    "frame": "native/local-import/raw/02-path-entered.ppm.gz",
+    "raw_sha256": "97a0fa821723685fde41154cdfe714dfe0e49682bd8611753e3858f99dea8a1f",
+    "png_rgb_exact": true
+  },
+  {
+    "frame": "native/local-import/raw/03-imported-publication.ppm.gz",
+    "raw_sha256": "e83f44ef752690f286de9566e874636d8f1576be7df09aea075d7107e8a4c711",
+    "png_rgb_exact": true
+  },
+  {
+    "frame": "native/local-import/raw/01-open-chooser.ppm.gz",
+    "raw_sha256": "e18d889612ea40159f0186efb093f541d12d1a9da223a8360437eb5929734b40",
+    "png_rgb_exact": true
+  },
+  {
+    "frame": "native/native-compat/raw/02-restarted-failed-form.ppm.gz",
+    "raw_sha256": "07022e480c104c2ab5d2be4598781c8bfc15413cd522573a46d0309963095faf",
+    "png_rgb_exact": true
+  },
+  {
+    "frame": "native/native-compat/raw/01-open-existing-failed-request.ppm.gz",
+    "raw_sha256": "e18d889612ea40159f0186efb093f541d12d1a9da223a8360437eb5929734b40",
+    "png_rgb_exact": true
+  }
+]

@@ -1,0 +1,26 @@
+set pagination off
+set confirm off
+set print thread-events off
+break xanadu::SwarmContentSource::startDownload(xanadu::InfoHash const&)
+commands
+  silent
+  printf "CHECKPOINT=before_startDownload\n"
+  python
+import os, json, hashlib
+base=os.path.join(os.environ["TMPDIR"], "xudu-swarm-MetadataOnlyMagnetWaitsForExplicitDownloadAndCanDiscardPieces")
+print("INVENTORY="+json.dumps({"checkpoint":"before_startDownload","base":base,"exists":os.path.exists(base),"entries":[] if not os.path.isdir(base) else [{"path":os.path.relpath(os.path.join(d,n),base),"kind":"file" if os.path.isfile(os.path.join(d,n)) else ("symlink" if os.path.islink(os.path.join(d,n)) else "other"),"logical_bytes":os.stat(os.path.join(d,n),follow_symlinks=False).st_size,"allocated_bytes":os.stat(os.path.join(d,n),follow_symlinks=False).st_blocks*512,"sha256":hashlib.sha256(open(os.path.join(d,n),"rb").read()).hexdigest() if os.path.isfile(os.path.join(d,n)) else None} for d,ds,ns in os.walk(base,followlinks=False) for n in ns],"directories":[] if not os.path.isdir(base) else [os.path.relpath(os.path.join(d,n),base) for d,ds,ns in os.walk(base,followlinks=False) for n in ds]},sort_keys=True))
+  end
+  continue
+end
+break xanadu::SwarmContentSource::discardCachedPieces(xanadu::InfoHash const&)
+commands
+  silent
+  printf "CHECKPOINT=after_flush_before_discard\n"
+  python
+import os, json, hashlib
+base=os.path.join(os.environ["TMPDIR"], "xudu-swarm-MetadataOnlyMagnetWaitsForExplicitDownloadAndCanDiscardPieces")
+print("INVENTORY="+json.dumps({"checkpoint":"after_flush_before_discard","base":base,"exists":os.path.exists(base),"entries":[] if not os.path.isdir(base) else [{"path":os.path.relpath(os.path.join(d,n),base),"kind":"file" if os.path.isfile(os.path.join(d,n)) else ("symlink" if os.path.islink(os.path.join(d,n)) else "other"),"logical_bytes":os.stat(os.path.join(d,n),follow_symlinks=False).st_size,"allocated_bytes":os.stat(os.path.join(d,n),follow_symlinks=False).st_blocks*512,"sha256":hashlib.sha256(open(os.path.join(d,n),"rb").read()).hexdigest() if os.path.isfile(os.path.join(d,n)) else None} for d,ds,ns in os.walk(base,followlinks=False) for n in ns],"directories":[] if not os.path.isdir(base) else [os.path.relpath(os.path.join(d,n),base) for d,ds,ns in os.walk(base,followlinks=False) for n in ds]},sort_keys=True))
+  end
+  continue
+end
+run

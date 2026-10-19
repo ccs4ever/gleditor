@@ -3921,6 +3921,51 @@ void Store::sealPendingMetadataAsCells() const {
   }
 }
 
+StoreTables Store::deploymentTablesForSave() const {
+  std::vector<ScrollSegment> deploymentSegments = localSegments.segments;
+  for (const auto &sc : externals) {
+    for (const auto &seg : sc.segments) {
+      if (!seg.path.empty() || !seg.torrent.isZero()) {
+        const auto already = std::ranges::find(deploymentSegments, seg);
+        if (already == deploymentSegments.end())
+          deploymentSegments.push_back(seg);
+      }
+    }
+  }
+  return StoreTables{.documentId           = documentId_,
+                     .localSegments        = std::move(deploymentSegments),
+                     .deployedScrolls      = externals,
+                     .publishedLocalScroll = publishedLocalScroll_};
+}
+
+NativeStoreFileSizes Store::nativeFileSizes() const {
+  if (hasPendingMetadata()) {
+    throw std::logic_error(
+        "native store size requires metadata to be sealed first");
+  }
+  if (!latest().isZero() && publishedLocalScroll_ == localScroll &&
+      zigzag::noCell != homeCell_ && !externals.empty()) {
+    const auto head     = structureHead();
+    const auto manifold = rebuildManifold(head.isZero() ? latest() : head);
+    const auto registry = manifold.scrollRegistry(*this);
+    for (const auto &scroll : externals) {
+      const auto key = scrollKey(scroll);
+      if (!key.empty() && !registry.byKey.contains(key))
+        throw std::logic_error(
+            "native store size requires external scroll metadata to be "
+            "sealed first");
+    }
+  }
+  const auto tableBytes = encodeStoreTables(deploymentTablesForSave()).size();
+  if constexpr (std::numeric_limits<std::size_t>::digits >
+                std::numeric_limits<std::uint64_t>::digits) {
+    if (tableBytes > std::numeric_limits<std::uint64_t>::max())
+      throw std::overflow_error("store tables size exceeds uint64_t");
+  }
+  return {.opsNodesBytes    = opsSpool.serializedFileSize(),
+          .storeTablesBytes = static_cast<std::uint64_t>(tableBytes)};
+}
+
 void Store::save(const std::string &directory) const {
   sealPendingMetadataAsCells();
   const std::filesystem::path dir(directory);
@@ -3969,29 +4014,7 @@ void Store::save(const std::string &directory) const {
     // different times -- both are per-store side tables replayed at load --
     // and being plaintext was buying only that they could be read with `less`,
     // which tools/xudu-dump buys back. See R11 and store_tables.hpp.
-    std::vector<ScrollSegment> deploymentSegments = localSegments.segments;
-    for (const auto &sc : externals) {
-      for (const auto &seg : sc.segments) {
-        if (!seg.path.empty() || !seg.torrent.isZero()) {
-          bool already = false;
-          for (const auto &existing : deploymentSegments) {
-            if (existing == seg) {
-              already = true;
-              break;
-            }
-          }
-          if (!already) {
-            deploymentSegments.push_back(seg);
-          }
-        }
-      }
-    }
-    writeStoreTables(
-        dir / storeTablesName,
-        StoreTables{.documentId           = documentId_,
-                    .localSegments        = deploymentSegments,
-                    .deployedScrolls      = externals,
-                    .publishedLocalScroll = publishedLocalScroll_});
+    writeStoreTables(dir / storeTablesName, deploymentTablesForSave());
     // The files this container replaced, taken with it. Leaving them would
     // leave two answers to what the scrolls are, and load() refuses a
     // directory holding both rather than choosing.
@@ -4022,29 +4045,7 @@ void Store::saveOsmicText(const std::string &directory) const {
     // scroll and link tables being plaintext alongside them was incidental,
     // and writing them that way now would produce a directory that load()
     // reads the operations out of and silently finds no scrolls in.
-    std::vector<ScrollSegment> deploymentSegments = localSegments.segments;
-    for (const auto &sc : externals) {
-      for (const auto &seg : sc.segments) {
-        if (!seg.path.empty() || !seg.torrent.isZero()) {
-          bool already = false;
-          for (const auto &existing : deploymentSegments) {
-            if (existing == seg) {
-              already = true;
-              break;
-            }
-          }
-          if (!already) {
-            deploymentSegments.push_back(seg);
-          }
-        }
-      }
-    }
-    writeStoreTables(
-        dir / storeTablesName,
-        StoreTables{.documentId           = documentId_,
-                    .localSegments        = deploymentSegments,
-                    .deployedScrolls      = externals,
-                    .publishedLocalScroll = publishedLocalScroll_});
+    writeStoreTables(dir / storeTablesName, deploymentTablesForSave());
   }
 }
 

@@ -1,0 +1,14 @@
+ops.nodes 67840 bytes
+published/3012f9a515544059df633b84b37af57dc717ac68/metainfo.torrent 210 bytes
+published/3012f9a515544059df633b84b37af57dc717ac68/permascroll/AUTHORSHIP.tsv 452 bytes
+published/3012f9a515544059df633b84b37af57dc717ac68/permascroll/AUTHORSHIP.tsv.asc 228 bytes
+published/3012f9a515544059df633b84b37af57dc717ac68/permascroll/primedia 700 bytes
+published/6f1316456b2d7d823bcddcb772dfe8acc4e981d4/metainfo.torrent 205 bytes
+published/6f1316456b2d7d823bcddcb772dfe8acc4e981d4/permascroll/AUTHORSHIP.tsv 520 bytes
+published/6f1316456b2d7d823bcddcb772dfe8acc4e981d4/permascroll/AUTHORSHIP.tsv.asc 228 bytes
+published/6f1316456b2d7d823bcddcb772dfe8acc4e981d4/permascroll/ops 530 bytes
+published/ab793922ba778d7871b9b90c8219993b50312cc8/metainfo.torrent 212 bytes
+published/ab793922ba778d7871b9b90c8219993b50312cc8/permascroll/AUTHORSHIP.tsv 450 bytes
+published/ab793922ba778d7871b9b90c8219993b50312cc8/permascroll/AUTHORSHIP.tsv.asc 228 bytes
+published/ab793922ba778d7871b9b90c8219993b50312cc8/permascroll/primedia 57269 bytes
+store.tables 697 bytes

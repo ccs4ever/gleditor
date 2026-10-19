@@ -1,0 +1,22 @@
+[
+  {
+    "dump": "activity-before.ops.txt",
+    "completed_visit_count": 1,
+    "current_visit": 1,
+    "visit_payloads": [
+      "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0"
+    ],
+    "references": [],
+    "annotations": []
+  },
+  {
+    "dump": "activity-after.ops.txt",
+    "completed_visit_count": 1,
+    "current_visit": 1,
+    "visit_payloads": [
+      "visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0"
+    ],
+    "references": [],
+    "annotations": []
+  }
+]

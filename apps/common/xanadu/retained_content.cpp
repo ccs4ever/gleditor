@@ -4,9 +4,11 @@
 #include <condition_variable>
 #include <deque>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <mutex>
 #include <set>
+#include <stdexcept>
 #include <thread>
 #include <utility>
 
@@ -15,6 +17,18 @@
 #include <gleditor/logging.hpp>
 
 namespace xanadu {
+std::uint64_t PublicationSeed::retainedFileBytes() const {
+  if constexpr (std::numeric_limits<std::size_t>::digits >
+                std::numeric_limits<std::uint64_t>::digits) {
+    if (metainfo.size() > std::numeric_limits<std::uint64_t>::max())
+      throw std::overflow_error("retained publication seed size overflows");
+  }
+  const auto metainfoBytes = static_cast<std::uint64_t>(metainfo.size());
+  if (metainfoBytes > std::numeric_limits<std::uint64_t>::max() - bytes)
+    throw std::overflow_error("retained publication seed size overflows");
+  return bytes + metainfoBytes;
+}
+
 namespace {
 std::string readFile(const std::filesystem::path &path) {
   std::ifstream input(path, std::ios::binary);

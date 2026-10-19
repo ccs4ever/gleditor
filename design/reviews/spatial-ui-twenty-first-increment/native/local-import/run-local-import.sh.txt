@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -euo pipefail
+repo=$PWD
+run=$repo/build/validation-twenty-first/local-import
+app=$repo/build/validation-twenty-first/frozen/xuzz
+libdir=$repo/build/validation-twenty-first/frozen
+manifest=$run/data/xudu/xanadocs/untitled-20261018-154726/published/document.xanadoc
+export SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1
+export XDG_DATA_HOME=$run/data XDG_CONFIG_HOME=$run/config
+export XDG_CACHE_HOME=$run/cache XDG_RUNTIME_DIR=$run/runtime
+export GNUPGHOME=$run/gpg PATH=/tmp/spatial-xvfb/usr/bin:$PATH
+mkdir -m 700 -p "$XDG_RUNTIME_DIR"
+args=(--backend opengl --resize 1440,1000 --profile --wait-ms 5000
+  --chord Ctrl+O --wait-ms 800 --dump-a11y
+  --capture "$run/raw/01-open-chooser.ppm"
+  --key right --key right --key right --key right --key right --key right
+  --key tab --wait-ms 100 --type "$manifest" --capture "$run/raw/02-path-entered.ppm"
+  --key enter --wait-ms 15000 --dump-a11y
+  --capture "$run/raw/03-imported-publication.ppm"
+  --wait-ms 300 --chord Ctrl+Q)
+printf '%q ' "$app" "${args[@]}" > "$run/argv.txt"
+printf '\n' >> "$run/argv.txt"
+printf '%s\n' 'SDL_VIDEODRIVER=x11' 'SDL_AUDIODRIVER=dummy' \
+  'LIBGL_ALWAYS_SOFTWARE=1' "XDG_DATA_HOME=$XDG_DATA_HOME" \
+  "XDG_CONFIG_HOME=$XDG_CONFIG_HOME" "XDG_CACHE_HOME=$XDG_CACHE_HOME" \
+  "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" "GNUPGHOME=$GNUPGHOME" > "$run/environment.txt"
+set +e
+LD_LIBRARY_PATH="$libdir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+  timeout --signal=TERM --kill-after=5s 300s xvfb-run -a -s \
+  '-noreset -screen 0 1600x1200x24' dbus-run-session -- "$app" \
+  "${args[@]}" > "$run/logs/local-import.log" 2>&1
+code=$?
+set -e
+printf '%s\n' "$code" > "$run/exit"
+exit "$code"

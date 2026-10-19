@@ -1,0 +1,51 @@
+# Metadata-only save-path observation
+
+The targeted existing swarm test showed an empty save directory before explicit download and a
+real retained payload file after download and flush. This is a filesystem observation from the
+test's configured save path, not an inference from `readStream()` and not a claim about production
+UI behavior.
+
+## Run
+
+Ran only
+`SwarmTest.MetadataOnlyMagnetWaitsForExplicitDownloadAndCanDiscardPieces` through a private copy
+of `tools/swarm-netns-test.sh`. The copy changes only the test-binary invocation to run the frozen
+pre-change test under GDB. The harness retained its real peer process, generated torrent, isolated
+seed and leecher network namespaces, veth link, fixture, and peer options. The outer command used
+`unshare -Urnm`; inside it, the runner created its private network namespaces. The SDL/XDG
+environment and `TMPDIR` were fresh and run-local. No product or test source was modified.
+
+The test binary was `build/validation-twenty-first/frozen-pre-change/xudu_test`
+(SHA-256 `e9d09b0ebe522040c43daea295f8e80d5d242bd68bb2a094623e5d056ab599ea`). The peer was the
+authorized `build/validation-twenty-first/frozen/xudu-swarm-peer`
+(SHA-256 `4bd53352fec3c16e35a6477c221edfc1f7059da691e62f261549ce3dd1fb2b67`). The peer binary
+matches `build/xudu-swarm-peer`. The test source hash was
+`3975beaaf9009dc30160a9b1c6d6c6962d8fdf023e78ce92c346b183f8117c29`; the checked source files
+and original runner were recorded alongside the artifacts.
+
+GDB stopped at `SwarmContentSource::startDownload()` after metadata arrival and the test's empty
+stream read, then at `discardCachedPieces()` after successful `flushDownload()` and the exact file
+comparison. At each stop, an inventory enumerated the test's own save directory and recorded file
+type, path, logical length, allocated bytes, and SHA-256.
+
+## Observations
+
+| Checkpoint | Save-directory state |
+| --- | --- |
+| Immediately before `startDownload()` | Directory present; no entries and no regular files. |
+| After successful `flushDownload()`, before `discardCachedPieces()` | `sample.txt`: 218 logical bytes, 512 allocated bytes, SHA-256 `a37198985e37a6e55d317f4cc4f09bde304e047554d938d696cb4a1e623dff02`. |
+
+GoogleTest reported one test passed, and the inferior exited normally. The outer runner exit was
+`0`. The second checkpoint is after the real test's payload equality assertion; this confirms the
+disk file was present before the test discarded its in-memory copied buffers.
+
+The results apply to this one isolated test, its `TMPDIR` save path, and these frozen artifacts.
+They do not establish that every metadata-only operation in the application writes no files, nor
+do they measure unrelated cache or temporary paths. A successful transfer is specific to the real
+veth-separated peer arrangement.
+
+The evidence bundle is in
+`build/validation-twenty-first/metadata-observation/archive/`. It contains the raw runner output
+and exit, exact GDB commands and private harness copy (saved as `.txt`), the one-line harness diff,
+expanded environment, launch arguments, and binary/source hashes. No binary, profile, cache, or
+key material was copied into the bundle.

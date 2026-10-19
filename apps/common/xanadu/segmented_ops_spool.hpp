@@ -361,6 +361,11 @@ public:
    */
   [[nodiscard]] bool writeSegmentFile(const std::filesystem::path &path) const;
 
+  /// Logical length of the complete native segment file this spool writes.
+  /// Includes the full 64 KiB header even when there are no operations.
+  /// Throws if the multiplication, addition, or platform file offset overflows.
+  [[nodiscard]] std::uint64_t serializedFileSize() const;
+
   /**
    * @brief Seal the active segment and start a new one at @p newActivePath.
    *

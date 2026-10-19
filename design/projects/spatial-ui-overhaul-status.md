@@ -7,6 +7,17 @@ session.
 
 ## Current checkpoint
 
+Twenty-first checkpoint (2026-10-19), based on `cc26a174`: exact prepared native-store sizing now
+shares the canonical operation extent and table encoder with save; retained-seed sizing includes
+metainfo sidecars. Queries refuse pending save-time metadata and preserve primedia/operation counts.
+The installer verifies copied-seed and native output lengths. This is not pre-payload admission or
+an aggregate staging bound. Canonical Make, UI 248/248, Xuzz 107/107 and broad engine 1,352/1,352
+pass against 1,347/1,347 baseline cases; native E2E and most network suites are excluded. A separate
+real-peer metadata-only filesystem observation passes. Native restart and local signed import pass
+with unchanged completed/current visit 1, source and request pin; no network UI or full-page
+readability pass is claimed. See the
+[twenty-first checkpoint](../reviews/spatial-ui-twenty-first-increment/README.md).
+
 Twentieth checkpoint (2026-10-19), based on `806c464b`: Failed/Cancelled downloads offer explicit
 Discard partial data. The existing worker preflights all owned attempts before deletion, preserves
 installed roots and exact receipts, and reports transient Pending/Complete/Failed cleanup results
@@ -648,19 +659,21 @@ reviews pass.
 
 ## Exact next task
 
-Complete measured, governed staging admission/retention after the twentieth checkpoint's explicit
-partial-data cleanup. First expose exact pre-write native-store and retained-copy sizing from shared
-writer/serialization logic and verify it against real staged files; do not use a guessed copy factor
-or post-install scan as a strict bound. Preserve receipts, installed roots and pinned consumers;
-failed attempts still have no aggregate disk bound and Discard does not free a request slot. Use the
-completed-root ownership audit before any Forget operation. Distinguish actual file/directory
-ordering and restart checks from physical power-loss recovery. Then continue normal publication
-transport configuration in `next-service-plan.md`: governed opt-in settings and a visible form,
-worker-owned factory setup, named-node-only privacy policy and a deliberate restart boundary. Keep
-receive/discovery distinct from real identity enrollment; never install the test mock verifier in a
-normal session. Establish authenticated trust roots and BEP46/fingerprint binding before reporting
-Verified. Capture real normal-mode acquisition, rejection, unavailable/retry/offline routes without
-simulated services.
+Complete measured, governed staging admission/retention after checkpoint 21's prepared
+native-install sizing. First derive exact native table and operation extents from signed publication
+inputs before dependency payload transfer, sharing existing restore/writer inputs. Add transport
+metadata preflight before explicit payload start, including metainfo sidecars. Then account for all
+owned caches, attempts, retained copies, native files and manifest carriers under a governed
+aggregate budget. Do not use a guessed copy factor or post-install scan as a strict bound. Preserve
+receipts, installed roots and pinned consumers; failed attempts still have no aggregate disk bound
+and Discard does not free a request slot. Use the completed-root ownership audit before any Forget
+operation. Distinguish actual file/directory ordering and restart checks from physical power-loss
+recovery. Then continue normal publication transport configuration in `next-service-plan.md`:
+governed opt-in settings and a visible form, worker-owned factory setup, named-node-only privacy
+policy and a deliberate restart boundary. Keep receive/discovery distinct from real identity
+enrollment; never install the test mock verifier in a normal session. Establish authenticated trust
+roots and BEP46/fingerprint binding before reporting Verified. Capture real normal-mode acquisition,
+rejection, unavailable/retry/offline routes without simulated services.
 
 Validate the sixteenth comparison’s trust/availability variants below before D2. Continue the
 remaining J25 and exact cell/history variants through actual controls; preserve the five-visit

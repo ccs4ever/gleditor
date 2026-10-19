@@ -719,6 +719,13 @@ bool SegmentedOpsSpool::flush() {
 
 bool SegmentedOpsSpool::writeSegmentFile(
     const std::filesystem::path &path) const {
+  std::uint64_t fileBytes = 0;
+  try {
+    fileBytes = serializedFileSize();
+  } catch (const std::overflow_error &) {
+    return false;
+  }
+  const auto nodeBytes = fileBytes - opsSegmentHeaderBytes;
   const int fd =
       ::open(path.string().c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
   if (fd < 0) {
@@ -731,7 +738,7 @@ bool SegmentedOpsSpool::writeSegmentFile(
     return false;
   }
   if (0 != opCount) {
-    const auto bytes = opCount * sizeof(CompactOpNode);
+    const auto bytes = static_cast<std::size_t>(nodeBytes);
     if (::lseek(fd, static_cast<off_t>(opsSegmentHeaderBytes), SEEK_SET) < 0 ||
         ::write(fd, rawOps() + 1, bytes) != static_cast<ssize_t>(bytes)) {
       ::close(fd);
@@ -740,6 +747,26 @@ bool SegmentedOpsSpool::writeSegmentFile(
   }
   ::close(fd);
   return true;
+}
+
+std::uint64_t SegmentedOpsSpool::serializedFileSize() const {
+  constexpr auto nodeSize = sizeof(CompactOpNode);
+  constexpr auto offsetMax =
+      static_cast<std::uint64_t>(std::numeric_limits<off_t>::max());
+  const auto count = static_cast<std::uint64_t>(opCount);
+  if (count >
+      (std::numeric_limits<std::uint64_t>::max() - opsSegmentHeaderBytes) /
+          nodeSize) {
+    throw std::overflow_error("operations segment file size overflows");
+  }
+  const auto bytes = opsSegmentHeaderBytes + count * nodeSize;
+  if (bytes > offsetMax ||
+      bytes - opsSegmentHeaderBytes >
+          static_cast<std::uint64_t>(std::numeric_limits<ssize_t>::max())) {
+    throw std::overflow_error(
+        "operations segment file size exceeds platform write limits");
+  }
+  return bytes;
 }
 
 void SegmentedOpsSpool::clear() {

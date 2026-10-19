@@ -63,6 +63,11 @@
 
 namespace xanadu {
 
+struct NativeStoreFileSizes {
+  std::uint64_t opsNodesBytes{};
+  std::uint64_t storeTablesBytes{};
+};
+
 /**
  * @brief Classification of text spans during mathematical primedia identity
  * diffing.
@@ -1217,6 +1222,10 @@ public:
    */
   void save(const std::string &directory) const;
 
+  /// Exact logical sizes of the two native store files, without preparing,
+  /// flushing, or writing the store. Refuses while save would seal metadata.
+  [[nodiscard]] NativeStoreFileSizes nativeFileSizes() const;
+
   /**
    * @brief Write the store to @p directory using canonical human-readable
    *        OSMIC text format for the operations, as `ops.osmic`.
@@ -1337,6 +1346,8 @@ private:
   /// Ensure pending author annotations and currentVersions_ are sealed as
   /// structure hyperop cells in ops.nodes before saving (§5.4).
   void sealPendingMetadataAsCells() const;
+
+  [[nodiscard]] StoreTables deploymentTablesForSave() const;
 
   std::shared_ptr<UserPermascroll> userPermascroll_;
   DocumentId documentId_;

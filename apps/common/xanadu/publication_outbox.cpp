@@ -8,6 +8,7 @@
 #include <condition_variable>
 #include <deque>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <mutex>
 #include <set>
@@ -23,6 +24,25 @@
 
 namespace xanadu {
 namespace {
+
+std::uint64_t retainedSeedBytes(const std::vector<PublicationSeed> &seeds) {
+  std::uint64_t total = 0;
+  for (const auto &seed : seeds) {
+    const auto bytes = seed.retainedFileBytes();
+    if (bytes > std::numeric_limits<std::uint64_t>::max() - total)
+      throw std::overflow_error("retained publication size overflows");
+    total += bytes;
+  }
+  return total;
+}
+
+void requireFileSize(const std::filesystem::path &path,
+                     const std::uint64_t expected) {
+  if (std::filesystem::file_size(path) != expected)
+    throw PublicationUnreadable("installed native file size disagrees with "
+                                "its exact footprint: " +
+                                path.string());
+}
 
 std::string jobId(const Publication &pub) {
   return pub.publisher.hex() + ":" + toHex(pub.salt) + ":" +
@@ -326,8 +346,9 @@ installPublication(const Publication &pub,
     throw PublicationUnreadable("publication has no complete store history");
   if (fs::exists(destination))
     throw std::runtime_error("publication destination already exists");
-  const auto seeds       = reviewPublicationDependencies(pub, roots);
-  const fs::path staging = destination.string() + ".partial";
+  const auto seeds         = reviewPublicationDependencies(pub, roots);
+  const auto retainedBytes = retainedSeedBytes(seeds);
+  const fs::path staging   = destination.string() + ".partial";
   if (!destination.parent_path().empty())
     fs::create_directories(destination.parent_path());
   if (!fs::create_directory(staging))
@@ -340,15 +361,21 @@ installPublication(const Publication &pub,
     // Recheck the copies, including path escapes and piece hashes: source
     // files may have changed while the reader was retaining them.
     const auto copies = reviewPublicationDependencies(pub, {retained});
+    if (retainedSeedBytes(copies) != retainedBytes)
+      throw PublicationUnreadable(
+          "retained dependency sizes disagree with their reviewed seeds");
     DirectoryContentSource source;
     for (const auto &seed : copies)
       (void)source.add(seed.metainfo, seed.savePath.string());
-    auto restored    = restorePublication(pub, source, reader);
-    const auto count = restored->opCount();
+    auto restored          = restorePublication(pub, source, reader);
+    const auto count       = restored->opCount();
+    const auto nativeSizes = restored->nativeFileSizes();
     restored->save(staging.string());
     if (restored->opCount() != count)
       throw PublicationUnreadable(
           "saving a publication changed its authored history");
+    requireFileSize(staging / "ops.nodes", nativeSizes.opsNodesBytes);
+    requireFileSize(staging / storeTablesName, nativeSizes.storeTablesBytes);
     // Native loading must succeed before installing anything discoverable.
     auto offline = std::make_unique<Store>(reader);
     offline->load(staging.string());

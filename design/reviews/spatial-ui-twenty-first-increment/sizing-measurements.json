@@ -1,0 +1,927 @@
+{
+  "samples": [
+    {
+      "sample": "tests/samples/xudu/beams/01_one_to_many",
+      "operation_count_derived": 42,
+      "ops_nodes": {
+        "logical": 68224,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "store_tables": {
+        "logical": 92,
+        "allocated_file_bytes": 512,
+        "file_count": 1
+      },
+      "native_store": {
+        "logical": 68316,
+        "allocated_file_bytes": 5120,
+        "file_count": 2
+      },
+      "retained_metainfo": {
+        "logical": 0,
+        "allocated_file_bytes": 0,
+        "file_count": 0
+      },
+      "retained_payload": {
+        "logical": 0,
+        "allocated_file_bytes": 0,
+        "file_count": 0
+      },
+      "retained_dependencies": {
+        "logical": 0,
+        "allocated_file_bytes": 0,
+        "file_count": 0
+      },
+      "whole_tree_files": {
+        "logical": 70076,
+        "allocated_file_bytes": 9728,
+        "file_count": 3
+      },
+      "ops_formula_matches": true,
+      "install_peak_known_lower_bound_logical": 68316,
+      "install_peak_known_lower_bound_allocated_files": 5120,
+      "retained_dependencies_tree_allocated_du_bytes": 0,
+      "sample_tree_allocated_du_bytes": 10240,
+      "ops_header": {
+        "signature": "ok",
+        "format_version": 2,
+        "header_bytes": 65536,
+        "node_size": 64,
+        "first_op_index": 1,
+        "recorded_node_count": 42,
+        "present_nodes": 42
+      },
+      "ops_header_valid": true
+    },
+    {
+      "sample": "tests/samples/xudu/beams/02_many_to_many",
+      "operation_count_derived": 42,
+      "ops_nodes": {
+        "logical": 68224,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "store_tables": {
+        "logical": 92,
+        "allocated_file_bytes": 512,
+        "file_count": 1
+      },
+      "native_store": {
+        "logical": 68316,
+        "allocated_file_bytes": 5120,
+        "file_count": 2
+      },
+      "retained_metainfo": {
+        "logical": 0,
+        "allocated_file_bytes": 0,
+        "file_count": 0
+      },
+      "retained_payload": {
+        "logical": 0,
+        "allocated_file_bytes": 0,
+        "file_count": 0
+      },
+      "retained_dependencies": {
+        "logical": 0,
+        "allocated_file_bytes": 0,
+        "file_count": 0
+      },
+      "whole_tree_files": {
+        "logical": 70084,
+        "allocated_file_bytes": 9728,
+        "file_count": 3
+      },
+      "ops_formula_matches": true,
+      "install_peak_known_lower_bound_logical": 68316,
+      "install_peak_known_lower_bound_allocated_files": 5120,
+      "retained_dependencies_tree_allocated_du_bytes": 0,
+      "sample_tree_allocated_du_bytes": 10240,
+      "ops_header": {
+        "signature": "ok",
+        "format_version": 2,
+        "header_bytes": 65536,
+        "node_size": 64,
+        "first_op_index": 1,
+        "recorded_node_count": 42,
+        "present_nodes": 42
+      },
+      "ops_header_valid": true
+    },
+    {
+      "sample": "tests/samples/xudu/beams/03_multi_span_stacked",
+      "operation_count_derived": 66,
+      "ops_nodes": {
+        "logical": 69760,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "store_tables": {
+        "logical": 92,
+        "allocated_file_bytes": 512,
+        "file_count": 1
+      },
+      "native_store": {
+        "logical": 69852,
+        "allocated_file_bytes": 5120,
+        "file_count": 2
+      },
+      "retained_metainfo": {
+        "logical": 0,
+        "allocated_file_bytes": 0,
+        "file_count": 0
+      },
+      "retained_payload": {
+        "logical": 0,
+        "allocated_file_bytes": 0,
+        "file_count": 0
+      },
+      "retained_dependencies": {
+        "logical": 0,
+        "allocated_file_bytes": 0,
+        "file_count": 0
+      },
+      "whole_tree_files": {
+        "logical": 72660,
+        "allocated_file_bytes": 9728,
+        "file_count": 3
+      },
+      "ops_formula_matches": true,
+      "install_peak_known_lower_bound_logical": 69852,
+      "install_peak_known_lower_bound_allocated_files": 5120,
+      "retained_dependencies_tree_allocated_du_bytes": 0,
+      "sample_tree_allocated_du_bytes": 10240,
+      "ops_header": {
+        "signature": "ok",
+        "format_version": 2,
+        "header_bytes": 65536,
+        "node_size": 64,
+        "first_op_index": 1,
+        "recorded_node_count": 66,
+        "present_nodes": 66
+      },
+      "ops_header_valid": true
+    },
+    {
+      "sample": "tests/samples/xudu/core_hypertext/unified_store",
+      "operation_count_derived": 126,
+      "ops_nodes": {
+        "logical": 73600,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "store_tables": {
+        "logical": 92,
+        "allocated_file_bytes": 512,
+        "file_count": 1
+      },
+      "native_store": {
+        "logical": 73692,
+        "allocated_file_bytes": 5120,
+        "file_count": 2
+      },
+      "retained_metainfo": {
+        "logical": 0,
+        "allocated_file_bytes": 0,
+        "file_count": 0
+      },
+      "retained_payload": {
+        "logical": 0,
+        "allocated_file_bytes": 0,
+        "file_count": 0
+      },
+      "retained_dependencies": {
+        "logical": 0,
+        "allocated_file_bytes": 0,
+        "file_count": 0
+      },
+      "whole_tree_files": {
+        "logical": 79075,
+        "allocated_file_bytes": 9728,
+        "file_count": 3
+      },
+      "ops_formula_matches": true,
+      "install_peak_known_lower_bound_logical": 73692,
+      "install_peak_known_lower_bound_allocated_files": 5120,
+      "retained_dependencies_tree_allocated_du_bytes": 0,
+      "sample_tree_allocated_du_bytes": 10240,
+      "ops_header": {
+        "signature": "ok",
+        "format_version": 2,
+        "header_bytes": 65536,
+        "node_size": 64,
+        "first_op_index": 1,
+        "recorded_node_count": 126,
+        "present_nodes": 126
+      },
+      "ops_header_valid": true
+    },
+    {
+      "sample": "tests/samples/xudu/core_hypertext/xanadoc_a",
+      "operation_count_derived": 127,
+      "ops_nodes": {
+        "logical": 73664,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "store_tables": {
+        "logical": 92,
+        "allocated_file_bytes": 512,
+        "file_count": 1
+      },
+      "native_store": {
+        "logical": 73756,
+        "allocated_file_bytes": 5120,
+        "file_count": 2
+      },
+      "retained_metainfo": {
+        "logical": 0,
+        "allocated_file_bytes": 0,
+        "file_count": 0
+      },
+      "retained_payload": {
+        "logical": 0,
+        "allocated_file_bytes": 0,
+        "file_count": 0
+      },
+      "retained_dependencies": {
+        "logical": 0,
+        "allocated_file_bytes": 0,
+        "file_count": 0
+      },
+      "whole_tree_files": {
+        "logical": 79762,
+        "allocated_file_bytes": 9728,
+        "file_count": 3
+      },
+      "ops_formula_matches": true,
+      "install_peak_known_lower_bound_logical": 73756,
+      "install_peak_known_lower_bound_allocated_files": 5120,
+      "retained_dependencies_tree_allocated_du_bytes": 0,
+      "sample_tree_allocated_du_bytes": 10240,
+      "ops_header": {
+        "signature": "ok",
+        "format_version": 2,
+        "header_bytes": 65536,
+        "node_size": 64,
+        "first_op_index": 1,
+        "recorded_node_count": 127,
+        "present_nodes": 127
+      },
+      "ops_header_valid": true
+    },
+    {
+      "sample": "tests/samples/xudu/core_hypertext/xanadoc_b",
+      "operation_count_derived": 17,
+      "ops_nodes": {
+        "logical": 66624,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "store_tables": {
+        "logical": 92,
+        "allocated_file_bytes": 512,
+        "file_count": 1
+      },
+      "native_store": {
+        "logical": 66716,
+        "allocated_file_bytes": 5120,
+        "file_count": 2
+      },
+      "retained_metainfo": {
+        "logical": 0,
+        "allocated_file_bytes": 0,
+        "file_count": 0
+      },
+      "retained_payload": {
+        "logical": 0,
+        "allocated_file_bytes": 0,
+        "file_count": 0
+      },
+      "retained_dependencies": {
+        "logical": 0,
+        "allocated_file_bytes": 0,
+        "file_count": 0
+      },
+      "whole_tree_files": {
+        "logical": 67421,
+        "allocated_file_bytes": 9728,
+        "file_count": 3
+      },
+      "ops_formula_matches": true,
+      "install_peak_known_lower_bound_logical": 66716,
+      "install_peak_known_lower_bound_allocated_files": 5120,
+      "retained_dependencies_tree_allocated_du_bytes": 0,
+      "sample_tree_allocated_du_bytes": 10240,
+      "ops_header": {
+        "signature": "ok",
+        "format_version": 2,
+        "header_bytes": 65536,
+        "node_size": 64,
+        "first_op_index": 1,
+        "recorded_node_count": 17,
+        "present_nodes": 17
+      },
+      "ops_header_valid": true
+    },
+    {
+      "sample": "tests/samples/xudu/multimedia/01_multipage_pdf",
+      "operation_count_derived": 18,
+      "ops_nodes": {
+        "logical": 66688,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "store_tables": {
+        "logical": 92,
+        "allocated_file_bytes": 512,
+        "file_count": 1
+      },
+      "native_store": {
+        "logical": 66780,
+        "allocated_file_bytes": 5120,
+        "file_count": 2
+      },
+      "retained_metainfo": {
+        "logical": 0,
+        "allocated_file_bytes": 0,
+        "file_count": 0
+      },
+      "retained_payload": {
+        "logical": 0,
+        "allocated_file_bytes": 0,
+        "file_count": 0
+      },
+      "retained_dependencies": {
+        "logical": 0,
+        "allocated_file_bytes": 0,
+        "file_count": 0
+      },
+      "whole_tree_files": {
+        "logical": 67526,
+        "allocated_file_bytes": 9728,
+        "file_count": 3
+      },
+      "ops_formula_matches": true,
+      "install_peak_known_lower_bound_logical": 66780,
+      "install_peak_known_lower_bound_allocated_files": 5120,
+      "retained_dependencies_tree_allocated_du_bytes": 0,
+      "sample_tree_allocated_du_bytes": 10240,
+      "ops_header": {
+        "signature": "ok",
+        "format_version": 2,
+        "header_bytes": 65536,
+        "node_size": 64,
+        "first_op_index": 1,
+        "recorded_node_count": 18,
+        "present_nodes": 18
+      },
+      "ops_header_valid": true
+    },
+    {
+      "sample": "tests/samples/xudu/multimedia/02_pdf_linked_xanadoc",
+      "operation_count_derived": 57,
+      "ops_nodes": {
+        "logical": 69184,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "store_tables": {
+        "logical": 92,
+        "allocated_file_bytes": 512,
+        "file_count": 1
+      },
+      "native_store": {
+        "logical": 69276,
+        "allocated_file_bytes": 5120,
+        "file_count": 2
+      },
+      "retained_metainfo": {
+        "logical": 0,
+        "allocated_file_bytes": 0,
+        "file_count": 0
+      },
+      "retained_payload": {
+        "logical": 0,
+        "allocated_file_bytes": 0,
+        "file_count": 0
+      },
+      "retained_dependencies": {
+        "logical": 0,
+        "allocated_file_bytes": 0,
+        "file_count": 0
+      },
+      "whole_tree_files": {
+        "logical": 71675,
+        "allocated_file_bytes": 9728,
+        "file_count": 3
+      },
+      "ops_formula_matches": true,
+      "install_peak_known_lower_bound_logical": 69276,
+      "install_peak_known_lower_bound_allocated_files": 5120,
+      "retained_dependencies_tree_allocated_du_bytes": 0,
+      "sample_tree_allocated_du_bytes": 10240,
+      "ops_header": {
+        "signature": "ok",
+        "format_version": 2,
+        "header_bytes": 65536,
+        "node_size": 64,
+        "first_op_index": 1,
+        "recorded_node_count": 57,
+        "present_nodes": 57
+      },
+      "ops_header_valid": true
+    },
+    {
+      "sample": "tests/samples/xudu/multimedia/03_mixed_text_image",
+      "operation_count_derived": 19,
+      "ops_nodes": {
+        "logical": 66752,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "store_tables": {
+        "logical": 387,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "native_store": {
+        "logical": 67139,
+        "allocated_file_bytes": 9216,
+        "file_count": 2
+      },
+      "retained_metainfo": {
+        "logical": 120,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "retained_payload": {
+        "logical": 228,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "retained_dependencies": {
+        "logical": 348,
+        "allocated_file_bytes": 9216,
+        "file_count": 2
+      },
+      "whole_tree_files": {
+        "logical": 68313,
+        "allocated_file_bytes": 23040,
+        "file_count": 5
+      },
+      "ops_formula_matches": true,
+      "install_peak_known_lower_bound_logical": 67835,
+      "install_peak_known_lower_bound_allocated_files": 27648,
+      "retained_dependencies_tree_allocated_du_bytes": 10752,
+      "sample_tree_allocated_du_bytes": 33280,
+      "ops_header": {
+        "signature": "ok",
+        "format_version": 2,
+        "header_bytes": 65536,
+        "node_size": 64,
+        "first_op_index": 1,
+        "recorded_node_count": 19,
+        "present_nodes": 19
+      },
+      "ops_header_valid": true
+    },
+    {
+      "sample": "tests/samples/xudu/multimedia/04_audio_doc",
+      "operation_count_derived": 17,
+      "ops_nodes": {
+        "logical": 66624,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "store_tables": {
+        "logical": 402,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "native_store": {
+        "logical": 67026,
+        "allocated_file_bytes": 9216,
+        "file_count": 2
+      },
+      "retained_metainfo": {
+        "logical": 143,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "retained_payload": {
+        "logical": 352844,
+        "allocated_file_bytes": 152064,
+        "file_count": 1
+      },
+      "retained_dependencies": {
+        "logical": 352987,
+        "allocated_file_bytes": 156672,
+        "file_count": 2
+      },
+      "whole_tree_files": {
+        "logical": 420720,
+        "allocated_file_bytes": 170496,
+        "file_count": 5
+      },
+      "ops_formula_matches": true,
+      "install_peak_known_lower_bound_logical": 773000,
+      "install_peak_known_lower_bound_allocated_files": 322560,
+      "retained_dependencies_tree_allocated_du_bytes": 158208,
+      "sample_tree_allocated_du_bytes": 180736,
+      "ops_header": {
+        "signature": "ok",
+        "format_version": 2,
+        "header_bytes": 65536,
+        "node_size": 64,
+        "first_op_index": 1,
+        "recorded_node_count": 17,
+        "present_nodes": 17
+      },
+      "ops_header_valid": true
+    },
+    {
+      "sample": "tests/samples/xudu/multimedia/05_video_doc",
+      "operation_count_derived": 17,
+      "ops_nodes": {
+        "logical": 66624,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "store_tables": {
+        "logical": 391,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "native_store": {
+        "logical": 67015,
+        "allocated_file_bytes": 9216,
+        "file_count": 2
+      },
+      "retained_metainfo": {
+        "logical": 122,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "retained_payload": {
+        "logical": 21778,
+        "allocated_file_bytes": 25088,
+        "file_count": 1
+      },
+      "retained_dependencies": {
+        "logical": 21900,
+        "allocated_file_bytes": 29696,
+        "file_count": 2
+      },
+      "whole_tree_files": {
+        "logical": 89621,
+        "allocated_file_bytes": 43520,
+        "file_count": 5
+      },
+      "ops_formula_matches": true,
+      "install_peak_known_lower_bound_logical": 110815,
+      "install_peak_known_lower_bound_allocated_files": 68608,
+      "retained_dependencies_tree_allocated_du_bytes": 31232,
+      "sample_tree_allocated_du_bytes": 53760,
+      "ops_header": {
+        "signature": "ok",
+        "format_version": 2,
+        "header_bytes": 65536,
+        "node_size": 64,
+        "first_op_index": 1,
+        "recorded_node_count": 17,
+        "present_nodes": 17
+      },
+      "ops_header_valid": true
+    },
+    {
+      "sample": "tests/samples/xudu/multimedia/06_embedded_media_page",
+      "operation_count_derived": 28,
+      "ops_nodes": {
+        "logical": 67328,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "store_tables": {
+        "logical": 1062,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "native_store": {
+        "logical": 68390,
+        "allocated_file_bytes": 9216,
+        "file_count": 2
+      },
+      "retained_metainfo": {
+        "logical": 418,
+        "allocated_file_bytes": 13824,
+        "file_count": 3
+      },
+      "retained_payload": {
+        "logical": 374850,
+        "allocated_file_bytes": 181760,
+        "file_count": 3
+      },
+      "retained_dependencies": {
+        "logical": 375268,
+        "allocated_file_bytes": 195584,
+        "file_count": 6
+      },
+      "whole_tree_files": {
+        "logical": 444859,
+        "allocated_file_bytes": 209408,
+        "file_count": 9
+      },
+      "ops_formula_matches": true,
+      "install_peak_known_lower_bound_logical": 818926,
+      "install_peak_known_lower_bound_allocated_files": 400384,
+      "retained_dependencies_tree_allocated_du_bytes": 207360,
+      "sample_tree_allocated_du_bytes": 229888,
+      "ops_header": {
+        "signature": "ok",
+        "format_version": 2,
+        "header_bytes": 65536,
+        "node_size": 64,
+        "first_op_index": 1,
+        "recorded_node_count": 28,
+        "present_nodes": 28
+      },
+      "ops_header_valid": true
+    },
+    {
+      "sample": "tests/samples/xudu/multimedia/07_audio_transclusion",
+      "operation_count_derived": 20,
+      "ops_nodes": {
+        "logical": 66816,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "store_tables": {
+        "logical": 402,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "native_store": {
+        "logical": 67218,
+        "allocated_file_bytes": 9216,
+        "file_count": 2
+      },
+      "retained_metainfo": {
+        "logical": 143,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "retained_payload": {
+        "logical": 352844,
+        "allocated_file_bytes": 152064,
+        "file_count": 1
+      },
+      "retained_dependencies": {
+        "logical": 352987,
+        "allocated_file_bytes": 156672,
+        "file_count": 2
+      },
+      "whole_tree_files": {
+        "logical": 421084,
+        "allocated_file_bytes": 170496,
+        "file_count": 5
+      },
+      "ops_formula_matches": true,
+      "install_peak_known_lower_bound_logical": 773192,
+      "install_peak_known_lower_bound_allocated_files": 322560,
+      "retained_dependencies_tree_allocated_du_bytes": 158208,
+      "sample_tree_allocated_du_bytes": 180736,
+      "ops_header": {
+        "signature": "ok",
+        "format_version": 2,
+        "header_bytes": 65536,
+        "node_size": 64,
+        "first_op_index": 1,
+        "recorded_node_count": 20,
+        "present_nodes": 20
+      },
+      "ops_header_valid": true
+    },
+    {
+      "sample": "tests/samples/xudu/multimedia/08_video_transclusion",
+      "operation_count_derived": 20,
+      "ops_nodes": {
+        "logical": 66816,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "store_tables": {
+        "logical": 391,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "native_store": {
+        "logical": 67207,
+        "allocated_file_bytes": 9216,
+        "file_count": 2
+      },
+      "retained_metainfo": {
+        "logical": 122,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "retained_payload": {
+        "logical": 21778,
+        "allocated_file_bytes": 25088,
+        "file_count": 1
+      },
+      "retained_dependencies": {
+        "logical": 21900,
+        "allocated_file_bytes": 29696,
+        "file_count": 2
+      },
+      "whole_tree_files": {
+        "logical": 89978,
+        "allocated_file_bytes": 43520,
+        "file_count": 5
+      },
+      "ops_formula_matches": true,
+      "install_peak_known_lower_bound_logical": 111007,
+      "install_peak_known_lower_bound_allocated_files": 68608,
+      "retained_dependencies_tree_allocated_du_bytes": 31232,
+      "sample_tree_allocated_du_bytes": 53760,
+      "ops_header": {
+        "signature": "ok",
+        "format_version": 2,
+        "header_bytes": 65536,
+        "node_size": 64,
+        "first_op_index": 1,
+        "recorded_node_count": 20,
+        "present_nodes": 20
+      },
+      "ops_header_valid": true
+    },
+    {
+      "sample": "tests/samples/xudu/multimedia/09_image_transclusion",
+      "operation_count_derived": 20,
+      "ops_nodes": {
+        "logical": 66816,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "store_tables": {
+        "logical": 387,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "native_store": {
+        "logical": 67203,
+        "allocated_file_bytes": 9216,
+        "file_count": 2
+      },
+      "retained_metainfo": {
+        "logical": 120,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "retained_payload": {
+        "logical": 228,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "retained_dependencies": {
+        "logical": 348,
+        "allocated_file_bytes": 9216,
+        "file_count": 2
+      },
+      "whole_tree_files": {
+        "logical": 68420,
+        "allocated_file_bytes": 23040,
+        "file_count": 5
+      },
+      "ops_formula_matches": true,
+      "install_peak_known_lower_bound_logical": 67899,
+      "install_peak_known_lower_bound_allocated_files": 27648,
+      "retained_dependencies_tree_allocated_du_bytes": 10752,
+      "sample_tree_allocated_du_bytes": 33280,
+      "ops_header": {
+        "signature": "ok",
+        "format_version": 2,
+        "header_bytes": 65536,
+        "node_size": 64,
+        "first_op_index": 1,
+        "recorded_node_count": 20,
+        "present_nodes": 20
+      },
+      "ops_header_valid": true
+    },
+    {
+      "sample": "tests/samples/xudu/multimedia/10_svg_static_image",
+      "operation_count_derived": 19,
+      "ops_nodes": {
+        "logical": 66752,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "store_tables": {
+        "logical": 402,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "native_store": {
+        "logical": 67154,
+        "allocated_file_bytes": 9216,
+        "file_count": 2
+      },
+      "retained_metainfo": {
+        "logical": 120,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "retained_payload": {
+        "logical": 428,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "retained_dependencies": {
+        "logical": 548,
+        "allocated_file_bytes": 9216,
+        "file_count": 2
+      },
+      "whole_tree_files": {
+        "logical": 68528,
+        "allocated_file_bytes": 23040,
+        "file_count": 5
+      },
+      "ops_formula_matches": true,
+      "install_peak_known_lower_bound_logical": 68250,
+      "install_peak_known_lower_bound_allocated_files": 27648,
+      "retained_dependencies_tree_allocated_du_bytes": 10752,
+      "sample_tree_allocated_du_bytes": 33280,
+      "ops_header": {
+        "signature": "ok",
+        "format_version": 2,
+        "header_bytes": 65536,
+        "node_size": 64,
+        "first_op_index": 1,
+        "recorded_node_count": 19,
+        "present_nodes": 19
+      },
+      "ops_header_valid": true
+    },
+    {
+      "sample": "tests/samples/xudu/multimedia/11_floating_image",
+      "operation_count_derived": 2,
+      "ops_nodes": {
+        "logical": 65664,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "store_tables": {
+        "logical": 387,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "native_store": {
+        "logical": 66051,
+        "allocated_file_bytes": 9216,
+        "file_count": 2
+      },
+      "retained_metainfo": {
+        "logical": 120,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "retained_payload": {
+        "logical": 228,
+        "allocated_file_bytes": 4608,
+        "file_count": 1
+      },
+      "retained_dependencies": {
+        "logical": 348,
+        "allocated_file_bytes": 9216,
+        "file_count": 2
+      },
+      "whole_tree_files": {
+        "logical": 66399,
+        "allocated_file_bytes": 18432,
+        "file_count": 4
+      },
+      "ops_formula_matches": true,
+      "install_peak_known_lower_bound_logical": 66747,
+      "install_peak_known_lower_bound_allocated_files": 27648,
+      "retained_dependencies_tree_allocated_du_bytes": 10752,
+      "sample_tree_allocated_du_bytes": 20480,
+      "ops_header": {
+        "signature": "ok",
+        "format_version": 2,
+        "header_bytes": 65536,
+        "node_size": 64,
+        "first_op_index": 1,
+        "recorded_node_count": 2,
+        "present_nodes": 2
+      },
+      "ops_header_valid": true
+    }
+  ],
+  "separate_ui_authored_manifest_measurement": {
+    "path": "build/validation-nineteenth/native/restart-smoke/data/xudu/xanadocs/untitled-20261018-154726/published/document.xanadoc",
+    "logical_bytes": 1871,
+    "allocated_file_bytes": 4608
+  }
+}

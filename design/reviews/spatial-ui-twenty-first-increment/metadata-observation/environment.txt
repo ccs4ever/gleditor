@@ -1,0 +1,10 @@
+SDL_VIDEODRIVER=offscreen
+SDL_AUDIODRIVER=dummy
+LIBGL_ALWAYS_SOFTWARE=1
+XDG_DATA_HOME=/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-twenty-first/metadata-observation/data
+XDG_CONFIG_HOME=/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-twenty-first/metadata-observation/config
+XDG_CACHE_HOME=/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-twenty-first/metadata-observation/cache
+GNUPGHOME=/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-twenty-first/metadata-observation/gnupg
+TMPDIR=/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-twenty-first/metadata-observation/tmp
+XUDU_SWARM_TEST_FILTER=SwarmTest.MetadataOnlyMagnetWaitsForExplicitDownloadAndCanDiscardPieces
+OUTER_NAMESPACE=unshare -Urnm

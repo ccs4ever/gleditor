@@ -1,0 +1,71 @@
+{
+  "base_commit": "cc26a174d2f74f0f613fe98841bb82385cfb2ae0",
+  "strict": {
+    "exit": 0,
+    "backends": [
+      "OpenGL",
+      "OpenGL ES",
+      "Vulkan"
+    ],
+    "GL_GLES_ordinary_differing_pixels": 0,
+    "Vulkan_ordinary_percent": 0.5104,
+    "Vulkan_overlay_percent": 0.5096,
+    "actual_threaded_split_exercised": false,
+    "frames": 22,
+    "comparison_log_sha256": "25bd6bcbc63865cc9aae2f071ca038724feabc85569c123b53ce54ac99127891"
+  },
+  "hashes": {
+    "base_commit": "cc26a174d2f74f0f613fe98841bb82385cfb2ae0",
+    "product_patch_sha256": "72aeb0a9c06874c6f75a6f78152069b26b3f6499cfaa90fac6ca51d4a7612f1e",
+    "test_patch_sha256": "af1268a906c3b9e88d32ab69eda57e60e4ba044d7bf7e57129cf7d8f04092feb",
+    "product_source_sha256": {
+      "apps/common/xanadu/publication_outbox.cpp": "94283a7907c0428b201ed2420f8662a352d4c31fb58bfd5c0023c1112a060540",
+      "apps/common/xanadu/retained_content.cpp": "405035fa58b361f54d3c15625f3fda46113a8152de9c314f27ca5909e51f6446",
+      "apps/common/xanadu/retained_content.hpp": "f535e3df8b5e99da5ad534017c3f695b0ab55c9a74e8cc0d160fe775fc561854",
+      "apps/common/xanadu/segmented_ops_spool.cpp": "417acdfa339c2294ffbf66f3f7c2875e602916ea3b3859eddcd010459f945539",
+      "apps/common/xanadu/segmented_ops_spool.hpp": "14cb8299cbaaf0aa0894f3d11b7e8b123cd8c82c2fbf54f5e1c17b9e34ae844d",
+      "apps/common/xanadu/store.cpp": "816769f768515b28147ea6fe172f05f7db7deaa73b5c1fc50209c63630982398",
+      "apps/common/xanadu/store.hpp": "7e5515efffafdbfe49827161c49a0634a902092c7e09c92493934ccb4e62ca83",
+      "apps/common/xanadu/store_tables.cpp": "8b8a2ea1e4aa66611cc75eb72794b3aabff7c13a02960ced491417adfa8b934e",
+      "apps/common/xanadu/store_tables.hpp": "826299b671d16664bd59ecf5250256f9385b8f41e635163d4fa99dd2b435e076"
+    },
+    "test_source_sha256": {
+      "tests/xudu/publication.cpp": "5b1268798d878359bb46f0b08c0cbe2958d95455d2b6490d40968d800edd98ef",
+      "tests/xudu/segmented_ops_spool.cpp": "3d499f9093e6fa9e2eebc93acf6f1349ca5bac48fa7b1e0b5701df98669b8a63",
+      "tests/xudu/store_tables_test.cpp": "ba9828474e096927ab6ebaa8c5824ad0b362090bbcd1c623471461200bf45742"
+    },
+    "binary_sha256": {
+      "build/xuzz": "f4c6f133892348f3d27b17ad30d64627d3071ecaa1b487bae1974e05d0670c9f",
+      "build/gleditor": "723f0dfd829c1cea3a949658e24ba8eede6a71ad27ea8ffc3da210d09691280c",
+      "build/gleditor_test": "44562f4e4ea437f8f3c575a8005d5847367860f9b4d4714d2d1b6516cf014f8a",
+      "build/xudu-dump": "678b64e96fc9ada8e3702e4258a5d867786d12c9eb9e7877d4b6f37699de2beb",
+      "build/libgleditor.so.0": "ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9",
+      "build/zigzag_test": "cf9242983a0819733c1ec62f741c96d7363c257506f6422d291ede713d101176",
+      "build/xuzz_test": "9885cd87e61bd9102cac7d995c70d44e41e6bba496072d7753c60259abfb53a9",
+      "build/xudu_test": "99453c13b57e1c4454b5f817042527c6575d9cbf0feb1320bccec15609f78e0c"
+    },
+    "frozen_final_hashes_file_sha256": "3d02464a143b62de17caa644e14e398d01d32927a7c8e0ae0ea0716a8ead9873",
+    "frozen_final_engine_binaries": {
+      "libgleditor.so.0": "ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9",
+      "xudu-dump": "678b64e96fc9ada8e3702e4258a5d867786d12c9eb9e7877d4b6f37699de2beb"
+    },
+    "current_engine_binaries": {
+      "build/libgleditor.so.0": "ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9",
+      "build/xudu-dump": "678b64e96fc9ada8e3702e4258a5d867786d12c9eb9e7877d4b6f37699de2beb"
+    },
+    "engine_binary_matches_frozen_final": {
+      "build/libgleditor.so.0": true,
+      "build/xudu-dump": true
+    }
+  },
+  "tests": {
+    "engine_baseline_passed": 1347,
+    "engine_final_passed": 1352,
+    "engine_disabled": 1,
+    "UI_passed": 248,
+    "Xuzz_passed": 107,
+    "metadata_only_swarm_passed": 1,
+    "library": "799/799 and mip/cache 53/53 reused from checkpoint17 only after exact library/test binary hash equality; not new runs"
+  },
+  "engine_filter": "-SwarmTest.*:MutableNameTest.*:PublicationOutboxNetworkTest.*:E2EBinaryOrchestrationTest.*:AnimationTransclusionTest.*:BeamProgressiveLoadingTest.*"
+}

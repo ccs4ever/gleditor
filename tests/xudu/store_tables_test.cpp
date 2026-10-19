@@ -13,6 +13,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <tuple>
@@ -65,10 +66,12 @@ StoreTables everything() {
 }
 
 TEST(StoreTablesTest, everyFieldSurvivesTheRoundTrip) {
-  const auto dir  = scratch("roundtrip");
-  const auto path = dir / "store.tables";
-  const auto sent = everything();
+  const auto dir     = scratch("roundtrip");
+  const auto path    = dir / "store.tables";
+  const auto sent    = everything();
+  const auto encoded = xanadu::encodeStoreTables(sent);
   xanadu::writeStoreTables(path, sent);
+  EXPECT_EQ(fs::file_size(path), encoded.size());
   const auto back = xanadu::readStoreTables(path);
 
   EXPECT_EQ(back.documentId, sent.documentId);
@@ -84,6 +87,19 @@ TEST(StoreTablesTest, everyFieldSurvivesTheRoundTrip) {
   EXPECT_EQ(back.localSegments.front().mimeType, "image/png")
       << "a local segment's MIME type is the one thing the shared segment "
          "encoding has no key for, so the registry adds it";
+}
+
+TEST(StoreTablesTest, canonicalFixturesKeepTheirExactEncodedBytes) {
+  for (const auto *store :
+       {"core_hypertext/unified_store", "multimedia/06_embedded_media_page",
+        "multimedia/11_floating_image"}) {
+    const auto path = fs::path("tests/samples/xudu") / store / "store.tables";
+    SCOPED_TRACE(path.string());
+    std::ifstream input(path, std::ios::binary);
+    ASSERT_TRUE(input);
+    const std::string bytes{std::istreambuf_iterator<char>(input), {}};
+    EXPECT_EQ(xanadu::encodeStoreTables(xanadu::readStoreTables(path)), bytes);
+  }
 }
 
 TEST(StoreTablesTest, aFileThatIsNotOneIsRefusedAndSaysWhy) {

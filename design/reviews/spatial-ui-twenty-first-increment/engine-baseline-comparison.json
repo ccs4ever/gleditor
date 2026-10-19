@@ -1,0 +1,28 @@
+{
+  "baseline": {
+    "tests": "1348",
+    "failures": "0",
+    "disabled": "1",
+    "errors": "0",
+    "time": "27.621",
+    "timestamp": "2026-10-19T11:20:44.961",
+    "name": "AllTests"
+  },
+  "candidate": {
+    "tests": "1353",
+    "failures": "0",
+    "disabled": "1",
+    "errors": "0",
+    "time": "27.538",
+    "timestamp": "2026-10-19T11:32:21.174",
+    "name": "AllTests"
+  },
+  "baseline_cases_removed": [],
+  "new_cases": [
+    "PublicationFootprintTest.pendingMetadataRefusesWithoutMintingOperations",
+    "PublicationFootprintTest.retainedSeedSizeChecksAdditionOverflow",
+    "PublicationInventoryTest.exactInstallFootprintMatchesRetainedFiles",
+    "SegmentedOpsSpoolTest.emptyFileFootprintIncludesTheWholeHeader",
+    "StoreTablesTest.canonicalFixturesKeepTheirExactEncodedBytes"
+  ]
+}

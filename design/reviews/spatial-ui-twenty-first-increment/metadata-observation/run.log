@@ -1,0 +1,35 @@
+==> making a torrent of tests/samples/quick_brown_fox.txt
+  218 bytes, 4 pieces, info hash dc308895c32545a2fb09f050d0be66164b234219
+==> two network namespaces, joined by a veth pair
+  seeder 10.77.0.1, leecher 10.77.0.2
+==> starting the seeder in xudu-seed
+  listening on 10.77.0.1:41951
+  publishing as cdf811badce4c6ad367855f317b6c05b1b1fad97aa30c269063e99ca850184d1
+==> running the swarm tests in xudu-leech
+Breakpoint 1 at 0x8f4478: file apps/common/xanadu/swarm.cpp, line 955.
+Breakpoint 2 at 0x8f4548: file apps/common/xanadu/swarm.cpp, line 962.
+
+This GDB supports auto-downloading debuginfo from the following URLs:
+  <https://debuginfod.cachyos.org>
+  <https://debuginfod.archlinux.org>
+Debuginfod has been disabled.
+To make this setting permanent, add 'set debuginfod enabled off' to .gdbinit.
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/usr/lib/libthread_db.so.1".
+Running main() from gmock_main.cc
+Note: Google Test filter = SwarmTest.MetadataOnlyMagnetWaitsForExplicitDownloadAndCanDiscardPieces
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from SwarmTest
+[ RUN      ] SwarmTest.MetadataOnlyMagnetWaitsForExplicitDownloadAndCanDiscardPieces
+CHECKPOINT=before_startDownload
+INVENTORY={"base": "/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-twenty-first/metadata-observation/tmp/xudu-swarm-MetadataOnlyMagnetWaitsForExplicitDownloadAndCanDiscardPieces", "checkpoint": "before_startDownload", "directories": [], "entries": [], "exists": true}
+CHECKPOINT=after_flush_before_discard
+INVENTORY={"base": "/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-twenty-first/metadata-observation/tmp/xudu-swarm-MetadataOnlyMagnetWaitsForExplicitDownloadAndCanDiscardPieces", "checkpoint": "after_flush_before_discard", "directories": [], "entries": [{"allocated_bytes": 512, "kind": "file", "logical_bytes": 218, "path": "sample.txt", "sha256": "a37198985e37a6e55d317f4cc4f09bde304e047554d938d696cb4a1e623dff02"}], "exists": true}
+[       OK ] SwarmTest.MetadataOnlyMagnetWaitsForExplicitDownloadAndCanDiscardPieces (1623 ms)
+[----------] 1 test from SwarmTest (1623 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1623 ms total)
+[  PASSED  ] 1 test.
+[Inferior 1 (process 1930804) exited normally]

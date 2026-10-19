@@ -17,6 +17,9 @@ struct PublicationSeed {
   std::string metainfo;
   std::filesystem::path savePath;
   std::uint64_t bytes{};
+
+  /// Payload bytes plus the retained metainfo.torrent sidecar.
+  [[nodiscard]] std::uint64_t retainedFileBytes() const;
 };
 
 [[nodiscard]] PublicationSeed

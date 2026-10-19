@@ -1,0 +1,19 @@
+usage: store-dump [--section=SECTION] [--permascroll=PATH]
+                 <store-directory|ops-file>
+
+  Renders a xanadu store as text without going through the loader,
+  so that a store the loader refuses can still be looked at.
+
+  SECTION is one of: all (default), header, ops, scrolls, links,
+  versions, authorship.
+
+  --section=ops is the one to diff across a format change: it
+  renders what each operation means, so a change that preserves
+  meaning produces identical output. --section=header is where a
+  version bump is supposed to show.
+
+  A store holds no primedia of its own -- what was typed lives in
+  the author's permascroll -- so --permascroll is what lets an
+  operation render the text its span names. PATH is the permascroll
+  directory or its active segment file. Without it every other
+  field still renders; only text= is missing.

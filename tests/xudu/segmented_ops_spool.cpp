@@ -719,6 +719,7 @@ TEST(SegmentedOpsSpoolTest, aSegmentFileSaysWhatItIsAndComesBackTheSame) {
   branched.at            = 700;
   spool.append(branched, MicroversionId::parse("3a1"));
   ASSERT_TRUE(spool.writeSegmentFile(path));
+  EXPECT_EQ(spool.serializedFileSize(), segmentFileSize(8));
 
   // Exactly a header and its operations, with the header's own 64 KiB left as
   // a hole rather than padded out with anything.
@@ -763,6 +764,14 @@ TEST(SegmentedOpsSpoolTest, aSegmentFileSaysWhatItIsAndComesBackTheSame) {
   EXPECT_TRUE(again.contains(MicroversionId::parse("3a3")));
   EXPECT_THAT(again.ancestralPath(10),
               testing::ElementsAre(1U, 2U, 3U, 8U, 9U, 10U));
+}
+
+TEST(SegmentedOpsSpoolTest, emptyFileFootprintIncludesTheWholeHeader) {
+  const auto path = scratchDir("empty_footprint") / "empty.ops";
+  SegmentedOpsSpool spool;
+  EXPECT_EQ(spool.serializedFileSize(), xanadu::opsSegmentHeaderBytes);
+  ASSERT_TRUE(spool.writeSegmentFile(path));
+  EXPECT_EQ(std::filesystem::file_size(path), spool.serializedFileSize());
 }
 
 } // namespace

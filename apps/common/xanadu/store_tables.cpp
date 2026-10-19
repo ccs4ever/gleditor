@@ -96,6 +96,18 @@ Scroll decodeDeployment(const bencode::Value &value) {
 
 void writeStoreTables(const std::filesystem::path &path,
                       const StoreTables &tables) {
+  const auto bytes = encodeStoreTables(tables);
+  std::ofstream out(path, std::ios::binary | std::ios::trunc);
+  if (!out) {
+    throw StoreTablesUnreadable("cannot write " + path.string());
+  }
+  out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+  if (!out) {
+    throw StoreTablesUnreadable("cannot write " + path.string());
+  }
+}
+
+std::string encodeStoreTables(const StoreTables &tables) {
   bencode::List local;
   local.reserve(tables.localSegments.size());
   for (const auto &segment : tables.localSegments) {
@@ -121,18 +133,12 @@ void writeStoreTables(const std::filesystem::path &path,
           })
           .encode();
 
-  std::ofstream out(path, std::ios::binary | std::ios::trunc);
-  if (!out) {
-    throw StoreTablesUnreadable("cannot write " + path.string());
-  }
-  out.write(reinterpret_cast<const char *>(storeTablesSignature.data()),
-            static_cast<std::streamsize>(storeTablesSignature.size()));
+  std::string bytes(reinterpret_cast<const char *>(storeTablesSignature.data()),
+                    storeTablesSignature.size());
   const auto version = storeTablesFormatVersion;
-  out.write(reinterpret_cast<const char *>(&version), sizeof(version));
-  out.write(body.data(), static_cast<std::streamsize>(body.size()));
-  if (!out) {
-    throw StoreTablesUnreadable("cannot write " + path.string());
-  }
+  bytes.append(reinterpret_cast<const char *>(&version), sizeof(version));
+  bytes.append(body);
+  return bytes;
 }
 
 StoreTables readStoreTables(const std::filesystem::path &path) {

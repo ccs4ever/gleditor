@@ -119,6 +119,7 @@ struct StoreTables {
 
 /// Write @p tables to @p path, header and all.
 /// @throws StoreTablesUnreadable if the file cannot be written.
+[[nodiscard]] std::string encodeStoreTables(const StoreTables &tables);
 void writeStoreTables(const std::filesystem::path &path,
                       const StoreTables &tables);
 

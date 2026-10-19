@@ -688,6 +688,12 @@ TEST_F(PublicationInventoryTest,
   (void)sparse.transcludeExternal(text, 5, foreign->second, 0, 9);
   const auto genesis = sparse.sliceGenesis(text);
   (void)sparse.makeCell(genesis, "Idea cell");
+  const auto unsealedCount = sparse.opCount();
+  EXPECT_THROW((void)sparse.nativeFileSizes(), std::logic_error);
+  EXPECT_EQ(sparse.opCount(), unsealedCount);
+  sparse.sealMetadata();
+  EXPECT_GT(sparse.opCount(), unsealedCount);
+  EXPECT_NO_THROW((void)sparse.nativeFileSizes());
   // The slice branch has no authored registry rank. Complete publication
   // descriptors still make the quotation on the other branch addressable.
   const auto sealed = xanadu::sealLocalSpool(sparse, keys, "sparse-permascroll",
@@ -734,6 +740,54 @@ TEST_F(PublicationInventoryTest,
   offline.save(destination.string());
   EXPECT_EQ(offline.opCount(), count);
   EXPECT_EQ(reader->bytes().size(), 0U);
+}
+
+TEST_F(PublicationInventoryTest, exactInstallFootprintMatchesRetainedFiles) {
+  const auto destination = root / "reader-footprint";
+  auto installed = xanadu::installPublication(pub, {root}, reader, destination);
+  const auto count = installed->opCount();
+  const std::string primedia(installed->userPermascroll().bytes());
+  const auto sizes = installed->nativeFileSizes();
+  const auto again = installed->nativeFileSizes();
+  EXPECT_EQ(again.opsNodesBytes, sizes.opsNodesBytes);
+  EXPECT_EQ(again.storeTablesBytes, sizes.storeTablesBytes);
+  EXPECT_EQ(installed->opCount(), count);
+  EXPECT_EQ(installed->userPermascroll().bytes(), primedia);
+  EXPECT_EQ(std::filesystem::file_size(destination / "ops.nodes"),
+            sizes.opsNodesBytes);
+  EXPECT_EQ(std::filesystem::file_size(destination / "store.tables"),
+            sizes.storeTablesBytes);
+
+  std::uint64_t expectedRetained = 0;
+  for (const auto &seed :
+       xanadu::reviewPublicationDependencies(pub, {destination / "published"}))
+    expectedRetained += seed.retainedFileBytes();
+  std::uint64_t actualRetained = 0;
+  for (const auto &entry :
+       std::filesystem::recursive_directory_iterator(destination / "published"))
+    if (entry.is_regular_file())
+      actualRetained += std::filesystem::file_size(entry.path());
+  EXPECT_EQ(actualRetained, expectedRetained);
+}
+
+TEST(PublicationFootprintTest, pendingMetadataRefusesWithoutMintingOperations) {
+  xanadu::Store store;
+  const auto head = store.insert({}, 0, "footprint");
+  store.setVersionAnnotation(head, {.alias = "pending"});
+  const auto count = store.opCount();
+  const std::string primedia(store.userPermascroll().bytes());
+  EXPECT_THROW((void)store.nativeFileSizes(), std::logic_error);
+  EXPECT_EQ(store.opCount(), count);
+  EXPECT_EQ(store.userPermascroll().bytes(), primedia);
+  store.sealMetadata();
+  EXPECT_NO_THROW((void)store.nativeFileSizes());
+}
+
+TEST(PublicationFootprintTest, retainedSeedSizeChecksAdditionOverflow) {
+  xanadu::PublicationSeed seed;
+  seed.bytes    = std::numeric_limits<std::uint64_t>::max();
+  seed.metainfo = "x";
+  EXPECT_THROW((void)seed.retainedFileBytes(), std::overflow_error);
 }
 
 TEST_F(PublicationInventoryTest, ReaderEditsUseItsOwnScrollAndSurviveReopen) {
