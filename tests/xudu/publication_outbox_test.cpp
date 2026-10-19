@@ -11,6 +11,10 @@
 #include <mutex>
 #include <thread>
 
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
+
 #include "common/xanadu/bencode.hpp"
 #include "common/xanadu/link_package_exchange.hpp"
 #include "common/xanadu/publication_discovery.hpp"
@@ -460,6 +464,50 @@ TEST_F(PublicationInboxTest,
     EXPECT_NE(thread, std::this_thread::get_id());
     EXPECT_EQ(thread, downloads->threads.front());
   }
+}
+
+#ifndef _WIN32
+TEST_F(PublicationInboxTest,
+       SpecialStagedFileStopsInstallBeforeReadyWithoutOpeningIt) {
+  auto options         = incomingOptions();
+  downloads->holdFetch = true;
+  xanadu::PublicationInbox inbox(options);
+  const auto id = inbox.submit(link);
+  for (int retry = 0; retry < 600 && downloads->fetchEntered.load() == 0;
+       ++retry)
+    std::this_thread::sleep_for(5ms);
+  ASSERT_GT(downloads->fetchEntered.load(), 0U);
+
+  const auto attempt = root / "inbox" / (id + ".attempt-0");
+  const auto special = attempt / "unexpected-fifo";
+  ASSERT_EQ(::mkfifo(special.c_str(), 0600), 0);
+  downloads->holdFetch = false;
+
+  ASSERT_TRUE(inbox.waitFor(id, xanadu::PublicationDownloadPhase::Failed, 3s));
+  EXPECT_NE(inbox.status(id).error.find("Special file in staged publication"),
+            std::string::npos);
+  EXPECT_FALSE(fs::exists(root / "inbox" / id));
+  EXPECT_EQ(fs::symlink_status(special).type(), fs::file_type::fifo);
+}
+#endif
+
+TEST_F(PublicationInboxTest, CanonicalizesInboxRootBeforeDirectorySync) {
+  auto options      = incomingOptions();
+  options.directory = fs::relative(root / "relative-inbox", fs::current_path());
+  {
+    xanadu::PublicationInbox inbox(options);
+  }
+  EXPECT_TRUE(fs::exists(root / "relative-inbox" / "data.mdb"));
+
+#ifndef _WIN32
+  const auto alias = root / "parent-alias";
+  ASSERT_NO_THROW(fs::create_directory_symlink(root, alias));
+  options.directory = alias / "aliased-inbox";
+  {
+    xanadu::PublicationInbox inbox(options);
+  }
+  EXPECT_TRUE(fs::exists(root / "aliased-inbox" / "data.mdb"));
+#endif
 }
 
 TEST_F(PublicationInboxTest,

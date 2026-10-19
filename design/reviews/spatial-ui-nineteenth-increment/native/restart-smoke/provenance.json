@@ -1,0 +1,56 @@
+{
+  "scope": "bounded ordinary-UI restart smoke; no Retry and no Inbox installation",
+  "continuation_source": "build/validation-eighteenth/native/candidate18/data and config only",
+  "profile_copy_policy": "fresh run used copied data/config, empty cache and GNUPG home; profile roots not archived",
+  "frozen_binary_hashes_file": "frozen-hashes.txt",
+  "process": {
+    "count": 1,
+    "exit_code": 0,
+    "actual_argv": "argv-process1.txt",
+    "environment": "environment.txt",
+    "headless_display": "private xvfb-run X11 1600x1200x24 with -noreset, software OpenGL, private dbus-run-session",
+    "screen_capture_size": "1440x1000"
+  },
+  "request": {
+    "snapshot_format": "XPI1",
+    "record_field_count": 21,
+    "request_id": "319507aabff5973c66527f4a3398ef35750615642c3cd4ce25b751a9cbf1af28",
+    "pin_hash": "f8ff688c5680ab88c27e4297decb5e7640b86a31",
+    "pin_publisher": "4c6e92c9b3e4abbd75ca25d8fc7cfaa3dc9d45ef2b8fa700e79f3cfca81abf79",
+    "pin_salt": "document",
+    "pin_sequence": 2,
+    "pin_title": "document",
+    "pin_version": "a34",
+    "phase": "Failed",
+    "verification": "Unchecked",
+    "attempt": 1,
+    "error": "No publication connection is configured. Content availability has not been checked."
+  },
+  "interaction": "Ctrl+O; open the persisted download entry; inspect the failed form; Escape; Ctrl+Q. No Retry selection or submission.",
+  "source_and_activity": {
+    "source_ops_dump_before_after_identical": true,
+    "source_ops_nodes_store_tables_and_package_visibility_hashes_before_after_identical": true,
+    "completed_visits_before_after": 1,
+    "current_visit_before_after": 1,
+    "activity_metadata": "shutdown appended activity-store metadata; activity operation dumps are not byte-identical"
+  },
+  "frame_evidence": [
+    {
+      "frame": "01-download-list",
+      "ppm_sha256": "e18d889612ea40159f0186efb093f541d12d1a9da223a8360437eb5929734b40",
+      "ppm_gzip_sha256": "3c8d92143988cedcdd679e24d73f121a57e5a271690036a12fedddd2ca4a69b1",
+      "png_sha256": "2210cf36d94bb39491f78dde793dcbd170eb72627ae36954a41aef1b71e987c0",
+      "rgb_sha256": "a61774398b3438fa22c4a88e151702cbb22ccb16d2cf6f7cce6c538fa7f0daae",
+      "ppm_png_rgb_equal": true
+    },
+    {
+      "frame": "02-failed-form",
+      "ppm_sha256": "c908b323c8eb90ac2df423bc16741f3f86bc339672afe0940fbc8fbb3398974a",
+      "ppm_gzip_sha256": "1ad7b0af7ac0e98d08fb52659a38a527d7c10b132f5a980248c6cf88959ec0e7",
+      "png_sha256": "d4300e83c73aa127b53b193b1011fb7dc0a4ca06c237c467a22ee32a38ae1d54",
+      "rgb_sha256": "86e51dfbe0a40e6dcc787af603ddba055b153a99604f705ec85e4caf7ee9dd3a",
+      "ppm_png_rgb_equal": true
+    }
+  ],
+  "exclusions": ["profile roots", "private keys", "LMDB database files", "binary artifacts"]
+}

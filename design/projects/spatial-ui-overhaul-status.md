@@ -7,6 +7,17 @@ session.
 
 ## Current checkpoint
 
+Nineteenth checkpoint (2026-10-18), based on `7200fd17`: publication installation now syncs staged
+files/directories, manifest promotion and the installed root's parent before committing Ready on
+POSIX. Retained-root verification applies the same barrier. Relative and aliased-ancestor inbox
+configuration remains supported; internal symlinks and special files are refused before reads. XPI1
+and store formats are unchanged. Canonical Make, UI 246/246, Xuzz 107/107 and owning 72/72 pass; a
+focused completed-install/offline-reopen syscall trace on workspace ZFS confirms ordering. This is
+not physical power-cut recovery proof. Windows directory durability remains unverified. See the
+[nineteenth checkpoint](../reviews/spatial-ui-nineteenth-increment/README.md) for final native,
+backend and formatting gates. The exact next task is explicit partial-download cleanup and its
+measured retention policy before normal network configuration. The full overhaul remains open.
+
 Eighteenth checkpoint (2026-10-18), based on `bce65b1f`: the publication inbox now persists strict
 `XPI1` request records in LMDB. Stable IDs, full pins, mutable pointer floors, failure and
 cancellation outcomes survive restart. Interrupted work requires explicit Retry and starts no
@@ -21,10 +32,10 @@ comparison passes unchanged criteria, without actual split recording or broad E2
 restart, format/lint and archive details are in the
 [eighteenth checkpoint](../reviews/spatial-ui-eighteenth-increment/README.md).
 
-Installation power-loss sync and an aggregate partial-transfer retention policy remain open before
-normal network traffic is enabled. Production connection settings, real identity enrollment and
-BEP46/fingerprint binding, remote availability/rejection variants, complete journeys and measured
-performance remain open; this is a bounded request-lifecycle increment.
+At checkpoint 18, installation power-loss sync and aggregate partial-transfer retention remained
+open before normal network traffic is enabled. Production connection settings, real identity
+enrollment and BEP46/fingerprint binding, remote availability/rejection variants, complete journeys
+and measured performance remain open; this is a bounded request-lifecycle increment.
 
 Seventeenth checkpoint (2026-10-18), based on `f3841729`: cited-publication status now preserves and
 displays the full requested pin independently of transfer phase and Unchecked/ManifestVerified/
@@ -628,16 +639,18 @@ reviews pass.
 
 ## Exact next task
 
-Complete the remaining installation/partial-cache lifecycle after the eighteenth checkpoint: add
-file/directory durability ordering around immutable-root installation and journal Ready, and a
-bounded, explicit policy for incomplete attempt data without deleting completed snapshots or losing
-request pins. Keep process-restart evidence distinct from power-loss proof. Then continue normal
-publication transport configuration in `next-service-plan.md`: governed opt-in settings and a
-visible form, worker-owned factory setup, named-node-only privacy policy and a deliberate restart
-boundary. Keep receive/discovery distinct from real identity enrollment; never install the test mock
-verifier in a normal session. Establish authenticated trust roots and BEP46/fingerprint binding
-before reporting Verified. Capture real normal-mode acquisition, rejection,
-unavailable/retry/offline routes without simulated services.
+Complete partial-cache lifecycle after the nineteenth checkpoint: add an explicit native control to
+discard incomplete attempt data for failed/cancelled requests while retaining the request receipt,
+full pin, attempt counter and all completed/referenced snapshots. Keep deletion on the owning
+worker, make restart behavior honest, and measure retained bytes before choosing a governed
+aggregate policy. Do not add Forget for completed/referenced roots before the pin-ownership audit.
+Keep observed filesystem ordering and process-restart evidence distinct from physical power-loss
+proof. Then continue normal publication transport configuration in `next-service-plan.md`: governed
+opt-in settings and a visible form, worker-owned factory setup, named-node-only privacy policy and a
+deliberate restart boundary. Keep receive/discovery distinct from real identity enrollment; never
+install the test mock verifier in a normal session. Establish authenticated trust roots and
+BEP46/fingerprint binding before reporting Verified. Capture real normal-mode acquisition,
+rejection, unavailable/retry/offline routes without simulated services.
 
 Validate the sixteenth comparison’s trust/availability variants below before D2. Continue the
 remaining J25 and exact cell/history variants through actual controls; preserve the five-visit

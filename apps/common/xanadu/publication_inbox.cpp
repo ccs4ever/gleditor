@@ -1,8 +1,10 @@
 #include "publication_inbox.hpp"
 
 #include <algorithm>
+#include <cerrno>
 #include <charconv>
 #include <condition_variable>
+#include <cstring>
 #include <fstream>
 #include <limits>
 #include <lmdb.h>
@@ -10,6 +12,19 @@
 #include <mutex>
 #include <set>
 #include <thread>
+
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 #include "bencode.hpp"
 #include "store.hpp"
@@ -64,6 +79,127 @@ InfoHash parseHash(const V &value) {
 }
 void checkCancelled(std::stop_token stop) {
   if (stop.stop_requested()) throw std::runtime_error("Download cancelled");
+}
+
+std::runtime_error filesystemFailure(std::string_view operation,
+                                     const std::filesystem::path &path) {
+  return std::runtime_error("Cannot " + std::string(operation) + " " +
+                            path.string() + ": " + std::strerror(errno));
+}
+
+void syncRegularFile(const std::filesystem::path &path) {
+  std::error_code error;
+  const auto status = std::filesystem::symlink_status(path, error);
+  if (error || !std::filesystem::is_regular_file(status))
+    throw std::runtime_error("Unsafe non-regular publication file: " +
+                             path.string());
+#ifdef _WIN32
+  const auto fd = _wopen(path.c_str(), _O_RDWR | _O_BINARY | _O_NOINHERIT);
+  if (fd < 0) throw filesystemFailure("open for sync", path);
+  const auto result = _commit(fd);
+  const auto saved  = errno;
+  _close(fd);
+  errno = saved;
+  if (result != 0) throw filesystemFailure("sync", path);
+#else
+  int flags = O_RDONLY | O_CLOEXEC | O_NONBLOCK;
+#ifdef O_NOFOLLOW
+  flags |= O_NOFOLLOW;
+#endif
+  const auto fd = ::open(path.c_str(), flags);
+  if (fd < 0) throw filesystemFailure("open for sync", path);
+  struct stat info{};
+  if (::fstat(fd, &info) != 0 || !S_ISREG(info.st_mode)) {
+    const auto saved = errno;
+    ::close(fd);
+    errno = saved;
+    throw std::runtime_error("Unsafe non-regular publication file: " +
+                             path.string());
+  }
+  int result{};
+  do {
+    result = ::fsync(fd);
+  } while (result != 0 && errno == EINTR);
+  const auto saved = errno;
+  ::close(fd);
+  errno = saved;
+  if (result != 0) throw filesystemFailure("sync", path);
+#endif
+}
+
+void syncDirectory(const std::filesystem::path &path) {
+#ifdef _WIN32
+  // Windows does not expose a portable directory-handle equivalent to
+  // fsync(2). File contents are committed separately; directory rename uses
+  // MOVEFILE_WRITE_THROUGH below, without claiming POSIX power-loss semantics.
+  (void)path;
+#else
+  int flags = O_RDONLY | O_CLOEXEC;
+#ifdef O_DIRECTORY
+  flags |= O_DIRECTORY;
+#endif
+#ifdef O_NOFOLLOW
+  flags |= O_NOFOLLOW;
+#endif
+  const auto fd = ::open(path.c_str(), flags);
+  if (fd < 0) throw filesystemFailure("open directory for sync", path);
+  struct stat info{};
+  if (::fstat(fd, &info) != 0 || !S_ISDIR(info.st_mode)) {
+    const auto saved = errno;
+    ::close(fd);
+    errno = saved;
+    throw std::runtime_error("Unsafe publication directory: " + path.string());
+  }
+  int result{};
+  do {
+    result = ::fsync(fd);
+  } while (result != 0 && errno == EINTR);
+  const auto saved = errno;
+  ::close(fd);
+  errno = saved;
+  if (result != 0) throw filesystemFailure("sync directory", path);
+#endif
+}
+
+void syncDirectoryChain(std::filesystem::path path) {
+  while (!path.empty()) {
+    syncDirectory(path);
+    if (path == path.root_path()) break;
+    const auto parent = path.parent_path();
+    if (parent == path) break;
+    path = parent;
+  }
+}
+
+void renameInstalledRoot(const std::filesystem::path &from,
+                         const std::filesystem::path &to) {
+#ifdef _WIN32
+  if (!MoveFileExW(from.c_str(), to.c_str(), MOVEFILE_WRITE_THROUGH))
+    throw std::runtime_error("Cannot install publication snapshot: Windows " +
+                             std::to_string(GetLastError()));
+#else
+  std::filesystem::rename(from, to);
+#endif
+}
+
+void syncStagedTree(const std::filesystem::path &root) {
+  std::vector<std::filesystem::path> directories{root};
+  for (std::filesystem::recursive_directory_iterator it(root), end; it != end;
+       ++it) {
+    const auto status = it->symlink_status();
+    if (std::filesystem::is_symlink(status))
+      throw std::runtime_error("Symlink in staged publication: " +
+                               it->path().string());
+    if (std::filesystem::is_regular_file(status))
+      syncRegularFile(it->path());
+    else if (std::filesystem::is_directory(status))
+      directories.push_back(it->path());
+    else
+      throw std::runtime_error("Special file in staged publication: " +
+                               it->path().string());
+  }
+  for (auto it = directories.rbegin(); it != directories.rend(); ++it)
+    syncDirectory(*it);
 }
 
 class DownloadTransport final : public PublicationDownloadTransport {
@@ -272,9 +408,14 @@ struct PublicationInbox::Impl {
           "Publication inbox format 1: unsafe retained snapshot root");
     for (std::filesystem::recursive_directory_iterator it(root), end; it != end;
          ++it) {
-      if (it->is_symlink())
+      const auto status = it->symlink_status();
+      if (std::filesystem::is_symlink(status))
         throw PublicationInboxUnreadable(
             "Publication inbox format 1: symlink in retained snapshot");
+      if (!std::filesystem::is_directory(status) &&
+          !std::filesystem::is_regular_file(status))
+        throw PublicationInboxUnreadable(
+            "Publication inbox format 1: special file in retained snapshot");
     }
   }
 
@@ -430,6 +571,14 @@ struct PublicationInbox::Impl {
       throw PublicationInboxUnreadable(
           "Publication inbox format 1: unsafe cache root");
     std::filesystem::create_directories(options.directory);
+    // Resolve configured ancestor aliases once. Directory syncing must target
+    // the real directories (for example, macOS /var and /tmp aliases), while
+    // the configured inbox leaf itself remains forbidden from being a link.
+    options.directory = std::filesystem::canonical(options.directory);
+    // The journal's containing directory can itself be newly created. Sync
+    // its ancestor chain bottom-up so the first Ready record cannot outrun
+    // the directory entries that make the inbox reachable.
+    syncDirectoryChain(options.directory);
     if (std::filesystem::is_symlink(options.directory / "data.mdb") ||
         std::filesystem::is_symlink(options.directory / "lock.mdb"))
       throw PublicationInboxUnreadable(
@@ -439,6 +588,7 @@ struct PublicationInbox::Impl {
     env.reset(raw);
     dbCheck(mdb_env_set_mapsize(raw, 16ULL * 1024 * 1024));
     dbCheck(mdb_env_open(raw, options.directory.string().c_str(), 0, 0600));
+    syncDirectoryChain(options.directory);
     MDB_txn *readRaw{};
     dbCheck(mdb_txn_begin(raw, nullptr, MDB_RDONLY, &readRaw));
     std::unique_ptr<MDB_txn, decltype(&mdb_txn_abort)> readTxn(readRaw,
@@ -767,11 +917,14 @@ struct PublicationInbox::Impl {
           throw std::runtime_error(
               "Retained native deployment segments do not match the signed "
               "publication");
+        syncStagedTree(root);
+        syncDirectoryChain(options.directory);
         checkCancelled(stop);
         update(
             id,
             [&](auto &status) {
               checkCancelled(stop);
+              syncDirectory(options.directory);
               status.phase        = PublicationDownloadPhase::Ready;
               status.verification = PublicationDownloadVerification::Complete;
               status.storePath    = root / "store";
@@ -897,16 +1050,19 @@ struct PublicationInbox::Impl {
       manifest.close();
       if (!manifest)
         throw std::runtime_error("Cannot retain signed publication manifest");
+      syncStagedTree(attemptRoot);
       update(
           id,
           [&](auto &status) {
             checkCancelled(stop);
-            std::filesystem::rename(attemptRoot / "publication.xanadoc.partial",
-                                    attemptRoot / "publication.xanadoc");
+            renameInstalledRoot(attemptRoot / "publication.xanadoc.partial",
+                                attemptRoot / "publication.xanadoc");
+            syncDirectory(attemptRoot);
             if (std::filesystem::exists(root))
               throw std::runtime_error(
                   "Publication snapshot root already exists");
-            std::filesystem::rename(attemptRoot, root);
+            renameInstalledRoot(attemptRoot, root);
+            syncDirectory(options.directory);
             status.phase        = PublicationDownloadPhase::Ready;
             status.verification = PublicationDownloadVerification::Complete;
             status.version      = pub->version;

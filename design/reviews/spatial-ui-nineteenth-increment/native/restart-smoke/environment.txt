@@ -1,0 +1,8 @@
+SDL_VIDEODRIVER=x11
+SDL_AUDIODRIVER=dummy
+LIBGL_ALWAYS_SOFTWARE=1
+XDG_DATA_HOME=build/validation-nineteenth/native/restart-smoke/data
+XDG_CONFIG_HOME=build/validation-nineteenth/native/restart-smoke/config
+XDG_CACHE_HOME=build/validation-nineteenth/native/restart-smoke/cache
+GNUPGHOME=build/validation-nineteenth/native/restart-smoke/gpg
+DISPLAY and DBUS_SESSION_BUS_ADDRESS: supplied by xvfb-run and dbus-run-session for the app process.

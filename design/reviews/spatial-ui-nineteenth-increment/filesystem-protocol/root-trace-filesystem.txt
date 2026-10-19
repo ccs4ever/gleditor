@@ -1,0 +1,2 @@
+Filesystem              Type 1K-blocks      Used Available Use% Mounted on
+zpcachyos/ROOT/cos/root zfs  412427392 227123200 185304192  56% /
