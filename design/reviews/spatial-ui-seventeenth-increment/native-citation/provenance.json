@@ -1,0 +1,329 @@
+{
+  "archive": "spatial-ui-seventeenth-increment/native-citation",
+  "scope": "genuine native citation flow baseline, first inconclusive attempt, and final retry/review candidate",
+  "source_profile": "Actual sixteenth-increment UI-authored profile at build/validation-sixteenth/native; only data/config were copied to baseline.",
+  "continuation": "The baseline copied only data/config from build/validation-sixteenth/native into its own fresh root. Attempt-1 and final each copied only data/config from build/validation-seventeenth/native-baseline into separate fresh roots. Cache and GNUPGHOME were fresh per phase. No profile directories, cache, GPG material, private keys, or binaries are archived.",
+  "phase_boundaries": [
+    {
+      "phase": "baseline",
+      "app_sha256": "19792347b9f012782b71d4906fc61a35fd064e9c86dc5caee926e3bd11980310",
+      "range": "actual no-transport baseline; publication citation opening and observed connection failure"
+    },
+    {
+      "phase": "attempt-1",
+      "app_sha256": "8a38fb2d6a414da51ee074e267b17fc5461f5b7f32fd0ef719957520a456be86",
+      "range": "first candidate; exact pin and no-connection failure; retry control precondition was not proven, so not a retry pass"
+    },
+    {
+      "phase": "final",
+      "app_sha256": "a1ff64ffb8462dec9594cf4523a3879940140a7f55123ec7e61da00ff628637c",
+      "range": "failed menu captured before explicit retry, same pin queued, failure refreshed, review says Request failed; open status, same citation reopens failed pin"
+    }
+  ],
+  "phases": [
+    {
+      "phase": "baseline",
+      "app_sha256": "19792347b9f012782b71d4906fc61a35fd064e9c86dc5caee926e3bd11980310",
+      "library_sha256": "ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9",
+      "dumper_sha256": "7031847f950135234935ae67d06c3e59da6a945bd95a5202f14591064f00947c",
+      "app_path": "build/validation-sixteenth/frozen-accepted/xuzz",
+      "profile_input_origin": "copied build/validation-sixteenth/native/{data,config}",
+      "recorded_process_exit": null,
+      "exit_record": "No process-exit file was recorded for this baseline run.",
+      "frame_count": 6,
+      "frames": [
+        {
+          "name": "00-package-entry",
+          "width": 1440,
+          "height": 1000,
+          "ppm_file": "00-package-entry.ppm.gz",
+          "ppm_sha256": "4cea243ede45a1c625d981b6f54a1f80924c67929bffa24a50541ebd207f5649",
+          "rgb_sha256": "4d720f4db1a3e59ee0ae593e85a836c3871dc450ce3a6fa752d00dd98ff682a1",
+          "png_file": "00-package-entry.png",
+          "png_sha256": "08fb3440954a437b87d5a32aae6761c1101bb8b5ef698a5c6e9e686cc6f182f5",
+          "png_decodes_to_same_rgb_as_ppm": true,
+          "ppm_storage": "gzip; decompressed bytes have source ppm_sha256"
+        },
+        {
+          "name": "01-downloaded-packages",
+          "width": 1440,
+          "height": 1000,
+          "ppm_file": "01-downloaded-packages.ppm.gz",
+          "ppm_sha256": "6b6a74113c89d18ff28eca3f359b4b4751caaeb41af1a72e7d5b993adedac2c7",
+          "rgb_sha256": "b66c72d335dae876e9b05ad871d4d30a0585a7078ad944645e97e868891b38cc",
+          "png_file": "01-downloaded-packages.png",
+          "png_sha256": "067ec6bf515e799279a68236b57dcfa1af4f6dda74142c1a1422785c8ccee4f4",
+          "png_decodes_to_same_rgb_as_ppm": true,
+          "ppm_storage": "gzip; decompressed bytes have source ppm_sha256"
+        },
+        {
+          "name": "02-package-b-status",
+          "width": 1440,
+          "height": 1000,
+          "ppm_file": "02-package-b-status.ppm.gz",
+          "ppm_sha256": "6e3116dd0f974631b2042e6a278ef06d3cf72dfc3ba4a5e7f75e870da935b517",
+          "rgb_sha256": "3f41ae7a49d7d07f4eb6857cb71765cb21871a4c22ae5c2dd123ba1e66bc70bf",
+          "png_file": "02-package-b-status.png",
+          "png_sha256": "f5bfb281baeaeeb4e592b4403c0841569faf1ac05e2de155674cc5b5b0b9a37f",
+          "png_decodes_to_same_rgb_as_ppm": true,
+          "ppm_storage": "gzip; decompressed bytes have source ppm_sha256"
+        },
+        {
+          "name": "03-package-b-review",
+          "width": 1440,
+          "height": 1000,
+          "ppm_file": "03-package-b-review.ppm.gz",
+          "ppm_sha256": "d6a8da4cdd9651592313aba69e4d98ac063482c1153ac132ea481bd11ab7313b",
+          "rgb_sha256": "cd87719c7023b0dd0952790f8b7cef8d5bbad53040eeda309df12eae91698eee",
+          "png_file": "03-package-b-review.png",
+          "png_sha256": "3b8ced25df8811519b56e9e423afa9934859b75081899d5d75de34474ff9cbc2",
+          "png_decodes_to_same_rgb_as_ppm": true,
+          "ppm_storage": "gzip; decompressed bytes have source ppm_sha256"
+        },
+        {
+          "name": "04-citation-open-immediate",
+          "width": 1440,
+          "height": 1000,
+          "ppm_file": "04-citation-open-immediate.ppm.gz",
+          "ppm_sha256": "e1df9cd3de58658db41d85be40b4b5e54780f8544cc1ea76c6445cfba4b28fc8",
+          "rgb_sha256": "6c47c356043a3fd3479f09b0ee63cc0d5123f1f7129f046d5ef8d2a76a90e22d",
+          "png_file": "04-citation-open-immediate.png",
+          "png_sha256": "49dcd7781d2cdc9ff08a34276c89c949ed924512ce5b89cfa9a1c03edc612a11",
+          "png_decodes_to_same_rgb_as_ppm": true,
+          "ppm_storage": "gzip; decompressed bytes have source ppm_sha256"
+        },
+        {
+          "name": "05-citation-open-refreshed",
+          "width": 1440,
+          "height": 1000,
+          "ppm_file": "05-citation-open-refreshed.ppm.gz",
+          "ppm_sha256": "81500acdbf7271083f3163447185ad25646b7062c89f2b1d45f45313d42cedf8",
+          "rgb_sha256": "93fce8418a3d5c435e3febe875a13ebcc028adcab76cd4e157f32b5bb1a29192",
+          "png_file": "05-citation-open-refreshed.png",
+          "png_sha256": "fbd8ed024f973992c8fd7ff5f1b47d39dca710262204fc2c5875b5b62ce94e2e",
+          "png_decodes_to_same_rgb_as_ppm": true,
+          "ppm_storage": "gzip; decompressed bytes have source ppm_sha256"
+        }
+      ]
+    },
+    {
+      "phase": "attempt-1",
+      "app_sha256": "8a38fb2d6a414da51ee074e267b17fc5461f5b7f32fd0ef719957520a456be86",
+      "library_sha256": "ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9",
+      "dumper_sha256": "7031847f950135234935ae67d06c3e59da6a945bd95a5202f14591064f00947c",
+      "app_path": "build/validation-seventeenth/frozen/xuzz",
+      "profile_input_origin": "copied build/validation-seventeenth/native-baseline/{data,config}; fresh phase-specific cache and GNUPGHOME",
+      "recorded_process_exit": 0,
+      "exit_record": "citation-candidate.exit records 0. The first direct runner invocation was separately refused by the shell before app launch; that record is preserved.",
+      "frame_count": 6,
+      "frames": [
+        {
+          "name": "00-review-before-open",
+          "width": 1440,
+          "height": 1000,
+          "ppm_file": "00-review-before-open.ppm.gz",
+          "ppm_sha256": "c81d47f59e43a966710ad76f66231e8ac02c1982041bdc05e606c19e332af86f",
+          "rgb_sha256": "f265d0265d2c7ea3ef808fc7f531c7a8e9656dcadcc3b2f4c01de02ddcd4c8be",
+          "png_file": "00-review-before-open.png",
+          "png_sha256": "8e86f8bd32065d3e87c62c43fa30ba6086a239bb5b314b88d19e45584f429481",
+          "png_decodes_to_same_rgb_as_ppm": true,
+          "ppm_storage": "gzip; decompressed bytes have source ppm_sha256"
+        },
+        {
+          "name": "01-open-immediate",
+          "width": 1440,
+          "height": 1000,
+          "ppm_file": "01-open-immediate.ppm.gz",
+          "ppm_sha256": "9e547948304dad6b37f824589b1aaef0e0ef11ba3f92f813d59c1cb2ca9cf75f",
+          "rgb_sha256": "ababb044fcfb3f92240b80813edfa46eb507aea61b308e33bb9e14977b021796",
+          "png_file": "01-open-immediate.png",
+          "png_sha256": "82efb902f52a5ce5b0b9d86130a05e0a7d0ab36a4eb087af6697f0a4752841e5",
+          "png_decodes_to_same_rgb_as_ppm": true,
+          "ppm_storage": "gzip; decompressed bytes have source ppm_sha256"
+        },
+        {
+          "name": "02-open-settled",
+          "width": 1440,
+          "height": 1000,
+          "ppm_file": "02-open-settled.ppm.gz",
+          "ppm_sha256": "9e547948304dad6b37f824589b1aaef0e0ef11ba3f92f813d59c1cb2ca9cf75f",
+          "rgb_sha256": "ababb044fcfb3f92240b80813edfa46eb507aea61b308e33bb9e14977b021796",
+          "png_file": "02-open-settled.png",
+          "png_sha256": "82efb902f52a5ce5b0b9d86130a05e0a7d0ab36a4eb087af6697f0a4752841e5",
+          "png_decodes_to_same_rgb_as_ppm": true,
+          "ppm_storage": "gzip; decompressed bytes have source ppm_sha256"
+        },
+        {
+          "name": "03-explicit-retry-immediate",
+          "width": 1440,
+          "height": 1000,
+          "ppm_file": "03-explicit-retry-immediate.ppm.gz",
+          "ppm_sha256": "95af0b074423b809a193905d80634f75a462595830a9e33650f63646fe29a289",
+          "rgb_sha256": "399af5123e04827e911fc251e0dd676048712d5540bffebe0ead73f2b5e2827d",
+          "png_file": "03-explicit-retry-immediate.png",
+          "png_sha256": "cb1e9031084550cb39b211ff556f72414a40f246ac3ecb1cfe167e2aa9a5e015",
+          "png_decodes_to_same_rgb_as_ppm": true,
+          "ppm_storage": "gzip; decompressed bytes have source ppm_sha256"
+        },
+        {
+          "name": "04-retry-settled",
+          "width": 1440,
+          "height": 1000,
+          "ppm_file": "04-retry-settled.ppm.gz",
+          "ppm_sha256": "95af0b074423b809a193905d80634f75a462595830a9e33650f63646fe29a289",
+          "rgb_sha256": "399af5123e04827e911fc251e0dd676048712d5540bffebe0ead73f2b5e2827d",
+          "png_file": "04-retry-settled.png",
+          "png_sha256": "cb1e9031084550cb39b211ff556f72414a40f246ac3ecb1cfe167e2aa9a5e015",
+          "png_decodes_to_same_rgb_as_ppm": true,
+          "ppm_storage": "gzip; decompressed bytes have source ppm_sha256"
+        },
+        {
+          "name": "05-same-citation-again",
+          "width": 1440,
+          "height": 1000,
+          "ppm_file": "05-same-citation-again.ppm.gz",
+          "ppm_sha256": "95af0b074423b809a193905d80634f75a462595830a9e33650f63646fe29a289",
+          "rgb_sha256": "399af5123e04827e911fc251e0dd676048712d5540bffebe0ead73f2b5e2827d",
+          "png_file": "05-same-citation-again.png",
+          "png_sha256": "cb1e9031084550cb39b211ff556f72414a40f246ac3ecb1cfe167e2aa9a5e015",
+          "png_decodes_to_same_rgb_as_ppm": true,
+          "ppm_storage": "gzip; decompressed bytes have source ppm_sha256"
+        }
+      ]
+    },
+    {
+      "phase": "final",
+      "app_sha256": "a1ff64ffb8462dec9594cf4523a3879940140a7f55123ec7e61da00ff628637c",
+      "library_sha256": "ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9",
+      "dumper_sha256": "7031847f950135234935ae67d06c3e59da6a945bd95a5202f14591064f00947c",
+      "app_path": "build/validation-seventeenth/frozen-final/xuzz",
+      "profile_input_origin": "copied build/validation-seventeenth/native-baseline/{data,config}; fresh phase-specific cache and GNUPGHOME",
+      "recorded_process_exit": 0,
+      "exit_record": "citation-candidate.exit records 0.",
+      "frame_count": 9,
+      "frames": [
+        {
+          "name": "00-review-before-open",
+          "width": 1440,
+          "height": 1000,
+          "ppm_file": "00-review-before-open.ppm.gz",
+          "ppm_sha256": "c81d47f59e43a966710ad76f66231e8ac02c1982041bdc05e606c19e332af86f",
+          "rgb_sha256": "f265d0265d2c7ea3ef808fc7f531c7a8e9656dcadcc3b2f4c01de02ddcd4c8be",
+          "png_file": "00-review-before-open.png",
+          "png_sha256": "8e86f8bd32065d3e87c62c43fa30ba6086a239bb5b314b88d19e45584f429481",
+          "png_decodes_to_same_rgb_as_ppm": true,
+          "ppm_storage": "gzip; decompressed bytes have source ppm_sha256"
+        },
+        {
+          "name": "01-open-immediate",
+          "width": 1440,
+          "height": 1000,
+          "ppm_file": "01-open-immediate.ppm.gz",
+          "ppm_sha256": "1d113ff07ae2449c3b82639915e78c2b147eb1e593af57ab3bbc10da259100a5",
+          "rgb_sha256": "af97cd7b852ad0958f9d0ae41c3c7d5c120b40776b078165aca024d57be1b24e",
+          "png_file": "01-open-immediate.png",
+          "png_sha256": "eb4b0c6fad9e22d55f664d03feb8e4bd75b9304819b21f6e70a6e000a19c5ba2",
+          "png_decodes_to_same_rgb_as_ppm": true,
+          "ppm_storage": "gzip; decompressed bytes have source ppm_sha256"
+        },
+        {
+          "name": "02-open-stale-form",
+          "width": 1440,
+          "height": 1000,
+          "ppm_file": "02-open-stale-form.ppm.gz",
+          "ppm_sha256": "1d113ff07ae2449c3b82639915e78c2b147eb1e593af57ab3bbc10da259100a5",
+          "rgb_sha256": "af97cd7b852ad0958f9d0ae41c3c7d5c120b40776b078165aca024d57be1b24e",
+          "png_file": "02-open-stale-form.png",
+          "png_sha256": "eb4b0c6fad9e22d55f664d03feb8e4bd75b9304819b21f6e70a6e000a19c5ba2",
+          "png_decodes_to_same_rgb_as_ppm": true,
+          "ppm_storage": "gzip; decompressed bytes have source ppm_sha256"
+        },
+        {
+          "name": "03-open-refreshed-once",
+          "width": 1440,
+          "height": 1000,
+          "ppm_file": "03-open-refreshed-once.ppm.gz",
+          "ppm_sha256": "c908b323c8eb90ac2df423bc16741f3f86bc339672afe0940fbc8fbb3398974a",
+          "rgb_sha256": "86e51dfbe0a40e6dcc787af603ddba055b153a99604f705ec85e4caf7ee9dd3a",
+          "png_file": "03-open-refreshed-once.png",
+          "png_sha256": "95d30f307c44a75b0bbc2a7fe1f60cd2ad7a0b7353fd8690001a594b56e32be5",
+          "png_decodes_to_same_rgb_as_ppm": true,
+          "ppm_storage": "gzip; decompressed bytes have source ppm_sha256"
+        },
+        {
+          "name": "04-open-failed-before-retry",
+          "width": 1440,
+          "height": 1000,
+          "ppm_file": "04-open-failed-before-retry.ppm.gz",
+          "ppm_sha256": "c908b323c8eb90ac2df423bc16741f3f86bc339672afe0940fbc8fbb3398974a",
+          "rgb_sha256": "86e51dfbe0a40e6dcc787af603ddba055b153a99604f705ec85e4caf7ee9dd3a",
+          "png_file": "04-open-failed-before-retry.png",
+          "png_sha256": "95d30f307c44a75b0bbc2a7fe1f60cd2ad7a0b7353fd8690001a594b56e32be5",
+          "png_decodes_to_same_rgb_as_ppm": true,
+          "ppm_storage": "gzip; decompressed bytes have source ppm_sha256"
+        },
+        {
+          "name": "05-retry-immediate",
+          "width": 1440,
+          "height": 1000,
+          "ppm_file": "05-retry-immediate.ppm.gz",
+          "ppm_sha256": "ba1cd96e7bd9aa276d3f5012a53ccfdef457415c3cf7cfc2869d068edf450e31",
+          "rgb_sha256": "22b40d6c590dca3abfafd82f5160cf47ddd812867275f28814530c6f9115bd62",
+          "png_file": "05-retry-immediate.png",
+          "png_sha256": "dc1208ee89b0c0fa16777b0871b8fa673be7229a42d53e1ab52a26f4a0c699ca",
+          "png_decodes_to_same_rgb_as_ppm": true,
+          "ppm_storage": "gzip; decompressed bytes have source ppm_sha256"
+        },
+        {
+          "name": "06-retry-result-refreshed",
+          "width": 1440,
+          "height": 1000,
+          "ppm_file": "06-retry-result-refreshed.ppm.gz",
+          "ppm_sha256": "c908b323c8eb90ac2df423bc16741f3f86bc339672afe0940fbc8fbb3398974a",
+          "rgb_sha256": "86e51dfbe0a40e6dcc787af603ddba055b153a99604f705ec85e4caf7ee9dd3a",
+          "png_file": "06-retry-result-refreshed.png",
+          "png_sha256": "95d30f307c44a75b0bbc2a7fe1f60cd2ad7a0b7353fd8690001a594b56e32be5",
+          "png_decodes_to_same_rgb_as_ppm": true,
+          "ppm_storage": "gzip; decompressed bytes have source ppm_sha256"
+        },
+        {
+          "name": "07-review-after-failure",
+          "width": 1440,
+          "height": 1000,
+          "ppm_file": "07-review-after-failure.ppm.gz",
+          "ppm_sha256": "dfb05305f6af6808847f426ba3729d63e48275089d7540c54eafa1016881c2fd",
+          "rgb_sha256": "1e21b55f02a5f8395cd26ae5a3d9a1aa2f9c53931298763fe5bab01e5f802e48",
+          "png_file": "07-review-after-failure.png",
+          "png_sha256": "21f158d6f3c852b370a235ea44a57d46b20245d9746e0803ffae8981a67870c4",
+          "png_decodes_to_same_rgb_as_ppm": true,
+          "ppm_storage": "gzip; decompressed bytes have source ppm_sha256"
+        },
+        {
+          "name": "08-same-citation-reopened",
+          "width": 1440,
+          "height": 1000,
+          "ppm_file": "08-same-citation-reopened.ppm.gz",
+          "ppm_sha256": "c908b323c8eb90ac2df423bc16741f3f86bc339672afe0940fbc8fbb3398974a",
+          "rgb_sha256": "86e51dfbe0a40e6dcc787af603ddba055b153a99604f705ec85e4caf7ee9dd3a",
+          "png_file": "08-same-citation-reopened.png",
+          "png_sha256": "95d30f307c44a75b0bbc2a7fe1f60cd2ad7a0b7353fd8690001a594b56e32be5",
+          "png_decodes_to_same_rgb_as_ppm": true,
+          "ppm_storage": "gzip; decompressed bytes have source ppm_sha256"
+        }
+      ]
+    }
+  ],
+  "archive_rules": {
+    "raw_frames": "Original PPM bytes gzip-compressed with deterministic mtime; decompression verified byte-exact. PNG derivatives are lossless and verified by decoded RGB equality.",
+    "logs": "Exact log bytes compressed as deterministic .log.gz.",
+    "scripts": "Exact runner source bytes copied as .sh.txt; no archived shell file is executable.",
+    "reports": "Exact Markdown report bytes copied as .md.txt.",
+    "baseline_process_exit": "No process-exit file was recorded; no exit value was invented.",
+    "excluded": [
+      "profile trees",
+      "data/config/cache/GPG directories",
+      "private keys",
+      "binaries"
+    ]
+  }
+}

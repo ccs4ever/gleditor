@@ -156,6 +156,7 @@ struct PublicationInbox::Impl {
     MutableLink link;
     std::optional<MutablePointer> minimum;
     std::optional<PublicationPin> pin;
+    bool verifyRetainedOnly{};
     PublicationDownloadStatus status;
     std::stop_source cancel;
   };
@@ -170,8 +171,9 @@ struct PublicationInbox::Impl {
         !options.maximumDependencyBytes || !options.maximumDependencies)
       throw std::invalid_argument("Invalid publication inbox options");
     std::filesystem::create_directories(options.directory);
-    // Only completed, signed snapshots are restored. Interrupted requests are
-    // not subscriptions and are never silently resolved again at startup.
+    // Interrupted requests are not subscriptions and are never silently
+    // resolved again at startup. Retained dependencies are verified by the
+    // worker before a restored snapshot is exposed as Ready.
     for (const auto &entry :
          std::filesystem::directory_iterator(options.directory)) {
       const auto manifestPath = entry.path() / "publication.xanadoc";
@@ -193,16 +195,30 @@ struct PublicationInbox::Impl {
           !std::filesystem::exists(entry.path() / "store" / "store.tables"))
         throw std::runtime_error(
             "Publication inbox: invalid retained signed snapshot");
+      const std::vector<TorrentContent> files{
+          {.path = "publication.xanadoc", .data = encoded}};
+      const auto hash = makeTorrent(files, "publication").hash;
       Job job;
-      job.link.key         = pub->publisher;
-      job.link.salt        = pub->salt;
-      job.status.id        = id;
-      job.status.uri       = job.link.uri();
-      job.status.title     = pub->title;
-      job.status.phase     = PublicationDownloadPhase::Ready;
-      job.status.storePath = entry.path() / "store";
-      job.status.version   = pub->version;
-      job.status.sequence  = pub->sequence;
+      job.link.key           = pub->publisher;
+      job.link.salt          = pub->salt;
+      job.status.id          = id;
+      job.status.uri         = job.link.uri();
+      job.status.title       = pub->title;
+      job.pin                = PublicationPin{.publisher = pub->publisher,
+                                              .salt      = pub->salt,
+                                              .hash      = hash,
+                                              .sequence  = pub->sequence,
+                                              .version   = pub->version,
+                                              .title     = pub->title};
+      job.status.pin         = job.pin;
+      job.verifyRetainedOnly = true;
+      job.status.phase       = PublicationDownloadPhase::Queued;
+      job.status.verification =
+          PublicationDownloadVerification::ManifestVerified;
+      job.status.storePath    = entry.path() / "store";
+      job.status.version      = pub->version;
+      job.status.sequence     = pub->sequence;
+      job.status.manifestHash = hash;
       jobs.emplace(id, std::move(job));
     }
     worker = std::jthread([this](std::stop_token stop) { run(stop); });
@@ -227,9 +243,115 @@ struct PublicationInbox::Impl {
     const auto root = options.directory / id;
     try {
       checkCancelled(stop);
+      if (job.verifyRetainedOnly) {
+        const auto manifestPath = root / "publication.xanadoc";
+        std::ifstream manifest(manifestPath, std::ios::binary);
+        const std::string encoded{std::istreambuf_iterator<char>(manifest),
+                                  std::istreambuf_iterator<char>()};
+        const auto pub = decodePublication(encoded);
+        if (!pub || !job.pin || pub->publisher != job.pin->publisher ||
+            pub->salt != job.pin->salt || pub->sequence != job.pin->sequence ||
+            pub->version != job.pin->version || pub->title != job.pin->title)
+          throw std::runtime_error(
+              "Retained publication manifest no longer matches its citation");
+        const std::vector<TorrentContent> files{
+            {.path = "publication.xanadoc", .data = encoded}};
+        if (makeTorrent(files, "publication").hash != job.pin->hash)
+          throw std::runtime_error(
+              "Retained publication carrier hash does not match its citation");
+        update(id, [&](auto &status) {
+          status.verification =
+              PublicationDownloadVerification::ManifestVerified;
+        });
+        const auto published = root / "store" / "published";
+        const auto dependencies =
+            reviewPublicationDependencies(*pub, {published});
+        if (dependencies.size() > options.maximumDependencies)
+          throw std::runtime_error(
+              "Retained publication has too many dependencies");
+        auto remaining = options.maximumDependencyBytes;
+        for (const auto &dependency : dependencies) {
+          if (dependency.bytes > remaining)
+            throw std::runtime_error(
+                "Retained publication dependencies exceed configured byte "
+                "limit");
+          remaining -= dependency.bytes;
+        }
+        DirectoryContentSource source;
+        for (const auto &dependency : dependencies)
+          (void)source.add(dependency.metainfo, dependency.savePath.string());
+        auto canonical = restorePublication(
+            *pub, source, std::make_shared<UserPermascroll>());
+        Store restored;
+        restored.load((root / "store").string());
+        const auto retainedTables =
+            readStoreTables(root / "store" / "store.tables");
+        if (restored.documentId() != pub->storeId ||
+            retainedTables.documentId != pub->storeId ||
+            restored.publishedLocalScroll() !=
+                canonical->publishedLocalScroll() ||
+            retainedTables.publishedLocalScroll !=
+                canonical->publishedLocalScroll() ||
+            restored.opCount() != canonical->opCount() ||
+            !restored.getOp(job.pin->version) ||
+            restored.textOf(job.pin->version) !=
+                canonical->textOf(job.pin->version))
+          throw std::runtime_error(
+              "Retained native store does not match the signed publication");
+        for (std::uint64_t index = 1; index <= canonical->opCount(); ++index) {
+          const auto nativeId =
+              restored.segmentedOps().idOf(static_cast<std::uint32_t>(index));
+          const auto signedId =
+              canonical->segmentedOps().idOf(static_cast<std::uint32_t>(index));
+          if (nativeId != signedId ||
+              restored.getOp(nativeId) != canonical->getOp(signedId))
+            throw std::runtime_error(
+                "Retained native operation history does not match the signed "
+                "publication");
+        }
+        const auto &nativeScrolls    = restored.scrolls();
+        const auto &canonicalScrolls = canonical->scrolls();
+        if (nativeScrolls.size() != canonicalScrolls.size())
+          throw std::runtime_error(
+              "Retained native scroll table does not match the signed "
+              "publication");
+        for (std::size_t index = 0; index < nativeScrolls.size(); ++index) {
+          const auto &nativeScroll    = nativeScrolls[index];
+          const auto &canonicalScroll = canonicalScrolls[index];
+          if (nativeScroll.publisher != canonicalScroll.publisher ||
+              nativeScroll.salt != canonicalScroll.salt ||
+              nativeScroll.defaultMimeType != canonicalScroll.defaultMimeType ||
+              nativeScroll.segments != canonicalScroll.segments)
+            throw std::runtime_error(
+                "Retained native scroll table does not match the signed "
+                "publication");
+        }
+        std::vector<ScrollSegment> expectedDeploymentSegments;
+        for (const auto &scroll : canonicalScrolls) {
+          for (const auto &segment : scroll.segments) {
+            if ((!segment.path.empty() || !segment.torrent.isZero()) &&
+                std::ranges::find(expectedDeploymentSegments, segment) ==
+                    expectedDeploymentSegments.end())
+              expectedDeploymentSegments.push_back(segment);
+          }
+        }
+        if (retainedTables.localSegments != expectedDeploymentSegments)
+          throw std::runtime_error(
+              "Retained native deployment segments do not match the signed "
+              "publication");
+        checkCancelled(stop);
+        update(id, [&](auto &status) {
+          checkCancelled(stop);
+          status.phase        = PublicationDownloadPhase::Ready;
+          status.verification = PublicationDownloadVerification::Complete;
+          status.storePath    = root / "store";
+        });
+        return;
+      }
       if (!options.makeTransport)
-        throw std::runtime_error("No publication swarm configured. Set up the "
-                                 "local test swarm, then retry.");
+        throw std::runtime_error(
+            "No publication connection is configured. Content availability "
+            "has not been checked.");
       // Each attempt owns a fresh session and cache. A failed attempt cannot
       // share active torrent writers with verified installation or a retry.
       std::filesystem::remove_all(root);
@@ -264,6 +386,22 @@ struct PublicationInbox::Impl {
           (pub->version != job.pin->version || pub->title != job.pin->title))
         throw std::runtime_error(
             "Publication version or title differs from the pinned citation");
+      const PublicationPin verifiedPin{.publisher = pub->publisher,
+                                       .salt      = pub->salt,
+                                       .hash      = pointer.hash,
+                                       .sequence  = pub->sequence,
+                                       .version   = pub->version,
+                                       .title     = pub->title};
+      {
+        const std::scoped_lock lock(guard);
+        auto &current               = jobs.at(id);
+        current.pin                 = verifiedPin;
+        current.status.pin          = verifiedPin;
+        current.status.manifestHash = pointer.hash;
+        current.status.verification =
+            PublicationDownloadVerification::ManifestVerified;
+        changed.notify_all();
+      }
       std::set<InfoHash> dependencies;
       for (const auto &[name, scroll] : pub->scrolls) {
         (void)name;
@@ -312,14 +450,17 @@ struct PublicationInbox::Impl {
         std::filesystem::rename(root / "publication.xanadoc.partial",
                                 root / "publication.xanadoc");
         status.phase        = PublicationDownloadPhase::Ready;
+        status.verification = PublicationDownloadVerification::Complete;
         status.version      = pub->version;
         status.sequence     = pub->sequence;
         status.manifestHash = pointer.hash;
         status.storePath    = root / "store";
       });
     } catch (const std::exception &error) {
-      std::error_code ignored;
-      std::filesystem::remove_all(root, ignored);
+      if (!job.verifyRetainedOnly) {
+        std::error_code ignored;
+        std::filesystem::remove_all(root, ignored);
+      }
       update(id, [&](auto &status) {
         status.phase = stop.stop_requested()
                            ? PublicationDownloadPhase::Cancelled
@@ -342,7 +483,9 @@ struct PublicationInbox::Impl {
       const auto next = std::ranges::find_if(jobs, [](const auto &item) {
         return item.second.status.phase == PublicationDownloadPhase::Queued;
       });
-      next->second.status.phase = PublicationDownloadPhase::Resolving;
+      next->second.status.phase = next->second.verifyRetainedOnly
+                                      ? PublicationDownloadPhase::Verifying
+                                      : PublicationDownloadPhase::Resolving;
       const auto job            = next->second;
       changed.notify_all();
       lock.unlock();
@@ -381,6 +524,9 @@ std::string PublicationInbox::submitPinned(const PublicationPin &pin) {
       pin.hash.isZero() || pin.sequence < 0)
     throw std::invalid_argument("Invalid pinned publication");
   const std::scoped_lock lock(impl_->guard);
+  for (const auto &[existingId, job] : impl_->jobs) {
+    if (job.status.pin == pin) return existingId;
+  }
   std::string id;
   do {
     id = createMutableKeys().publicKey.hex();
@@ -393,6 +539,7 @@ std::string PublicationInbox::submitPinned(const PublicationPin &pin) {
   job.pin                     = pin;
   job.status.id               = id;
   job.status.uri              = job.link.uri();
+  job.status.pin              = pin;
   impl_->jobs.emplace(id, std::move(job));
   impl_->changed.notify_all();
   return id;
@@ -419,6 +566,8 @@ void PublicationInbox::retry(std::string_view id) {
   job.status.phase                 = PublicationDownloadPhase::Queued;
   job.status.completedDependencies = 0;
   job.status.dependencyCount       = 0;
+  job.status.verification          = PublicationDownloadVerification::Unchecked;
+  if (!job.verifyRetainedOnly) job.status.manifestHash = {};
   job.status.error.clear();
   impl_->changed.notify_all();
 }

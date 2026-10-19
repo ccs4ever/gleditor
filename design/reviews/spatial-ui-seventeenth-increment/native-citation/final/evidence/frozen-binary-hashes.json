@@ -1,0 +1,14 @@
+{
+  "xuzz": {
+    "path": "build/validation-seventeenth/frozen-final/xuzz",
+    "sha256": "a1ff64ffb8462dec9594cf4523a3879940140a7f55123ec7e61da00ff628637c"
+  },
+  "libgleditor.so.0": {
+    "path": "build/validation-seventeenth/frozen-final/libgleditor.so.0",
+    "sha256": "ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9"
+  },
+  "xudu-dump": {
+    "path": "build/validation-seventeenth/frozen-final/xudu-dump",
+    "sha256": "7031847f950135234935ae67d06c3e59da6a945bd95a5202f14591064f00947c"
+  }
+}

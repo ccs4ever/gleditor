@@ -1,0 +1,73 @@
+# Native citation candidate validation
+
+The final run used `build/validation-seventeenth/frozen-final/xuzz`, SHA-256
+`a1ff64ffb8462dec9594cf4523a3879940140a7f55123ec7e61da00ff628637c`, its
+matching frozen library directory, and `xudu-dump` SHA-256
+`7031847f950135234935ae67d06c3e59da6a945bd95a5202f14591064f00947c`. It
+continued the genuine UI-authored profile by copying only `data/` and `config/`
+from the baseline run into the separate `native-candidate-final/` root. Cache
+and GPG home were fresh; all six SDL/headless/XDG variables were set. The app
+ran with OpenGL at 1440×1000 inside Xvfb `-noreset -screen 0 1600x1200x24`.
+The native app exited 0. Exact argv, environment, logs, checkpoints and raw
+lossless PPMs are retained under
+`build/validation-seventeenth/native-candidate-final/`; PNGs beside them are
+viewing copies only.
+
+The genuine package review showed `Spatial review`, signature verified, curator
+enrollment unchecked, and the cited item `document #2 / a34 · Not checked`
+(frame `00-review-before-open`). Opening the citation showed a pinned request:
+carrier `f8ff688c5680ab88c27e4297decb5e7640b86a31`, edition `document / a34
+#2`, publication name `document`, and the requested publisher key in segmented
+accessibility fields. After the form was refreshed, it showed the actual
+failure: “No publication connection is configured. Content availability has
+not been checked.” Frame `04-open-failed-before-retry` and its a11y dump show
+the failed state and the available `Retry download` menu item before the retry
+key was sent.
+
+With that failed-menu precondition captured, the run chose `Retry download`
+explicitly. The immediate status was `Queued` and retained the same requested
+carrier, edition, name, and publisher key (frame `05-retry-immediate`). After
+Refresh progress, it returned to the same no-connection failure with
+verification still `Not checked` and the same pin (frame
+`06-retry-result-refreshed`). No peer or transport response occurred, so this
+proves the UI's configured-connection failure and retry state, not remote
+content unavailability.
+
+After closing the status form, the review form showed
+`document #2 / a34 · Request failed; open status` (frame
+`07-review-after-failure`). Selecting that citation again returned the same
+failed status and exact requested pin, without showing a queued/fetching state
+(frame `08-same-citation-reopened`). The UI path invokes `submitPinned()` and
+does not invoke retry; the inbox de-duplicates requests by `PublicationPin`
+value equality across publisher, salt, hash, sequence, version and title. The
+native view confirms the same pin and failed status on re-open; together with
+the reviewed source equality check, it supports same-request reuse without an
+automatic retry.
+
+The source document ops dump matched before/after. Its `ops.nodes` hash is
+`ac9f7eed1c1b6ee7b3cb17b33c52e1eeb4859c6eefb6b5a1419b381b0f0843`; its
+`store.tables` hash is
+`fc15f548fddd5e8b4cb642ff53d8fc18ecdf00b02499fd08eecba1b0a2b919b4`. The
+reader package visibility hash also matched:
+`37ff1e81ec961c07c063bc5e2a57d8a686c88d31b6784a6c51ee84b42d6f0c50`. Decoded
+activity state was identical: one pre-existing completed visit, current visit
+1, the same visit payload, no references, and no annotations. The full activity
+operation dump changed during shutdown reading-place metadata; decoded visit
+state did not.
+
+The earlier `native-candidate/` run remains preserved as an inconclusive
+interaction attempt: its Retry input was sent while the stale form still showed
+`Fetching pinned publication`, so it may have selected Cancel. It is not used as
+proof of Retry or post-failure review availability. Its own evidence is kept
+separate from the final run.
+
+Key raw frame SHA-256 values:
+
+| Frame | SHA-256 |
+| --- | --- |
+| `00-review-before-open.ppm` | `c81d47f59e43a966710ad76f66231e8ac02c1982041bdc05e606c19e332af86f` |
+| `04-open-failed-before-retry.ppm` | `c908b323c8eb90ac2df423bc16741f3f86bc339672afe0940fbc8fbb3398974a` |
+| `05-retry-immediate.ppm` | `ba1cd96e7bd9aa276d3f5012a53ccfdef457415c3cf7cfc2869d068edf450e31` |
+| `06-retry-result-refreshed.ppm` | `c908b323c8eb90ac2df423bc16741f3f86bc339672afe0940fbc8fbb3398974a` |
+| `07-review-after-failure.ppm` | `dfb05305f6af6808847f426ba3729d63e48275089d7540c54eafa1016881c2fd` |
+| `08-same-citation-reopened.ppm` | `c908b323c8eb90ac2df423bc16741f3f86bc339672afe0940fbc8fbb3398974a` |

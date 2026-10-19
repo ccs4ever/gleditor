@@ -1,0 +1,125 @@
+# Independent publication inbox and subscription audit
+
+Audit scope: read-only review of the live delta in `publication_inbox.cpp` and
+`publication_subscriptions.cpp`, with the current `publication_outbox_test.cpp` and publication
+status form tests. The implementation worker owns these files; this report records the observed
+state and remaining evidence limits. No engine changes were made for this audit.
+
+## Current status
+
+The finalized source delta addresses both previously identified subscription issues. The canonical
+build is still running, so these findings are source and test review only; the frozen candidate has
+not yet been exercised natively. `PublicationSubscriptions::Impl::decode()` now validates snapshot
+identity independently of readiness, so an inbox snapshot reconstructed as `Queued` can be checked
+without requiring that its background retained-content verification has already reached `Ready`. It
+checks the persisted hash and title against the snapshot's exact pin, along with URI authority/salt,
+sequence, version, nonzero hash, and any available manifest hash/title. The worker still calls
+`requireReadySnapshot()` before accepting an update, and `subscribe()` also requires a complete
+`Ready` snapshot. This separates startup identity validation from the stronger content-complete
+condition.
+
+The relevant current checks are `validateSnapshotIdentity()` and `requireReadySnapshot()` in
+`publication_subscriptions.cpp`; inbox restore queues retained snapshots for verification in
+`publication_inbox.cpp`. This removes the construction-order race where subscription decode could
+observe a restored snapshot before its verifier completed, while preserving refusal to subscribe or
+advance a notice from incomplete content.
+
+## Findings and limits
+
+1. **Restored retained content is checked before it is exposed as complete.** Startup reconstructs
+   the publication pin from the signed manifest and derives the carrier hash, marks the job
+   `Queued`/`ManifestVerified`, then verifies dependencies and reconstructs a canonical publication
+   before setting `Ready`/`Complete`. The native store is compared against the reconstructed
+   publication by document id, local scroll binding, operation count and history, selected-version
+   text, scroll descriptors, and expected deployment segments. Failures in this retained-only branch
+   preserve the snapshot root; they do not call `remove_all(root)`. The existing test
+   `ReopenedSnapshotVerifiesRetainedContentAndPreservesCorruption` demonstrates refusal and
+   retention of a corrupted byte. It does not yet prove whole-tree byte-for-byte preservation for
+   every corruption shape, nor exhaustive rejection of symlink/path edge cases after restoration.
+
+1. **Pinned requests use full-pin de-duplication.** `submitPinned()` returns an existing request
+   only when `job.status.pin == pin`; the pin includes publisher, salt, hash, sequence, version, and
+   title. Other pins for the same mutable name become distinct requests. For mutable requests, the
+   first valid signed manifest produces a `PublicationPin`, which is retained in the job before
+   dependencies are fetched. Subsequent retry follows the pinned hash path rather than resolving the
+   mutable name again. `retry()` preserves `job.pin` and only clears `manifestHash` for jobs without
+   a pin; retained-only verification also remains retained-only across retry.
+
+1. **The retry test does not yet perform the strongest mutable-head race.**
+   `VerifiedMutableCitationSurvivesFailureAndRetryResetsStage` verifies that a mutable request keeps
+   its first accepted pin and that retry resets its download stage. It does not advance a fake
+   mutable head between attempts and assert the second transport's resolve counter stays at zero.
+   The current code path is direct evidence for that property, but an adversarial test would make
+   the guarantee more durable.
+
+1. **Cancellation has no observed destructive retained-content path.** A cancellation requests the
+   job stop token; the worker checks it before publishing `Ready`. Retained-only failures preserve
+   bytes. For ordinary downloads the failed attempt root is intentionally removed, while the
+   in-memory first-valid-manifest pin remains available for retry in that process. The tests cover
+   retry state and cancellation paths, but there is not a dedicated interleaving stress test for
+   cancel arriving exactly while the valid manifest pin is being installed or while a subscription
+   is being disabled/re-enabled. Generation checks prevent a stale subscription worker from
+   committing after the job changes.
+
+1. **Subscription acceptance requires verified native content.** The subscription worker validates
+   snapshot identity and then requires `Ready`, `Complete`, and a nonempty store path before
+   advancing the accepted sequence or creating a notice. A restored current snapshot and each notice
+   snapshot are checked against persisted identity fields; notice predecessor snapshots are checked
+   for identity as well. The previous snapshot's hash and title are not separately persisted in the
+   notice record, so those predecessor checks can only compare the identity fields available there.
+
+1. **UI wording and persisted metadata are aligned with the pin model.** Citation availability
+   distinguishes “Not checked,” active checking, verified manifest with incomplete content, complete
+   local copy, and failed/cancelled request. Matching uses the complete `PublicationPin`, so a
+   citation with a changed hash, title, version, sequence, publisher, or salt is not presented as
+   the earlier request. “Complete local copy” is only emitted for `Ready`/`Complete`. Unit coverage
+   in `publication_status_form_test.cpp` exercises mismatches in pinned identity fields. These are
+   code/test findings, not yet native candidate results.
+
+## Candidate native route prepared
+
+The genuine no-transport baseline in `build/validation-seventeenth/native-baseline/` opened the
+second package edition's cited publication through the UI. It showed `Resolving signed DHT name`,
+then the actual control's failure, “No publication swarm configured.” It never selected “Open
+completed publication”; the source operation dump and decoded visit state were unchanged. That
+baseline does not demonstrate remote content unavailability, and there was no peer/transport
+response.
+
+The candidate run should start from a fresh copy of only that baseline's `data/` and `config/`, with
+fresh `cache/`, empty `gpg/`, all six headless/XDG variables and the same Xvfb/OpenGL setup. The run
+must capture the review state before opening, the exact requested pin and `Unchecked` status after
+opening, then the explicit retry and review-again state. Re-selecting the citation must return the
+same full-pin request without an automatic network action. Record source and activity dumps
+before/after, all raw PPMs, a11y dumps, argv, logs, and binary hash. Do not describe this
+no-transport run as proof that remote content is unavailable; it proves only the real UI's
+no-connection behavior.
+
+The candidate runner is prepared separately and is intentionally not launched until the parent
+freezes the canonical binary. No archive or gates were run.
+
+## Finalized pin and metadata re-review
+
+The latest source confirms the pin is a value type whose default equality covers all six fields:
+publisher key, salt/name, carrier hash, sequence, microversion, and title
+(`PublicationPin::operator== = default`). `PublicationInbox::submitPinned()` uses that equality to
+reuse an existing request; a difference in any field yields a separate request. The review form
+passes the chosen citation directly to `submitPinned()` and opens that request's status form. It
+does not call `retry()`; retry remains a separate, explicit form action. This supports the intended
+same-citation/no-automatic-retry behavior at source level.
+
+Persisted subscription decode now compares the saved current hash and title to the referenced
+snapshot's pin, in addition to authority/name, sequence, version, and any nonzero manifest
+hash/title. Each notice's hash and title are also checked against its own pinned snapshot. The test
+`PersistedCitationHashAndTitleMustMatchThePinnedSnapshot` alters both saved fields independently and
+requires format refusal. Separately, `CitationAvailabilityMatchesEveryPinnedField` changes title,
+version, and hash and confirms the citation is not conflated with that request; together with
+`PublicationPin` default equality, all six fields participate in inbox request de-duplication and
+availability matching.
+
+Remaining evidence limits are narrow and explicit: the candidate build and native route are pending;
+the mutable retry unit test still does not change the fake mutable head between attempts and assert
+that retry performs zero new `resolve()` calls; retained corruption tests preserve and re-observe a
+corrupted file rather than hashing every byte in the retained tree; and notice records do not
+persist previous snapshot hash/title, so a predecessor snapshot can only be validated against the
+saved publisher/name, sequence, and version. These are coverage/model limits, not source regressions
+observed in this re-review.

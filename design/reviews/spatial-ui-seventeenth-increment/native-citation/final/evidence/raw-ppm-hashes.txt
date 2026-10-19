@@ -1,0 +1,9 @@
+c81d47f59e43a966710ad76f66231e8ac02c1982041bdc05e606c19e332af86f  build/validation-seventeenth/native-candidate-final/raw/00-review-before-open.ppm
+1d113ff07ae2449c3b82639915e78c2b147eb1e593af57ab3bbc10da259100a5  build/validation-seventeenth/native-candidate-final/raw/01-open-immediate.ppm
+1d113ff07ae2449c3b82639915e78c2b147eb1e593af57ab3bbc10da259100a5  build/validation-seventeenth/native-candidate-final/raw/02-open-stale-form.ppm
+c908b323c8eb90ac2df423bc16741f3f86bc339672afe0940fbc8fbb3398974a  build/validation-seventeenth/native-candidate-final/raw/03-open-refreshed-once.ppm
+c908b323c8eb90ac2df423bc16741f3f86bc339672afe0940fbc8fbb3398974a  build/validation-seventeenth/native-candidate-final/raw/04-open-failed-before-retry.ppm
+ba1cd96e7bd9aa276d3f5012a53ccfdef457415c3cf7cfc2869d068edf450e31  build/validation-seventeenth/native-candidate-final/raw/05-retry-immediate.ppm
+c908b323c8eb90ac2df423bc16741f3f86bc339672afe0940fbc8fbb3398974a  build/validation-seventeenth/native-candidate-final/raw/06-retry-result-refreshed.ppm
+dfb05305f6af6808847f426ba3729d63e48275089d7540c54eafa1016881c2fd  build/validation-seventeenth/native-candidate-final/raw/07-review-after-failure.ppm
+c908b323c8eb90ac2df423bc16741f3f86bc339672afe0940fbc8fbb3398974a  build/validation-seventeenth/native-candidate-final/raw/08-same-citation-reopened.ppm

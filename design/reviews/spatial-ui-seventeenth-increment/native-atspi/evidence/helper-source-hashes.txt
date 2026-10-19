@@ -1,0 +1,2 @@
+07af71eb1d3baf56197a59182e9524a07a438f9f751b0749f168e05138bfca52  /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/design/reviews/spatial-ui-seventeenth-increment/native-atspi/evidence/ux-atspi-client-native-x11.py.txt
+2fa582612634283b812d016c5e6843b890e5a56a156091fec37eff70e084a004  /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/design/reviews/spatial-ui-seventeenth-increment/native-atspi/evidence/ux-atspi-client.py.txt

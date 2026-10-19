@@ -1,3 +1,5 @@
+#include "common/ui/identity_fields.hpp"
+#include "publication_status_form.hpp"
 #include "views.hpp"
 
 #include <gleditor/logging.hpp>
@@ -43,22 +45,6 @@ Field sources(const std::vector<Publication> &pubs) {
 std::string rangeOf(const GlobalSpan &span) {
   return "[" + std::to_string(span.start) + ", " + std::to_string(span.end()) +
          ")";
-}
-Field keyParts(const std::string &label, const std::string &key) {
-  std::vector<std::string> parts;
-  for (std::size_t start = 0; start < key.size();) {
-    auto end = std::min(start + 32, key.size());
-    while (end > start && end < key.size() &&
-           (static_cast<unsigned char>(key[end]) & 0xc0) == 0x80)
-      --end;
-    if (end == start) ++end;
-    parts.push_back(std::to_string(parts.size() + 1) + ": " +
-                    key.substr(start, end - start));
-    start = end;
-  }
-  auto field = choice(label, std::move(parts));
-  field.optionDescriptions.assign(field.options.size(), key);
-  return field;
 }
 Field endset(const std::string &label, const std::vector<GlobalSpan> &spans) {
   auto field = choice(label, {});
@@ -496,10 +482,12 @@ void Views::reviewIndependentLinks(const std::string &id,
         pins.options.clear();
         pins.optionValues.clear();
       }
+      const auto requests = session.publicationInbox().statuses();
       for (std::size_t i = 0; i < pkg.publications.size(); ++i) {
         const auto &pin = pkg.publications[i];
         pins.options.push_back(pin.title + " #" + std::to_string(pin.sequence) +
-                               " / " + pin.version.str());
+                               " / " + pin.version.str() + " · " +
+                               publicationCitationAvailability(pin, requests));
         pins.optionDescriptions.push_back(
             pin.publisher.hex() + " / " + pin.salt + " #" +
             std::to_string(pin.sequence) + " / " + pin.version.str() + " / " +

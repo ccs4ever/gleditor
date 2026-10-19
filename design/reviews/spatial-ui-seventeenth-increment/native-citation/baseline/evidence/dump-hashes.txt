@@ -1,0 +1,6 @@
+493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01  /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-seventeenth/native-baseline/evidence/source-before.ops.txt
+493fb2b73314bafb4c6ee800a3461e147e0408a750d3a8243cdb540b0e29ec01  /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-seventeenth/native-baseline/evidence/source-after.ops.txt
+c6d5d7180d898cd2bdcfd664cbe8b0f1b7075524619690e87b9fcdf865511aca  /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-seventeenth/native-baseline/evidence/activity-before.ops.txt
+8c39293a35bebcc4a3084abb18476db5fe7044b83df46908ce4876ef24819b7d  /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-seventeenth/native-baseline/evidence/activity-after.ops.txt
+2ba1f930f33e925f002b28af0b26f8c870bb32349732edb2eaa1a197abac5b9d  /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-seventeenth/native-baseline/evidence/store-file-hashes-before.txt
+54fe1f26d963185f3503f0e1cd1a37e69c7829ddd6edf02998a8431183cb1ce4  /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-seventeenth/native-baseline/evidence/store-file-hashes-after.txt

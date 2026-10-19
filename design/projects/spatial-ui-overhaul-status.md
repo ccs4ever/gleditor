@@ -7,6 +7,28 @@ session.
 
 ## Current checkpoint
 
+Seventeenth checkpoint (2026-10-18), based on `f3841729`: cited-publication status now preserves and
+displays the full requested pin independently of transfer phase and Unchecked/ManifestVerified/
+Complete verification. Exact requests are reused; only explicit Retry restarts. Review correlates
+citation availability by full pin, and Open/Subscribe require Ready+Complete. Offline snapshots now
+verify dependencies and native history on the inbox worker before becoming Ready. Corrupt retained
+files survive failure/retry. Subscriptions preserve unavailable receipts during asynchronous restore
+and bind persisted hash/title to exact snapshot identity.
+
+GNU Make, UI 246/246, Xuzz 107/107 and owning publication/package 61/61 pass. Unchanged default
+library/test hashes permit reuse of 799/799 and mip/cache 53/53 evidence. Strict GL/GLES/Vulkan
+passes unchanged criteria without actual split recording. Native GL proves the real
+missing-connection outcome, exact citation identity, explicit Retry, correlated failure and
+unchanged source/preferences with one completed visit/current 1. The first candidate's misnamed
+Retry attempt is corrected in the
+[seventeenth checkpoint](../reviews/spatial-ui-seventeenth-increment/README.md).
+
+Native AT-SPI form capability is now exercised in an isolated AccessKit build; complete parity and
+text editing remain separate open gates. Normal publication transport configuration, authenticated
+identity enrollment/binding, durable failed/interrupted requests, real remote
+bad-content/unavailable variants and full journeys remain next before D2. See the checkpoint's
+finite remaining-goal map; the full overhaul is not complete.
+
 Sixteenth checkpoint (2026-10-18), based on `49b82077`: package Review now compares exact
 same-curator/name immutable editions and explicitly switches their drawing with one atomic
 preference save. Both retention/emphasis choices and unrelated layers survive; the old selected
@@ -586,6 +608,16 @@ reviews pass.
   not describe the complete test gate or J1–J16 preservation as passed.
 
 ## Exact next task
+
+First implement the seventeenth checkpoint's `request-persistence-plan.md`: preserve stable request
+IDs, exact pins and known failures through restart; interrupted requests require explicit Retry.
+Validate safe journal/install recovery without deleting retained content. Then continue normal
+publication transport configuration in `next-service-plan.md`: governed opt-in settings and a
+visible form, worker-owned factory setup, named-node-only privacy policy and a deliberate restart
+boundary. Keep receive/discovery distinct from real identity enrollment; never install the test mock
+verifier in a normal session. Establish authenticated trust roots and BEP46/fingerprint binding
+before reporting Verified. Capture real normal-mode acquisition, rejection,
+unavailable/retry/offline routes without simulated services.
 
 Validate the sixteenth comparison’s trust/availability variants below before D2. Continue the
 remaining J25 and exact cell/history variants through actual controls; preserve the five-visit

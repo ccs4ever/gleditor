@@ -1,0 +1,68 @@
+[
+  {
+    "name": "00-package-entry",
+    "width": 1440,
+    "height": 1000,
+    "ppm_file": "00-package-entry.ppm",
+    "ppm_sha256": "4cea243ede45a1c625d981b6f54a1f80924c67929bffa24a50541ebd207f5649",
+    "rgb_sha256": "4d720f4db1a3e59ee0ae593e85a836c3871dc450ce3a6fa752d00dd98ff682a1",
+    "png_file": "00-package-entry.png",
+    "png_sha256": "08fb3440954a437b87d5a32aae6761c1101bb8b5ef698a5c6e9e686cc6f182f5",
+    "png_decodes_to_same_rgb_as_ppm": true
+  },
+  {
+    "name": "01-downloaded-packages",
+    "width": 1440,
+    "height": 1000,
+    "ppm_file": "01-downloaded-packages.ppm",
+    "ppm_sha256": "6b6a74113c89d18ff28eca3f359b4b4751caaeb41af1a72e7d5b993adedac2c7",
+    "rgb_sha256": "b66c72d335dae876e9b05ad871d4d30a0585a7078ad944645e97e868891b38cc",
+    "png_file": "01-downloaded-packages.png",
+    "png_sha256": "067ec6bf515e799279a68236b57dcfa1af4f6dda74142c1a1422785c8ccee4f4",
+    "png_decodes_to_same_rgb_as_ppm": true
+  },
+  {
+    "name": "02-package-b-status",
+    "width": 1440,
+    "height": 1000,
+    "ppm_file": "02-package-b-status.ppm",
+    "ppm_sha256": "6e3116dd0f974631b2042e6a278ef06d3cf72dfc3ba4a5e7f75e870da935b517",
+    "rgb_sha256": "3f41ae7a49d7d07f4eb6857cb71765cb21871a4c22ae5c2dd123ba1e66bc70bf",
+    "png_file": "02-package-b-status.png",
+    "png_sha256": "f5bfb281baeaeeb4e592b4403c0841569faf1ac05e2de155674cc5b5b0b9a37f",
+    "png_decodes_to_same_rgb_as_ppm": true
+  },
+  {
+    "name": "03-package-b-review",
+    "width": 1440,
+    "height": 1000,
+    "ppm_file": "03-package-b-review.ppm",
+    "ppm_sha256": "d6a8da4cdd9651592313aba69e4d98ac063482c1153ac132ea481bd11ab7313b",
+    "rgb_sha256": "cd87719c7023b0dd0952790f8b7cef8d5bbad53040eeda309df12eae91698eee",
+    "png_file": "03-package-b-review.png",
+    "png_sha256": "3b8ced25df8811519b56e9e423afa9934859b75081899d5d75de34474ff9cbc2",
+    "png_decodes_to_same_rgb_as_ppm": true
+  },
+  {
+    "name": "04-citation-open-immediate",
+    "width": 1440,
+    "height": 1000,
+    "ppm_file": "04-citation-open-immediate.ppm",
+    "ppm_sha256": "e1df9cd3de58658db41d85be40b4b5e54780f8544cc1ea76c6445cfba4b28fc8",
+    "rgb_sha256": "6c47c356043a3fd3479f09b0ee63cc0d5123f1f7129f046d5ef8d2a76a90e22d",
+    "png_file": "04-citation-open-immediate.png",
+    "png_sha256": "49dcd7781d2cdc9ff08a34276c89c949ed924512ce5b89cfa9a1c03edc612a11",
+    "png_decodes_to_same_rgb_as_ppm": true
+  },
+  {
+    "name": "05-citation-open-refreshed",
+    "width": 1440,
+    "height": 1000,
+    "ppm_file": "05-citation-open-refreshed.ppm",
+    "ppm_sha256": "81500acdbf7271083f3163447185ad25646b7062c89f2b1d45f45313d42cedf8",
+    "rgb_sha256": "93fce8418a3d5c435e3febe875a13ebcc028adcab76cd4e157f32b5bb1a29192",
+    "png_file": "05-citation-open-refreshed.png",
+    "png_sha256": "fbd8ed024f973992c8fd7ff5f1b47d39dca710262204fc2c5875b5b62ce94e2e",
+    "png_decodes_to_same_rgb_as_ppm": true
+  }
+]

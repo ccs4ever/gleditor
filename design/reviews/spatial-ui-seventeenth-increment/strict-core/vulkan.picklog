@@ -1,0 +1,12 @@
+backend: vulkan, SDL3
+file: tests/samples/quick_brown_fox.txt
+accessibility: not in this build
+render: vulkan device, AMD Radeon RX Vega (RADV VEGA10) (API 1.4.354)
+glyph cache: atlas 512x512 x1 layers, growing to at most 16384x16384 x64 (device allows 16384x16384 x2048, the vertex encoding 64 layers)
+[TIMING] First page rendered: 96.06 ms (docs in render: 1)
+pick 500,300: kind 1 doc 16382 page 0 cluster 0 frac 0.636
+pick 175,320: kind 1 doc 16382 page 0 cluster 0 frac 0.197
+pick 295,340: kind 3 doc 0 page 0 cluster 41 frac 0.006
+pick 185,350: kind 3 doc 0 page 0 cluster 64 frac 0.482
+pick 215,360: kind 3 doc 0 page 0 cluster 85 frac 0.621
+[TIMING] Complete render settled: 485.72 ms (docs: 1, total pages: 1, built pages: 1)

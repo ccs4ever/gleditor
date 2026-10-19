@@ -1,0 +1,68 @@
+[
+  {
+    "name": "00-review-before-open",
+    "width": 1440,
+    "height": 1000,
+    "ppm_file": "00-review-before-open.ppm",
+    "ppm_sha256": "c81d47f59e43a966710ad76f66231e8ac02c1982041bdc05e606c19e332af86f",
+    "rgb_sha256": "f265d0265d2c7ea3ef808fc7f531c7a8e9656dcadcc3b2f4c01de02ddcd4c8be",
+    "png_file": "00-review-before-open.png",
+    "png_sha256": "8e86f8bd32065d3e87c62c43fa30ba6086a239bb5b314b88d19e45584f429481",
+    "png_decodes_to_same_rgb_as_ppm": true
+  },
+  {
+    "name": "01-open-immediate",
+    "width": 1440,
+    "height": 1000,
+    "ppm_file": "01-open-immediate.ppm",
+    "ppm_sha256": "9e547948304dad6b37f824589b1aaef0e0ef11ba3f92f813d59c1cb2ca9cf75f",
+    "rgb_sha256": "ababb044fcfb3f92240b80813edfa46eb507aea61b308e33bb9e14977b021796",
+    "png_file": "01-open-immediate.png",
+    "png_sha256": "82efb902f52a5ce5b0b9d86130a05e0a7d0ab36a4eb087af6697f0a4752841e5",
+    "png_decodes_to_same_rgb_as_ppm": true
+  },
+  {
+    "name": "02-open-settled",
+    "width": 1440,
+    "height": 1000,
+    "ppm_file": "02-open-settled.ppm",
+    "ppm_sha256": "9e547948304dad6b37f824589b1aaef0e0ef11ba3f92f813d59c1cb2ca9cf75f",
+    "rgb_sha256": "ababb044fcfb3f92240b80813edfa46eb507aea61b308e33bb9e14977b021796",
+    "png_file": "02-open-settled.png",
+    "png_sha256": "82efb902f52a5ce5b0b9d86130a05e0a7d0ab36a4eb087af6697f0a4752841e5",
+    "png_decodes_to_same_rgb_as_ppm": true
+  },
+  {
+    "name": "03-explicit-retry-immediate",
+    "width": 1440,
+    "height": 1000,
+    "ppm_file": "03-explicit-retry-immediate.ppm",
+    "ppm_sha256": "95af0b074423b809a193905d80634f75a462595830a9e33650f63646fe29a289",
+    "rgb_sha256": "399af5123e04827e911fc251e0dd676048712d5540bffebe0ead73f2b5e2827d",
+    "png_file": "03-explicit-retry-immediate.png",
+    "png_sha256": "cb1e9031084550cb39b211ff556f72414a40f246ac3ecb1cfe167e2aa9a5e015",
+    "png_decodes_to_same_rgb_as_ppm": true
+  },
+  {
+    "name": "04-retry-settled",
+    "width": 1440,
+    "height": 1000,
+    "ppm_file": "04-retry-settled.ppm",
+    "ppm_sha256": "95af0b074423b809a193905d80634f75a462595830a9e33650f63646fe29a289",
+    "rgb_sha256": "399af5123e04827e911fc251e0dd676048712d5540bffebe0ead73f2b5e2827d",
+    "png_file": "04-retry-settled.png",
+    "png_sha256": "cb1e9031084550cb39b211ff556f72414a40f246ac3ecb1cfe167e2aa9a5e015",
+    "png_decodes_to_same_rgb_as_ppm": true
+  },
+  {
+    "name": "05-same-citation-again",
+    "width": 1440,
+    "height": 1000,
+    "ppm_file": "05-same-citation-again.ppm",
+    "ppm_sha256": "95af0b074423b809a193905d80634f75a462595830a9e33650f63646fe29a289",
+    "rgb_sha256": "399af5123e04827e911fc251e0dd676048712d5540bffebe0ead73f2b5e2827d",
+    "png_file": "05-same-citation-again.png",
+    "png_sha256": "cb1e9031084550cb39b211ff556f72414a40f246ac3ecb1cfe167e2aa9a5e015",
+    "png_decodes_to_same_rgb_as_ppm": true
+  }
+]

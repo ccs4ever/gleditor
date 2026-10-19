@@ -1,0 +1,92 @@
+[
+  {
+    "step": 0,
+    "request": {
+      "op": "wait_name",
+      "name": "Requested carrier"
+    },
+    "status": "passed"
+  },
+  {
+    "step": 1,
+    "request": {
+      "op": "wait_name",
+      "name": "f8ff688c5680ab88c27e4297decb5e7640b86a31"
+    },
+    "status": "passed"
+  },
+  {
+    "step": 2,
+    "request": {
+      "op": "wait_name",
+      "name": "document / a34 #2"
+    },
+    "status": "passed"
+  },
+  {
+    "step": 3,
+    "request": {
+      "op": "wait_name",
+      "name": "Not checked"
+    },
+    "status": "passed"
+  },
+  {
+    "step": 4,
+    "request": {
+      "op": "wait_name",
+      "name_prefix": "Download failed:"
+    },
+    "status": "passed"
+  },
+  {
+    "step": 5,
+    "request": {
+      "op": "wait_name",
+      "name": "Retry download",
+      "interface": "Action"
+    },
+    "status": "passed"
+  },
+  {
+    "step": 6,
+    "request": {
+      "op": "absent",
+      "name": "Open completed publication"
+    },
+    "status": "passed"
+  },
+  {
+    "step": 7,
+    "request": {
+      "op": "snapshot",
+      "file": "native-before-retry.json"
+    },
+    "status": "passed"
+  },
+  {
+    "step": 8,
+    "request": {
+      "op": "action",
+      "name": "Retry download",
+      "interface": "Action"
+    },
+    "status": "passed"
+  },
+  {
+    "step": 9,
+    "request": {
+      "op": "snapshot",
+      "file": "native-after-action-selection.json"
+    },
+    "status": "passed"
+  },
+  {
+    "step": 10,
+    "request": {
+      "op": "wait_exit",
+      "exit_code": 0
+    },
+    "status": "passed"
+  }
+]

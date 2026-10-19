@@ -44,16 +44,32 @@ InfoHash hashField(const V &value) {
         "Subscriptions format 1: invalid hash");
   return *hash;
 }
-void validateSnapshot(const PublicationDownloadStatus &snapshot,
-                      const MutableLink &link, std::int64_t sequence,
-                      const MicroversionId &version) {
+void validateSnapshotIdentity(const PublicationDownloadStatus &snapshot,
+                              const MutableLink &link, std::int64_t sequence,
+                              const MicroversionId &version,
+                              const InfoHash *expectedHash     = nullptr,
+                              const std::string *expectedTitle = nullptr) {
   const auto actual = MutableLink::parse(snapshot.uri);
-  if (snapshot.phase != PublicationDownloadPhase::Ready ||
-      actual.key != link.key || actual.salt != link.salt ||
-      snapshot.sequence != sequence || snapshot.version != version)
+  if (!snapshot.pin || actual.key != link.key || actual.salt != link.salt ||
+      snapshot.sequence != sequence || snapshot.version != version ||
+      snapshot.pin->publisher != link.key || snapshot.pin->salt != link.salt ||
+      snapshot.pin->sequence != sequence || snapshot.pin->version != version ||
+      snapshot.pin->hash.isZero() ||
+      (!snapshot.manifestHash.isZero() &&
+       snapshot.manifestHash != snapshot.pin->hash) ||
+      (!snapshot.title.empty() && snapshot.title != snapshot.pin->title) ||
+      (expectedHash && snapshot.pin->hash != *expectedHash) ||
+      (expectedTitle && snapshot.pin->title != *expectedTitle))
     throw PublicationSubscriptionsUnreadable(
         "Subscriptions format 1: retained snapshot does not match signed "
         "publication");
+}
+void requireReadySnapshot(const PublicationDownloadStatus &snapshot) {
+  if (snapshot.phase != PublicationDownloadPhase::Ready ||
+      snapshot.verification != PublicationDownloadVerification::Complete ||
+      snapshot.storePath.empty())
+    throw std::logic_error(
+        "Open a verified publication before enabling notifications");
 }
 } // namespace
 
@@ -155,8 +171,8 @@ struct PublicationSubscriptions::Impl {
           (!job.pending.empty() &&
            (job.observed.hash.isZero() || job.observed.sequence <= s.sequence)))
         throw std::runtime_error("invalid sequence, title or pending pointer");
-      validateSnapshot(options.inbox->status(s.snapshotId), link, s.sequence,
-                       s.version);
+      validateSnapshotIdentity(options.inbox->status(s.snapshotId), link,
+                               s.sequence, s.version, &s.hash, &s.title);
       const auto &notices = field(root, "notices").asList();
       if (notices.size() > options.maximumNotices)
         throw std::runtime_error("notice limit exceeded");
@@ -180,10 +196,10 @@ struct PublicationSubscriptions::Impl {
             n.previousSequence < 0 || n.previousSequence >= n.sequence ||
             n.hash.isZero() || n.title.empty() || n.title.size() > 1024)
           throw std::runtime_error("invalid notice sequence or identity");
-        validateSnapshot(options.inbox->status(n.snapshotId), link, n.sequence,
-                         n.version);
-        validateSnapshot(options.inbox->status(n.previousSnapshotId), link,
-                         n.previousSequence, n.previousVersion);
+        validateSnapshotIdentity(options.inbox->status(n.snapshotId), link,
+                                 n.sequence, n.version, &n.hash, &n.title);
+        validateSnapshotIdentity(options.inbox->status(n.previousSnapshotId),
+                                 link, n.previousSequence, n.previousVersion);
         previous = n.sequence;
         s.notices.push_back(std::move(n));
       }
@@ -334,7 +350,9 @@ struct PublicationSubscriptions::Impl {
           return;
         if (download.phase == PublicationDownloadPhase::Ready) {
           const auto link = MutableLink::parse(job.status.uri);
-          validateSnapshot(download, link, download.sequence, download.version);
+          validateSnapshotIdentity(download, link, download.sequence,
+                                   download.version);
+          requireReadySnapshot(download);
           if (download.sequence < job.observed.sequence ||
               download.sequence <= job.status.sequence ||
               (download.sequence == job.observed.sequence &&
@@ -446,8 +464,8 @@ PublicationSubscriptions::PublicationSubscriptions(Options options)
 PublicationSubscriptions::~PublicationSubscriptions() = default;
 std::string PublicationSubscriptions::subscribe(std::string_view downloadedId) {
   const auto baseline = impl_->options.inbox->status(downloadedId);
-  if (baseline.phase != PublicationDownloadPhase::Ready ||
-      baseline.sequence < 0)
+  requireReadySnapshot(baseline);
+  if (baseline.sequence < 0)
     throw std::logic_error(
         "Open a verified publication before enabling notifications");
   if (!validTitle(baseline.title))

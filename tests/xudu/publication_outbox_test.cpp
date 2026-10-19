@@ -339,6 +339,7 @@ struct DownloadState {
   std::atomic<bool> hold{false};
   std::atomic<bool> fail{false};
   std::atomic<bool> failFetch{false};
+  std::atomic<bool> failDependency{false};
   std::atomic<bool> holdFetch{false};
 };
 
@@ -369,6 +370,8 @@ public:
     if (state_->failFetch)
       throw std::runtime_error("injected transfer failure");
     const std::scoped_lock lock(state_->guard);
+    if (state_->failDependency && hash != state_->pointer.hash)
+      throw std::runtime_error("injected dependency transfer failure");
     fs::create_directories(directory.parent_path());
     fs::copy(state_->seeds.at(hash), directory, fs::copy_options::recursive);
   }
@@ -423,6 +426,10 @@ TEST_F(PublicationInboxTest,
     const auto status = inbox.status(id);
     EXPECT_EQ(status.completedDependencies, 2U);
     EXPECT_EQ(status.title, "Story Ideas");
+    ASSERT_TRUE(status.pin);
+    EXPECT_EQ(status.pin->hash, downloads->pointer.hash);
+    EXPECT_EQ(status.verification,
+              xanadu::PublicationDownloadVerification::Complete);
     xanadu::Store restored;
     restored.load(status.storePath.string());
     EXPECT_EQ(restored.documentId(), publication.storeId);
@@ -431,14 +438,91 @@ TEST_F(PublicationInboxTest,
   }
   xanadu::PublicationInbox offline({.directory = root / "inbox"});
   ASSERT_EQ(offline.statuses().size(), 1U);
+  ASSERT_TRUE(offline.waitFor(id, xanadu::PublicationDownloadPhase::Ready, 3s))
+      << offline.status(id).error;
   EXPECT_EQ(offline.status(id).phase, xanadu::PublicationDownloadPhase::Ready);
   EXPECT_EQ(offline.status(id).version, publication.version);
+  const auto restored = offline.status(id);
+  ASSERT_TRUE(restored.pin);
+  EXPECT_EQ(restored.manifestHash, downloads->pointer.hash);
+  EXPECT_EQ(restored.pin->hash, downloads->pointer.hash);
+  EXPECT_EQ(restored.verification,
+            xanadu::PublicationDownloadVerification::Complete);
   const std::scoped_lock lock(downloads->guard);
   ASSERT_FALSE(downloads->threads.empty());
   for (const auto thread : downloads->threads) {
     EXPECT_NE(thread, std::this_thread::get_id());
     EXPECT_EQ(thread, downloads->threads.front());
   }
+}
+
+TEST_F(PublicationInboxTest,
+       ReopenedSnapshotVerifiesRetainedContentAndPreservesCorruption) {
+  std::string id;
+  {
+    xanadu::PublicationInbox inbox(incomingOptions());
+    id = inbox.submit(link);
+    ASSERT_TRUE(inbox.waitFor(id, xanadu::PublicationDownloadPhase::Ready, 3s))
+        << inbox.status(id).error;
+  }
+
+  const auto seed =
+      xanadu::reviewPublicationDependencies(publication, roots).front();
+  const auto meta    = xanadu::Metainfo::parse(seed.metainfo);
+  const auto payload = root / "inbox" / id / "store" / "published" /
+                       seed.hash.hex() / meta.name() /
+                       meta.files().front().path;
+  std::fstream damaged(payload,
+                       std::ios::in | std::ios::out | std::ios::binary);
+  ASSERT_TRUE(damaged.good());
+  damaged.put('!');
+  damaged.close();
+
+  xanadu::PublicationInbox offline({.directory = root / "inbox"});
+  ASSERT_TRUE(
+      offline.waitFor(id, xanadu::PublicationDownloadPhase::Failed, 3s));
+  const auto failed = offline.status(id);
+  EXPECT_EQ(failed.verification,
+            xanadu::PublicationDownloadVerification::ManifestVerified);
+  EXPECT_THAT(failed.error, testing::HasSubstr("verification"));
+  EXPECT_TRUE(fs::exists(payload));
+  {
+    std::ifstream retained(payload, std::ios::binary);
+    EXPECT_EQ(retained.get(), '!');
+  }
+
+  offline.retry(id);
+  ASSERT_TRUE(
+      offline.waitFor(id, xanadu::PublicationDownloadPhase::Failed, 3s));
+  EXPECT_TRUE(fs::exists(payload));
+  {
+    std::ifstream retained(payload, std::ios::binary);
+    EXPECT_EQ(retained.get(), '!');
+  }
+}
+
+TEST_F(PublicationInboxTest,
+       ReopenedSnapshotRejectsNativeStoreWithDifferentDocumentId) {
+  std::string id;
+  {
+    xanadu::PublicationInbox inbox(incomingOptions());
+    id = inbox.submit(link);
+    ASSERT_TRUE(inbox.waitFor(id, xanadu::PublicationDownloadPhase::Ready, 3s))
+        << inbox.status(id).error;
+  }
+  const auto tablesPath       = root / "inbox" / id / "store" / "store.tables";
+  auto tables                 = xanadu::readStoreTables(tablesPath);
+  const auto originalDocument = tables.documentId;
+  tables.documentId           = xanadu::DocumentId{};
+  ASSERT_NE(tables.documentId, originalDocument);
+  xanadu::writeStoreTables(tablesPath, tables);
+
+  xanadu::PublicationInbox offline({.directory = root / "inbox"});
+  ASSERT_TRUE(
+      offline.waitFor(id, xanadu::PublicationDownloadPhase::Failed, 3s));
+  EXPECT_THAT(offline.status(id).error,
+              testing::HasSubstr("does not match the signed publication"));
+  EXPECT_EQ(xanadu::readStoreTables(tablesPath).documentId, tables.documentId);
 }
 
 TEST_F(PublicationInboxTest, PinnedSnapshotDoesNotResolveNewerMutableHead) {
@@ -452,14 +536,24 @@ TEST_F(PublicationInboxTest, PinnedSnapshotDoesNotResolveNewerMutableHead) {
   downloads->pointer.sequence = 99;
   xanadu::PublicationInbox inbox(incomingOptions());
   const auto id = inbox.submitPinned(pin);
+  EXPECT_EQ(inbox.status(id).pin, pin);
   ASSERT_TRUE(inbox.waitFor(id, xanadu::PublicationDownloadPhase::Ready, 3s))
       << inbox.status(id).error;
   EXPECT_EQ(inbox.status(id).version, pin.version);
   EXPECT_EQ(inbox.status(id).sequence, 1);
+  EXPECT_EQ(inbox.status(id).verification,
+            xanadu::PublicationDownloadVerification::Complete);
+  EXPECT_EQ(inbox.submitPinned(pin), id);
+  auto differentTitle = pin;
+  differentTitle.title += " revised";
+  EXPECT_NE(inbox.submitPinned(differentTitle), id);
   pin.version      = {};
   const auto wrong = inbox.submitPinned(pin);
   ASSERT_TRUE(
       inbox.waitFor(wrong, xanadu::PublicationDownloadPhase::Failed, 3s));
+  EXPECT_EQ(inbox.submitPinned(pin), wrong);
+  EXPECT_EQ(inbox.status(wrong).phase,
+            xanadu::PublicationDownloadPhase::Failed);
   EXPECT_FALSE(fs::exists(inbox.status(wrong).storePath / "ops.nodes"));
   pin.version      = publication.version;
   pin.sequence     = 2;
@@ -511,6 +605,31 @@ TEST_F(PublicationInboxTest, NetworkFailureLeavesNoStoreAndAllowsRetry) {
   downloads->fail = false;
   inbox.retry(id);
   ASSERT_TRUE(inbox.waitFor(id, xanadu::PublicationDownloadPhase::Ready, 3s));
+}
+
+TEST_F(PublicationInboxTest,
+       VerifiedMutableCitationSurvivesFailureAndRetryResetsStage) {
+  downloads->failDependency = true;
+  xanadu::PublicationInbox inbox(incomingOptions());
+  const auto id = inbox.submit(link);
+  ASSERT_TRUE(inbox.waitFor(id, xanadu::PublicationDownloadPhase::Failed, 3s));
+  const auto failed = inbox.status(id);
+  ASSERT_TRUE(failed.pin);
+  EXPECT_EQ(failed.pin->hash, downloads->pointer.hash);
+  EXPECT_EQ(failed.verification,
+            xanadu::PublicationDownloadVerification::ManifestVerified);
+
+  downloads->failDependency = false;
+  inbox.retry(id);
+  const auto queued = inbox.status(id);
+  EXPECT_EQ(queued.pin, failed.pin);
+  EXPECT_EQ(queued.verification,
+            xanadu::PublicationDownloadVerification::Unchecked);
+  ASSERT_TRUE(inbox.waitFor(id, xanadu::PublicationDownloadPhase::Ready, 3s))
+      << inbox.status(id).error;
+  EXPECT_EQ(inbox.status(id).pin, failed.pin);
+  EXPECT_EQ(inbox.status(id).verification,
+            xanadu::PublicationDownloadVerification::Complete);
 }
 
 TEST_F(PublicationInboxTest,
@@ -853,6 +972,117 @@ TEST_F(PublicationSubscriptionsTest,
   ASSERT_EQ(notices.size(), 1U);
   EXPECT_EQ(notices.front().second.previousSequence, 1);
   EXPECT_EQ(notices.front().second.sequence, 3);
+}
+
+TEST_F(PublicationSubscriptionsTest,
+       RestartPreservesSubscriptionForUnavailableBaselineWithoutAcceptingIt) {
+  std::string snapshotId;
+  std::string subscriptionId;
+  {
+    xanadu::PublicationInbox inbox(incomingOptions());
+    snapshotId      = baseline(inbox);
+    downloads->hold = true;
+    {
+      xanadu::PublicationSubscriptions updates(subscriptionOptions(inbox));
+      subscriptionId = updates.subscribe(snapshotId);
+      updates.setEnabled(subscriptionId, false);
+    }
+  }
+  downloads->hold = false;
+
+  const auto seed =
+      xanadu::reviewPublicationDependencies(publication, roots).front();
+  const auto meta    = xanadu::Metainfo::parse(seed.metainfo);
+  const auto payload = root / "inbox" / snapshotId / "store" / "published" /
+                       seed.hash.hex() / meta.name() /
+                       meta.files().front().path;
+  std::fstream damaged(payload,
+                       std::ios::in | std::ios::out | std::ios::binary);
+  ASSERT_TRUE(damaged.good());
+  damaged.put('!');
+  damaged.close();
+
+  xanadu::PublicationInbox offline({.directory = root / "inbox"});
+  ASSERT_TRUE(offline.waitFor(snapshotId,
+                              xanadu::PublicationDownloadPhase::Failed, 3s));
+  const auto unavailable = offline.status(snapshotId);
+  ASSERT_TRUE(unavailable.pin);
+  EXPECT_EQ(unavailable.verification,
+            xanadu::PublicationDownloadVerification::ManifestVerified);
+
+  xanadu::PublicationSubscriptions restored(subscriptionOptions(offline));
+  const auto subscription = restored.status(subscriptionId);
+  EXPECT_EQ(subscription.phase, xanadu::PublicationSubscriptionPhase::Paused);
+  EXPECT_EQ(subscription.snapshotId, snapshotId);
+  EXPECT_EQ(subscription.hash, unavailable.pin->hash);
+  EXPECT_EQ(subscription.sequence, unavailable.pin->sequence);
+  EXPECT_EQ(subscription.version, unavailable.pin->version);
+  EXPECT_THROW((void)restored.subscribe(snapshotId), std::logic_error);
+}
+
+TEST_F(PublicationSubscriptionsTest,
+       PersistedCitationHashAndTitleMustMatchThePinnedSnapshot) {
+  xanadu::PublicationInbox inbox(incomingOptions());
+  std::string id;
+  {
+    xanadu::PublicationSubscriptions updates(subscriptionOptions(inbox));
+    id = updates.subscribe(baseline(inbox));
+    updates.setEnabled(id, false);
+  }
+
+  const auto accessRecord = [&](const std::string *replacement) {
+    MDB_env *raw{};
+    if (mdb_env_create(&raw) != MDB_SUCCESS)
+      throw std::runtime_error("Cannot open subscription test database");
+    std::unique_ptr<MDB_env, decltype(&mdb_env_close)> env(raw, mdb_env_close);
+    if (mdb_env_open(raw, (root / "subscriptions").c_str(), 0, 0600) !=
+        MDB_SUCCESS)
+      throw std::runtime_error("Cannot read subscription test database");
+    MDB_txn *rawTransaction{};
+    if (mdb_txn_begin(raw, nullptr, 0, &rawTransaction) != MDB_SUCCESS)
+      throw std::runtime_error("Cannot begin subscription test transaction");
+    std::unique_ptr<MDB_txn, decltype(&mdb_txn_abort)> transaction(
+        rawTransaction, mdb_txn_abort);
+    MDB_dbi db{};
+    if (mdb_dbi_open(rawTransaction, nullptr, 0, &db) != MDB_SUCCESS)
+      throw std::runtime_error("Cannot open subscription test records");
+    MDB_val key{id.size(), id.data()};
+    if (replacement) {
+      std::string copy = *replacement;
+      MDB_val value{copy.size(), copy.data()};
+      if (mdb_put(rawTransaction, db, &key, &value, 0) != MDB_SUCCESS)
+        throw std::runtime_error("Cannot write subscription test record");
+      if (mdb_txn_commit(transaction.release()) != MDB_SUCCESS)
+        throw std::runtime_error("Cannot commit subscription test record");
+      return std::string{};
+    }
+    MDB_val value{};
+    if (mdb_get(rawTransaction, db, &key, &value) != MDB_SUCCESS)
+      throw std::runtime_error("Cannot read subscription test record");
+    return std::string(static_cast<const char *>(value.mv_data), value.mv_size);
+  };
+  const auto original = accessRecord(nullptr);
+  for (const auto &field : {std::string{"hash"}, std::string{"title"}}) {
+    auto fields =
+        xanadu::bencode::decode(std::string_view(original).substr(4)).asDict();
+    auto changed = fields.at(field).asString();
+    if (field == "hash")
+      changed[0] = changed[0] == '0' ? '1' : '0';
+    else
+      changed = "Another signed title";
+    fields[field] = xanadu::bencode::Value::string(std::move(changed));
+    const auto altered =
+        "XPS1" + xanadu::bencode::Value::dict(std::move(fields)).encode();
+    (void)accessRecord(&altered);
+    try {
+      xanadu::PublicationSubscriptions refused(subscriptionOptions(inbox));
+      FAIL() << "Mismatched persisted " << field << " was accepted";
+    } catch (const xanadu::PublicationSubscriptionsUnreadable &error) {
+      EXPECT_THAT(error.what(),
+                  testing::HasSubstr("retained snapshot does not match"));
+    }
+    EXPECT_EQ(accessRecord(nullptr), altered);
+  }
 }
 
 TEST_F(PublicationSubscriptionsTest, RefusesUnknownPersistedFormatsByNumber) {

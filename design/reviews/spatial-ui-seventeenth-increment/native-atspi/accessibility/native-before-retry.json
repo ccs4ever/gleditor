@@ -1,0 +1,993 @@
+[
+  {
+    "role": "application",
+    "name": "xuzz",
+    "interfaces": [
+      "Accessible",
+      "Application"
+    ],
+    "states": []
+  },
+  {
+    "role": "frame",
+    "name": "Xuzz",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "active",
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "entry",
+    "name": "default",
+    "interfaces": [
+      "Accessible",
+      "Component",
+      "Text"
+    ],
+    "states": [
+      "editable",
+      "enabled",
+      "multi-line",
+      "sensitive",
+      "showing",
+      "visible",
+      "selectable-text"
+    ],
+    "text": "",
+    "caret": -1,
+    "selections": []
+  },
+  {
+    "role": "entry",
+    "name": "Untitled \u00b7 a",
+    "interfaces": [
+      "Accessible",
+      "Component",
+      "Text"
+    ],
+    "states": [
+      "editable",
+      "enabled",
+      "multi-line",
+      "sensitive",
+      "showing",
+      "visible",
+      "selectable-text"
+    ],
+    "text": "Harbor left passage.\nMeadow second passage.\nRight one.\nRight two.\nRight three.\n",
+    "caret": 20,
+    "selections": [
+      [
+        0,
+        20
+      ]
+    ]
+  },
+  {
+    "role": "entry",
+    "name": "Untitled \u00b7 b",
+    "interfaces": [
+      "Accessible",
+      "Component",
+      "Text"
+    ],
+    "states": [
+      "editable",
+      "enabled",
+      "multi-line",
+      "sensitive",
+      "showing",
+      "visible",
+      "selectable-text"
+    ],
+    "text": "Harbor left passage.",
+    "caret": -1,
+    "selections": []
+  },
+  {
+    "role": "panel",
+    "name": "Xanadu ZigZag: Xudu/Zigzag unified store",
+    "interfaces": [
+      "Accessible"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "panel",
+    "name": "Active View Dimensions: X=d.1, Y=d.2, Z=d.3",
+    "interfaces": [
+      "Accessible"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "list",
+    "name": "Open Documents",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "list item",
+    "name": "default",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible",
+      "checkable"
+    ]
+  },
+  {
+    "role": "button",
+    "name": "Close default",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "list item",
+    "name": "Untitled \u00b7 a",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "checked",
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible",
+      "checkable"
+    ]
+  },
+  {
+    "role": "button",
+    "name": "Close Untitled \u00b7 a",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "list item",
+    "name": "Untitled \u00b7 b",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible",
+      "checkable"
+    ]
+  },
+  {
+    "role": "button",
+    "name": "Close Untitled \u00b7 b",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "button",
+    "name": "Store Object Manager",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "button",
+    "name": "New Document",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "list",
+    "name": "links between the open documents",
+    "interfaces": [
+      "Accessible"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "link",
+    "name": "comment link, 2 left and 3 right members",
+    "interfaces": [
+      "Accessible"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "link",
+    "name": "comment link, 2 left and 3 right members",
+    "interfaces": [
+      "Accessible"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "link",
+    "name": "comment link, 2 left and 3 right members",
+    "interfaces": [
+      "Accessible"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "panel",
+    "name": "Publication download",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "panel",
+    "name": "",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "label",
+    "name": "",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "label",
+    "name": "",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "label",
+    "name": "",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "label",
+    "name": "",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "label",
+    "name": "",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "label",
+    "name": "",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "label",
+    "name": "",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "panel",
+    "name": "",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "button",
+    "name": "Previous link",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "button",
+    "name": "Next link",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "button",
+    "name": "\u2039 member",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "button",
+    "name": "member \u203a",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "button",
+    "name": "\u2039 place",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "button",
+    "name": "place \u203a",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "button",
+    "name": "Cross",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "button",
+    "name": "Enter unavailable",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "button",
+    "name": "Origin",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "button",
+    "name": "Back",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "button",
+    "name": "\u00d7",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "button",
+    "name": "Normal package emphasis",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "button",
+    "name": "Remove package from reader",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "button",
+    "name": "Re-enable package",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "button",
+    "name": "Inspect members",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "button",
+    "name": "Overview: move camera to scene centre",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "dialog",
+    "name": "Download publication",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "active",
+      "enabled",
+      "modal",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "label",
+    "name": "Download publication",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "label",
+    "name": "Download failed: No publication connection is configured. Content availability has not been checked. Publisher enrollment is unchecked. Downloading never enters the publication.",
+    "interfaces": [
+      "Accessible",
+      "Component"
+    ],
+    "states": [
+      "enabled",
+      "sensitive",
+      "showing",
+      "visible"
+    ]
+  },
+  {
+    "role": "combo box",
+    "name": "Action",
+    "interfaces": [
+      "Accessible",
+      "Action",
+      "Component",
+      "Selection"
+    ],
+    "states": [
+      "enabled",
+      "focusable",
+      "focused",
+      "sensitive",
+      "showing",
+      "visible"
+    ],
+    "actions": [
+      "click"
+    ]
+  },
+  {
+    "role": "list item",
+    "name": "Refresh progress",
+    "interfaces": [
+      "Accessible",
+      "Action"
+    ],
+    "states": [
+      "enabled",
+      "focusable",
+      "sensitive",
+      "showing",
+      "visible"
+    ],
+    "actions": [
+      "click"
+    ]
+  },
+  {
+    "role": "list item",
+    "name": "Retry download",
+    "interfaces": [
+      "Accessible",
+      "Action"
+    ],
+    "states": [
+      "enabled",
+      "focusable",
+      "sensitive",
+      "showing",
+      "visible"
+    ],
+    "actions": [
+      "click"
+    ]
+  },
+  {
+    "role": "list item",
+    "name": "Close",
+    "interfaces": [
+      "Accessible",
+      "Action"
+    ],
+    "states": [
+      "enabled",
+      "focusable",
+      "sensitive",
+      "showing",
+      "visible"
+    ],
+    "actions": [
+      "click"
+    ]
+  },
+  {
+    "role": "combo box",
+    "name": "Verification",
+    "interfaces": [
+      "Accessible",
+      "Action",
+      "Component",
+      "Selection"
+    ],
+    "states": [
+      "enabled",
+      "focusable",
+      "sensitive",
+      "showing",
+      "visible"
+    ],
+    "actions": [
+      "click"
+    ]
+  },
+  {
+    "role": "list item",
+    "name": "Not checked",
+    "interfaces": [
+      "Accessible",
+      "Action"
+    ],
+    "states": [
+      "enabled",
+      "focusable",
+      "sensitive",
+      "showing",
+      "visible"
+    ],
+    "actions": [
+      "click"
+    ]
+  },
+  {
+    "role": "combo box",
+    "name": "Requested carrier",
+    "interfaces": [
+      "Accessible",
+      "Action",
+      "Component",
+      "Selection"
+    ],
+    "states": [
+      "enabled",
+      "focusable",
+      "sensitive",
+      "showing",
+      "visible"
+    ],
+    "actions": [
+      "click"
+    ]
+  },
+  {
+    "role": "list item",
+    "name": "f8ff688c5680ab88c27e4297decb5e7640b86a31",
+    "interfaces": [
+      "Accessible",
+      "Action"
+    ],
+    "states": [
+      "enabled",
+      "focusable",
+      "sensitive",
+      "showing",
+      "visible"
+    ],
+    "actions": [
+      "click"
+    ]
+  },
+  {
+    "role": "combo box",
+    "name": "Requested edition",
+    "interfaces": [
+      "Accessible",
+      "Action",
+      "Component",
+      "Selection"
+    ],
+    "states": [
+      "enabled",
+      "focusable",
+      "sensitive",
+      "showing",
+      "visible"
+    ],
+    "actions": [
+      "click"
+    ]
+  },
+  {
+    "role": "list item",
+    "name": "document / a34 #2",
+    "interfaces": [
+      "Accessible",
+      "Action"
+    ],
+    "states": [
+      "enabled",
+      "focusable",
+      "sensitive",
+      "showing",
+      "visible"
+    ],
+    "actions": [
+      "click"
+    ]
+  },
+  {
+    "role": "combo box",
+    "name": "Publication name",
+    "interfaces": [
+      "Accessible",
+      "Action",
+      "Component",
+      "Selection"
+    ],
+    "states": [
+      "enabled",
+      "focusable",
+      "sensitive",
+      "showing",
+      "visible"
+    ],
+    "actions": [
+      "click"
+    ]
+  },
+  {
+    "role": "list item",
+    "name": "document",
+    "interfaces": [
+      "Accessible",
+      "Action"
+    ],
+    "states": [
+      "enabled",
+      "focusable",
+      "sensitive",
+      "showing",
+      "visible"
+    ],
+    "actions": [
+      "click"
+    ]
+  },
+  {
+    "role": "combo box",
+    "name": "Requested publisher",
+    "interfaces": [
+      "Accessible",
+      "Action",
+      "Component",
+      "Selection"
+    ],
+    "states": [
+      "enabled",
+      "focusable",
+      "sensitive",
+      "showing",
+      "visible"
+    ],
+    "actions": [
+      "click"
+    ]
+  },
+  {
+    "role": "list item",
+    "name": "1: 4c6e92c9b3e4abbd75ca25d8fc7cfaa3",
+    "interfaces": [
+      "Accessible",
+      "Action"
+    ],
+    "states": [
+      "enabled",
+      "focusable",
+      "sensitive",
+      "showing",
+      "visible"
+    ],
+    "actions": [
+      "click"
+    ]
+  },
+  {
+    "role": "list item",
+    "name": "2: dc9d45ef2b8fa700e79f3cfca81abf79",
+    "interfaces": [
+      "Accessible",
+      "Action"
+    ],
+    "states": [
+      "enabled",
+      "focusable",
+      "sensitive",
+      "showing",
+      "visible"
+    ],
+    "actions": [
+      "click"
+    ]
+  }
+]

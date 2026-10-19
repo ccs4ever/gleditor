@@ -1,0 +1,4 @@
+ac9f7eed1c1b6ee7b3cb17b33c52e1eeb4859c6eefb6b5b5a1419b381b0f0843  /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-seventeenth/native-baseline/data/xudu/xanadocs/untitled-20261018-154726/ops.nodes
+fc15f548fddd5e8b4cb642ff53d8fc18ecdf00b02499fd08eecba1b0a2b919b4  /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-seventeenth/native-baseline/data/xudu/xanadocs/untitled-20261018-154726/store.tables
+18b70ad052f1f2f2e41e87c989bbfc16089e62299f781b611c8d4d251ff07355  /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-seventeenth/native-baseline/data/xudu/activity/ops.nodes
+74245daadb9b527c08a75b5c2c5b4ae6584a89edf681b70f63094f763511e49c  /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-seventeenth/native-baseline/data/xudu/activity/store.tables

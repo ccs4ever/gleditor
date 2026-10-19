@@ -3,6 +3,7 @@
  * @brief Document presentation and views coordinator for Xudu.
  */
 #include "views.hpp"
+#include "publication_status_form.hpp"
 
 #include <algorithm>
 #include <array>
@@ -1757,23 +1758,7 @@ void Views::publicationDownloadStatus(const std::string &id) {
     try {
       const auto downloaded = session.publicationInbox().status(id);
       using Field           = gleditor::Form::Field;
-      Field action;
-      action.label         = "Action";
-      action.kind          = gleditor::Form::Kind::Choice;
-      action.submitOnEnter = true;
-      action.options       = {"Refresh progress",
-                              "Open completed publication",
-                              "Retry download",
-                              "Cancel download",
-                              "Close",
-                              "Notify me of updates"};
-      action.optionValues  = {"refresh", "open",  "retry",
-                              "cancel",  "close", "subscribe"};
-      auto note = std::string(publicationDownloadPhaseName(downloaded.phase));
-      if (downloaded.dependencyCount)
-        note += " (" + std::to_string(downloaded.completedDependencies) + "/" +
-                std::to_string(downloaded.dependencyCount) + " dependencies)";
-      if (!downloaded.error.empty()) note += ": " + downloaded.error;
+      const auto note       = publicationDownloadSummary(downloaded);
       if (wireframeOverlay_) {
         const auto fraction =
             downloaded.dependencyCount
@@ -1788,11 +1773,10 @@ void Views::publicationDownloadStatus(const std::string &id) {
                                             : downloaded.title,
                                         note, fraction);
       }
-      form.open(
-          "Download publication", std::move(note), {std::move(action)},
-          [this, id](const std::vector<Field> &answers) {
-            const auto action = answers[0].answer();
-            if (action == "close") {
+      openPublicationDownloadForm(
+          form, downloaded,
+          [this, id](PublicationDownloadAction action) {
+            if (action == PublicationDownloadAction::Close) {
               renderer->runWithState([this, id](RenderState &) {
                 if (wireframeOverlay_) wireframeOverlay_->clearTelemetry(id);
               });
@@ -1800,7 +1784,7 @@ void Views::publicationDownloadStatus(const std::string &id) {
             }
             renderer->runWithState([this, id, action](RenderState &) {
               try {
-                if (action == "open") {
+                if (action == PublicationDownloadAction::Open) {
                   const auto [index, version] =
                       session.openDownloadedPublication(id);
                   if (wireframeOverlay_) wireframeOverlay_->clearTelemetry(id);
@@ -1808,9 +1792,11 @@ void Views::publicationDownloadStatus(const std::string &id) {
                   activateNewest();
                   return;
                 }
-                if (action == "retry") session.publicationInbox().retry(id);
-                if (action == "cancel") session.publicationInbox().cancel(id);
-                if (action == "subscribe") {
+                if (action == PublicationDownloadAction::Retry)
+                  session.publicationInbox().retry(id);
+                if (action == PublicationDownloadAction::Cancel)
+                  session.publicationInbox().cancel(id);
+                if (action == PublicationDownloadAction::Subscribe) {
                   const auto subscription =
                       session.publicationSubscriptions().subscribe(id);
                   publicationUpdates(subscription);

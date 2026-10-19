@@ -1,0 +1,11 @@
+SDL_VIDEODRIVER=offscreen
+SDL_AUDIODRIVER=dummy
+LIBGL_ALWAYS_SOFTWARE=1
+XDG_DATA_HOME=/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-seventeenth/native-baseline/data
+XDG_CONFIG_HOME=/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-seventeenth/native-baseline/config
+XDG_CACHE_HOME=/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-seventeenth/native-baseline/cache
+GNUPGHOME=/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-seventeenth/native-baseline/gpg (fresh empty directory; no signing performed)
+Xvfb=-noreset -screen 0 1600x1200x24
+backend=OpenGL
+window=1440x1000
+profile origin=copy of build/validation-sixteenth/native/data and config

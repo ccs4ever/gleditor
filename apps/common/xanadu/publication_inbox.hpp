@@ -23,6 +23,11 @@ enum class PublicationDownloadPhase : std::uint8_t {
   Failed,
   Cancelled
 };
+enum class PublicationDownloadVerification : std::uint8_t {
+  Unchecked,
+  ManifestVerified,
+  Complete
+};
 [[nodiscard]] std::string_view
 publicationDownloadPhaseName(PublicationDownloadPhase phase);
 
@@ -30,7 +35,10 @@ struct PublicationDownloadStatus {
   std::string id;
   std::string uri;
   std::string title;
+  std::optional<PublicationPin> pin;
   PublicationDownloadPhase phase{PublicationDownloadPhase::Queued};
+  PublicationDownloadVerification verification{
+      PublicationDownloadVerification::Unchecked};
   std::uint64_t completedDependencies{};
   std::uint64_t dependencyCount{};
   std::filesystem::path storePath;

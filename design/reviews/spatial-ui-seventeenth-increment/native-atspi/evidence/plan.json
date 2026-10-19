@@ -1,0 +1,33 @@
+{
+  "launch_args": [
+    "--resize", "1440,1000", "--profile", "--wait-ms", "5000",
+    "--chord", "Ctrl+Alt+Shift+L", "--key", "right", "--key", "enter",
+    "--wait-ms", "500", "--key", "tab", "--key", "right",
+    "--chord", "Shift+Tab", "--key", "enter", "--wait-ms", "500",
+    "--key", "right", "--key", "enter", "--wait-ms", "500",
+    "--key", "right", "--wait-ms", "1800", "--dump-a11y", "--capture",
+    "{evidence}/raw/01-open-immediate.ppm", "--key", "enter",
+    "--wait-ms", "400", "--dump-a11y", "--capture",
+    "{evidence}/raw/02-open-refresh-one.ppm", "--wait-ms", "1800",
+    "--key", "enter", "--wait-ms", "400", "--dump-a11y", "--capture",
+    "{evidence}/raw/03-open-failed-before-retry.ppm", "--wait-ms", "10000",
+    "--key", "enter", "--wait-ms", "100", "--dump-a11y", "--capture",
+    "{evidence}/raw/04-retry-submitted.ppm", "--wait-ms", "1800",
+    "--key", "enter", "--wait-ms", "400", "--dump-a11y", "--capture",
+    "{evidence}/raw/05-retry-refreshed.ppm", "--key", "escape",
+    "--chord", "Ctrl+Q"
+  ],
+  "steps": [
+    {"op": "wait_name", "name": "Requested carrier"},
+    {"op": "wait_name", "name": "f8ff688c5680ab88c27e4297decb5e7640b86a31"},
+    {"op": "wait_name", "name": "document / a34 #2"},
+    {"op": "wait_name", "name": "Not checked"},
+    {"op": "wait_name", "name_prefix": "Download failed:"},
+    {"op": "wait_name", "name": "Retry download", "interface": "Action"},
+    {"op": "absent", "name": "Open completed publication"},
+    {"op": "snapshot", "file": "native-before-retry.json"},
+    {"op": "action", "name": "Retry download", "interface": "Action"},
+    {"op": "snapshot", "file": "native-after-action-selection.json"},
+    {"op": "wait_exit", "exit_code": 0}
+  ]
+}

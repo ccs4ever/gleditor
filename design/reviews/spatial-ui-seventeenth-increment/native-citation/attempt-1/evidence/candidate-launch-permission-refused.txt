@@ -1,0 +1,7 @@
+The first tool invocation tried to execute the prepared runner directly before its executable bit was set. The shell refused before the script or application started; no candidate run directory or native state was created by this invocation.
+
+Command:
+build/validation-seventeenth/run-native-citation-candidate.sh /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-seventeenth/frozen/xuzz /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-seventeenth/frozen /data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-seventeenth/frozen/xudu-dump
+
+Shell output: zsh:1: permission denied: build/validation-seventeenth/run-native-citation-candidate.sh
+Exit: 126

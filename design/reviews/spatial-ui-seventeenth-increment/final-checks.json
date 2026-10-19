@@ -1,0 +1,70 @@
+{
+  "base_commit": "f384172930d69513b714e90f08d4663a343ed554",
+  "canonical_build_exits": {
+    "initial_test_api_compile_refusal": 2,
+    "build2": 0,
+    "build3": 0,
+    "build4": 0,
+    "build5_final": 0
+  },
+  "final_ui": {
+    "passed": 246,
+    "total": 246,
+    "exit": 0
+  },
+  "xuzz": {
+    "passed": 107,
+    "total": 107,
+    "exit": 0
+  },
+  "owning_publication_packages": {
+    "passed": 61,
+    "total": 61,
+    "exit": 0
+  },
+  "library_799_and_mip_cache_53_reused_after_hash_verification": true,
+  "reused_evidence": "../spatial-ui-sixteenth-increment/final-checks.json",
+  "reused_binary_sha256": {
+    "build/libgleditor.so.0": "ea4d46e75ce858119626f470045c3cc555956ad2bd4ca9425f3aeffe3e831ce9",
+    "build/gleditor_test": "44562f4e4ea437f8f3c575a8005d5847367860f9b4d4714d2d1b6516cf014f8a"
+  },
+  "accepted_app_sha256": "a1ff64ffb8462dec9594cf4523a3879940140a7f55123ec7e61da00ff628637c",
+  "isolated_accessibility_tests": {
+    "passed": 33,
+    "total": 33,
+    "exit": 0,
+    "filter": "A11y*",
+    "binary_sha256": {
+      "xuzz": "a1ff64ffb8462dec9594cf4523a3879940140a7f55123ec7e61da00ff628637c",
+      "libgleditor.so.0": "dbc8f98265ce47d0900b85a65550a4b5d0e3c43a8a4ba0be6d0055558f65dec1",
+      "gleditor_test": "023095ec745b487d5f4cc860c7f377a1d873896c19354b04035cf7b2158c67d6"
+    },
+    "default_library_results_reused_for_variant": false
+  },
+  "native_AT_SPI_full_parity": false,
+  "optimized_performance_accepted": false,
+  "broad_E2E": false,
+  "actual_split_recording": false,
+  "strict_core": {
+    "exit": 0,
+    "GL_GLES_ordinary_overlay_differing_pixels": 0,
+    "Vulkan_ordinary_percent": 0.5104,
+    "Vulkan_overlay_percent": 0.5096,
+    "channel_tolerance": 1,
+    "limit_percent": 1,
+    "actual_split_recording": false
+  },
+  "format_check_exit": 0,
+  "format_tool": "clang-format 19.1.7 (explicit override; first run used 23.1.1 and failed)",
+  "lint_exit": 0,
+  "text_policy_exit": 0,
+  "native_AT_SPI_subset": {
+    "status": "passed",
+    "application_exit": 0,
+    "scope": "Final native field reads and Retry option selection; ordinary scheduled keyboard submission is a separate operation",
+    "full_text_editing": false,
+    "evidence": "native-atspi-validation.md",
+    "pin_status_interfaces": "Accessible names; no Text interface for those choice/label nodes"
+  },
+  "final_touched_markdown_exit": 0
+}

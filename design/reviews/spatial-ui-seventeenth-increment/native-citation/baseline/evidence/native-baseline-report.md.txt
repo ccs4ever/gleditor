@@ -1,0 +1,32 @@
+# Native no-transport citation baseline
+
+This run continued the genuine sixteenth-increment UI-authored profile by copying only its
+`data/` and `config/` into this run's fresh root. The fresh `cache/` and empty `gpg/` were isolated.
+The immutable app was `build/validation-sixteenth/frozen-accepted/xuzz`, SHA-256
+`19792347b9f012782b71d4906fc61a35fd064e9c86dc5caee926e3bd11980310`; its shared library and dumper
+hashes are in `binary-hashes.txt`. It ran with OpenGL, a 1440×1000 window under Xvfb
+`-noreset -screen 0 1600x1200x24`, and all six headless/XDG variables in `environment.txt`.
+
+Through the UI, I opened Links and responses, selected Review downloaded packages, chose the genuine
+same-name package #2 carrier `722911c0021f2b2352c5efc76c2d683088d6cbac`, and selected Review signed
+endpoints. Its UI review identified the curator key, `signature verified; enrollment unchecked`,
+and the exact cited publication `document #2 / a34`. The action list offered Open related
+publication. Choosing it submitted the citation through the actual inbox control. The immediate
+1440×1000 capture showed `Resolving signed DHT name`; selecting the form's Refresh progress action
+then showed `Download failed: No publication swarm configured. Set up the local test swarm, then
+retry.` This is the observed no-transport failure from the controls. It does not establish an
+unavailable response from a real peer, nor a Ready, pending-cancel, or successful-open outcome.
+
+Frames 04 and 05 were visually inspected. The failure message is fully visible in frame 05. The run
+stopped at the failed download form; Open completed publication was never selected. There is no
+completed-publication entry in this run.
+
+The visit decoder reports one completed visit, current visit 1, payload
+`visit3 0 doc db139f57d99fc5b2ce504a9e834eb489 0 0 0 0 0 0`, and empty references and annotations
+both before and after the UI actions. The source document's operation dumps are byte-identical; its
+`ops.nodes` and `store.tables` hashes match before and after (exact values are in
+`store-file-hashes-before.txt` and `store-file-hashes-after.txt`). The activity store's full
+operation dump changed during shutdown reading-place metadata, but the decoded visit/current state
+did not change. Exact raw PPM hashes are in `raw-ppm-hashes.txt`; each process's argv and full log
+are recorded in adjacent `*-argv.txt` and `*.log` files. The initial malformed `--enter` attempt is
+preserved separately with its exact argv and parser error; it did not launch the app or alter state.

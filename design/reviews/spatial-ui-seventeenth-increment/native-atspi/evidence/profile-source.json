@@ -1,0 +1,8 @@
+{
+  "copied_from": "/data/git/gleditor-restore/.worktrees/spatial-ui-overhaul/build/validation-sixteenth/native",
+  "data_config_only": true,
+  "fresh_directories": ["cache", "gpg"],
+  "process_profile": "build/validation-seventeenth/a11y/evidence/native-atspi-final/run",
+  "application_sha256": "a1ff64ffb8462dec9594cf4523a3879940140a7f55123ec7e61da00ff628637c",
+  "libgleditor_sha256": "dbc8f98265ce47d0900b85a65550a4b5d0e3c43a8a4ba0be6d0055558f65dec1"
+}

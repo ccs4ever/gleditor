@@ -1,0 +1,101 @@
+[
+  {
+    "name": "00-review-before-open",
+    "width": 1440,
+    "height": 1000,
+    "ppm_file": "00-review-before-open.ppm",
+    "ppm_sha256": "c81d47f59e43a966710ad76f66231e8ac02c1982041bdc05e606c19e332af86f",
+    "rgb_sha256": "f265d0265d2c7ea3ef808fc7f531c7a8e9656dcadcc3b2f4c01de02ddcd4c8be",
+    "png_file": "00-review-before-open.png",
+    "png_sha256": "8e86f8bd32065d3e87c62c43fa30ba6086a239bb5b314b88d19e45584f429481",
+    "png_decodes_to_same_rgb_as_ppm": true
+  },
+  {
+    "name": "01-open-immediate",
+    "width": 1440,
+    "height": 1000,
+    "ppm_file": "01-open-immediate.ppm",
+    "ppm_sha256": "1d113ff07ae2449c3b82639915e78c2b147eb1e593af57ab3bbc10da259100a5",
+    "rgb_sha256": "af97cd7b852ad0958f9d0ae41c3c7d5c120b40776b078165aca024d57be1b24e",
+    "png_file": "01-open-immediate.png",
+    "png_sha256": "eb4b0c6fad9e22d55f664d03feb8e4bd75b9304819b21f6e70a6e000a19c5ba2",
+    "png_decodes_to_same_rgb_as_ppm": true
+  },
+  {
+    "name": "02-open-stale-form",
+    "width": 1440,
+    "height": 1000,
+    "ppm_file": "02-open-stale-form.ppm",
+    "ppm_sha256": "1d113ff07ae2449c3b82639915e78c2b147eb1e593af57ab3bbc10da259100a5",
+    "rgb_sha256": "af97cd7b852ad0958f9d0ae41c3c7d5c120b40776b078165aca024d57be1b24e",
+    "png_file": "02-open-stale-form.png",
+    "png_sha256": "eb4b0c6fad9e22d55f664d03feb8e4bd75b9304819b21f6e70a6e000a19c5ba2",
+    "png_decodes_to_same_rgb_as_ppm": true
+  },
+  {
+    "name": "03-open-refreshed-once",
+    "width": 1440,
+    "height": 1000,
+    "ppm_file": "03-open-refreshed-once.ppm",
+    "ppm_sha256": "c908b323c8eb90ac2df423bc16741f3f86bc339672afe0940fbc8fbb3398974a",
+    "rgb_sha256": "86e51dfbe0a40e6dcc787af603ddba055b153a99604f705ec85e4caf7ee9dd3a",
+    "png_file": "03-open-refreshed-once.png",
+    "png_sha256": "95d30f307c44a75b0bbc2a7fe1f60cd2ad7a0b7353fd8690001a594b56e32be5",
+    "png_decodes_to_same_rgb_as_ppm": true
+  },
+  {
+    "name": "04-open-failed-before-retry",
+    "width": 1440,
+    "height": 1000,
+    "ppm_file": "04-open-failed-before-retry.ppm",
+    "ppm_sha256": "c908b323c8eb90ac2df423bc16741f3f86bc339672afe0940fbc8fbb3398974a",
+    "rgb_sha256": "86e51dfbe0a40e6dcc787af603ddba055b153a99604f705ec85e4caf7ee9dd3a",
+    "png_file": "04-open-failed-before-retry.png",
+    "png_sha256": "95d30f307c44a75b0bbc2a7fe1f60cd2ad7a0b7353fd8690001a594b56e32be5",
+    "png_decodes_to_same_rgb_as_ppm": true
+  },
+  {
+    "name": "05-retry-immediate",
+    "width": 1440,
+    "height": 1000,
+    "ppm_file": "05-retry-immediate.ppm",
+    "ppm_sha256": "ba1cd96e7bd9aa276d3f5012a53ccfdef457415c3cf7cfc2869d068edf450e31",
+    "rgb_sha256": "22b40d6c590dca3abfafd82f5160cf47ddd812867275f28814530c6f9115bd62",
+    "png_file": "05-retry-immediate.png",
+    "png_sha256": "dc1208ee89b0c0fa16777b0871b8fa673be7229a42d53e1ab52a26f4a0c699ca",
+    "png_decodes_to_same_rgb_as_ppm": true
+  },
+  {
+    "name": "06-retry-result-refreshed",
+    "width": 1440,
+    "height": 1000,
+    "ppm_file": "06-retry-result-refreshed.ppm",
+    "ppm_sha256": "c908b323c8eb90ac2df423bc16741f3f86bc339672afe0940fbc8fbb3398974a",
+    "rgb_sha256": "86e51dfbe0a40e6dcc787af603ddba055b153a99604f705ec85e4caf7ee9dd3a",
+    "png_file": "06-retry-result-refreshed.png",
+    "png_sha256": "95d30f307c44a75b0bbc2a7fe1f60cd2ad7a0b7353fd8690001a594b56e32be5",
+    "png_decodes_to_same_rgb_as_ppm": true
+  },
+  {
+    "name": "07-review-after-failure",
+    "width": 1440,
+    "height": 1000,
+    "ppm_file": "07-review-after-failure.ppm",
+    "ppm_sha256": "dfb05305f6af6808847f426ba3729d63e48275089d7540c54eafa1016881c2fd",
+    "rgb_sha256": "1e21b55f02a5f8395cd26ae5a3d9a1aa2f9c53931298763fe5bab01e5f802e48",
+    "png_file": "07-review-after-failure.png",
+    "png_sha256": "21f158d6f3c852b370a235ea44a57d46b20245d9746e0803ffae8981a67870c4",
+    "png_decodes_to_same_rgb_as_ppm": true
+  },
+  {
+    "name": "08-same-citation-reopened",
+    "width": 1440,
+    "height": 1000,
+    "ppm_file": "08-same-citation-reopened.ppm",
+    "ppm_sha256": "c908b323c8eb90ac2df423bc16741f3f86bc339672afe0940fbc8fbb3398974a",
+    "rgb_sha256": "86e51dfbe0a40e6dcc787af603ddba055b153a99604f705ec85e4caf7ee9dd3a",
+    "png_file": "08-same-citation-reopened.png",
+    "png_sha256": "95d30f307c44a75b0bbc2a7fe1f60cd2ad7a0b7353fd8690001a594b56e32be5",
+    "png_decodes_to_same_rgb_as_ppm": true
+  }
+]

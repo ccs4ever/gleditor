@@ -1,0 +1,5 @@
+{
+  "status": "passed",
+  "scope": "native AT-SPI operations only",
+  "exit_code": 0
+}

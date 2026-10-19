@@ -1,0 +1,51 @@
+{
+  "binary": {
+    "path": "build/validation-seventeenth/a11y/xuzz",
+    "sha256": "a1ff64ffb8462dec9594cf4523a3879940140a7f55123ec7e61da00ff628637c"
+  },
+  "library": {
+    "path": "build/validation-seventeenth/a11y/libgleditor.so.0",
+    "sha256": "dbc8f98265ce47d0900b85a65550a4b5d0e3c43a8a4ba0be6d0055558f65dec1"
+  },
+  "profile": {
+    "source": "build/validation-sixteenth/native",
+    "copied": ["data", "config"],
+    "fresh": ["cache", "gpg"],
+    "profile_directory_archived": false
+  },
+  "execution": {
+    "display": "Xvfb X11, 1600x1200x24, -noreset",
+    "backend": "OpenGL with LIBGL_ALWAYS_SOFTWARE=1",
+    "dbus_session": true,
+    "app_exit_code": 0,
+    "actions": [
+      "AT-SPI action on Retry download selected the option",
+      "scheduled Return submitted the selected option",
+      "scheduled Return refreshed the queued form to a no-connection failure",
+      "scheduled Escape and Ctrl+Q closed the app"
+    ]
+  },
+  "observations": {
+    "requested_carrier": "f8ff688c5680ab88c27e4297decb5e7640b86a31",
+    "requested_edition": "document / a34 #2",
+    "publication_name": "document",
+    "requested_publisher": "1: 4c6e92c9b3e4abbd75ca25d8fc7cfaa3",
+    "verification": "Not checked",
+    "configured_connection": false,
+    "content_availability_checked": false,
+    "pin_and_status_exposed_as_text_interfaces": false,
+    "accessible_name_and_action_exposed": true,
+    "completed_activity_visits_before_after": [1, 1],
+    "current_activity_visit_before_after": [1, 1],
+    "source_store_dump_unchanged": true,
+    "package_visibility_unchanged": true,
+    "transport_mocked": false
+  },
+  "frames": "frames/ with full per-frame PPM/RGB/PNG hashes in evidence/frame-provenance.json",
+  "focused_tests": {
+    "a11y_test_count": 33,
+    "a11y_test_suites": 6,
+    "build_exit": 0,
+    "test_exit": 0
+  }
+}
