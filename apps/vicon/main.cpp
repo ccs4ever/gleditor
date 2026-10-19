@@ -39,7 +39,11 @@ void printHelp() {
 }
 
 void printResults(Driver &driver) {
-  driver.every([](std::string_view text) { std::cout << text << "\n"; });
+  driver.every([](std::string_view text) {
+    if (!text.empty()) {
+      std::cout << text << "\n";
+    }
+  });
 }
 
 void runRepl(Driver &driver) {

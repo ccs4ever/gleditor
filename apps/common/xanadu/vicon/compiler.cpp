@@ -656,54 +656,34 @@ std::expected<CellRef, CompileFailure> Compiler::emitWhile(const EWhile &e) {
 }
 
 std::expected<CellRef, CompileFailure> Compiler::emitUntil(const EUntil &e) {
-  // The repeat frame is pushed AFTER the body — the body's Bind writes then
-  // sit under the next-outer mark and survive the pop that loops back, so
-  // `until i >= 3 do i := i + 1` actually counts. `done` is a
-  // compile-minted flag like emitIf's: once the condition succeeds it stays
-  // set, and every resume pops a frame whose guarded alt dies on it —
-  // `until` yields &null once, not once per frame.
-  const CellRef done = core_.arena().makeCell();
-  CellRef init       = mintOp(OpcodeKind::Value, "VICON_UNTIL_INIT");
-  CellRef dead       = mintOp(OpcodeKind::Fail, "VICON_UNTIL_DEAD");
-  CellRef guard      = mintOp(OpcodeKind::Branch, "VICON_UNTIL_GUARD");
-  CellRef push       = mintOp(OpcodeKind::Choice, "VICON_UNTIL");
-  CellRef setD       = mintOp(OpcodeKind::Value, "VICON_UNTIL_DONE");
-  CellRef setJ       = mintOp(OpcodeKind::Jump, "VICON_UNTIL_DONEJ");
-  // d.spin edges are mutual: body's NEG slot can name only one predecessor,
-  // so the guard's loop-back goes through a Jump (by-value target), leaving
-  // init -> body as the single incoming edge.
-  CellRef gJump      = mintOp(OpcodeKind::Jump, "VICON_UNTIL_GJUMP");
-
+  // `until e1 do e2`: loop condition is evaluated at each iteration.
+  // When e1 fails, #Fail pops to body and loops back.
+  // When e1 succeeds, it cuts the loop choice point and finishes with &null.
+  CellRef loopHead    = mintOp(OpcodeKind::Choice, "VICON_UNTIL_HEAD");
+  CellRef cutOp       = mintOp(OpcodeKind::Cut, "VICON_UNTIL_CUT");
+  CellRef loopBack    = mintOp(OpcodeKind::Jump, "VICON_UNTIL_LOOP");
   const CellRef prodE = emitProduce(nullCell_);
-  auto body = nullptr == e.body ? std::expected<CellRef, CompileFailure>{push}
-                                : emitInto(*e.body, scratchCell_, push);
+
+  auto body = nullptr == e.body
+                  ? std::expected<CellRef, CompileFailure>{loopBack}
+                  : emitInto(*e.body, scratchCell_, loopBack);
   if (!body) {
     return body;
   }
-  auto cond = emitBounded(*e.cond, scratchCell_, setD);
+
+  auto cond = emitBounded(*e.cond, scratchCell_, cutOp);
   if (!cond) {
     return cond;
   }
 
-  spin(init, *body);
-  spin(push, *cond);
-  spin(guard, gJump);
-  spin(setD, setJ);
+  spin(loopHead, *cond);
+  spin(cutOp, prodE);
+  spin(loopBack, loopHead);
 
-  core_.bindInput(init, done);
-  core_.bindInput(init, zero_);
-  core_.bindInput(init, negOne_);
-  core_.bindInput(init, zero_);
-  core_.bindInput(push, opref(guardedAlt(guard)));
-  core_.bindInput(guard, done);
-  core_.bindInput(guard, opref(dead));
-  core_.bindInput(gJump, opref(*body));
-  core_.bindInput(setD, done);
-  core_.bindInput(setD, zero_);
-  core_.bindInput(setD, negOne_);
-  core_.bindInput(setD, one_);
-  core_.bindInput(setJ, opref(prodE));
-  return init;
+  core_.bindInput(loopHead, opref(guardedAlt(*body)));
+  core_.bindInput(loopBack, opref(loopHead));
+
+  return loopHead;
 }
 
 // -- Calls
@@ -849,8 +829,8 @@ Compiler::compile(const Program &program) {
     }
     // Patch the call-site indirection cell to the body's entry op now that
     // the body exists (forward references and recursion both resolve here).
-    std::ignore             = core_.value(procTargets_[decl.name], 0, -1,
-                                          CellValue{static_cast<std::int64_t>(*body)});
+    std::ignore = core_.value(procTargets_[decl.name], 0, -1,
+                              CellValue{static_cast<std::int64_t>(*body)});
     procEntries_[decl.name] = *body;
   }
 
