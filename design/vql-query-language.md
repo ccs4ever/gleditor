@@ -64,6 +64,13 @@ ______________________________________________________________________
     - [Virtual Computed Dimensions][toc-33]
     - [Bidirectional Morphisms: Put/Get Lenses][toc-34]
     - [Systems Lowering: DynamicLensMatrix and SIMD Evaluation][toc-35]
+  - [4.11 First-Class Stores, Slices, Hypertime Pinning & Version Arithmetic][toc-38]
+    - [First-Class Store, Slice, Doc, and Hypertime Types][toc-39]
+    - [Store Generators and Slice/Doc Enumeration][toc-40]
+    - [The "Anything-to-ZigZag" Lens and Span Provenance][toc-41]
+    - [Hypertime Version Pinning across Folds][toc-42]
+    - [MicroversionId Literals and Hypertime Arithmetic][toc-43]
+    - [Systems Lowering: HyperHandle, LCA Time-Travel, and Open-Addressing Pinning][toc-44]
 - [5. Memory Management & Topological Garbage Collection][toc-06]
 - [6. Canonical Production Query Examples](#6-canonical-production-query-examples)
   - [6.1 Deep Structural Navigation with Zero-Copy Slice][toc-07]
@@ -74,6 +81,8 @@ ______________________________________________________________________
   - [6.6 Conditional Shape Morphisms and Lens Masking][toc-21]
   - [6.7 Distributed Job Orchestration and Multi-Machine Aggregation][toc-36]
   - [6.8 Cross-Store Transclusion Pipeline with Transcopyright Settlement][toc-37]
+  - [6.9 Multi-Store Swarm Navigation and Dynamic Slice Filtering][toc-45]
+  - [6.10 Hypertime Pinning, Manifold Folds & Microversion Arithmetic][toc-46]
 - [7. Reconciliation with the Unified Store/Slice](#7-reconciliation-with-the-unified-storeslice)
   - [7.1 Two regimes, and a query can be in either](#71-two-regimes-and-a-query-can-be-in-either)
   - [7.2 `##` is the origin cell, but the origin is not cell zero][toc-10]
@@ -171,65 +180,84 @@ mutations driven by the atomic engine:
   materialization manifolds. A dynamic lens is a 64-byte cache-line aligned `DynamicLensMatrix` that
   applies axis permutations (`d.1 <=> d.tag`), virtual computed dimensions (`+d.active := expr`),
   and bidirectional getters/putters directly in the hot traversal loop via SIMD bitmasks.
+- **First-Class Stores, Slices, Docs, and Hypertime Coordinates**: Stores, Slices, and Xanadocs are
+  not opaque string handles or external containers; they are first-class runtime types passed in
+  16-byte `HyperHandle` registers. Slices and xanadocs are enumerated via `/slices(...)` and
+  `/docs(...)`, with xanadocs projected into multidimensional zzspace through the canonical
+  "anything-to-zigzag" lens (`d.doc`, `d.transclude`, `d.link`, `d.version`). Hypertime is an
+  accessible spatial axis: slices, docs, and cells can be pinned to historical microversions via
+  `@(v1, v2)`, evaluating living manifold folds across the append-only ops spool, with first-class
+  `MicroversionId` literals (`@2a9`) and stack-inline topological arithmetic (`+`, `-`, `/`, `..`).
 
 ______________________________________________________________________
 
 ## 2. Syntactic Token & Structural Shorthand Matrix
 
-| Token / Operator         | Structural Equivalent            | Functional & Spatial Semantic Mapping                                                                                                                                                          |
-| ------------------------ | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `##`                     | Origin Anchor (`home`)           | Grounds query context to the system origin: a minted genesis cell. Never `0`, which is the absence of a cell -- see §7.2.                                                                      |
-| `##btpk(key, salt)`      | BEP 46 Author Pointer            | Resolves author's mutable ops spool tip via Ed25519 key and salt — see §4.9.1.                                                                                                                 |
-| `##topic(tag)`           | Topic Swarm Stream               | Discovers and streams stores announced in DHT topic swarm — see §4.9.1.                                                                                                                        |
-| `##citing(target)`       | Backlink Stream                  | Discovers all stores and documents transcluding or citing target — see §4.9.1.                                                                                                                 |
-| `##find(query)`          | Full-Text Search Stream          | In-process SQLite FTS5 BM25 ranked search across catalogs — see §4.9.1.                                                                                                                        |
-| `##btih(hash)`           | Immutable Content Hash           | Binds to frozen BitTorrent publication archive by InfoHash — see §4.9.1.                                                                                                                       |
-| `##ledger(root)`         | Merkle Ledger Checkpoint         | Opens append-only publication & identity ledger at Merkle root — see §4.9.1.                                                                                                                   |
-| `##system(domain)`       | Sovereign System Store           | Binds to local sovereign store (`keymap`, `settings`, `activity`, etc.) — see §4.9.1.                                                                                                          |
-| `/##`                    | Federated Hop                    | Navigates across a foreign store reference or network bridge into a remote manifold — see §4.9.1.                                                                                              |
-| `mount <anchor> as +d.d` | Dimension Mount                  | Dynamically binds a remote store/slice into local session dimensions without spool mutation — see §4.9.2.                                                                                      |
-| `#`                      | Root Metacells                   | Lazily streams all disjoint root manifold entry points across the matrix.                                                                                                                      |
-| `^`                      | Process Manifold (`d.cursors`)   | Streams all active Spin-Head execution cursor threads. Never a pinning cursor -- those are on their own Root Set rank, `d.pinning-cursors` (§7.5).                                             |
-| `^NAME`                  | `^[d.name = "NAME"]`             | Short-circuits the cursor scan, locking directly onto the named thread node. A cursor is named by a cell on its `d.name` rank rather than by its own content -- §6.1 spells the long form out. |
-| `.`                      | Context Identity                 | The current step's context cell — a valid anchor on its own, or `render(context)` when a host value is wanted.                                                                                 |
-| `/d.dim`                 | `LazyRankStream(d.dim, posward)` | Traverses `d.dim`'s entire rank posward from context cell — canonical `d.` form required.                                                                                                      |
-| `/-d.dim`                | `LazyRankStream(d.dim, negward)` | Traverses `d.dim`'s entire rank negward — the `-` binds to the dimension name, not the operator.                                                                                               |
-| `/~d.dim`                | `LazyRankStream(d.dim, both)`    | Traverses both negward and posward along `d.dim` from context cell (2-way fan-out stream) — see §4.8.4.                                                                                        |
-| `/d.dim%`                | Create (`link(., ±d.dim, -1)`)   | Allocates a new cell along `d.dim` (at the tail of any existing rank); see §4.5.                                                                                                               |
-| `/d.dim%VALUE`           | Create + init                    | Allocates and initializes a new cell's content to `VALUE` — bare, quoted, or `$variable`.                                                                                                      |
-| `/d.dim%%...`            | Batch create                     | Each additional `%` allocates one more cell along `d.dim`; all of them join the step's result set — see §4.5.                                                                                  |
-| `"key" => val`           | Sprout Morphism                  | Sprouts quoted key literal along `+d.vars`, scalar value along `+d.values`; context kept — see §4.8.5.                                                                                         |
-| `"key" => list(...)`     | Multi-Value Sprout               | Sprouts quoted key along `+d.vars`, values chained along `+d.values`; context kept — see §4.8.5.                                                                                               |
-| `±d.dim => val`          | Dimension Morphism               | Links fresh cell with `val` along canonical dimension `±d.dim`; context kept on origin cell — see §4.8.5.                                                                                      |
-| `tgt <~ src.[off, len]`  | Transclusion Morphism            | Zero-copy links `PrimediaSpan` into target cell without writing bytes to permascroll — see §4.9.3.                                                                                             |
-| `@persp: ±d.dim => val`  | Perspective Morphism             | Links under an observer perspective, minting a `d.clone` cell to preserve $\deg^\pm \le 1$ — see §4.9.4.                                                                                       |
-| `d.x <=> d.y`            | Dimension Pivot                  | Dynamically swaps or projects coordinate dimensions in lens views ($O(1)$) — see §4.10.1.                                                                                                      |
-| `+d.dim := expr`         | Virtual Dimension                | Dynamically synthesizes a transient computed dimension evaluated on demand — see §4.10.2.                                                                                                      |
-| `lens(get:, put:)`       | Bidirectional Lens               | Defines bidirectional projection mapping between view cells and underlying manifold — see §4.10.3.                                                                                             |
-| `watch $path { ... }`    | Reactive Observer                | Streams live hypertime diffs and rank changes via ZZ9P `Zwatch` (`0x0b`) — see §4.9.6.                                                                                                         |
-| `[{...}]`                | Shape Predicate                  | Fast L1 CSR row match: tests presence, absence, and values of local dimensional connections (sugar for `[. ~ {...}]`) — see §4.8.2.                                                            |
-| `$path{...}`             | Shape Mask / Lens                | Projects a shape onto context cells, masking unmentioned dimensions and remapping links (replaces `@lens`) — see §4.8.3.                                                                       |
-| `{}`                     | Empty Shape                      | Drops all connections in projection; tests for unlinked cell (valence 0) in predicates — see §4.8.1.                                                                                           |
-| `{*}`                    | Universal Shape                  | Projects all connections; tests for cell with valence $\ge 1$ — see §4.8.1.                                                                                                                    |
-| `{*, !d.dim}`            | Complement Shape                 | Derives from universal shape `*`, subtracting `d.dim` — see §4.8.1.                                                                                                                            |
-| `{!*, d.dim}`            | Exclusive Shape                  | Derives from empty shape `!*`, including only posward `d.dim` — see §4.8.1.                                                                                                                    |
-| `{ $shape, !d.dim }`     | Shape Derivation                 | Derives a new shape from `$shape`, subtracting or overriding dimensions — see §4.8.1.                                                                                                          |
-| `{ func(.) }`            | Dynamic Shape Embedding          | Embeds dynamically generated shape from a function invocation — see §4.8.1.                                                                                                                    |
-| `{ d.dim: { ... } }`     | Nested Shape                     | Defines multi-hop neighborhood schemas and deep matching — see §4.8.9.                                                                                                                         |
-| `$s/d.dim`, `$s[d.dim]`  | Dimension Extraction             | Extracts sub-shape or target value from shape descriptor via virtual path step or indexing — see §4.8.9.                                                                                       |
-| `{~d.dim}`               | Bidirectional Shape Filter       | Filters out everything except negward and posward on `d.dim` — see §4.8.4.                                                                                                                     |
-| `{ ., d.dim: $var }`     | Shape Destructuring              | Destructures orthogonal neighbors into variables with symmetric `:` syntax — see §4.8.6.                                                                                                       |
-| `sort_into(d, by: ...)`  | Topological Sorter               | Weaves an ordered sequence along `d` sorted by lambda or dimension shorthand (`by: +d.tag` $\equiv$ `by: \(.) ./+d.tag`) — see §4.8.7.                                                         |
-| `def name(...) := ...`   | User-Defined Function            | Declares reusable topological function or shape generator with dual-wing invocation — see §4.8.8.                                                                                              |
-| `A><B`                   | Clone (`link(A, +d.clone, B)`)   | Puts `A` and `B` on one clone rank, so both read its master; chainable (`A><B><C`) and combinable with `%` — see §4.6.                                                                         |
-| `.[offset, length]`      | `value(ctx, off, len)`           | A slice, answered as an ephemeral cell quoting that range of addresses — a transclusion, not a copy.                                                                                           |
-| ~~`@`~~                  | *retired*                        | Was "the numerical `cell_id` of the context node". A cell reference *is* a `cell_id`, so this was `.` spelled twice — see §7.6.                                                                |
-| `[...]`                  | Predicate / Index Window         | Applies inline boolean filters or relative index clamps to a stream. Negative indices count from the end, `-1` being the last cell, so `[1, -2]` is every cell but the last.                   |
-| `d.dim::tail/head/fixed` | Placement                        | Where on the rank a step acts, and whether the path's context follows. `::tail` is the default and is what `%` used to do silently — see §4.5.                                                 |
-| `any/all/none(...)`      | Predicate Assertion              | Quantifies a stream instead of leaving the quantifier implied by position — see §4.3, and the reason `[. != $x]` is not the negation of `[. = $x]`.                                            |
-| `(...)`                  | Macro Dimension Group            | Groups dimensional sequences into a compound traversal segment.                                                                                                                                |
-| `*`                      | Kleene Repetition                | Repeats the preceding macro group zero or more times until termination.                                                                                                                        |
-| `{...}`                  | Weave Block                      | Groups a comma-separated list of effect items under `weave`.                                                                                                                                   |
+| Token / Operator          | Structural Equivalent            | Functional & Spatial Semantic Mapping                                                                                                                                                          |
+| ------------------------- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `##`                      | Origin Anchor (`home`)           | Grounds query context to the system origin: a minted genesis cell. Never `0`, which is the absence of a cell -- see §7.2.                                                                      |
+| `current()`               | Ambient Store Generator          | Yields the active ambient `Store` object — see §4.11.2.                                                                                                                                        |
+| `local(path)`             | Local Store Generator            | Binds local filesystem store from directory or ops spool path — see §4.11.2.                                                                                                                   |
+| `topic(tag)`, `btpk(...)` | Sovereign Store Generators       | Yields a stream of first-class `Store` handles discovered via DHT or BEP 46 — see §4.11.2.                                                                                                     |
+| `/slices`, `/slices(...)` | Slice Enumeration & Filter       | Enumerates slices of a store, filtering by name or boolean attribute predicate — see §4.11.2.                                                                                                  |
+| `/docs`, `/docs(...)`     | Xanadoc Lens Enumeration         | Projects xanadocs into zzspace via the anything-to-zigzag lens (`d.doc`, `d.transclude`, `d.link`) — see §4.11.3.                                                                              |
+| `L/##`                    | Genesis Selector                 | Resolves the primary origin/home `CellRef` from a Store, Slice, or Doc — see §4.11.2.                                                                                                          |
+| `target@(v1, v2)`         | Hypertime Version Pinning        | Pins slice, doc, or cell to microversions, streaming historical manifold folds across hypertime — see §4.11.4.                                                                                 |
+| `@2a9`                    | Microversion Literal             | First-class `MicroversionId` coordinate in OSMIC hypertime — see §4.11.5.                                                                                                                      |
+| `$v + 1`, `$v - 1`        | Hypertime Step                   | Advances sequentially (`next()`) or steps backward to parent (`parent()`) in hypertime — see §4.11.5.                                                                                          |
+| `$v / "a"`                | Hypertime Branch                 | Forks a new child branch off hypertime state `$v` — see §4.11.5.                                                                                                                               |
+| `$v1 .. $v2`              | Hypertime Range                  | Lazily streams the causal ancestry path of microversions between `$v1` and `$v2` — see §4.11.5.                                                                                                |
+| `##btpk(key, salt)`       | BEP 46 Author Pointer            | Resolves author's mutable ops spool tip via Ed25519 key and salt — see §4.9.1.                                                                                                                 |
+| `##topic(tag)`            | Topic Swarm Stream               | Discovers and streams stores announced in DHT topic swarm — see §4.9.1.                                                                                                                        |
+| `##citing(target)`        | Backlink Stream                  | Discovers all stores and documents transcluding or citing target — see §4.9.1.                                                                                                                 |
+| `##find(query)`           | Full-Text Search Stream          | In-process SQLite FTS5 BM25 ranked search across catalogs — see §4.9.1.                                                                                                                        |
+| `##btih(hash)`            | Immutable Content Hash           | Binds to frozen BitTorrent publication archive by InfoHash — see §4.9.1.                                                                                                                       |
+| `##ledger(root)`          | Merkle Ledger Checkpoint         | Opens append-only publication & identity ledger at Merkle root — see §4.9.1.                                                                                                                   |
+| `##system(domain)`        | Sovereign System Store           | Binds to local sovereign store (`keymap`, `settings`, `activity`, etc.) — see §4.9.1.                                                                                                          |
+| `/##`                     | Federated Hop                    | Navigates across a foreign store reference or network bridge into a remote manifold — see §4.9.1.                                                                                              |
+| `mount <anchor> as +d.d`  | Dimension Mount                  | Dynamically binds a remote store/slice into local session dimensions without spool mutation — see §4.9.2.                                                                                      |
+| `#`                       | Root Metacells                   | Lazily streams all disjoint root manifold entry points across the matrix.                                                                                                                      |
+| `^`                       | Process Manifold (`d.cursors`)   | Streams all active Spin-Head execution cursor threads. Never a pinning cursor -- those are on their own Root Set rank, `d.pinning-cursors` (§7.5).                                             |
+| `^NAME`                   | `^[d.name = "NAME"]`             | Short-circuits the cursor scan, locking directly onto the named thread node. A cursor is named by a cell on its `d.name` rank rather than by its own content -- §6.1 spells the long form out. |
+| `.`                       | Context Identity                 | The current step's context cell — a valid anchor on its own, or `render(context)` when a host value is wanted.                                                                                 |
+| `/d.dim`                  | `LazyRankStream(d.dim, posward)` | Traverses `d.dim`'s entire rank posward from context cell — canonical `d.` form required.                                                                                                      |
+| `/-d.dim`                 | `LazyRankStream(d.dim, negward)` | Traverses `d.dim`'s entire rank negward — the `-` binds to the dimension name, not the operator.                                                                                               |
+| `/~d.dim`                 | `LazyRankStream(d.dim, both)`    | Traverses both negward and posward along `d.dim` from context cell (2-way fan-out stream) — see §4.8.4.                                                                                        |
+| `/d.dim%`                 | Create (`link(., ±d.dim, -1)`)   | Allocates a new cell along `d.dim` (at the tail of any existing rank); see §4.5.                                                                                                               |
+| `/d.dim%VALUE`            | Create + init                    | Allocates and initializes a new cell's content to `VALUE` — bare, quoted, or `$variable`.                                                                                                      |
+| `/d.dim%%...`             | Batch create                     | Each additional `%` allocates one more cell along `d.dim`; all of them join the step's result set — see §4.5.                                                                                  |
+| `"key" => val`            | Sprout Morphism                  | Sprouts quoted key literal along `+d.vars`, scalar value along `+d.values`; context kept — see §4.8.5.                                                                                         |
+| `"key" => list(...)`      | Multi-Value Sprout               | Sprouts quoted key along `+d.vars`, values chained along `+d.values`; context kept — see §4.8.5.                                                                                               |
+| `±d.dim => val`           | Dimension Morphism               | Links fresh cell with `val` along canonical dimension `±d.dim`; context kept on origin cell — see §4.8.5.                                                                                      |
+| `tgt <~ src.[off, len]`   | Transclusion Morphism            | Zero-copy links `PrimediaSpan` into target cell without writing bytes to permascroll — see §4.9.3.                                                                                             |
+| `@persp: ±d.dim => val`   | Perspective Morphism             | Links under an observer perspective, minting a `d.clone` cell to preserve $\deg^\pm \le 1$ — see §4.9.4.                                                                                       |
+| `d.x <=> d.y`             | Dimension Pivot                  | Dynamically swaps or projects coordinate dimensions in lens views ($O(1)$) — see §4.10.1.                                                                                                      |
+| `+d.dim := expr`          | Virtual Dimension                | Dynamically synthesizes a transient computed dimension evaluated on demand — see §4.10.2.                                                                                                      |
+| `lens(get:, put:)`        | Bidirectional Lens               | Defines bidirectional projection mapping between view cells and underlying manifold — see §4.10.3.                                                                                             |
+| `watch $path { ... }`     | Reactive Observer                | Streams live hypertime diffs and rank changes via ZZ9P `Zwatch` (`0x0b`) — see §4.9.6.                                                                                                         |
+| `[{...}]`                 | Shape Predicate                  | Fast L1 CSR row match: tests presence, absence, and values of local dimensional connections (sugar for `[. ~ {...}]`) — see §4.8.2.                                                            |
+| `$path{...}`              | Shape Mask / Lens                | Projects a shape onto context cells, masking unmentioned dimensions and remapping links (replaces `@lens`) — see §4.8.3.                                                                       |
+| `{}`                      | Empty Shape                      | Drops all connections in projection; tests for unlinked cell (valence 0) in predicates — see §4.8.1.                                                                                           |
+| `{*}`                     | Universal Shape                  | Projects all connections; tests for cell with valence $\ge 1$ — see §4.8.1.                                                                                                                    |
+| `{*, !d.dim}`             | Complement Shape                 | Derives from universal shape `*`, subtracting `d.dim` — see §4.8.1.                                                                                                                            |
+| `{!*, d.dim}`             | Exclusive Shape                  | Derives from empty shape `!*`, including only posward `d.dim` — see §4.8.1.                                                                                                                    |
+| `{ $shape, !d.dim }`      | Shape Derivation                 | Derives a new shape from `$shape`, subtracting or overriding dimensions — see §4.8.1.                                                                                                          |
+| `{ func(.) }`             | Dynamic Shape Embedding          | Embeds dynamically generated shape from a function invocation — see §4.8.1.                                                                                                                    |
+| `{ d.dim: { ... } }`      | Nested Shape                     | Defines multi-hop neighborhood schemas and deep matching — see §4.8.9.                                                                                                                         |
+| `$s/d.dim`, `$s[d.dim]`   | Dimension Extraction             | Extracts sub-shape or target value from shape descriptor via virtual path step or indexing — see §4.8.9.                                                                                       |
+| `{~d.dim}`                | Bidirectional Shape Filter       | Filters out everything except negward and posward on `d.dim` — see §4.8.4.                                                                                                                     |
+| `{ ., d.dim: $var }`      | Shape Destructuring              | Destructures orthogonal neighbors into variables with symmetric `:` syntax — see §4.8.6.                                                                                                       |
+| `sort_into(d, by: ...)`   | Topological Sorter               | Weaves an ordered sequence along `d` sorted by lambda or dimension shorthand (`by: +d.tag` $\equiv$ `by: \(.) ./+d.tag`) — see §4.8.7.                                                         |
+| `def name(...) := ...`    | User-Defined Function            | Declares reusable topological function or shape generator with dual-wing invocation — see §4.8.8.                                                                                              |
+| `A><B`                    | Clone (`link(A, +d.clone, B)`)   | Puts `A` and `B` on one clone rank, so both read its master; chainable (`A><B><C`) and combinable with `%` — see §4.6.                                                                         |
+| `.[offset, length]`       | `value(ctx, off, len)`           | A slice, answered as an ephemeral cell quoting that range of addresses — a transclusion, not a copy.                                                                                           |
+| ~~`@`~~                   | *retired*                        | Was "the numerical `cell_id` of the context node". A cell reference *is* a `cell_id`, so this was `.` spelled twice — see §7.6.                                                                |
+| `[...]`                   | Predicate / Index Window         | Applies inline boolean filters or relative index clamps to a stream. Negative indices count from the end, `-1` being the last cell, so `[1, -2]` is every cell but the last.                   |
+| `d.dim::tail/head/fixed`  | Placement                        | Where on the rank a step acts, and whether the path's context follows. `::tail` is the default and is what `%` used to do silently — see §4.5.                                                 |
+| `any/all/none(...)`       | Predicate Assertion              | Quantifies a stream instead of leaving the quantifier implied by position — see §4.3, and the reason `[. != $x]` is not the negation of `[. = $x]`.                                            |
+| `(...)`                   | Macro Dimension Group            | Groups dimensional sequences into a compound traversal segment.                                                                                                                                |
+| `*`                       | Kleene Repetition                | Repeats the preceding macro group zero or more times until termination.                                                                                                                        |
+| `{...}`                   | Weave Block                      | Groups a comma-separated list of effect items under `weave`.                                                                                                                                   |
 
 There is a single traversal operator: `/` already walks a whole rank, so there is no "one hop" form
 to distinguish it from, and direction is a property of the dimension name (an optional leading `-`
@@ -270,10 +298,30 @@ EffectItem            ::= LetClause | PathExpression | ForClause EffectClause
 
 ConditionalClause     ::= "if" BooleanExpr ActionClause ( "else" ActionClause )?
 
-PathExpression        ::= AnchorNode PathStep* ShapeProjection? CloneTail?
+PathExpression        ::= AnchorNode VersionPin? PathStep* ShapeProjection? CloneTail?
 ShapeProjection       ::= "{" ShapeRule ( "," ShapeRule )* "}"
 
-AnchorNode            ::= StoreAnchor | "#" | NamedCursor | VariableRef | LiteralCellId | "."
+AnchorNode            ::= StoreGenerator
+                        | StoreAnchor
+                        | "#"
+                        | NamedCursor
+                        | VariableRef
+                        | MicroversionLiteral
+                        | LiteralCellId
+                        | "."
+
+StoreGenerator        ::= StoreGenOp "(" ArgumentList? ")"
+StoreGenOp            ::= "current"
+                        | "local"
+                        | "topic"
+                        | "btpk"
+                        | "citing"
+                        | "backlinks"
+                        | "find"
+                        | "system"
+                        | "btih"
+                        | "ledger"
+
 StoreAnchor           ::= "##" StoreSpec? SliceSelector? DerefMaster?
 StoreSpec             ::= Identifier ( "(" ArgumentList? ")" )?
 SliceSelector         ::= "#" Identifier
@@ -282,8 +330,40 @@ NamedCursor           ::= "^" [a-zA-Z_][a-zA-Z0-9_]*
 VariableRef           ::= "$" [a-zA-Z_][a-zA-Z0-9_]*
 LiteralCellId         ::= [0-9]+
 
-PathStep              ::= ( "/" | "/##" ) StepSelector PredicateClause* RangeClamp? Yield?
-StepSelector          ::= PathMorphism | DimensionPivot | VirtualDimensionDef | SignedDimension CreateSuffix? | MacroDimensionGroup | FunctionInvocation
+PathStep              ::= "/" StepSelector VersionPin? PredicateClause* RangeClamp? Yield?
+StepSelector          ::= GenesisSelector
+                        | SliceSelectorStep
+                        | DocSelectorStep
+                        | PathMorphism
+                        | DimensionPivot
+                        | VirtualDimensionDef
+                        | SignedDimension CreateSuffix?
+                        | MacroDimensionGroup
+                        | FunctionInvocation
+
+GenesisSelector       ::= "##"
+SliceSelectorStep     ::= "slices" ( "(" SliceFilterArg? ")" )?
+SliceFilterArg        ::= StringLiteral | BooleanExpr
+DocSelectorStep       ::= "docs" ( "(" DocFilterArg? ")" )?
+DocFilterArg          ::= StringLiteral | BooleanExpr
+
+VersionPin            ::= "@" VersionPinSpec
+VersionPinSpec        ::= "(" VersionPinArgs ")" | MicroversionLiteral | VariableRef
+VersionPinArgs        ::= VersionExpr ( ( "," | ".." ) VersionExpr )?
+
+MicroversionLiteral   ::= "@" [0-9]+ ( [a-z]+ [0-9]+ )*
+TypedVersionLiteral   ::= 'v"' [0-9]+ ( [a-z]+ [0-9]+ )* '"'
+BareVersion           ::= [0-9]+ ( [a-z]+ [0-9]+ )*
+
+VersionExpr           ::= VersionRangeExpr
+VersionRangeExpr      ::= VersionAdditiveExpr ( ".." VersionAdditiveExpr )?
+VersionAdditiveExpr   ::= VersionBranchExpr ( ( "+" | "-" ) ( NumericLiteral | VariableRef ) )*
+VersionBranchExpr     ::= VersionPrimary ( "/" ( StringLiteral | NumericLiteral | VariableRef ) )?
+VersionPrimary        ::= MicroversionLiteral
+                        | BareVersion
+                        | TypedVersionLiteral
+                        | VariableRef
+                        | "(" VersionExpr ")"
 
 PathMorphism          ::= ( PerspectiveQualifier? MorphismSubject ) ( "=>" ( SproutList | ValueExpr ) | "<~" TransclusionSource )
 PerspectiveQualifier  ::= "@" Identifier ":"
@@ -328,7 +408,15 @@ PredicateTest         ::= PathExpression | "." | ExtendedTruthinessCheck | Funct
 
 ExtendedTruthinessCheck ::= "?" ( PathExpression | ValueExpr )
 
-ValueExpr             ::= LensSpec | PathLambda | PathExpression | ScalarLiteral | VariableRef | ShapeLiteral | ShapeIndexExpr | FunctionInvocation
+ValueExpr             ::= VersionExpr
+                        | LensSpec
+                        | PathLambda
+                        | PathExpression
+                        | ScalarLiteral
+                        | VariableRef
+                        | ShapeLiteral
+                        | ShapeIndexExpr
+                        | FunctionInvocation
 LensSpec              ::= "lens" "(" "get" ":" ValueExpr ( "," "put" ":" ValueExpr )? ")"
 ShapeIndexExpr        ::= VariableRef "[" SignedDimension "]"
 PathLambda            ::= "\\" "(" ( VariableRef | "." ) ( "," VariableRef )* ")" ( PathExpression | ValueExpr )
@@ -424,6 +512,36 @@ A few grammar points worth calling out explicitly:
 
 - **Reactive Watch Blocks (`watch ... { ... }`)**: Binds to ZZ9P `Zwatch` / Merkle spool updates to
   reactively stream hypertime diffs and rank modifications as they happen across machines (§4.9.6).
+
+- **First-Class Store Generators as Anchors (`current()`, `local(...)`, `topic(...)`)**: A
+  `StoreGenerator` discovers or opens a stream of sovereign `Store` handles. Because it begins with
+  a generator identifier followed by `(` (while all canonical dimensions begin with `d.` and other
+  anchors begin with non-identifier sigils), store generators are strictly LL(1) deterministic in
+  anchor and expression positions (§4.11.2).
+
+- **First-Class Slice and Xanadoc Selection (`/slices(...)`, `/docs(...)`)**: Stepping along
+  `/slices` or `/docs` enumerates the slice manifolds or xanadocs contained within the context
+  `Store`. Arguments filter by exact string name (`/slices("canvas")`) or evaluate a boolean
+  predicate on the slice's origin (`/slices(##/d.tag = "foo")`). Xanadocs are projected through the
+  canonical "anything-to-zigzag" lens (`projectXanaduToZigzag`), mapping concatext spans onto
+  `d.doc`, `d.transclude`, `d.link`, and `d.version` without copying raw bytes or breaking
+  `PrimediaSpan` provenance (§4.11.3).
+
+- **Genesis Selection (`/##`)**: Promoting `##` to a first-class `StepSelector` (`GenesisSelector`)
+  allows `/##` to resolve the origin/home `CellRef` from a `Store`, `Slice`, or `Doc` in $O(1)$
+  time, chaining directly into subsequent rank steps (`$slice/##/+d.nodes`).
+
+- **Disambiguation of `@`**: The `@` character is partitioned with $k \le 2$ lookahead:
+
+  1. `@(` opens a hypertime version pin (`@(88, 2a9)` or `@(2a9)`).
+  1. `@<digit>` begins a `MicroversionLiteral` (`@88`, `@2a9`).
+  1. `@<ident>:` specifies a `PerspectiveQualifier` (`@persp:`).
+
+- **Hypertime Version Arithmetic**: Operations on `MicroversionId` coordinates execute in $O(1)$
+  stack/register instructions: `$v + 1` sequentially advances to the next state on the branch
+  (`next()`); `$v - 1` steps to the parent state (`parent()`); `$v / "a"` forks a new branch
+  (`branch(1)`); and `$v1 .. $v2` lazily streams the causal ancestry sequence between states
+  (§4.11.5).
 
 - **A leading `+` is accepted wherever a direction is written, and means what its absence means.**
   `NumericLiteral` takes one, because every example writes directions as `+1`/`-1` for visual
@@ -1415,6 +1533,212 @@ static_assert(sizeof(DynamicLensMatrix) == 64, "DynamicLensMatrix must fit one L
   `_mm_prefetch` for the next 64-byte `CompactOpNode` in the CSR segment, preventing pipeline
   stalls.
 
+### 4.11 First-Class Stores, Slices, Hypertime Pinning & Version Arithmetic
+
+VQL 15.0 unifies the Nelsonian docuverse and OSMIC hypertime by treating **Stores**, **Slices**,
+**Xanadocs**, and **Microversions** as first-class runtime types. Stores cease to be external file
+paths or opaque network URIs; they become first-class values passed in registers, filtered by
+predicates, and navigated across hypertime.
+
+#### 4.11.1 First-Class Store, Slice, Doc, and Hypertime Types
+
+In the Vortex VM, the type universe comprises:
+
+```math
+\text{Type} ::= \text{Store} \mid \text{Slice} \mid \text{Doc} \mid \text{Cell} \mid \text{Version} \mid \text{Shape} \mid \text{Scalar} \mid \text{Stream}\langle \text{Type} \rangle
+```
+
+- **`Store`**: A sovereign repository handle encapsulating an operations spool
+  (`SegmentedOpsSpool`), permascroll storage bindings, and side tables (`store.tables`).
+- **`Slice`**: A sovereign multidimensional ZigZag manifold within a store, defined by its genesis
+  home cell (`##`) and active dimension dispatch table.
+- **`Doc`**: A linear or branching Xanadu concatext document within a store, backed by an EDL
+  (`Spanfilade`).
+- **`Version` (`MicroversionId`)**: A discrete coordinate in OSMIC hypertime, representing an
+  immutable document/manifold state arranged in a bijective base-26 DAG.
+
+To maintain zero memory overhead, handles pass through the Vortex VM's dual-wing parameter registers
+as 16-byte POD descriptors (`HyperHandle`), fitting into two 64-bit machine registers without heap
+allocations.
+
+#### 4.11.2 Store Generators and Slice/Doc Enumeration
+
+Queries initiate from first-class **Store Generators** that return lazy streams of `Store` handles:
+
+- **`current()`**: Resolves the active ambient store of the current session.
+- **`local("path/to/store")`**: Opens a local filesystem store from a directory or ops spool path.
+- **`topic(tag)`**: Streams stores announced in the Mainline DHT topic swarm
+  $\text{Target} = \text{SHA-1}("xanadu:topic:" \parallel \text{canonicalTopic})$.
+- **`btpk(author, salt)`**: Binds an author's mutable publication tip via BEP 46.
+- **`citing(target)` / `backlinks(target)`**: Discovers all stores quoting or linking to `target`.
+- **`find(query)`**: Streams stores matching SQLite FTS5 catalog search with BM25 ranking.
+- **`system(domain)`**: Resolves local sovereign subsystem stores (`keymap`, `settings`,
+  `activity`).
+- **`btih(hash)`** & **`ledger(root)`**: Binds immutable frozen archives or Merkle ledgers.
+
+##### Enumerating and Filtering Slices
+
+A `Store` handle enumerates its constituent slice manifolds via `/slices`:
+
+```
+// Select all slices in the ambient store tagged "physics"
+for $s in current()/slices(##/d.tag = "physics")
+return $s/##/+d.title
+
+// Select the slice named "canvas" from the first topic store
+let $home := topic("hypertext")[1]/slices("canvas")/##
+```
+
+- **String Argument (`/slices("name")`)**: Filters slices by exact name or role descriptor.
+- **Boolean Predicate (`/slices(BooleanExpr)`)**: Evaluates a filter against the slice's genesis
+  cell `##` (or metadata ranks).
+- **Genesis Selection (`/##`)**: Resolves the slice's origin/home `CellRef` in $O(1)$, seamlessly
+  transitioning from the slice handle into its spatial coordinate space.
+- **Auto-Grounding**: Where a dimension step is applied directly to a slice (`$s/+d.nodes`), the
+  engine automatically grounds the path to the slice's origin (`$s/##/+d.nodes`).
+
+#### 4.11.3 The "Anything-to-ZigZag" Lens and Span Provenance
+
+In the sovereign hypermedia architecture, Xanadu hypertext documents and ZigZag multidimensional
+manifolds are not separate worlds. A linear xanadoc is a 1-dimensional projection of an
+N-dimensional ZigZag manifold.
+
+VQL enumerates documents via `/docs` (or `/docs("name")`), projecting them through the canonical
+**"Anything-to-ZigZag" Projector Lens** (`apps/common/xanadu/zigzag/xanadu_projector.hpp`):
+
+```
+for $doc in current()/docs("Literary Machines")
+for $p in $doc/##/d.doc
+return {
+  text: $p/value(),
+  shared_quotes: $p/+d.transclude/origin()
+}
+```
+
+```mermaid
+graph TD
+    subgraph "Projected Xanadoc Slice (projectXanaduToZigzag)"
+        P1["Paragraph 1"]
+        P2["Paragraph 2"]
+        Q1["Remote Document Quote"]
+        L1["Xanalink Annotation"]
+
+        P1 -->|"+d.doc (reading sequence)"| P2
+        P1 -->|"+d.transclude (permascroll overlap)"| Q1
+        P1 -.->|"+d.link (xanalink endpoint)"| L1
+    end
+```
+
+The projector lens maps concatext spans onto four fundamental orthogonal dimensions:
+
+1. **`d.doc`**: Sequential reading rank linking paragraphs in authorial reading order.
+1. **`d.transclude`**: Links cells across independent documents that transclude overlapping spans of
+   invariant primedia on the permascroll.
+1. **`d.link`**: Links xanalink endpoints across documents, providing continuous bidirectional
+   navigation between sources, targets, and link types.
+1. **`d.version`**: Links successive states of paragraphs across microversions in hypertime.
+
+##### Zero-Copy Span Provenance
+
+Every cell projected through `/docs` retains its `XanaduProjectionProvenance`:
+
+```cpp
+struct XanaduProjectionProvenance {
+  std::string            documentId;
+  xanadu::MicroversionId version;
+  xanadu::PrimediaSpan   span; // author_pubkey, spool_id, start_offset, length
+  std::optional<CellRef> sourceCell;
+};
+```
+
+The cell's payload remains a pointer to an immutable `PrimediaSpan` on the author's original
+permascroll. Text is never copied; transclusion beams remain mathematically exact; and in-band
+transcopyright micropayments accurately track character spans down to the byte.
+
+#### 4.11.4 Hypertime Version Pinning across Folds
+
+In OSMIC hypertime, history is an accessible spatial coordinate rather than destroyed past. Slices,
+docs, and cells can be pinned to specific microversions using the `@(...)` operator:
+
+```
+// Stream two historical folds of the same slice across hypertime
+for $fold in current()/slices("canvas")@(88, 2a9)
+return $fold/##/+d.nodes
+
+// Stream a cell's historical states across two branches
+let $origin_history := ##@(2a5, 8c5)
+```
+
+- **`slice("bar")@(88, 2a9)`**: Evaluates the slice manifold at microversion `88` and at
+  microversion `2a9`. The engine executes incremental folds of `OpKind::Structure` operations along
+  the respective ancestral paths, streaming living manifolds representing each historical state.
+- **`##@(v1, v2)`**: Pins the genesis cell to states `v1` and `v2`, yielding a stream of `CellRef`s
+  representing the cell as it existed at each version (or terminating if the cell did not exist at
+  that state).
+- **Paired Edit Heads `(parent, head)`**: Reconstructs a slice manifold at head state `head` while
+  identifying changes committed since `parent`, matching the collaborative session model in `xuzz`.
+
+#### 4.11.5 MicroversionId Literals and Hypertime Arithmetic
+
+A `MicroversionId` (`apps/common/xanadu/microversion.hpp`) names a document state using alternating
+number-and-letter segments (`0`, `88`, `2a9`, `2a4`, `8c5`).
+
+##### Literal Syntax
+
+- **Canonical Form (`@<id>`)**: `@0`, `@1`, `@88`, `@2a9`, `@8c5`.
+- **Bare Inside Version Pinning**: Bare versions are accepted inside `@(...)` (e.g.,
+  `slice("bar")@(88, 2a9)`).
+- **Quoted / Macro Form**: `v"2a9"` or `version("2a9")`.
+
+##### Topological Hypertime Arithmetic
+
+VQL maps arithmetic operators directly to the OSMIC hypertime tree:
+
+| Expression   | Method Equivalent        | Hypertime Semantics                                                                          |
+| :----------- | :----------------------- | :------------------------------------------------------------------------------------------- |
+| `$v + 1`     | `$v.next()`              | Advances sequentially to the next state on the same branch (e.g. `@2a4 + 1` $\to$ `@2a5`).   |
+| `$v - 1`     | `$v.parent()`            | Steps backward to the parent state (e.g. `@2a1 - 1` $\to$ `@2`, `@1 - 1` $\to$ `@0`).        |
+| `$v / "a"`   | `$v.branch(1)`           | Forks a new child branch off `$v` (e.g. `@2 / "a"` $\to$ `@2a1`, `@88 / "b"` $\to$ `@88b1`). |
+| `$v1 .. $v2` | `versionRange($v1, $v2)` | Lazily streams the causal ancestry sequence from ancestor `$v1` to descendant `$v2`.         |
+| `$v1 < $v2`  | `$v1.isAncestorOf($v2)`  | Lineage test: true if `$v1` is an ancestor of `$v2` along its hypertime path.                |
+
+Because `MicroversionId::inlineSegments = 2`, mainlines and single-level branches (covering over
+99.9% of all production edits) execute entirely in registers and stack memory with **zero heap
+allocations**.
+
+#### 4.11.6 Systems Lowering: HyperHandle, LCA Time-Travel, and Open-Addressing Pinning
+
+To guarantee real-time execution in the Vortex runtime:
+
+1. **In-Register Handle Layout (`HyperHandle`)**: Passes in two 64-bit general-purpose registers:
+
+   ```cpp
+   struct alignas(16) HyperHandle {
+     std::uint32_t spoolId{0};   // Store coordinate slot
+     std::uint32_t birthOp{0};   // Slice birth, Xanadoc birth, or CellRef
+     std::uint32_t versionOp{0}; // Pinned microversion opIndex (0 = active tip)
+     HandleKind    kind{HandleKind::Unset};
+     std::uint8_t  flags{0};     // Ephemeral, ReadOnly, SwarmRemote
+     std::uint16_t reserved{0};
+   };
+   static_assert(sizeof(HyperHandle) == 16);
+   ```
+
+1. **Sub-Microsecond Structural Filtering**: `store/slices(##/d.tag = "foo")` bypasses linear ops
+   spool scans ($O(N)$) entirely. The engine intersects the store's pre-indexed
+   `structureBirths(StructureKind::Slice)` table ($S \le 10^2 \ll N$) with the origin cell's
+   contiguous `DimLink` run ($D \le 16$), evaluating the filter in sub-microsecond time.
+
+1. **Lazy Chronofilade Time-Travel**: `slice("bar")@(v1, v2)` rejects cold spool replays. Using
+   `Chronofilade`'s power-18 binary lifting tables, the engine computes
+   $v_{\text{LCA}} = \text{LCA}(v_1, v_2)$ in $O(\log N)$ steps and applies forward delta operations
+   in $O(\Delta)$ time, or evaluates concurrent comparisons via lightweight `ShadowManifoldDelta`
+   overlays.
+
+1. **$O(1)$ Hash-Directed Cell Pinning**: `##@(v1, v2)` probes `SegmentedOpsSpool::indexOf(v)` via
+   open-addressing hash table in expected $O(1)$ time, bounding Nelson R7 edit chains to locate the
+   effective `CompactOpNode` directly in mmap'd memory.
+
 ______________________________________________________________________
 
 ## 5. Memory Management & Topological Garbage Collection
@@ -1711,6 +2035,76 @@ Under this workflow:
   $\text{SHA-1}("xanadu:link-package:" \parallel \text{scrollKey})$, streaming all foreign stores
   and slices across the docuverse that link to or quote the selected passage.
 
+### 6.9 Multi-Store Swarm Navigation and Dynamic Slice Filtering
+
+Demonstrates multi-store swarm discovery via DHT topic rendezvous, selecting slices with attribute
+predicates, and resolving home cells with genesis selection (`/##`):
+
+```
+// Discover all peer stores announced in the "hypertext" topic swarm
+for $st in topic("hypertext")
+for $sl in $st/slices(##/d.tag = "distributed")
+return {
+  "store_title" => $st/##/+d.title,
+  "slice_name"  => $sl/##/+d.name,
+  "nodes"       => $sl/##/+d.nodes
+}
+
+// Select the home cell of the slice named "canvas" in the first matching topic store
+let $canvas_home := topic("hypertext")[1]/slices("canvas")/##
+return $canvas_home/+d.layers
+```
+
+In this pipeline:
+
+- `topic("hypertext")` invokes the Mainline DHT topic rendezvous transport in $O(1)$ setup time,
+  streaming matching `Store` handles lazily as peer nodes respond.
+- `$st/slices(##/d.tag = "distributed")` filters slices without scanning the ops spool, inspecting
+  pre-indexed slice births in $O(S)$ time and checking the `d.tag` link off each slice's origin.
+- `$sl/##` resolves the slice's genesis `CellRef`, auto-grounding subsequent path steps along
+  `+d.nodes`.
+
+### 6.10 Hypertime Pinning, Manifold Folds & Microversion Arithmetic
+
+Demonstrates hypertime historical slicing across living manifold folds, cell-level version pinning,
+and branch arithmetic over `MicroversionId`:
+
+```
+// Pin slice to two historical microversions, streaming parallel manifold folds
+for $fold in current()/slices("canvas")@(88, 2a9)
+for $node in $fold/##/+d.nodes
+return {
+  "version" => $fold/@ver,
+  "title"   => $node/+d.title,
+  "summary" => $node/+d.body.[0, 100]
+}
+
+// Stream historical cell states across branch microversions
+let $cell_states := ##@(2a5, 8c5)
+
+// Topological hypertime branch arithmetic and ancestry range
+let $base_ver   := @2a4
+let $next_ver   := $base_ver + 1         // Advances to @2a5 in O(1)
+let $branch_ver := $base_ver / "b"       // Forks branch 'b' -> @2a4b1
+
+for $v in (@2a1 .. $next_ver)
+let $snap := current()/slices("canvas")@$v
+return {
+  "version" => $v,
+  "summary" => $snap/##/+d.summary
+}
+```
+
+In this pipeline:
+
+- `slices("canvas")@(88, 2a9)` triggers a lazy bifurcated replay from
+  $v_{\text{LCA}} = \text{LCA}(88, 2a9)$, evaluating both folds in $O(\log N + \Delta)$ time without
+  cold database replays.
+- `##@(2a5, 8c5)` probes `SegmentedOpsSpool::indexOf()` in $O(1)$ expected time, locating the
+  effective `CompactOpNode` on the cell's R7 chain for each microversion.
+- Arithmetic operators (`+ 1`, `/ "b"`, `..`) execute entirely within the stack-inline
+  representation of `MicroversionId` with zero heap allocations.
+
 ______________________________________________________________________
 
 ## 7. Reconciliation with the Unified Store/Slice
@@ -1915,30 +2309,31 @@ The rule, two components:
 Editorial changes that alter no normative text do not bump either component; they are not in the
 table.
 
-| version | commit    | date       | change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| ------- | --------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1.0     | `846c0ed` | 2026-09-09 | Initial specification: paths, predicates, and the compilation target.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| 2.0     | `bd9b58b` | 2026-09-09 | Reworked around `%`, `weave`, and a real zzstructure `Cell`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| 3.0     | `a7d36d8` | 2026-09-09 | `\\` traversal replaced; `%` batches; `fuse` renamed `entangle`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| 4.0     | `bca523d` | 2026-09-09 | Compilation retargeted onto the single `link` primitive.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| 4.1     | `a6fffe4` | 2026-09-09 | §4.7 existing-target fan-out, drawing partners from a generator.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| 4.2     | `22b4aec` | 2026-09-09 | The generator's first pull returns the target itself.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| 4.3     | `c8864ee` | 2026-09-10 | Checked against the convergence's measured cell layout.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| 5.0     | `88524a9` | 2026-09-10 | V1–V4 accepted; `d.cache` pinned to a cursor rather than hung off the origin.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| 5.1     | `3d1cb53` | 2026-09-10 | `d.pinning-cursors` given its own Root Set rank.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| 5.2     | `05c79d9` | 2026-09-10 | A pin is named on `d.name`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| 6.0     | `563c93a` | 2026-09-11 | **`d.entangle` deleted.** `><` links along `d.clone`; `EntangleTail` becomes `CloneTail`; the master is the leftmost operand.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| 7.0     | `4720419` | 2026-09-11 | **Compilation retargeted onto `value()`**; §7.4 corrected — a splice is one operation, not two.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| 8.0     | `8f7d4bd` | 2026-09-11 | **`@` retired.** `.` is the context cell everywhere; comparison renders it; the implicit-context rule loses its branch.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| 8.1     | `ae4e800` | 2026-09-11 | `any()`/`all()`/`none()` added; negative index windows stated as counting from the end.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| 9.0     | `69ad10d` | 2026-09-11 | **The break sentinel is `0`**, and `LiteralCellId` may not be written as `0`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| 10.0    | `072b394` | 2026-09-11 | **`::` placement added**, retiring `dim`'s two meanings; `[-1]` is the last *match*, not the rank's tail.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| 10.1    | `b92bbe3` | 2026-09-11 | `::from` and `::rank` added; the read and create defaults named.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| 11.0    | `715c525` | 2026-09-11 | **`::fixed` removed from the placement family**, becoming a step suffix.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| 11.1    | `ae9362f` | 2026-09-11 | The yield axis given four values — `!new`, `!last`, `!both`, `!keep` — with bare `!` as `!keep`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| 12.0    | `a03ddcc` | 2026-09-11 | **The fan-out generator never hands out the master**; every attachment is a fresh clone.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| 14.0    | `381972e` | 2026-10-20 | **First-class shapes `{...}`**, Boolean wildcard algebra (`{}`, `*`, `!*`, `~`), shape derivation (`{ $shape, !d }`), dynamic embedding `{ func(.) }`, nested shapes, dimension extraction (`$shape/d`, `$s[d]`), short-form shape predicates `[{...}]`, shape masking/projection replacing `@lens`, `~dim` bidirectional prefix, sprout morphisms `key => val` and `key => list(...)`, symmetric destructuring `:`, path lambdas `\(.) ...`, `sort_into(dim, by: ...)`, and UDF `def`.                                                                                                                                                                                            |
-| 15.0    | `current` | 2026-10-20 | **Federated Docuverse, Sovereign Store Discovery Anchors & Bidirectional Lenses**: Sovereign discovery anchors (`##btpk`, `##topic`, `##citing`, `##find`, `##btih`, `##ledger`, `##system`), federated hops `/##`, private dimension mounts `mount ... as +d.dim`, zero-copy transclusion `<~` with in-band transcopyright micropayments, perspective-preserving quantum clone ranks `@persp: ±d.dim => val`, "No Remote Mutation" invariant with `d.ctl` action cells and signed write-sets, reactive `watch` via ZZ9P `Zwatch`, and $O(1)$ dynamic virtual lenses (`<=>` axis pivoting, `:=` computed dimensions, bidirectional `(get:, put:)` morphisms, `DynamicLensMatrix`). |
+| version | commit    | date       | change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------- | --------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1.0     | `846c0ed` | 2026-09-09 | Initial specification: paths, predicates, and the compilation target.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| 2.0     | `bd9b58b` | 2026-09-09 | Reworked around `%`, `weave`, and a real zzstructure `Cell`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| 3.0     | `a7d36d8` | 2026-09-09 | `\\` traversal replaced; `%` batches; `fuse` renamed `entangle`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| 4.0     | `bca523d` | 2026-09-09 | Compilation retargeted onto the single `link` primitive.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| 4.1     | `a6fffe4` | 2026-09-09 | §4.7 existing-target fan-out, drawing partners from a generator.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| 4.2     | `22b4aec` | 2026-09-09 | The generator's first pull returns the target itself.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| 4.3     | `c8864ee` | 2026-09-10 | Checked against the convergence's measured cell layout.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| 5.0     | `88524a9` | 2026-09-10 | V1–V4 accepted; `d.cache` pinned to a cursor rather than hung off the origin.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 5.1     | `3d1cb53` | 2026-09-10 | `d.pinning-cursors` given its own Root Set rank.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| 5.2     | `05c79d9` | 2026-09-10 | A pin is named on `d.name`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| 6.0     | `563c93a` | 2026-09-11 | **`d.entangle` deleted.** `><` links along `d.clone`; `EntangleTail` becomes `CloneTail`; the master is the leftmost operand.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 7.0     | `4720419` | 2026-09-11 | **Compilation retargeted onto `value()`**; §7.4 corrected — a splice is one operation, not two.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| 8.0     | `8f7d4bd` | 2026-09-11 | **`@` retired.** `.` is the context cell everywhere; comparison renders it; the implicit-context rule loses its branch.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| 8.1     | `ae4e800` | 2026-09-11 | `any()`/`all()`/`none()` added; negative index windows stated as counting from the end.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| 9.0     | `69ad10d` | 2026-09-11 | **The break sentinel is `0`**, and `LiteralCellId` may not be written as `0`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 10.0    | `072b394` | 2026-09-11 | **`::` placement added**, retiring `dim`'s two meanings; `[-1]` is the last *match*, not the rank's tail.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| 10.1    | `b92bbe3` | 2026-09-11 | `::from` and `::rank` added; the read and create defaults named.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| 11.0    | `715c525` | 2026-09-11 | **`::fixed` removed from the placement family**, becoming a step suffix.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| 11.1    | `ae9362f` | 2026-09-11 | The yield axis given four values — `!new`, `!last`, `!both`, `!keep` — with bare `!` as `!keep`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| 12.0    | `a03ddcc` | 2026-09-11 | **The fan-out generator never hands out the master**; every attachment is a fresh clone.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| 14.0    | `381972e` | 2026-10-20 | **First-class shapes `{...}`**, Boolean wildcard algebra (`{}`, `*`, `!*`, `~`), shape derivation (`{ $shape, !d }`), dynamic embedding `{ func(.) }`, nested shapes, dimension extraction (`$shape/d`, `$s[d]`), short-form shape predicates `[{...}]`, shape masking/projection replacing `@lens`, `~dim` bidirectional prefix, sprout morphisms `key => val` and `key => list(...)`, symmetric destructuring `:`, path lambdas `\(.) ...`, `sort_into(dim, by: ...)`, and UDF `def`.                                                                                                                                                                                 |
+| 15.0    | `f1d7b71` | 2026-10-20 | **Federated Docuverse & Sovereign Discovery Anchors**: Sovereign discovery anchors (`##btpk`, `##topic`, `##citing`, `##find`, `##btih`, `##ledger`, `##system`), federated hops `/##`, private dimension mounts `mount ... as +d.dim`, zero-copy transclusion `<~` with in-band transcopyright micropayments, perspective-preserving quantum clone ranks `@persp: ±d.dim => val`, "No Remote Mutation" invariant with `d.ctl` action cells, reactive `watch` via ZZ9P `Zwatch`, and $O(1)$ dynamic virtual lenses (`<=>`, `:=`, `(get:, put:)`).                                                                                                                       |
+| 15.1    | `current` | 2026-10-20 | **First-Class Stores, Slices, Hypertime Pinning & Version Arithmetic**: Stores, Slices, and Xanadocs as first-class runtime types; store generators (`current()`, `local()`, `topic()`, `btpk()`, etc.); slice/doc enumeration and attribute filtering (`/slices(...)`, `/docs(...)`); canonical anything-to-zigzag lens (`projectXanaduToZigzag`) with character-level span provenance; hypertime version pinning (`@(v1, v2)`) streaming living manifold folds; cell-level version pinning (`##@(v1, v2)`); first-class `MicroversionId` literals (`@2a9`); stack-inline hypertime arithmetic (`+`, `-`, `/`, `..`); and 16-byte `HyperHandle` in-register lowerings. |
 
 [toc-01]: #1-architectural-foundations--operational-invariants
 [toc-02]: #2-syntactic-token--structural-shorthand-matrix
@@ -1977,3 +2372,12 @@ table.
 [toc-35]: #4104-systems-lowering-dynamiclensmatrix-and-simd-evaluation
 [toc-36]: #67-distributed-job-orchestration-and-multi-machine-aggregation
 [toc-37]: #68-cross-store-transclusion-pipeline-with-transcopyright-settlement
+[toc-38]: #411-first-class-stores-slices-hypertime-pinning--version-arithmetic
+[toc-39]: #4111-first-class-store-slice-doc-and-hypertime-types
+[toc-40]: #4112-store-generators-and-slicedoc-enumeration
+[toc-41]: #4113-the-anything-to-zigzag-lens-and-span-provenance
+[toc-42]: #4114-hypertime-version-pinning-across-folds
+[toc-43]: #4115-microversionid-literals-and-hypertime-arithmetic
+[toc-44]: #4116-systems-lowering-hyperhandle-lca-time-travel-and-open-addressing-pinning
+[toc-45]: #69-multi-store-swarm-navigation-and-dynamic-slice-filtering
+[toc-46]: #610-hypertime-pinning-manifold-folds--microversion-arithmetic
