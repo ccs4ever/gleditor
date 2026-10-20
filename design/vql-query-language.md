@@ -811,34 +811,41 @@ VQL introduces the tilde prefix `~`:
 - **Exclusive Bidirectional Projection (`{!*, ~d.tag}`)**: Drops all dimensions except negward and
   posward connections on `d.tag`.
 
-#### 4.8.5 Context-Preserving Sprout Morphisms and Value Lists
+#### 4.8.5 Context-Preserving Polymorphic Morphisms (`=>`)
 
 Complex knowledge topologies frequently require annotating an existing cell with auxiliary key-value
-trees or properties without moving the path context away from the subject cell. The sprout morphism
-`=>` provides concise syntactic sugar:
+trees, wiring new dimensional edges, or applying shapes without moving the path context away from
+the subject cell. In standard VQL, `/+d.tag%"mp4"` steps into the freshly created cell by default,
+requiring explicit `!keep` flags (`!`) or temporary variables to attach multiple properties to the
+same parent.
+
+The polymorphic morphism operator `=>` resolves this across all forms by **keeping the evaluation
+context anchored to the left-hand subject**:
+
+| Category                                | Form (`LHS => RHS`)  | Concrete Example                        | Desugared Structural Lowering                                | Context Behavior    | Semantic Outcome                                                                         |
+| :-------------------------------------- | :------------------- | :-------------------------------------- | :----------------------------------------------------------- | :------------------ | :--------------------------------------------------------------------------------------- |
+| **Sprout Morphism** *(Metadata)*        | `key => value`       | `$node/title => "Hamlet"`               | `$node/+d.vars%"title"/+d.values%"Hamlet"!keep`              | Stays on `$node`    | Sprouts key on `+d.vars`, value on `+d.values`.                                          |
+|                                         | `key => list(...)`   | `$node/tags => list("video", "hd")`     | `$node/+d.vars%"tags"/+d.values%"video"%"hd"!keep`           | Stays on `$node`    | Sprouts key on `+d.vars`, chaining values posward along `+d.values`.                     |
+|                                         | `key => { shape }`   | `$node/meta => { +d.author: "Alice" }`  | `$node/+d.vars%"meta"/+d.values%{ +d.author: "Alice" }!keep` | Stays on `$node`    | Sprouts key on `+d.vars`, materializing shape value posward.                             |
+| **Dimension Morphism** *(Edge Wiring)*  | `±dim => value`      | `$video/+d.tag => "video/mp4"`          | `$video/+d.tag%"video/mp4"!keep`                             | Stays on `$video`   | Links fresh cell with content `value` along `±dim`, context kept.                        |
+|                                         | `±dim => list(...)`  | `$doc/+d.edits => list("rev1", "rev2")` | `$doc/+d.edits%"rev1"%"rev2"!keep`                           | Stays on `$doc`     | Allocates and chains multiple cells posward along `±dim`, context kept.                  |
+|                                         | `±dim => { shape }`  | `$cell/+d.child => { +d.fps: 60 }`      | `$cell/+d.child%{ +d.fps: 60 }!keep`                         | Stays on `$cell`    | Allocates cell along `±dim`, materializes nested shape onto it, context kept.            |
+|                                         | `±dim => $target`    | `$cell/+d.parent => $root`              | `$cell/link(+d.parent, $root)`                               | Stays on `$cell`    | Links to existing cell `$target` along `±dim` (using clone generator for fan-out, §4.7). |
+| **Subject Morphism** *(In-Place Morph)* | `$cell => { shape }` | `$account => { +d.status: "active" }`   | `$account{ +d.status: "active" }`                            | Stays on `$account` | In-place shape projection/masking applied to `$cell`.                                    |
+|                                         | `$cell => $target`   | `$theme => $default_theme`              | `$theme><$target`                                            | Stays on `$theme`   | Joins `$cell` to `$target` on a `d.clone` rank (leftmost is master, §4.6).               |
+|                                         | `$cell => list(...)` | `$parent => list($c1, $c2, $c3)`        | `$parent/link(+d.1, $c1/link(+d.step, $c2...))`              | Stays on `$parent`  | Links an ordered sequence of existing cells off `$parent` along primary rank.            |
+
+##### Chaining Morphisms
+
+Because the context stays anchored on the left-hand subject, multiple morphisms can be chained
+without context drift:
 
 ```
-$node/attr => value
-$node/attr => list(val1, val2, val3)
+$video/+d.tag => "video/mp4"/+d.codec => "avc1"/views => 1042
 ```
 
-The sprout operator expands structurally:
-
-- `$node/attr => value` desugars into:
-
-  ```
-  $node/+d.vars%"attr"/+d.values%value!keep
-  ```
-
-  The context remains anchored on `$node`, so subsequent path steps continue from `$node` rather
-  than the newly sprouted leaf.
-
-- `$node/attr => list(val1, val2, val3)` creates the `+d.vars` key node for `"attr"`, and then
-  chains `val1`, `val2`, and `val3` posward along `+d.values`, retaining context on `$node`.
-
-- Chaining multiple sprouts (`$node/a => 1/b => 2/c => 3`) annotates three distinct properties off
-  `$node`, each cleanly rooted in the canonical `d.vars`/`d.values` associative scope topology
-  (§4.4).
+Here, `+d.tag` and `+d.codec` wire direct dimensional edges off `$video`, while `views => 1042`
+sprouts an associative variable pair off `$video`'s `+d.vars`, all in a single readable pipeline.
 
 #### 4.8.6 Shape Destructuring
 
