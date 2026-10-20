@@ -1,50 +1,52 @@
 # Vweave: A Topological, Vortex-Native Programming Language Over Zigzag Manifolds
 
-**Document Version:** 1.0 — The Orthotopal Specification\
+**Document Version:** 1.1 — The Rectified Orthotopal Specification\
 **Compilation Target:** Vortex Hyperstructural Runtime Core — `link` and `value`, and nothing else
-(§6)\
+(§7)\
 **Primary Substrate:** 2-Rank Multidimensional Manifold (`zigzag::Manifold`, `ArenaManifold`,
 `CompactOpNode`)\
 **Status:** Specification only; non-breaking design document. Implements no new C++ core primitives;
 rests entirely on existing mechanisms built in `apps/common/xanadu/vortex/` and
-`apps/common/xanadu/zigzag/`.
+`apps/common/xanadu/zigzag/`.\
+**Reconciliation History:** v1.1 incorporates the results of the two-round multi-agent architectural
+critique (Nelsonian Purist, PL Designer, Technical Writer, Vortex Architect, and Zigzag Power User).
 
 ______________________________________________________________________
 
 ## Contents
 
 - [1. The Premise: Beyond Immigrant Paradigms](#1-the-premise-beyond-immigrant-paradigms)
-- [2. The Quadripartite Consultation](#2-the-quadripartite-consultation)
-  - [2.1 PL Design: The 1D Stream vs. Graph Topology][toc-01]
-  - [2.2 Vortex Engine: Mechanical Invariants of the Spool][toc-02]
-  - [2.3 Zigzag Power User: Sensory Navigation and Live Projection][toc-03]
-  - [2.4 Technical Writer: The Loom Metaphor and Lexical Precision][toc-04]
-- [3. Architectural Foundations & Invariants](#3-architectural-foundations--invariants)
-  - [3.1 Invariant 1: The Nelsonian 2-Rank Manifold](#31-invariant-1-the-nelsonian-2-rank-manifold)
-  - [3.2 Invariant 2: The Single-Primitive Invariant][toc-05]
-  - [3.3 Invariant 3: Dual-Wing Spatial Invocation][toc-06]
-  - [3.4 Invariant 4: Topological Scope & Zero Unanchored Cells][toc-07]
-- [4. Formal EBNF Grammar](#4-formal-ebnf-grammar)
-- [5. Type System: Topological & Structural Types](#5-type-system-topological--structural-types)
+- [2. The Multi-Agent Architectural Audit & Dialectic][toc-01]
+  - [2.1 Round 1: The Indictment Across Five Axes][toc-02]
+  - [2.2 Round 2: Dialectical Cross-Examination & Reconciliations][toc-03]
+  - [2.3 Core Architectural Shifts from v1.0 to v1.1][toc-04]
+- [3. Architectural Foundations & Invariants][toc-05]
+  - [3.1 Invariant 1: The Nelsonian 2-Rank Manifold & Collision Semantics][toc-06]
+  - [3.2 Invariant 2: The Single-Primitive & Host Dispatch Model][toc-07]
+  - [3.3 Invariant 3: Re-entrant Invocation via Activation Headcells][toc-08]
+  - [3.4 Invariant 4: Continuous Open Space & Topological GC][toc-09]
+- [4. Formal EBNF Grammar (v1.1)](#4-formal-ebnf-grammar-v11)
+- [5. Type System: Topological & Structural Types][toc-10]
   - [5.1 Primitive Values & Payloads](#51-primitive-values--payloads)
-  - [5.2 Spatial Types: Cells, Ranks, Rings, and Shapes][toc-08]
-  - [5.3 Dimensional Contracts along `d.contract`][toc-09]
-- [6. Language Mechanics & Operational Semantics](#6-language-mechanics--operational-semantics)
-  - [6.1 Warps (Execution Ranks) and Wefts (Data Ranks)][toc-10]
-  - [6.2 Pivots, Cross-Stitching, and Dimensional Swivels][toc-11]
-  - [6.3 Control Flow: Topological Rings and Deflection][toc-12]
-  - [6.4 Subroutines: Dual-Wing Spindles and Spatial Closures][toc-13]
-  - [6.5 Clone Superposition and Multi-Presence][toc-14]
+  - [5.2 Spatial Types: Cells, Ranks, Rings, and Shapes][toc-11]
+  - [5.3 Topological Boundary Guards & Contracts][toc-12]
+- [6. Language Mechanics & Operational Semantics][toc-13]
+  - [6.1 Warps (Execution) & Wefts (Data) with Dimension Inheritance][toc-14]
+  - [6.2 Pivots, Cross-Stitching, and Dimensional Swivels][toc-15]
+  - [6.3 Control Flow: Topological Rings and Boundary Deflection][toc-16]
+  - [6.4 Subroutines: Activation Headcells and Spatial Wings][toc-17]
+  - [6.5 Clone Superposition and Ring Splicing][toc-18]
 - [7. Lowering to the Vortex Runtime](#7-lowering-to-the-vortex-runtime)
   - [7.1 Production-to-Lowering Matrix](#71-production-to-lowering-matrix)
-  - [7.2 Memory Model & Compressed Sparse Row (CSR) Layout][toc-15]
-  - [7.3 Ephemeral Execution & Promotion](#73-ephemeral-execution--promotion)
+  - [7.2 Memory Model & Compressed Sparse Row (CSR) Layout][toc-19]
+  - [7.3 Ephemeral Execution & Store Promotion][toc-20]
 - [8. Standard Library: `std:weave`](#8-standard-library-stdweave)
 - [9. Worked Canonical Programs](#9-worked-canonical-programs)
-  - [9.1 Topological In-Place Quicksort](#91-topological-in-place-quicksort)
-  - [9.2 Concurrent Tokenizer & Frequency Lattice][toc-16]
-  - [9.3 Xanadu Transclusion & Citation Weave][toc-17]
-- [10. The `xuzz` Interactive Experience & Live Projection][toc-18]
+  - [9.1 Semantic Tagging & Dimensional Video Sorter][toc-21]
+  - [9.2 Topological Insertion & Priority Queue][toc-22]
+  - [9.3 Xanadu Transclusion & Citation Weave][toc-23]
+- [10. The `xuzz` Interactive Experience & Live Projection][toc-24]
+- [Appendix: Versioning and Change History][toc-25]
 
 ______________________________________________________________________
 
@@ -67,7 +69,11 @@ None of them were **born from the manifold itself**.
 In Ted Nelson's ZigZag, there are no files, no directories, no linear memory buffers, and no nested
 hierarchies. There is only an infinite, orthogonal hyper-matrix of informational atoms (**cells**)
 connected along named, non-intersecting dimensions subject to the **2-Rank Manifold Invariant**:
-each cell has at most one positive neighbor and at most one negative neighbor per dimension.
+each cell has at most one positive neighbor and at most one negative neighbor per dimension:
+
+$$
+\text{deg}^+(C, d) \le 1, \quad \text{deg}^-(C, d) \le 1
+$$
 
 `Vweave` is a textual, Vortex-native programming language designed from the substrate up. It does
 not map conventional language idioms onto ZigZag; it turns the topological physics of ZigZag into
@@ -75,85 +81,81 @@ first-class programming constructs.
 
 ______________________________________________________________________
 
-## 2. The Quadripartite Consultation
+## 2. The Multi-Agent Architectural Audit & Dialectic
 
-### 2.1 PL Design: The 1D Stream vs. Graph Topology
+Following the initial v1.0 specification, an adversarial multi-agent critique was conducted across
+five specialized perspectives:
 
-Conventional programming languages suffer from the tyranny of the 1D character stream. A lexer reads
-a linear sequence of tokens; a parser arranges them into an Abstract Syntax Tree (AST). Trees impose
-an artificial hierarchy on computation: nested scopes, nested expressions, and parent-child
-relations.
+1. **Theodor Holm Nelson Purist** (`xanadu_purist`): Ideological fidelity to continuous zzspace.
+1. **PL Ergonomics & Design Expert** (`pl_designer`): Formal language theory and type soundness.
+1. **Technical Writer & Documentation Specialist** (`tech_writer`): Conceptual consistency.
+1. **Vortex Runtime Architect & C++23 Systems Expert** (`vortex_architect`): Engine alignment.
+1. **Zigzag Power User** (`power_user`): Day-to-day authoring velocity and live `xuzz` flow.
 
-In ZigZag, structure is strictly non-hierarchical. A cell can maintain relationships along $N$
-orthogonal dimensions simultaneously. Previous front ends either flattened this space into linear
-pipelines or forced tree blocks onto the manifold.
+### 2.1 Round 1: The Indictment Across Five Axes
 
-`Vweave` resolves this tension through **Orthogonal Rank Declarations**. Code is not structured as
-nested blocks, but as independent linear trajectories (**Warps**) cross-cut by perpendicular data
-trajectories (**Wefts**). Scope is not a stack frame; it is an orthogonal coordinate projection. By
-expressing computation as spatial intersections (**Pivots**), `Vweave` provides a readable 1D/2D
-textual grammar that compiles directly into a multigraph without an intermediate hierarchical AST.
+- **The Recursion / Spatial Invocation Paradox:** Invariant 1 ($\text{deg}^\pm \le 1$) and the v1.0
+  notion of singleton anchored Spindle cells with hardcoded `-d.2` inputs were mutually exclusive. A
+  recursive call stomped on caller parameters and return links, making recursion impossible.
+- **Syntactic Ambiguity & Dangling Grammar:** Overloading `*` (declarations, dereferences, math) and
+  `->` (chaining, sequencing, return signatures) rendered v1.0 unparseable. Seven non-terminals were
+  dangling, and worked examples fell back to C-style `if/else`.
+- **Ideological Betrayal (Containers & Nil):** Wrapping code in `loom { ... }` blocks re-introduced
+  hierarchical AST containers into continuous zzspace. Checking `curr == nil` violated Nelsonian
+  space (where empty space does not exist) and contradicted repository rules on sentinels.
+- **CSR Layout Cache Thrashing:** In-place topological sorting (`sever`/`splice`) in tight loops
+  forced linear link scans and 40-byte trail logging, causing a 100x–500x performance penalty over
+  flat arrays and generating megabytes of immutable Merkle ops if promoted.
+- **Ergonomic Friction:** Requiring `~d.step>` after every line imposed severe shift-key gymnastics.
+  Lacking contextual anchors (`$focus`, `$mark`), v1.0 failed the interactive omnibar test.
 
-### 2.2 Vortex Engine: Mechanical Invariants of the Spool
+### 2.2 Round 2: Dialectical Cross-Examination & Reconciliations
 
-Under the hood in `apps/common/xanadu/vortex/`, the runtime engine is minimal and uncompromising:
+- **The Calling Model Reconciliation (PL Designer vs. Vortex Architect):** A `spindle` is a topology
+  template, not a singleton cell. Every invocation dynamically mints an **Activation Headcell**
+  ($A$) in `ArenaManifold`. Operands link on `+d.grab` and chain on `+d.step`; return values emit on
+  `-d.grab`. This restores re-entrancy and unbounded recursion while preserving
+  $\text{deg}^\pm \le 1$.
+- **Containers vs. Fluidity (Purist vs. Power User):** `loom` is abolished as an enclosing syntactic
+  block. Code exists as open, unbounded ranks at top-level. **Contextual Flow Mode** introduces
+  `$focus`, `$mark`, `dX`, and `dY` for live terminal-speed scripting in `xuzz`.
+- **Topological Boundary Guards (Purist vs. Tech Writer):** `nil` is exterminated. Loop termination
+  and rank edges use topological boundary guards: `deflect !has_link(d) to ~d.exit>`.
+- **Domain Specialization (Vortex Architect vs. Purist):** Heavy numeric crunching belongs in
+  `Arrayfilade` and `vpl`. Vweave's primary mission is **hypermedia orchestration**, semantic
+  classification, citation lattices, and interactive multidimensional manipulation.
 
-1. `link(cell, dim, dir, [target])`
-1. `value(cell, [data])`
+### 2.3 Core Architectural Shifts from v1.0 to v1.1
 
-The entire runtime—the Merkle-piece append-only ops spool (`CompactOpNode`), the zero-allocation
-`ArenaManifold`, the dual-wing parameter calling conventions, and instruction streams along
-`+d.spin`—is built strictly from those two calls.
-
-For `Vweave` to be native, it must introduce **zero new runtime primitives**. Every weave, swivel,
-ring-loop, and clone must compile to a deterministic sequence of `link` and `value`. Ephemeral
-evaluations execute in `ArenaManifold` with `mark()` and `release()`; persistent results commit
-through `promote()`.
-
-### 2.3 Zigzag Power User: Sensory Navigation and Live Projection
-
-In `xuzz` and the ZigZag projection architecture, navigation is physical. An operator maps two
-dimensions to the screen ($X$ on `d.1`, $Y$ on `d.2`). To inspect metadata, $Y$ swivels to `d.time`.
-To view category assignments, $X$ swivels to `d.clone`.
-
-In `Vweave`, programming mirrors this spatial manipulation. Writing code is weaving fabric: one lays
-down a Warp of execution and shoots Wefts of data across it. Where they cross, a Pivot forms.
-Debugging inside `xuzz` is not reading a text trace; it is watching the execution cursor step
-through the manifold, swiveling dimensions in real time and weaving live data cells into the space.
-
-### 2.4 Technical Writer: The Loom Metaphor and Lexical Precision
-
-To make a multidimensional topological language intuitive, `Vweave` adopts the unified mental model
-of **The Loom**:
-
-- **Cell**: The discrete informational atom carrying a 64-bit scalar or primedia span.
-- **Rank**: A continuous sequence of cells linked along a single dimension.
-- **Warp**: A rank dedicated to sequential control flow or operational progression.
-- **Weft**: A rank dedicated to data pipelines, collections, or environments.
-- **Pivot (`*`)**: A cell belonging to two or more orthogonal ranks simultaneously.
-- **Swivel**: Changing the cursor's active dimensional trajectory at a pivot.
-- **Spindle**: A reusable spatial component with Inputs and Outputs wings.
-- **Ring**: A closed rank where $+d$ eventually links back to the origin, forming a loop.
-- **Loom**: The active manifold enclosing the program's ranks.
+| Concept                   | v1.0 (Initial Proposal)                    | v1.1 (Rectified Specification)                             |
+| :------------------------ | :----------------------------------------- | :--------------------------------------------------------- |
+| **Syntactic Scope**       | Mandatory `loom { ... }` block             | Open top-level ranks (`warp` / `weft`)                     |
+| **Boundary Guard**        | Sentinel pointer check (`curr == nil`)     | Topological boundary guard (`!has_link(d)`)                |
+| **Calling Model**         | Static singleton pivot cell on `d.2`       | Ephemeral Activation Headcell on `d.grab`/`d.stack`        |
+| **Step Syntax**           | Mandatory `~d.step>` on every line         | Dimension inheritance (bare `->` steps on active warp)     |
+| **Symbol Disambiguation** | `*` for pivots, math, and dereference      | `*` strictly for pivots; `.` for projection; `->` for step |
+| **Contextual Anchors**    | None (requires explicit labels)            | Native `$focus`, `$mark`, `dX`, `dY` in `xuzz` flow        |
+| **Clone Lowering**        | Linear link overwrite ($\text{deg}^+ > 1$) | Spliced `d.clone` ring maintaining $\text{deg}^\pm \le 1$  |
 
 ______________________________________________________________________
 
 ## 3. Architectural Foundations & Invariants
 
 ```
-                               ▲ +d.2 (Inputs / Weft)
-                               │
-                               │
-      -d.1 (Prev Step) ──────[Pivot]────── +d.1 (Next Step / Warp)
-                               │
-                               │
-                               ▼ -d.2 (Outputs / Weft)
-                              ╱
-                             ╱ +d.spin (Spindle Execution)
-                            ▼
+                        +d.grab (Inputs Wing)
+              [y] ◄──+d.step── [x] ◄───┐
+                                       │
+                              [ Activation Headcell ] ──+d.vars──► { locals }
+                                       │
+                                       ▼
+                                   [result]
+                        -d.grab (Outputs Wing)
+                                       │
+                                       ▼ +d.spin
+                            [ Opcode Execution Stream ]
 ```
 
-### 3.1 Invariant 1: The Nelsonian 2-Rank Manifold
+### 3.1 Invariant 1: The Nelsonian 2-Rank Manifold & Collision Semantics
 
 Along any dimension $d$, every cell $C$ has at most one positive neighbor and at most one negative
 neighbor:
@@ -165,78 +167,94 @@ $$
 Branching is never an inline fork along the same dimension; branching is a **dimensional
 deflection** into an orthogonal dimension.
 
-### 3.2 Invariant 2: The Single-Primitive Invariant
+#### Runtime Collision Semantics
 
-The language runtime compiles strictly to Vortex's:
+When an operation attempts to link cell $A$ posward along dimension $d$:
+
+1. **Default Mode (Topological Fault):** If $A$ already possesses a neighbor in $+d$, the engine
+   raises a `DimensionalCollisionFault`. Re-linking requires an explicit `sever +d` first.
+1. **Displacement Linking (`~d!>`):** In ephemeral arena scratchpads, an explicit displacement arrow
+   severs the prior reciprocal connection on the displaced cell, avoiding dangling half-links.
+
+### 3.2 Invariant 2: The Single-Primitive & Host Dispatch Model
+
+The persistent manifold compiles strictly to Vortex's two primitives:
 
 $$
 \text{link}(c, d, \text{dir}, [t]) \quad \text{and} \quad \text{value}(c, [v])
 $$
 
-No external call stacks, no linear byte heaps, and no hidden CPU register mappings. State is
-topology.
+Instruction streams dispatch along `+d.spin`. ALU operations (`+`, `-`, `*`) are evaluated via host
+C++ `OpcodeKind` dispatch during `VortexVM::step()`, preserving hardware ALU speed while maintaining
+topological state in `ArenaManifold`.
 
-### 3.3 Invariant 3: Dual-Wing Spatial Invocation
+### 3.3 Invariant 3: Re-entrant Invocation via Activation Headcells
 
-Subroutines do not push activation records onto a stack. A subroutine in `Vweave` is an anchored
-**Pivot Cell** ($S$):
+Subroutines do not push activation records to an out-of-band C++ call stack. Instead:
 
-- Inputs arrive along the **Inputs Wing** (`-d.2`).
-- Outputs emit along the **Outputs Wing** (`+d.2`).
+- Every invocation mints an ephemeral **Activation Headcell** in `ArenaManifold`.
+- Operands arrive on the **Inputs Wing** (`+d.grab`) chained along `+d.step`.
+- Return values emit on the **Outputs Wing** (`-d.grab`).
 - Instructions execute along the **Spin Dimension** (`+d.spin`).
 - Lexical variables index along the **Environment Rank** (`+d.vars`).
+- The caller return continuation links along `-d.spin` (or `d.stack`).
 
-### 3.4 Invariant 4: Topological Scope & Zero Unanchored Cells
+Because each invocation receives a unique headcell, subroutines support **unbounded recursion,
+re-entrancy, and multi-cursor concurrency** while strictly respecting $\text{deg}^\pm \le 1$.
 
-Every cell minted by `Vweave` belongs to at least one rank upon creation. There are no orphan
-pointers or free-floating heap blocks. Memory reclamation is topological: resetting the
-`ArenaManifold` head reclaims unreachable subgraphs in $O(1)$.
+### 3.4 Invariant 4: Continuous Open Space & Topological GC
+
+`Vweave` recognizes no file, module, or loom container boundaries. All ranks extend through a
+continuous coordinate manifold. Memory reclamation in `ArenaManifold` is topological: resetting the
+arena head reclaims unpromoted activation frames and intermediate cells in $O(1)$.
 
 ______________________________________________________________________
 
-## 4. Formal EBNF Grammar
+## 4. Formal EBNF Grammar (v1.1)
 
 ```ebnf
-Program         ::= { DimensionDecl | LoomDecl | SpindleDecl } ;
+Program         ::= { TopLevelItem } ;
+TopLevelItem    ::= DimensionDecl | RankDecl | SpindleDecl | StepStmt ;
 
-DimensionDecl   ::= "dim" DimensionName { "," DimensionName } ";" ;
+DimensionDecl   ::= "dim" Ident { "," Ident } ";" ;
+
+RankDecl        ::= ( "warp" | "weft" ) Ident [ "along" DimensionName ] "{" { StepStmt } "}" ;
 DimensionName   ::= "d." Ident ;
 
-LoomDecl        ::= "loom" Ident [ "along" DimensionName ] "{" { LoomItem } "}" ;
-LoomItem        ::= WarpDecl | WeftDecl | SpliceStmt | PivotDecl ;
+StepStmt        ::= [ CellAnchor ":" ] StepElement [ StepArrow ] ;
+StepElement     ::= Literal | Invocation | Action | StepRef ;
+StepArrow       ::= "->" | "~" DimensionName ">" | "<" DimensionName "~" ;
 
-WarpDecl        ::= "warp" Ident "along" DimensionName "{" { StepExpr } "}" ;
-WeftDecl        ::= "weft" Ident "along" DimensionName "{" { CellDef } "}" ;
+CellAnchor      ::= "@" Ident [ PivotClause ] ;
+PivotClause     ::= "*" DimensionName ":" ( CellAnchor | CellRef ) ;
+CellRef         ::= ( "@" Ident | "$focus" | "$mark" ) [ "." DimensionDir ] ;
+DimensionDir    ::= ( "+" | "-" ) DimensionName ;
 
-StepExpr        ::= [ CellLabel ] ( Action | PivotRef | RingRef ) [ StepArrow ] ;
-StepArrow       ::= "~" DimensionName ">" | "<" DimensionName "~" | "->" ;
-
-CellDef         ::= [ CellLabel ] Literal [ PivotAnnotation ] [ StepArrow ] ;
-CellLabel       ::= "@" Ident ;
-PivotAnnotation ::= "*" DimensionName [ ":" CellRef ] ;
-
-Action          ::= Invocation | Assignment | Deflection | Swivel | SpliceStmt | SeverStmt ;
-
-Invocation      ::= Ident "(" [ ArgumentList ] ")" ;
-ArgumentList    ::= ValueExpr { "," ValueExpr } ;
-
+Action          ::= Deflection | Swivel | SpliceStmt | SeverStmt | EmitStmt | Assignment ;
+Assignment      ::= ( CellRef | Ident ) "=" ValueExpr ;
 Deflection      ::= "deflect" Condition "to" StepArrow ;
 Swivel          ::= "swivel" DimensionName ;
+SpliceStmt      ::= "splice" ( Ident | Literal | CellRef ) "into" StepArrow ;
+SeverStmt       ::= "sever" DimensionDir ;
+EmitStmt        ::= "emit" ValueExpr ;
 
 RingRef         ::= "ring" DimensionName "(" Ident ")" ;
-SpliceStmt      ::= "splice" StepArrow "{" { CellDef } "}" ;
-SeverStmt       ::= "sever" StepArrow ;
 
 SpindleDecl     ::= "spindle" Ident "(" [ ParamList ] ")" [ "->" "(" [ OutputList ] ")" ]
                     [ "contract" "{" ContractExpr "}" ]
-                    "{" { StepExpr } "}" ;
+                    "{" { StepStmt } "}" ;
 
 ParamList       ::= Ident { "," Ident } ;
 OutputList      ::= Ident { "," Ident } ;
 
-Literal         ::= Integer | Float | String | SymLiteral | SpanLiteral ;
+Condition       ::= TopologicalGuard | ValuePredicate ;
+TopologicalGuard::= [ "!" ] "has_link" "(" DimensionDir [ "," CellRef ] ")" ;
+ValuePredicate  ::= ValueExpr ( "==" | "!=" | "<" | "<=" | ">" | ">=" ) ValueExpr ;
+
+ValueExpr       ::= Literal | CellRef [ ".val" ] | Invocation | SpanExpr ;
+SpanExpr        ::= "span" "(" ( Ident | SymLiteral ) "," Integer "," Integer ")" ;
+Literal         ::= Integer | Float | String | SymLiteral ;
 SymLiteral      ::= "#" Ident ;
-SpanLiteral     ::= "span(" Ident "," Integer "," Integer ")" ;
 ```
 
 ______________________________________________________________________
@@ -260,360 +278,379 @@ ______________________________________________________________________
                        ┌────────────▼────────────┐
                        │     Pivot[d1, d2]       │
                        └────────────┬────────────┘
-                                    │ spans
+                                    │ guards
                        ┌────────────▼────────────┐
-                       │     Shape { ... }       │
+                       │    TopologicalGuard     │
                        └─────────────────────────┘
 ```
 
 ### 5.1 Primitive Values & Payloads
 
-A cell carries either:
+A cell carries:
 
 - `Int`: 64-bit two's complement integer.
 - `Float`: 64-bit IEEE 754 floating-point scalar.
 - `Sym`: 64-bit hashed atom identifier (`#name`).
-- `Span`: Nelsonian primedia coordinate `(author_id, offset, length)`.
+- `Span`: Nelsonian primedia coordinate `(author_id, offset, length)` addressing the Permascroll.
 
 ### 5.2 Spatial Types: Cells, Ranks, Rings, and Shapes
 
 - `Cell[T]`: An individual node holding payload `T`.
-- `Rank[d, T]`: An open sequence of cells linked strictly along dimension `d`, each holding `T`.
-- `Ring[d, T]`: A closed rank along `d` where traversing posward cycles to the origin cell.
+- `Rank[d, T]`: An open sequence of cells linked strictly along dimension `d`.
+- `Ring[d, T]`: A closed rank along `d` where traversing posward cycles back to the origin cell.
 - `Pivot[d1, d2]`: A cell guaranteeing $\text{deg}(C, d1) > 0$ and $\text{deg}(C, d2) > 0$.
 - `Shape { +d.1: T1, -d.2: T2, ... }`: An orthotopal neighborhood contract asserting that the target
   cell has positive/negative neighbors along specific dimensions.
 
-### 5.3 Dimensional Contracts along `d.contract`
+### 5.3 Topological Boundary Guards & Contracts
 
-`Vweave` supports topological contracts. A Spindle asserts its input shape:
+Topological assertions are evaluated without sentinel pointers:
 
-```vweave
-spindle PopNode(node: Cell) -> (val: Cell, next: Cell)
-contract {
-    node matches Shape { +d.data: Any, +d.next: Cell }
-} {
-    // Verified safe from missing links along +d.next
-}
-```
+- `has_link(+d.order)`: Returns true if the cell has a posward neighbor on `d.order`.
+- `!has_link(+d.order)`: Returns true if the rank terminates posward on `d.order`.
+- Contracts along `d.contract` guard spindle entry and deflect on violation.
 
 ______________________________________________________________________
 
 ## 6. Language Mechanics & Operational Semantics
 
-### 6.1 Warps (Execution Ranks) and Wefts (Data Ranks)
+### 6.1 Warps (Execution) & Wefts (Data) with Dimension Inheritance
 
-Computation in `Vweave` is a collision between two perpendicular ranks:
+Computation in `Vweave` is an orthogonal collision between two perpendicular ranks:
 
-- The **Warp** is the timeline of control. By default, it moves along `d.step`.
-- The **Weft** is a data stream. It moves along a data dimension, such as `d.data` or `d.tokens`.
+- **Warp**: Timeline of operational control (defaults to `d.step`).
+- **Weft**: Sequence of data cells (e.g., `d.tokens`, `d.data`).
+
+#### Dimension Inheritance
+
+Within `warp Name along d.step`, the arrow `->` automatically advances along `+d.step`. Explicit
+arrows (`~d.other>`) are required only when swiveling into an orthogonal dimension:
 
 ```vweave
-loom WordStream along d.step {
-    weft Inputs along d.tokens {
-        @w1: "Hypertext" -> @w2: "Intertwingled" -> @w3: "Transclusion"
-    }
-
-    warp Processor along d.step {
-        @s1: FetchToken() *d.tokens: @w1 ~d.step>
-        @s2: PrintUpper()                ~d.step>
-        @s3: AdvanceToken()              ~d.step>
-        @s4: ring d.step(@s1)
-    }
+warp ProcessTokens along d.step {
+    @start: FetchNext() ->
+    @print: PrintUpper() ->
+    ring d.step(@start)
 }
 ```
-
-When `@s1` executes, it pivots onto `@w1`. The operation `PrintUpper()` accesses its input by
-reaching negward along `d.tokens`.
 
 ### 6.2 Pivots, Cross-Stitching, and Dimensional Swivels
 
-The fundamental operator in `Vweave` is the **Pivot** (`*`). A pivot declares that a single cell
-exists simultaneously on two or more dimensions:
+The **Pivot** (`*`) attaches an orthogonal dimension to an existing cell without moving the cursor:
 
 ```vweave
-@pivot: 1042 *d.category: #Metrics ~d.time>
+// Attach tag category along d.tag without stepping the cursor:
+@video *d.tag: #MP4
 ```
 
-A running cursor does not branch; it **swivels**. A swivel command reorients the cursor's momentum
-vector:
+To move the cursor across dimensions, a program uses a **Dimensional Swivel**:
 
 ```vweave
-warp Dispatcher along d.step {
-    @start -> CheckCondition() -> deflect true to ~d.branch>
-           -> @default_path    ~d.step> ...
+// Swivel cursor momentum into d.tag posward:
+~d.tag>
+```
+
+### 6.3 Control Flow: Topological Rings and Boundary Deflection
+
+Loops are **Topological Rings**. Termination uses **Boundary Deflection**:
+
+```
+        @loop ──~d.step─► [Op 1] ──~d.step─► [Op 2]
+          ▲                                    │
+          │                                    │ ~d.step
+          └───────────── ring d.step ──────────┘
+                                 │
+                   deflect !has_link(+d.step)
+                                 │
+                                 ▼
+                              @done
+```
+
+```vweave
+warp TraverseRank along d.step {
+    curr = $focus ->
+    @loop:
+        deflect !has_link(+d.data, curr) to ~d.done>
+        Process(curr) ->
+        curr = curr.+d.data ->
+        ring d.step(@loop)
+
+    @done:
+        emit curr
 }
 ```
 
-If `CheckCondition()` produces `true`, the cursor swivels $90^\circ$ into `+d.branch`, entering an
-orthogonal operational rank without stack unwinding.
+### 6.4 Subroutines: Activation Headcells and Spatial Wings
 
-### 6.3 Control Flow: Topological Rings and Deflection
-
-Traditional languages implement loops using jumps (`JMP`). `Vweave` implements loops as
-**Topological Rings**:
-
-```
-        @loop_start ──~d.step─► [Op 1] ──~d.step─► [Op 2]
-             ▲                                        │
-             │                                        │ ~d.step
-             └─────────────── ring d.step ────────────┘
-                                     │
-                             (deflect ~d.exit>)
-                                     │
-                                     ▼
-                                  @exit_op
-```
-
-```vweave
-warp Counter along d.step {
-    @init: 0 *d.val
-    @loop: ReadInput() ~d.step>
-           Increment(@init) ~d.step>
-           deflect (@init *d.val >= 10) to ~d.exit>
-           ring d.step(@loop)
-
-    @exit_op: Finalize()
-}
-```
-
-- To iterate: The cursor follows `~d.step>` around the ring.
-- To break: `deflect` steers the cursor along `~d.exit>`, exiting the ring.
-- Loops execute in bounded memory because no stack frames are created.
-
-### 6.4 Subroutines: Dual-Wing Spindles and Spatial Closures
-
-A function in `Vweave` is called a **Spindle**. It specifies how parameters align along the **Inputs
-Wing** (`-d.2`) and how return values emerge along the **Outputs Wing** (`+d.2`):
-
-```
-                    -d.2 (Inputs Wing)
-              [y] ◄─── [x] ◄───┐
-                               │
-                        [ @pivot: Add ]
-                               │
-                               ▼
-                          [result]
-                     +d.2 (Outputs Wing)
-```
+A `spindle` defines a reusable topology template:
 
 ```vweave
 spindle Add(x: Int, y: Int) -> (sum: Int) {
-    warp along d.spin {
-        fetch -d.2(x)      ~d.spin>
-        fetch -d.2(y)      ~d.spin>
-        sum = x + y        ~d.spin>
-        emit +d.2(sum)
-    }
+    sum = x + y ->
+    emit sum
 }
 
 warp Main along d.step {
-    @p: Add(40, 2) ~d.step>
-    Print(@p.+d.2)
+    res = Add(40, 2) ->
+    Print(res)
 }
 ```
 
-### 6.5 Clone Superposition and Multi-Presence
+The compiler lowers `Add(40, 2)` to:
 
-Data in ZigZag is never copied. If an entity exists in multiple contexts, it is cloned along
-`d.clone`. Walking negward along `d.clone` resolves to the canonical **Master Headcell**.
+1. Allocate an ephemeral Activation Headcell $A$ in `ArenaManifold`.
+1. Link argument `40` to $A.+d.\text{grab}$, and chain `2` along `+d.step`.
+1. Link the return continuation on $A.-d.\text{spin}$.
+1. Advance the VM cursor to `Add`'s bytecode stream on `+d.spin`.
+1. `emit sum` links `sum` to $A.-d.\text{grab}$ and resumes the caller continuation.
+
+### 6.5 Clone Superposition and Ring Splicing
+
+Data in ZigZag is never copied. If an entity exists in multiple views, it is cloned along `d.clone`.
+To preserve the 2-rank manifold invariant ($\text{deg}^\pm \le 1$), clones are spliced into a
+**`d.clone` ring**:
 
 ```vweave
-loom ParallelAnalysis along d.step {
-    weft Records along d.data {
-        @master: Document("Hypertext")
-    }
-
-    warp MetricsWarp along d.step {
-        @c1 = clone @master *d.view: #WordCount ~d.step>
-        ComputeWordCount(@c1)
-    }
-
-    warp SentimentWarp along d.step {
-        @c2 = clone @master *d.view: #Sentiment ~d.step>
-        ComputeSentiment(@c2)
-    }
-}
+// Slices a new clone into the master cell's d.clone ring:
+@c1 = clone @master *d.view: #WordCount
 ```
 
-`@c1` and `@c2` are distinct cells for control flow, but both share identical identity and
-underlying text via their `d.clone` link.
+```
+                  ┌───────────────┐
+                  │ @master (Doc) │◄───┐
+                  └───────┬───────┘    │
+                  +d.clone│            │+d.clone
+                          ▼            │
+                   ┌─────────────┐     │
+                   │  @c1 (View) ├─────┘
+                   └─────────────┘
+```
+
+Both cells share immutable primedia text through the headcell, but participate in separate warps.
 
 ______________________________________________________________________
 
 ## 7. Lowering to the Vortex Runtime
 
-`Vweave` introduces zero new primitives to the C++ core. Every construct lowers directly to Vortex's
-`link`, `value`, and `ArenaManifold`.
-
 ### 7.1 Production-to-Lowering Matrix
 
-| `Vweave` Syntax       | Vortex Runtime Lowering                                                     | Operational Effect                           |
-| :-------------------- | :-------------------------------------------------------------------------- | :------------------------------------------- |
-| `dim d.foo;`          | `Store::makeDimension("d.foo")`                                             | Mints dimension identity in Merkle catalog   |
-| `@c: 42`              | `c = makeScalarCell(42)`                                                    | Emits `OpKind::Structure (MakeCell)`         |
-| `@a ~d.1> @b`         | `link(a, d.1, POS, b)`                                                      | Links `a` to `b` posward; `b` to `a` negward |
-| `@p *d.2: @q`         | `link(p, d.2, POS, q)`                                                      | Establishes orthogonal pivot                 |
-| `clone @master`       | `c = makeCell(); link(master, d.clone, POS, c)`                             | Extends the `d.clone` rank                   |
-| `splice ~d.1> { @x }` | `link(curr, d.1, POS, x); link(x, d.1, POS, next)`                          | Inserts `@x` between `curr` and `next`       |
-| `sever ~d.1>`         | `link(curr, d.1, POS, nullopt)`                                             | Breaks dimensional connection                |
-| `ring d.step(@start)` | `link(curr, d.step, POS, start)`                                            | Closes 2-rank loop                           |
-| `Spindle(...)`        | Allocate pivot; assemble wing links along `d.2`; emit bytecode on `+d.spin` | Prepares dual-wing execution frame           |
+| `Vweave` Syntax         | Vortex Runtime Lowering                            | Operational Effect                           |
+| :---------------------- | :------------------------------------------------- | :------------------------------------------- |
+| `dim d.foo;`            | `Store::makeDimension("d.foo")`                    | Mints dimension identity in Merkle catalog   |
+| `@c: 42`                | `c = makeScalarCell(42)`                           | Emits `OpKind::Structure (MakeCell)`         |
+| `@a ~d.1> @b`           | `link(a, d.1, POS, b)`                             | Links `a` to `b` posward; reciprocal negward |
+| `@p *d.2: @q`           | `link(p, d.2, POS, q)`                             | Establishes orthogonal pivot                 |
+| `clone @master`         | `c = makeCell(); splice(master, d.clone, c)`       | Slices new clone into `d.clone` ring         |
+| `splice @x into ~d.1>`  | `link(curr, d.1, POS, x); link(x, d.1, POS, next)` | Atomically inserts `@x` into rank            |
+| `sever +d.1`            | `link(curr, d.1, POS, noCell)`                     | Breaks dimensional link posward              |
+| `deflect cond to ~d>`   | `emitOp(OpcodeKind::Branch, {cond, targetOp})`     | Conditional branch opcode on `+d.spin`       |
+| `swivel d.dim`          | `cursor.axis = resolveDim(d.dim)`                  | Reorients active stepping axis in VM         |
+| `ring d.step(@start)`   | `emitOp(OpcodeKind::Jump, {startOp})`              | Emits jump opcode to ring origin             |
+| `emit val`              | `link(actHead, d.grab, NEG, val); emitOp(Return)`  | Links result cell to `-d.grab` of frame      |
+| `Spindle(...)` (Call)   | `f = makeCell(); link(f, d.grab, POS, args); ...`  | Mints activation headcell on `d.stack`       |
+| `span(#auth, off, len)` | `makeSpanCell(Span{auth, off, len})`               | Mints cell carrying Permascroll span         |
 
 ### 7.2 Memory Model & Compressed Sparse Row (CSR) Layout
 
-In `apps/common/xanadu/zigzag/manifold.hpp`, links are stored as a compact Compressed Sparse Row
-(CSR) index:
+In `apps/common/xanadu/zigzag/manifold.hpp`, cells and links use compact cache-aligned storage:
 
 ```cpp
-struct LinkTriple {
-  DimId dim;
-  CellRef pos;
-  CellRef neg;
+struct DimLink {
+  DimRef dim{noCell};  // 4 bytes
+  CellRef pos{noCell}; // 4 bytes
+  CellRef neg{noCell}; // 4 bytes
 };
+static_assert(sizeof(DimLink) == 12);
+
+struct CellSlot {
+  std::uint32_t spanOffset;
+  std::uint16_t spanCount;
+  std::uint16_t formatFlags;
+  std::uint32_t birthOp;
+  std::uint32_t lastOp;
+  std::uint32_t linkOffset;
+  std::uint16_t linkCount;
+  std::uint8_t valueKind;
+  std::uint8_t flags;
+  std::uint64_t valueBits;
+};
+static_assert(sizeof(CellSlot) == 32);
 ```
 
-When `Vweave` compiles:
+### 7.3 Ephemeral Execution & Store Promotion
 
-1. Each cell occupies one entry in the `CellSlot` array.
-1. Its dimensional connections occupy contiguous records in the CSR run.
-1. Ephemeral evaluations execute entirely within `ArenaManifold`.
-
-### 7.3 Ephemeral Execution & Promotion
-
-Algorithms execute inside `ArenaManifold`. Ephemeral computations allocate cells in the arena spool.
-When a computation finishes, calling `promote()` persists the resulting subgraph into the author's
-spool, while unpromoted intermediate cells are discarded in $O(1)$ by resetting the arena head.
+Subroutine activation headcells and scratch calculations reside in `ArenaManifold`. When execution
+completes, calling `arena.promote()` transfers only the targeted result subgraph into the author's
+persistent `Store`, while ephemeral frames and dead link runs are discarded in $O(1)$ by resetting
+the arena head.
 
 ______________________________________________________________________
 
 ## 8. Standard Library: `std:weave`
 
-The standard library module `std:weave` provides native operations for manipulating manifolds:
+The `std:weave` standard library module provides foundational manifold algorithms:
 
 ```vweave
-module std:weave;
-
-// Walks rank along dim from origin, applying fn at each cell
-spindle Walk(origin: Cell, dim: DimId, fn: Spindle) { ... }
+// Walks rank along dim from origin, executing fn at each cell
+spindle Walk(origin: Cell, dim: DimName, fn: Spindle) { ... }
 
 // Folds values along a dimension into an accumulator
-spindle Fold(origin: Cell, dim: DimId, acc: Cell, fn: Spindle) -> (res: Cell) { ... }
+spindle Fold(origin: Cell, dim: DimName, acc: Cell, fn: Spindle) -> (res: Cell) { ... }
 
-// Splices an entire rank between two adjacent cells
-spindle WeaveRank(target: Cell, dim: DimId, rankHead: Cell) { ... }
+// Atomically splices an entire rank between two adjacent cells
+spindle WeaveRank(target: Cell, dim: DimName, rankHead: Cell) { ... }
 
 // Projects a 2D orthotope into an EDL for Xanadu rendering
-spindle ProjectToXanadoc(root: Cell, dX: DimId, dY: DimId) -> (doc: Cell) { ... }
+spindle ProjectToXanadoc(root: Cell, dX: DimName, dY: DimName) -> (doc: Cell) { ... }
 ```
 
 ______________________________________________________________________
 
 ## 9. Worked Canonical Programs
 
-### 9.1 Topological In-Place Quicksort
+### 9.1 Semantic Tagging & Dimensional Video Sorter
 
-Traditional Quicksort shifts array indices in linear memory. In `Vweave`, Quicksort **re-links cells
-along dimension `d.order` without copying or array allocations**:
-
-```vweave
-loom QuicksortLoom along d.step {
-    dim d.order, d.less, d.greater;
-
-    spindle Partition(head: Cell) -> (pivot: Cell, lessHead: Cell, greaterHead: Cell) {
-        warp along d.step {
-            pivot = head ~d.step>
-            curr = pivot.+d.order ~d.step>
-
-            @partition_loop:
-                deflect (curr == nil) to ~d.done>
-                next = curr.+d.order
-
-                // Sever curr from its current link
-                sever curr.~d.order>
-
-                // Deflect into less or greater rank based on value
-                if (curr.val < pivot.val) {
-                    splice curr into ~d.less>
-                } else {
-                    splice curr into ~d.greater>
-                }
-
-                curr = next ~d.step>
-                ring d.step(@partition_loop)
-
-            @done:
-                emit +d.2(pivot, lessHead, greaterHead)
-        }
-    }
-
-    spindle Sort(head: Cell) -> (sorted: Cell) {
-        (piv, less, greater) = Partition(head)
-        sLess = Sort(less)
-        sGreater = Sort(greater)
-
-        WeaveChain(sLess, piv, sGreater, d.order)
-        emit +d.2(sLess)
-    }
-}
-```
-
-### 9.2 Concurrent Tokenizer & Frequency Lattice
-
-This program reads text, extracts words along `d.tokens`, and builds a 2D frequency lattice along
-`d.vocab` and `d.count`:
+This program walks a rank of video cells along `d.videos` from `$focus`, attaches an orthogonal
+pivot along `d.tag` holding each video's MIME type, and weaves an ordered sequence along `d.order`:
 
 ```vweave
-loom WordLattice along d.step {
-    dim d.step, d.tokens, d.vocab, d.count;
+dim d.step, d.videos, d.tag, d.order;
 
-    warp Ingest along d.step {
-        @doc = OpenDocument("system://permascroll/speech.txt") ~d.step>
-        @tok = TokenizeToWeft(@doc, d.tokens)                 ~d.step>
+// Spindle: Inserts a video cell into the d.order rank sorted by MIME tag value
+spindle InsertSorted(head: Cell, item: Cell) -> (newHead: Cell) {
+    warp along d.step {
+        // Topological guard: if rank has no items yet, item is the new head
+        deflect !has_link(+d.order, head) to ~d.empty>
+        deflect (item.+d.tag.val < head.+d.tag.val) to ~d.prepend>
 
-        cursor = @tok
+        curr = head ->
         @scan:
-            deflect (cursor == nil) to ~d.finish>
-            word = cursor.val
-
-            vocabCell = LookupOrSplice(d.vocab, word)
-            vocabCell *d.count <~ IncCell()
-
-            cursor = cursor.+d.tokens ~d.step>
+            deflect !has_link(+d.order, curr) to ~d.append>
+            next = curr.+d.order ->
+            deflect (item.+d.tag.val < next.+d.tag.val) to ~d.splice>
+            curr = next ->
             ring d.step(@scan)
 
-        @finish:
-            ExportLattice(d.vocab, d.count)
+        @prepend:
+            splice item into <head.-d.order~ ->
+            emit item
+
+        @splice:
+            splice item into ~curr.+d.order> ->
+            emit head
+
+        @append:
+            splice item into ~curr.+d.order> ->
+            emit head
+
+        @empty:
+            emit item
     }
+}
+
+// Main Warp: Walks d.videos from $focus, tags each cell, and weaves d.order
+warp TagAndSort along d.step {
+    vid = $focus ->
+    orderHead = vid ->
+
+    // Tag the first video cell along d.tag (Orthogonal Pivot)
+    vid *d.tag: DetectMime(vid) ->
+
+    @loop:
+        // Nelsonian boundary guard: stop when d.videos rank ends
+        deflect !has_link(+d.videos, vid) to ~d.done>
+
+        // Traverse posward along d.videos to the next cell
+        vid = vid.+d.videos ->
+
+        // 1. Pivot: Attach MIME type tag cell without altering d.videos
+        vid *d.tag: DetectMime(vid) ->
+
+        // 2. Weave into the sorted d.order rank
+        orderHead = InsertSorted(orderHead, vid) ->
+
+        ring d.step(@loop)
+
+    @done:
+        emit orderHead
 }
 ```
 
 ```
-               d.count (Tallies)
-                  ▲
-                  │  [3]
-                  │   │
-                  │  [2]
-                  │   │
-  d.vocab ───────[ "hypertext" ]───────[ "zigzag" ]───────►
+                     ▲ +d.tag (MIME Type)
+                     │
+               [ "video/webm" ]           [ "video/mp4" ]
+                     ▲                          ▲
+                     │ *d.tag                   │ *d.tag
+d.videos ──► [ Vid 1: "clip.webm" ] ──► [ Vid 2: "intro.mp4" ] ──►
+                     │                          ▲
+                     │                          │
+d.order  ────────────┼──────────────────────────┴──────────~d.order──────►
+                     └─────────────────────────────────────► [ Vid 1 ]
+```
+
+### 9.2 Topological Insertion & Priority Queue
+
+A priority queue in `Vweave` is a 2-rank manifold where tasks are inserted along `d.priority` based
+on an integer rank:
+
+```vweave
+dim d.step, d.priority;
+
+spindle EnqueueTask(queueHead: Cell, task: Cell, priority: Int) -> (newHead: Cell) {
+    warp along d.step {
+        task.val = priority ->
+        deflect !has_link(+d.priority, queueHead) to ~d.empty>
+        deflect (priority > queueHead.val) to ~d.prepend>
+
+        curr = queueHead ->
+        @find_slot:
+            deflect !has_link(+d.priority, curr) to ~d.append>
+            next = curr.+d.priority ->
+            deflect (priority > next.val) to ~d.insert>
+            curr = next ->
+            ring d.step(@find_slot)
+
+        @prepend:
+            splice task into <queueHead.-d.priority~ ->
+            emit task
+
+        @insert:
+            splice task into ~curr.+d.priority> ->
+            emit queueHead
+
+        @append:
+            splice task into ~curr.+d.priority> ->
+            emit queueHead
+
+        @empty:
+            emit task
+    }
+}
 ```
 
 ### 9.3 Xanadu Transclusion & Citation Weave
 
-Demonstrating seamless integration with Xanadu primedia spans (`std:xanadu`):
+Demonstrating zero-copy transclusion from immutable Permascrolls into a citation mesh:
 
 ```vweave
-loom TransclusionForge along d.step {
-    dim d.step, d.transclude, d.annot;
+dim d.step, d.doc, d.tag, d.cite;
 
-    warp AssembleArticle along d.step {
-        @quote = transclude span("author:ted", 1040, 240) *d.step>
+spindle TagSpan(targetSpan: Span, tagName: Sym) -> (taggedCell: Cell) {
+    @node = targetSpan *d.tag: tagName ->
+    emit @node
+}
 
-        @comment = "Essential definition of Nelsonian intertwingularity."
-                   *d.annot: @quote ~d.step>
+warp AnnotateArticle along d.step {
+    // 1. Transclude span directly from permascroll without POSIX file paths
+    @quote = span(#author_ted, 1042, 128) *d.doc: $focus ->
 
-        PublishSpan(@quote, @comment)
-    }
+    // 2. Cross-stitch tag category
+    @tagged = TagSpan(@quote, #Intertwingularity) ->
+
+    // 3. Weave bidirectional citation link into secondary view
+    splice @tagged into ~$mark.+d.cite> ->
+    emit @tagged
 }
 ```
 
@@ -626,44 +663,81 @@ ______________________________________________________________________
 
 ```
 ┌──────────────────────────────────────┬──────────────────────────────────────┐
-│ VWEAVE TEXT BUFFER                   │ XUZZ 2D MANIFOLD VISUALIZER (d.1/d.2)│
+│ VWEAVE TEXT BUFFER / OMNIBAR         │ XUZZ 2D MANIFOLD VISUALIZER (d.1/d.2)│
 ├──────────────────────────────────────┼──────────────────────────────────────┤
 │ 01: warp Pipeline along d.step {     │                                      │
-│ 02:   @fetch -> Read()    ~d.step>   │          [Read] (Step 1)             │
-│ 03:   @eval  -> Calc()    ~d.step>   │            │                        │
-│ 04:             *d.val: 42           │            ▼ +d.step                 │
-│ 05:   @emit  -> Print()   ~d.step>   │  [42] ◄──[Calc] (Step 2, Active)     │
-│ 06: }                                │   -d.2     │                        │
+│ 02:   @fetch = Read() ->             │          [Read] (Step 1)             │
+│ 03:   @eval  = Calc() ->             │            │                        │
+│ 04:            *d.val: 42            │            ▼ +d.step                 │
+│ 05:   @emit  = Print()               │  [42] ◄──[Calc] (Step 2, Active)     │
+│ 06: }                                │   -d.grab  │                        │
 │                                      │            ▼ +d.step                 │
-│ [CURSOR AT LINE 03]                  │          [Print] (Step 3)            │
+│ [CURSOR AT LINE 03 ($focus)]         │          [Print] (Step 3)            │
 │                                      │                                      │
 └──────────────────────────────────────┴──────────────────────────────────────┘
 ```
 
-1. **Bilateral Caret Synchronization**: Moving the text cursor in the code editor animates the
-   visualizer camera in `xuzz` to focus on the corresponding cell in the manifold.
-1. **Interactive Swiveling**: While paused on cell `@eval`, pressing `Ctrl+X` / `Ctrl+Y` in `xuzz`
-   swivels the screen axes from `(d.step, d.val)` to `(d.time, d.clone)`, exposing the microversion
-   history and clone topology of the executing instruction.
-1. **No AST Disconnect**: Because `Vweave` is homoiconic, the program edited in the buffer is the
-   exact slice executing in the engine. Saving the text file appends `OpKind::Structure` records
-   directly into the store's ops spool.
+1. **Contextual Flow Mode (`$focus`, `$mark`):** In the `xuzz` omnibar (`:`), commands operate
+   directly on the highlighted cell (`$focus`), extending ranks along active viewport axes
+   (`dX`/`dY`).
+1. **Bilateral Caret Synchronization:** Moving the text cursor in the code buffer automatically
+   animates the `xuzz` camera to center on the corresponding cell in the 2D/3D visualizer.
+1. **Interactive Swiveling:** While paused on cell `@eval`, pressing `Ctrl+X` / `Ctrl+Y` swivels the
+   visualizer axes from `(d.step, d.val)` to `(d.time, d.clone)`, exposing the microversion history
+   and clone topology of the executing instruction.
+1. **Homoiconic Reality:** Code is not an ephemeral AST; saving a Vweave buffer writes
+   `OpKind::Structure` nodes into the ops spool. The code is the slice; the slice is the code.
 
-[toc-01]: #21-pl-design-the-1d-stream-vs-graph-topology
-[toc-02]: #22-vortex-engine-mechanical-invariants-of-the-spool
-[toc-03]: #23-zigzag-power-user-sensory-navigation-and-live-projection
-[toc-04]: #24-technical-writer-the-loom-metaphor-and-lexical-precision
-[toc-05]: #32-invariant-2-the-single-primitive-invariant
-[toc-06]: #33-invariant-3-dual-wing-spatial-invocation
-[toc-07]: #34-invariant-4-topological-scope--zero-unanchored-cells
-[toc-08]: #52-spatial-types-cells-ranks-rings-and-shapes
-[toc-09]: #53-dimensional-contracts-along-dcontract
-[toc-10]: #61-warps-execution-ranks-and-wefts-data-ranks
-[toc-11]: #62-pivots-cross-stitching-and-dimensional-swivels
-[toc-12]: #63-control-flow-topological-rings-and-deflection
-[toc-13]: #64-subroutines-dual-wing-spindles-and-spatial-closures
-[toc-14]: #65-clone-superposition-and-multi-presence
-[toc-15]: #72-memory-model--compressed-sparse-row-csr-layout
-[toc-16]: #92-concurrent-tokenizer--frequency-lattice
-[toc-17]: #93-xanadu-transclusion--citation-weave
-[toc-18]: #10-the-xuzz-interactive-experience--live-projection
+______________________________________________________________________
+
+## Appendix: Versioning and Change History
+
+**1.0 — Initial Specification (October 19, 2026).** Established the Nelsonian 2-rank manifold as a
+programming substrate, the Loom/Warp/Weft metaphor, dual-wing parameter calling, and basic lowering
+to Vortex primitives.
+
+**1.1 — The Rectified Orthotopal Specification (October 20, 2026).** Substantial overhaul following
+the two-round multi-agent architectural critique:
+
+- **Abolished `loom` blocks:** Continuous, open zzspace replaces hierarchical module enclosures.
+- **Abolished `nil` sentinels:** Replaced with topological boundary guards (`!has_link(...)`),
+  eliminating Hoare's sentinel from the manifold.
+- **Reified Activation Headcells:** Subroutines allocate ephemeral frames on `d.grab`/`d.stack` in
+  `ArenaManifold`, resolving the Recursion / Spatial Invocation Paradox while upholding
+  $\text{deg}^\pm \le 1$.
+- **Harmonized Coordinate Axes:** Replaced hardcoded `d.2` with `VortexCore` system dimensions
+  (`d.grab`, `d.step`, `d.spin`, `d.vars`, `d.stack`).
+- **Sanitized Grammar & Disambiguation:** `*` is reserved strictly for pivots; `.` for projection;
+  `->` for active rank steps; dimension inheritance eliminates shift-key typing noise.
+- **Contextual Flow Mode:** Added native `$focus`, `$mark`, `dX`, and `dY` for interactive `xuzz`
+  flow.
+- **Clone Ring Splicing:** Lowered `clone` to circular `d.clone` ring splicing, preserving
+  $\text{deg}^+ = 1$.
+- **Separation of Concerns:** Clarified that dense numeric crunching belongs in `Arrayfilade`/`vpl`,
+  focusing Vweave on hypermedia orchestration and semantic taxonomy lattices.
+
+[toc-01]: #2-the-multi-agent-architectural-audit--dialectic
+[toc-02]: #21-round-1-the-indictment-across-five-axes
+[toc-03]: #22-round-2-dialectical-cross-examination--reconciliations
+[toc-04]: #23-core-architectural-shifts-from-v10-to-v11
+[toc-05]: #3-architectural-foundations--invariants
+[toc-06]: #31-invariant-1-the-nelsonian-2-rank-manifold--collision-semantics
+[toc-07]: #32-invariant-2-the-single-primitive--host-dispatch-model
+[toc-08]: #33-invariant-3-re-entrant-invocation-via-activation-headcells
+[toc-09]: #34-invariant-4-continuous-open-space--topological-gc
+[toc-10]: #5-type-system-topological--structural-types
+[toc-11]: #52-spatial-types-cells-ranks-rings-and-shapes
+[toc-12]: #53-topological-boundary-guards--contracts
+[toc-13]: #6-language-mechanics--operational-semantics
+[toc-14]: #61-warps-execution--wefts-data-with-dimension-inheritance
+[toc-15]: #62-pivots-cross-stitching-and-dimensional-swivels
+[toc-16]: #63-control-flow-topological-rings-and-boundary-deflection
+[toc-17]: #64-subroutines-activation-headcells-and-spatial-wings
+[toc-18]: #65-clone-superposition-and-ring-splicing
+[toc-19]: #72-memory-model--compressed-sparse-row-csr-layout
+[toc-20]: #73-ephemeral-execution--store-promotion
+[toc-21]: #91-semantic-tagging--dimensional-video-sorter
+[toc-22]: #92-topological-insertion--priority-queue
+[toc-23]: #93-xanadu-transclusion--citation-weave
+[toc-24]: #10-the-xuzz-interactive-experience--live-projection
+[toc-25]: #appendix-versioning-and-change-history
