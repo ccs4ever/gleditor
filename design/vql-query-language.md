@@ -43,12 +43,15 @@ ______________________________________________________________________
   - [4.7 Existing-Target Fan-Out](#47-existing-target-fan-out)
     - [Which cell the first attachment gets, and why it stopped being obvious][toc-05]
   - [4.8 First-Class Shapes, Context Morphisms & Structural Unification][toc-13]
-    - [The Shape Type and Boolean Wildcard Algebra][toc-14]
+    - [The Shape Type, Derivation & Boolean Wildcard Algebra][toc-14]
     - [Short-Form Shape Matching and Predicate Invariants][toc-15]
     - [Shape Masking, Projection, and Lens Subsumption][toc-16]
     - [The Bidirectional Tilde Operator][toc-17]
     - [Context-Preserving Sprout Morphisms and Value Lists][toc-18]
-    - [Generalized Sorting and User-Defined Functions][toc-19]
+    - [Shape Destructuring](#486-shape-destructuring)
+    - [Generalized Sorting and Path Lambdas][toc-19]
+    - [User-Defined Functions Returning Dynamic Shapes][toc-23]
+    - [Nested Shapes and Dimension Extraction][toc-22]
 - [5. Memory Management & Topological Garbage Collection][toc-06]
 - [6. Canonical Production Query Examples](#6-canonical-production-query-examples)
   - [6.1 Deep Structural Navigation with Zero-Copy Slice][toc-07]
@@ -153,8 +156,12 @@ ______________________________________________________________________
 | `$path{...}`            | Shape Mask / Lens              | Projects a shape onto context cells, masking unmentioned dimensions and remapping links (replaces `@lens`) — see §4.8.3.                                                                       |
 | `{}`                    | Empty Shape                    | Drops all connections in projection; tests for unlinked cell (valence 0) in predicates — see §4.8.1.                                                                                           |
 | `{*}`                   | Universal Shape                | Projects all connections; tests for cell with valence $\ge 1$ — see §4.8.1.                                                                                                                    |
-| `{*, !dim}`             | Complement Shape               | Projects all connections except `dim`; tests absence of `dim` — see §4.8.1.                                                                                                                    |
-| `{!*, dim}`             | Exclusive Shape                | Projects only posward on `dim`; tests for presence of `+dim` and no other connections — see §4.8.1.                                                                                            |
+| `{*, !dim}`             | Complement Shape               | Derives from universal shape `*`, subtracting `dim` — see §4.8.1.                                                                                                                              |
+| `{!*, dim}`             | Exclusive Shape                | Derives from empty shape `!*`, including only posward `dim` — see §4.8.1.                                                                                                                      |
+| `{ $shape, !dim }`      | Shape Derivation               | Derives a new shape from `$shape`, subtracting or overriding dimensions — see §4.8.1.                                                                                                          |
+| `{ func(.) }`           | Dynamic Shape Embedding        | Embeds dynamically generated shape from a function invocation — see §4.8.1.                                                                                                                    |
+| `{ dim: { ... } }`      | Nested Shape                   | Defines multi-hop neighborhood schemas and deep matching — see §4.8.9.                                                                                                                         |
+| `$shape/dim`, `$s[dim]` | Dimension Extraction           | Extracts sub-shape or target value from shape descriptor via virtual path step or indexing — see §4.8.9.                                                                                       |
 | `{~dim}`                | Bidirectional Shape Filter     | Filters out everything except negward and posward on `dim` — see §4.8.4.                                                                                                                       |
 | `{ ., dim: $var }`      | Shape Destructuring            | Destructures orthogonal neighbors into variables with symmetric `:` syntax — see §4.8.6.                                                                                                       |
 | `sort_into(d, by: ...)` | Topological Sorter             | Weaves an ordered sequence along `d` sorted by lambda or dimension shorthand (`by: +d.tag` $\equiv$ `by: \(.) ./+d.tag`) — see §4.8.7.                                                         |
@@ -226,9 +233,9 @@ CreateValue           ::= ValueExpr | BareLiteral
 BareLiteral           ::= (run of characters excluding whitespace, "%", ",", "(", ")", "[", "]", "{", "}")
 
 ShapeLiteral          ::= "{" ShapeRule ( "," ShapeRule )* "}"
-ShapeRule             ::= WildcardShapeRule | DimensionShapeRule
-WildcardShapeRule     ::= "*" | "!*"
-DimensionShapeRule    ::= "!"? ( "+" | "-" | "~" )? DimensionIdentifier ( ":" ( ValueExpr | VariableRef ) )?
+ShapeRule             ::= BaseShapeRule | DimensionShapeRule
+BaseShapeRule         ::= "*" | "!*" | VariableRef | FunctionInvocation
+DimensionShapeRule    ::= "!"? ( "+" | "-" | "~" )? DimensionIdentifier ( ":" ValueExpr )?
 
 CloneTail             ::= ( "><" CloneOperand )+
 CloneOperand          ::= PathExpression | BareCreate
@@ -251,7 +258,8 @@ PredicateTest         ::= PathExpression | "." | ExtendedTruthinessCheck | Funct
 
 ExtendedTruthinessCheck ::= "?" ( PathExpression | ValueExpr )
 
-ValueExpr             ::= PathLambda | PathExpression | ScalarLiteral | VariableRef | ShapeLiteral | FunctionInvocation
+ValueExpr             ::= PathLambda | PathExpression | ScalarLiteral | VariableRef | ShapeLiteral | ShapeIndexExpr | FunctionInvocation
+ShapeIndexExpr        ::= VariableRef "[" SignedDimension "]"
 PathLambda            ::= "\\" "(" ( VariableRef | "." ) ( "," VariableRef )* ")" ( PathExpression | ValueExpr )
 
 ScalarLiteral          ::= StringLiteral | NumericLiteral | BooleanLiteral
@@ -712,31 +720,42 @@ testing, destructuring, and projection eliminates special-purpose sublanguages (
 allows topological manifolds to be inspected, transformed, and reasoned about with zero-copy
 algebraic operations.
 
-#### 4.8.1 The Shape Type and Boolean Wildcard Algebra
+#### 4.8.1 The Shape Type, Derivation & Boolean Wildcard Algebra
 
 A shape literal `{...}` defines a set of constraints or projections over the signed dimensions
 $\mathcal{D}(c)$ incident to a cell $c$. VQL defines a rigorous Boolean wildcard algebra for
 neighborhood shapes:
 
-| Shape Literal | Predicate Semantics (Test)                                         | Projection / Mask Semantics (Effect)                       |
-| ------------- | ------------------------------------------------------------------ | ---------------------------------------------------------- |
-| `{}`          | Valence-0 check: $                                                 | \\mathcal{D}(c)                                            |
-| `{*}`         | Valence $\ge 1$ check: $                                           | \\mathcal{D}(c)                                            |
-| `{*, !d.tag}` | Complement check: has connections, but none along `d.tag`          | Preserves all connections except `d.tag`, which is severed |
-| `{!*, d.tag}` | Exclusive check: has connection along `+d.tag`, and no others      | Drops all connections except posward along `d.tag`         |
-| `{~d.tag}`    | Bidirectional check: has connections along both or either `±d.tag` | Preserves only negward and posward links along `d.tag`     |
+| Shape Literal        | Predicate Semantics (Test)                                                          | Projection / Mask Semantics (Effect)                          |
+| -------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `{}`                 | Valence-0 check: $\lvert\mathcal{D}(c)\rvert = 0$ (cell is completely unlinked)     | Drop all links; isolates cell completely (eager for GC)       |
+| `{*}`                | Valence $\ge 1$ check: $\lvert\mathcal{D}(c)\rvert \ge 1$ (cell has any connection) | Identity projection: preserves all existing dimensional links |
+| `{*, !d.tag}`        | Complement check: has connections, but none along `d.tag`                           | Preserves all connections except `d.tag`, which is severed    |
+| `{!*, d.tag}`        | Exclusive check: has connection along `+d.tag`, and no others                       | Drops all connections except posward along `d.tag`            |
+| `{ $shape, !d.tag }` | Shape derivation: matches `$shape` without `d.tag`                                  | Projects `$shape` with `d.tag` filtered out                   |
+| `{ func(.) }`        | Dynamic embedding: matches dynamically evaluated shape                              | Projects dynamically evaluated shape                          |
+| `{~d.tag}`           | Bidirectional check: has connections along both or either `±d.tag`                  | Preserves only negward and posward links along `d.tag`        |
 
 - **Empty Shape (`{}`)**: Evaluated as a predicate, `{}` is true if and only if the cell has no
   incident links across any dimension in the manifold. Evaluated under shape projection (`$c{}`), it
   severs all links across all dimensions, isolating `$c` from the reachable root set and scheduling
   it for topological garbage collection (§5).
-- **Universal Wildcard (`*`)**: The wildcard `*` stands for the set of all active incident
-  dimensions on the context cell. In `{*, !d.foo}`, `*` includes all dimensions, while `!d.foo`
-  subtracts `d.foo` from the set.
-- **Negated Wildcard (`!*`)**: The prefix `!*` explicitly clears the active set to empty before
-  specific dimensions are added back. Hence, `{!*, +d.a, +d.b}` projects exclusively `+d.a` and
-  `+d.b`, masking away all other dimensions. An unsigned dimension `d.tag` in an inclusion rule
-  defaults to posward `+d.tag`.
+- **`*` as the Universal "Everything" Shape**: Inside any shape literal, `*` literally denotes the
+  universal base shape containing every active dimension. Therefore, `{*, !d.foo}` is not a one-off
+  syntax exception — it is simply shape derivation: start with `*` and subtract `d.foo`.
+- **Negated Wildcard (`!*`)**: The prefix `!*` explicitly clears the active set to empty (the empty
+  base shape) before specific dimensions are added back. Hence, `{!*, +d.a, +d.b}` projects
+  exclusively `+d.a` and `+d.b`, masking away all other dimensions. An unsigned dimension `d.tag` in
+  an inclusion rule defaults to posward `+d.tag`.
+- **Shape Derivation and Composition (`{ $shape, !d.tag }`)**: A new shape can be derived from any
+  existing shape expression:
+  - `{ $shape, !d.tag }`: derives a shape inheriting from `$shape`, filtering out `d.tag`.
+  - `{ $shape, +d.tag: "new_value" }`: inherits from `$shape`, adding or overriding `+d.tag`.
+  - `{ $shape_a, $shape_b }`: composes two shapes, unioning their rules with right-to-left
+    precedence for overrides.
+- **Dynamic Shape Embedding (`{ func(.) }`)**: Because any `BaseShapeRule` can be a
+  `FunctionInvocation`, dynamic shape generation is fully coherent:
+  `{ func_returning_shape(.), !d.tag }` evaluates the shape at runtime and modifies it.
 
 #### 4.8.2 Short-Form Shape Matching and Predicate Invariants
 
@@ -869,6 +888,52 @@ def video_schema($codec) :=
 A user-defined function can return a dynamic shape based on input conditions. This shape can be
 applied directly to paths via shape projection (`$video{ video_schema($video/+d.codec) }`),
 dynamically configuring the cell's dimensional connections based on runtime data.
+
+#### 4.8.9 Nested Shapes and Dimension Extraction
+
+Knowledge graphs frequently model multi-hop hierarchical structures within zzspace (for example, an
+asset connected to a video descriptor cell, which in turn links to codec and resolution parameters).
+VQL 14.0 supports **Nested Shapes** and **Shape Dimension Extraction**:
+
+##### Nested Shapes
+
+A shape rule can associate a dimension with an inner shape literal:
+
+```
+{
+  +d.video: { +d.codec: "h264", +d.fps: 60 },
+  +d.audio: { +d.codec: "aac", +d.channels: 2 }
+}
+```
+
+- **In Predicates (`$node[{ +d.video: { +d.codec: "h264" } }]`)**: Performs deep multi-hop pattern
+  matching directly across contiguous CSR rows in memory. It verifies that `$node` has a link along
+  `+d.video`, and that the target cell satisfies the nested shape (possessing `+d.codec = "h264"`).
+- **In Shape Projection (`weave $node{ +d.video: { +d.codec: "h264" } }`)**: Constructs or updates
+  the nested sub-manifold along `+d.video` off `$node`, linking the intermediate and child cells in
+  a single atomic weave block.
+
+##### Shape Dimension Extraction (`$shape/dim` vs. `$shape[dim]`)
+
+When composing shapes, an author may wish to extract a dimension's constraint or sub-shape from an
+existing shape value (e.g. constructing `{ +d.tag: $shape/d.tag }`). VQL supports two complementary
+formulations:
+
+1. **Reusing the Path Separator (`$shape/dim`) — The Virtual Manifold Model**: Under Nelsonian
+   principles, metadata and structures are structurally uniform: a First-Class Shape can be viewed
+   as an immutable virtual manifold node whose dimensions map to its rules. Navigating
+   `$shape/d.tag` traverses into the shape's `d.tag` entry:
+   - If `d.tag` references a nested shape, `$shape/d.tag` yields that shape.
+   - If `d.tag` references a value, it yields that value (or an ephemeral value cell).
+   - If `d.tag` is absent in `$shape`, it yields an empty stream $\emptyset$ (exactly like an
+     unlinked cell in zzspace).
+1. **Explicit Descriptor Indexing (`$shape[dim]`)**: Where static syntactic distinction between
+   physical cell graph traversal and schema descriptor inspection is desired, bracket indexing
+   `$shape[+d.tag]` directly queries the shape descriptor's rule table without invoking path
+   resolution machinery.
+
+Both forms are valid; `{ +d.tag: $shape/d.tag }` and `{ +d.tag: $shape[+d.tag] }` evaluate to the
+same derived shape.
 
 ______________________________________________________________________
 
@@ -1286,29 +1351,29 @@ The rule, two components:
 Editorial changes that alter no normative text do not bump either component; they are not in the
 table.
 
-| version | commit    | date       | change                                                                                                                                                                                                                                                                                                                                                 |
-| ------- | --------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 1.0     | `846c0ed` | 2026-09-09 | Initial specification: paths, predicates, and the compilation target.                                                                                                                                                                                                                                                                                  |
-| 2.0     | `bd9b58b` | 2026-09-09 | Reworked around `%`, `weave`, and a real zzstructure `Cell`.                                                                                                                                                                                                                                                                                           |
-| 3.0     | `a7d36d8` | 2026-09-09 | `\\` traversal replaced; `%` batches; `fuse` renamed `entangle`.                                                                                                                                                                                                                                                                                       |
-| 4.0     | `bca523d` | 2026-09-09 | Compilation retargeted onto the single `link` primitive.                                                                                                                                                                                                                                                                                               |
-| 4.1     | `a6fffe4` | 2026-09-09 | §4.7 existing-target fan-out, drawing partners from a generator.                                                                                                                                                                                                                                                                                       |
-| 4.2     | `22b4aec` | 2026-09-09 | The generator's first pull returns the target itself.                                                                                                                                                                                                                                                                                                  |
-| 4.3     | `c8864ee` | 2026-09-10 | Checked against the convergence's measured cell layout.                                                                                                                                                                                                                                                                                                |
-| 5.0     | `88524a9` | 2026-09-10 | V1–V4 accepted; `d.cache` pinned to a cursor rather than hung off the origin.                                                                                                                                                                                                                                                                          |
-| 5.1     | `3d1cb53` | 2026-09-10 | `d.pinning-cursors` given its own Root Set rank.                                                                                                                                                                                                                                                                                                       |
-| 5.2     | `05c79d9` | 2026-09-10 | A pin is named on `d.name`.                                                                                                                                                                                                                                                                                                                            |
-| 6.0     | `563c93a` | 2026-09-11 | **`d.entangle` deleted.** `><` links along `d.clone`; `EntangleTail` becomes `CloneTail`; the master is the leftmost operand.                                                                                                                                                                                                                          |
-| 7.0     | `4720419` | 2026-09-11 | **Compilation retargeted onto `value()`**; §7.4 corrected — a splice is one operation, not two.                                                                                                                                                                                                                                                        |
-| 8.0     | `8f7d4bd` | 2026-09-11 | **`@` retired.** `.` is the context cell everywhere; comparison renders it; the implicit-context rule loses its branch.                                                                                                                                                                                                                                |
-| 8.1     | `ae4e800` | 2026-09-11 | `any()`/`all()`/`none()` added; negative index windows stated as counting from the end.                                                                                                                                                                                                                                                                |
-| 9.0     | `69ad10d` | 2026-09-11 | **The break sentinel is `0`**, and `LiteralCellId` may not be written as `0`.                                                                                                                                                                                                                                                                          |
-| 10.0    | `072b394` | 2026-09-11 | **`::` placement added**, retiring `dim`'s two meanings; `[-1]` is the last *match*, not the rank's tail.                                                                                                                                                                                                                                              |
-| 10.1    | `b92bbe3` | 2026-09-11 | `::from` and `::rank` added; the read and create defaults named.                                                                                                                                                                                                                                                                                       |
-| 11.0    | `715c525` | 2026-09-11 | **`::fixed` removed from the placement family**, becoming a step suffix.                                                                                                                                                                                                                                                                               |
-| 11.1    | `ae9362f` | 2026-09-11 | The yield axis given four values — `!new`, `!last`, `!both`, `!keep` — with bare `!` as `!keep`.                                                                                                                                                                                                                                                       |
-| 12.0    | `a03ddcc` | 2026-09-11 | **The fan-out generator never hands out the master**; every attachment is a fresh clone.                                                                                                                                                                                                                                                               |
-| 14.0    | `current` | 2026-10-20 | **First-class shapes `{...}`**, Boolean wildcard algebra (`{}`, `*`, `!*`, `~`), short-form shape predicates `[{...}]`, shape masking/projection replacing `@lens`, `~dim` bidirectional prefix, sprout morphisms `key => val` and `key => list(...)`, symmetric destructuring `:`, path lambdas `\(.) ...`, `sort_into(dim, by: ...)`, and UDF `def`. |
+| version | commit    | date       | change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------- | --------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1.0     | `846c0ed` | 2026-09-09 | Initial specification: paths, predicates, and the compilation target.                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| 2.0     | `bd9b58b` | 2026-09-09 | Reworked around `%`, `weave`, and a real zzstructure `Cell`.                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| 3.0     | `a7d36d8` | 2026-09-09 | `\\` traversal replaced; `%` batches; `fuse` renamed `entangle`.                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| 4.0     | `bca523d` | 2026-09-09 | Compilation retargeted onto the single `link` primitive.                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| 4.1     | `a6fffe4` | 2026-09-09 | §4.7 existing-target fan-out, drawing partners from a generator.                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| 4.2     | `22b4aec` | 2026-09-09 | The generator's first pull returns the target itself.                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| 4.3     | `c8864ee` | 2026-09-10 | Checked against the convergence's measured cell layout.                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| 5.0     | `88524a9` | 2026-09-10 | V1–V4 accepted; `d.cache` pinned to a cursor rather than hung off the origin.                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 5.1     | `3d1cb53` | 2026-09-10 | `d.pinning-cursors` given its own Root Set rank.                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| 5.2     | `05c79d9` | 2026-09-10 | A pin is named on `d.name`.                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| 6.0     | `563c93a` | 2026-09-11 | **`d.entangle` deleted.** `><` links along `d.clone`; `EntangleTail` becomes `CloneTail`; the master is the leftmost operand.                                                                                                                                                                                                                                                                                                                                                           |
+| 7.0     | `4720419` | 2026-09-11 | **Compilation retargeted onto `value()`**; §7.4 corrected — a splice is one operation, not two.                                                                                                                                                                                                                                                                                                                                                                                         |
+| 8.0     | `8f7d4bd` | 2026-09-11 | **`@` retired.** `.` is the context cell everywhere; comparison renders it; the implicit-context rule loses its branch.                                                                                                                                                                                                                                                                                                                                                                 |
+| 8.1     | `ae4e800` | 2026-09-11 | `any()`/`all()`/`none()` added; negative index windows stated as counting from the end.                                                                                                                                                                                                                                                                                                                                                                                                 |
+| 9.0     | `69ad10d` | 2026-09-11 | **The break sentinel is `0`**, and `LiteralCellId` may not be written as `0`.                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 10.0    | `072b394` | 2026-09-11 | **`::` placement added**, retiring `dim`'s two meanings; `[-1]` is the last *match*, not the rank's tail.                                                                                                                                                                                                                                                                                                                                                                               |
+| 10.1    | `b92bbe3` | 2026-09-11 | `::from` and `::rank` added; the read and create defaults named.                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| 11.0    | `715c525` | 2026-09-11 | **`::fixed` removed from the placement family**, becoming a step suffix.                                                                                                                                                                                                                                                                                                                                                                                                                |
+| 11.1    | `ae9362f` | 2026-09-11 | The yield axis given four values — `!new`, `!last`, `!both`, `!keep` — with bare `!` as `!keep`.                                                                                                                                                                                                                                                                                                                                                                                        |
+| 12.0    | `a03ddcc` | 2026-09-11 | **The fan-out generator never hands out the master**; every attachment is a fresh clone.                                                                                                                                                                                                                                                                                                                                                                                                |
+| 14.0    | `current` | 2026-10-20 | **First-class shapes `{...}`**, Boolean wildcard algebra (`{}`, `*`, `!*`, `~`), shape derivation (`{ $shape, !d }`), dynamic embedding `{ func(.) }`, nested shapes, dimension extraction (`$shape/d`, `$s[d]`), short-form shape predicates `[{...}]`, shape masking/projection replacing `@lens`, `~dim` bidirectional prefix, sprout morphisms `key => val` and `key => list(...)`, symmetric destructuring `:`, path lambdas `\(.) ...`, `sort_into(dim, by: ...)`, and UDF `def`. |
 
 [toc-01]: #1-architectural-foundations--operational-invariants
 [toc-02]: #2-syntactic-token--structural-shorthand-matrix
@@ -1323,7 +1388,7 @@ table.
 [toc-11]: #73--links-along-dclone-and-the-master-is-the-leftmost-operand
 [toc-12]: #74-valuereplacement-offset-length-is-one-operation-on-a-persistent-cell
 [toc-13]: #48-first-class-shapes-context-morphisms--structural-unification
-[toc-14]: #481-the-shape-type-and-boolean-wildcard-algebra
+[toc-14]: #481-the-shape-type-derivation--boolean-wildcard-algebra
 [toc-15]: #482-short-form-shape-matching-and-predicate-invariants
 [toc-16]: #483-shape-masking-projection-and-lens-subsumption
 [toc-17]: #484-the-bidirectional-tilde-operator-
@@ -1331,3 +1396,5 @@ table.
 [toc-19]: #487-generalized-sorting-sort_into-and-path-lambdas
 [toc-20]: #65-context-preserving-sprout-and-generalized-sorting
 [toc-21]: #66-conditional-shape-morphisms-and-lens-masking
+[toc-22]: #489-nested-shapes-and-dimension-extraction
+[toc-23]: #488-user-defined-functions-def-returning-dynamic-shapes
