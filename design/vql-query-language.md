@@ -150,8 +150,9 @@ ______________________________________________________________________
 | `/dim%`                 | Create (`link(., ±dim, -1)`)   | Allocates a new cell along `dim` (at the tail of any existing rank); see §4.5.                                                                                                                 |
 | `/dim%VALUE`            | Create + init                  | Allocates and initializes a new cell's content to `VALUE` — bare, quoted, or `$variable`.                                                                                                      |
 | `/dim%%...`             | Batch create                   | Each additional `%` allocates one more cell along `dim`; all of them join the step's result set — see §4.5.                                                                                    |
-| `key => val`            | Sprout Morphism                | Sprouts key along `+d.vars`, scalar value along `+d.values`; context remains on the origin cell — see §4.8.5.                                                                                  |
-| `key => list(...)`      | Multi-Value Sprout             | Sprouts key along `+d.vars`, values chained along `+d.values`; context remains on origin cell — see §4.8.5.                                                                                    |
+| `"key" => val`          | Sprout Morphism                | Sprouts quoted key literal along `+d.vars`, scalar value along `+d.values`; context kept — see §4.8.5.                                                                                         |
+| `"key" => list(...)`    | Multi-Value Sprout             | Sprouts quoted key along `+d.vars`, values chained along `+d.values`; context kept — see §4.8.5.                                                                                               |
+| `±dim => val`           | Dimension Morphism             | Links fresh cell with `val` along unquoted dimension `±dim`; context kept on origin cell — see §4.8.5.                                                                                         |
 | `[{...}]`               | Shape Predicate                | Fast L1 CSR row match: tests presence, absence, and values of local dimensional connections (sugar for `[. ~ {...}]`) — see §4.8.2.                                                            |
 | `$path{...}`            | Shape Mask / Lens              | Projects a shape onto context cells, masking unmentioned dimensions and remapping links (replaces `@lens`) — see §4.8.3.                                                                       |
 | `{}`                    | Empty Shape                    | Drops all connections in projection; tests for unlinked cell (valence 0) in predicates — see §4.8.1.                                                                                           |
@@ -219,9 +220,10 @@ VariableRef           ::= "$" [a-zA-Z_][a-zA-Z0-9_]*
 LiteralCellId         ::= [0-9]+
 
 PathStep              ::= "/" StepSelector PredicateClause* RangeClamp? Yield?
-StepSelector          ::= SproutMorphism | SignedDimension CreateSuffix? | MacroDimensionGroup | FunctionInvocation
+StepSelector          ::= PathMorphism | SignedDimension CreateSuffix? | MacroDimensionGroup | FunctionInvocation
 
-SproutMorphism        ::= DimensionIdentifier "=>" ( SproutList | ValueExpr )
+PathMorphism          ::= MorphismSubject "=>" ( SproutList | ValueExpr )
+MorphismSubject       ::= StringLiteral | SignedDimension | VariableRef
 SproutList            ::= "list" "(" ValueExpr ( "," ValueExpr )* ")"
 
 SignedDimension       ::= ( "+" | "-" | "~" )? DimensionIdentifier Placement?
@@ -822,18 +824,43 @@ same parent.
 The polymorphic morphism operator `=>` resolves this across all forms by **keeping the evaluation
 context anchored to the left-hand subject**:
 
-| Category                                | Form (`LHS => RHS`)  | Concrete Example                        | Desugared Structural Lowering                                | Context Behavior    | Semantic Outcome                                                                         |
-| :-------------------------------------- | :------------------- | :-------------------------------------- | :----------------------------------------------------------- | :------------------ | :--------------------------------------------------------------------------------------- |
-| **Sprout Morphism** *(Metadata)*        | `key => value`       | `$node/title => "Hamlet"`               | `$node/+d.vars%"title"/+d.values%"Hamlet"!keep`              | Stays on `$node`    | Sprouts key on `+d.vars`, value on `+d.values`.                                          |
-|                                         | `key => list(...)`   | `$node/tags => list("video", "hd")`     | `$node/+d.vars%"tags"/+d.values%"video"%"hd"!keep`           | Stays on `$node`    | Sprouts key on `+d.vars`, chaining values posward along `+d.values`.                     |
-|                                         | `key => { shape }`   | `$node/meta => { +d.author: "Alice" }`  | `$node/+d.vars%"meta"/+d.values%{ +d.author: "Alice" }!keep` | Stays on `$node`    | Sprouts key on `+d.vars`, materializing shape value posward.                             |
-| **Dimension Morphism** *(Edge Wiring)*  | `±dim => value`      | `$video/+d.tag => "video/mp4"`          | `$video/+d.tag%"video/mp4"!keep`                             | Stays on `$video`   | Links fresh cell with content `value` along `±dim`, context kept.                        |
-|                                         | `±dim => list(...)`  | `$doc/+d.edits => list("rev1", "rev2")` | `$doc/+d.edits%"rev1"%"rev2"!keep`                           | Stays on `$doc`     | Allocates and chains multiple cells posward along `±dim`, context kept.                  |
-|                                         | `±dim => { shape }`  | `$cell/+d.child => { +d.fps: 60 }`      | `$cell/+d.child%{ +d.fps: 60 }!keep`                         | Stays on `$cell`    | Allocates cell along `±dim`, materializes nested shape onto it, context kept.            |
-|                                         | `±dim => $target`    | `$cell/+d.parent => $root`              | `$cell/link(+d.parent, $root)`                               | Stays on `$cell`    | Links to existing cell `$target` along `±dim` (using clone generator for fan-out, §4.7). |
-| **Subject Morphism** *(In-Place Morph)* | `$cell => { shape }` | `$account => { +d.status: "active" }`   | `$account{ +d.status: "active" }`                            | Stays on `$account` | In-place shape projection/masking applied to `$cell`.                                    |
-|                                         | `$cell => $target`   | `$theme => $default_theme`              | `$theme><$target`                                            | Stays on `$theme`   | Joins `$cell` to `$target` on a `d.clone` rank (leftmost is master, §4.6).               |
-|                                         | `$cell => list(...)` | `$parent => list($c1, $c2, $c3)`        | `$parent/link(+d.1, $c1/link(+d.step, $c2...))`              | Stays on `$parent`  | Links an ordered sequence of existing cells off `$parent` along primary rank.            |
+| Category                                | Form (`LHS => RHS`)  | Concrete Example                         | Desugared Structural Lowering                                | Context Behavior    | Semantic Outcome                                                                         |
+| :-------------------------------------- | :------------------- | :--------------------------------------- | :----------------------------------------------------------- | :------------------ | :--------------------------------------------------------------------------------------- |
+| **Sprout Morphism** *(Metadata)*        | `"key" => value`     | `$node/"title" => "Hamlet"`              | `$node/+d.vars%"title"/+d.values%"Hamlet"!keep`              | Stays on `$node`    | Sprouts quoted key on `+d.vars`, value on `+d.values`.                                   |
+|                                         | `"key" => list(...)` | `$node/"tags" => list("video", "hd")`    | `$node/+d.vars%"tags"/+d.values%"video"%"hd"!keep`           | Stays on `$node`    | Sprouts quoted key on `+d.vars`, values chained on `+d.values`.                          |
+|                                         | `"key" => { shape }` | `$node/"meta" => { +d.author: "Alice" }` | `$node/+d.vars%"meta"/+d.values%{ +d.author: "Alice" }!keep` | Stays on `$node`    | Sprouts key on `+d.vars`, materializing shape value posward.                             |
+| **Dimension Morphism** *(Edge Wiring)*  | `±dim => value`      | `$video/+d.tag => "video/mp4"`           | `$video/+d.tag%"video/mp4"!keep`                             | Stays on `$video`   | Links fresh cell with content `value` along `±dim`, context kept.                        |
+|                                         | `±dim => list(...)`  | `$doc/+d.edits => list("rev1", "rev2")`  | `$doc/+d.edits%"rev1"%"rev2"!keep`                           | Stays on `$doc`     | Allocates and chains multiple cells posward along `±dim`, context kept.                  |
+|                                         | `±dim => { shape }`  | `$cell/+d.child => { +d.fps: 60 }`       | `$cell/+d.child%{ +d.fps: 60 }!keep`                         | Stays on `$cell`    | Allocates cell along `±dim`, materializes nested shape onto it, context kept.            |
+|                                         | `±dim => $target`    | `$cell/+d.parent => $root`               | `$cell/link(+d.parent, $root)`                               | Stays on `$cell`    | Links to existing cell `$target` along `±dim` (using clone generator for fan-out, §4.7). |
+| **Subject Morphism** *(In-Place Morph)* | `$cell => { shape }` | `$account => { +d.status: "active" }`    | `$account{ +d.status: "active" }`                            | Stays on `$account` | In-place shape projection/masking applied to `$cell`.                                    |
+|                                         | `$cell => $target`   | `$theme => $default_theme`               | `$theme><$target`                                            | Stays on `$theme`   | Joins `$cell` to `$target` on a `d.clone` rank (leftmost is master, §4.6).               |
+|                                         | `$cell => list(...)` | `$parent => list($c1, $c2, $c3)`         | `$parent/link(+d.1, $c1/link(+d.step, $c2...))`              | Stays on `$parent`  | Links an ordered sequence of existing cells off `$parent` along primary rank.            |
+
+##### Disambiguating Keys from Dimensions: Strong Literals via Quotes
+
+A foundational architectural requirement in zzstructures is distinguishing **topological
+dimensions** from **data payloads**:
+
+- **Dimensions (`SignedDimension`)** are coordinate axes in the matrix manifold (`+d.tag`,
+  `-d.parent`, `d.status`, or bare `status`). In a path step, unquoted tokens are reserved
+  exclusively for dimension identifiers.
+- **Keys (`StringLiteral`)** are cell payloads stored on the `+d.vars` metadata rank.
+
+To prevent syntactic ambiguity, **keys in sprout morphisms must always be quoted string literals**
+(e.g., `"title" => "Hamlet"`), indicating a strong literal payload:
+
+- `$node/"title" => "Hamlet"`: Quoted string on LHS $\implies$ Sprout Morphism
+  (`+d.vars%"title"/+d.values%"Hamlet"!keep`).
+- `$node/+d.tag => "video/mp4"`: Unquoted signed dimension on LHS $\implies$ Dimension Morphism
+  (`+d.tag%"video/mp4"!keep`).
+- `$node/tag => "video/mp4"`: Unquoted identifier on LHS $\implies$ Dimension Morphism along
+  dimension `+tag`.
+- `$node/$key => "value"`: Dynamic variable on LHS $\implies$ If `$key` resolves to a string, acts
+  as a sprout morphism key; if `$key` is a cell, acts as a subject morphism.
+
+This eliminates all heuristic guessing by the compiler: an unquoted name is always a dimension, and
+a quoted literal is always a metadata key payload.
 
 ##### Chaining Morphisms
 
@@ -841,10 +868,10 @@ Because the context stays anchored on the left-hand subject, multiple morphisms 
 without context drift:
 
 ```
-$video/+d.tag => "video/mp4"/+d.codec => "avc1"/views => 1042
+$video/+d.tag => "video/mp4"/+d.codec => "avc1"/"views" => 1042
 ```
 
-Here, `+d.tag` and `+d.codec` wire direct dimensional edges off `$video`, while `views => 1042`
+Here, `+d.tag` and `+d.codec` wire direct dimensional edges off `$video`, while `"views" => 1042`
 sprouts an associative variable pair off `$video`'s `+d.vars`, all in a single readable pipeline.
 
 #### 4.8.6 Shape Destructuring
