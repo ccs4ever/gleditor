@@ -137,45 +137,45 @@ ______________________________________________________________________
 
 ## 2. Syntactic Token & Structural Shorthand Matrix
 
-| Token / Operator        | Structural Equivalent          | Functional & Spatial Semantic Mapping                                                                                                                                                          |
-| ----------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `##`                    | Origin Anchor (`home`)         | Grounds query context to the system origin: a minted genesis cell. Never `0`, which is the absence of a cell -- see §7.2.                                                                      |
-| `#`                     | Root Metacells                 | Lazily streams all disjoint root manifold entry points across the matrix.                                                                                                                      |
-| `^`                     | Process Manifold (`d.cursors`) | Streams all active Spin-Head execution cursor threads. Never a pinning cursor -- those are on their own Root Set rank, `d.pinning-cursors` (§7.5).                                             |
-| `^NAME`                 | `^[d.name = "NAME"]`           | Short-circuits the cursor scan, locking directly onto the named thread node. A cursor is named by a cell on its `d.name` rank rather than by its own content -- §6.1 spells the long form out. |
-| `.`                     | Context Identity               | The current step's context cell — a valid anchor on its own, or `render(context)` when a host value is wanted.                                                                                 |
-| `/dim`                  | `LazyRankStream(dim, posward)` | Traverses `dim`'s entire rank posward from the context cell.                                                                                                                                   |
-| `/-dim`                 | `LazyRankStream(dim, negward)` | Traverses `dim`'s entire rank negward — the `-` binds to the dimension name, not the operator.                                                                                                 |
-| `/~dim`                 | `LazyRankStream(dim, both)`    | Traverses both negward and posward along `dim` from context cell (2-way fan-out stream) — see §4.8.4.                                                                                          |
-| `/dim%`                 | Create (`link(., ±dim, -1)`)   | Allocates a new cell along `dim` (at the tail of any existing rank); see §4.5.                                                                                                                 |
-| `/dim%VALUE`            | Create + init                  | Allocates and initializes a new cell's content to `VALUE` — bare, quoted, or `$variable`.                                                                                                      |
-| `/dim%%...`             | Batch create                   | Each additional `%` allocates one more cell along `dim`; all of them join the step's result set — see §4.5.                                                                                    |
-| `"key" => val`          | Sprout Morphism                | Sprouts quoted key literal along `+d.vars`, scalar value along `+d.values`; context kept — see §4.8.5.                                                                                         |
-| `"key" => list(...)`    | Multi-Value Sprout             | Sprouts quoted key along `+d.vars`, values chained along `+d.values`; context kept — see §4.8.5.                                                                                               |
-| `±dim => val`           | Dimension Morphism             | Links fresh cell with `val` along unquoted dimension `±dim`; context kept on origin cell — see §4.8.5.                                                                                         |
-| `[{...}]`               | Shape Predicate                | Fast L1 CSR row match: tests presence, absence, and values of local dimensional connections (sugar for `[. ~ {...}]`) — see §4.8.2.                                                            |
-| `$path{...}`            | Shape Mask / Lens              | Projects a shape onto context cells, masking unmentioned dimensions and remapping links (replaces `@lens`) — see §4.8.3.                                                                       |
-| `{}`                    | Empty Shape                    | Drops all connections in projection; tests for unlinked cell (valence 0) in predicates — see §4.8.1.                                                                                           |
-| `{*}`                   | Universal Shape                | Projects all connections; tests for cell with valence $\ge 1$ — see §4.8.1.                                                                                                                    |
-| `{*, !dim}`             | Complement Shape               | Derives from universal shape `*`, subtracting `dim` — see §4.8.1.                                                                                                                              |
-| `{!*, dim}`             | Exclusive Shape                | Derives from empty shape `!*`, including only posward `dim` — see §4.8.1.                                                                                                                      |
-| `{ $shape, !dim }`      | Shape Derivation               | Derives a new shape from `$shape`, subtracting or overriding dimensions — see §4.8.1.                                                                                                          |
-| `{ func(.) }`           | Dynamic Shape Embedding        | Embeds dynamically generated shape from a function invocation — see §4.8.1.                                                                                                                    |
-| `{ dim: { ... } }`      | Nested Shape                   | Defines multi-hop neighborhood schemas and deep matching — see §4.8.9.                                                                                                                         |
-| `$shape/dim`, `$s[dim]` | Dimension Extraction           | Extracts sub-shape or target value from shape descriptor via virtual path step or indexing — see §4.8.9.                                                                                       |
-| `{~dim}`                | Bidirectional Shape Filter     | Filters out everything except negward and posward on `dim` — see §4.8.4.                                                                                                                       |
-| `{ ., dim: $var }`      | Shape Destructuring            | Destructures orthogonal neighbors into variables with symmetric `:` syntax — see §4.8.6.                                                                                                       |
-| `sort_into(d, by: ...)` | Topological Sorter             | Weaves an ordered sequence along `d` sorted by lambda or dimension shorthand (`by: +d.tag` $\equiv$ `by: \(.) ./+d.tag`) — see §4.8.7.                                                         |
-| `def name(...) := ...`  | User-Defined Function          | Declares reusable topological function or shape generator with dual-wing invocation — see §4.8.8.                                                                                              |
-| `A><B`                  | Clone (`link(A, +d.clone, B)`) | Puts `A` and `B` on one clone rank, so both read its master; chainable (`A><B><C`) and combinable with `%` — see §4.6.                                                                         |
-| `.[offset, length]`     | `value(ctx, off, len)`         | A slice, answered as an ephemeral cell quoting that range of addresses — a transclusion, not a copy.                                                                                           |
-| ~~`@`~~                 | *retired*                      | Was "the numerical `cell_id` of the context node". A cell reference *is* a `cell_id`, so this was `.` spelled twice — see §7.6.                                                                |
-| `[...]`                 | Predicate / Index Window       | Applies inline boolean filters or relative index clamps to a stream. Negative indices count from the end, `-1` being the last cell, so `[1, -2]` is every cell but the last.                   |
-| `dim::tail/head/fixed`  | Placement                      | Where on the rank a step acts, and whether the path's context follows. `::tail` is the default and is what `%` used to do silently — see §4.5.                                                 |
-| `any/all/none(...)`     | Predicate Assertion            | Quantifies a stream instead of leaving the quantifier implied by position — see §4.3, and the reason `[. != $x]` is not the negation of `[. = $x]`.                                            |
-| `(...)`                 | Macro Dimension Group          | Groups dimensional sequences into a compound traversal segment.                                                                                                                                |
-| `*`                     | Kleene Repetition              | Repeats the preceding macro group zero or more times until termination.                                                                                                                        |
-| `{...}`                 | Weave Block                    | Groups a comma-separated list of effect items under `weave`.                                                                                                                                   |
+| Token / Operator         | Structural Equivalent            | Functional & Spatial Semantic Mapping                                                                                                                                                          |
+| ------------------------ | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `##`                     | Origin Anchor (`home`)           | Grounds query context to the system origin: a minted genesis cell. Never `0`, which is the absence of a cell -- see §7.2.                                                                      |
+| `#`                      | Root Metacells                   | Lazily streams all disjoint root manifold entry points across the matrix.                                                                                                                      |
+| `^`                      | Process Manifold (`d.cursors`)   | Streams all active Spin-Head execution cursor threads. Never a pinning cursor -- those are on their own Root Set rank, `d.pinning-cursors` (§7.5).                                             |
+| `^NAME`                  | `^[d.name = "NAME"]`             | Short-circuits the cursor scan, locking directly onto the named thread node. A cursor is named by a cell on its `d.name` rank rather than by its own content -- §6.1 spells the long form out. |
+| `.`                      | Context Identity                 | The current step's context cell — a valid anchor on its own, or `render(context)` when a host value is wanted.                                                                                 |
+| `/d.dim`                 | `LazyRankStream(d.dim, posward)` | Traverses `d.dim`'s entire rank posward from context cell — canonical `d.` form required.                                                                                                      |
+| `/-d.dim`                | `LazyRankStream(d.dim, negward)` | Traverses `d.dim`'s entire rank negward — the `-` binds to the dimension name, not the operator.                                                                                               |
+| `/~d.dim`                | `LazyRankStream(d.dim, both)`    | Traverses both negward and posward along `d.dim` from context cell (2-way fan-out stream) — see §4.8.4.                                                                                        |
+| `/d.dim%`                | Create (`link(., ±d.dim, -1)`)   | Allocates a new cell along `d.dim` (at the tail of any existing rank); see §4.5.                                                                                                               |
+| `/d.dim%VALUE`           | Create + init                    | Allocates and initializes a new cell's content to `VALUE` — bare, quoted, or `$variable`.                                                                                                      |
+| `/d.dim%%...`            | Batch create                     | Each additional `%` allocates one more cell along `d.dim`; all of them join the step's result set — see §4.5.                                                                                  |
+| `"key" => val`           | Sprout Morphism                  | Sprouts quoted key literal along `+d.vars`, scalar value along `+d.values`; context kept — see §4.8.5.                                                                                         |
+| `"key" => list(...)`     | Multi-Value Sprout               | Sprouts quoted key along `+d.vars`, values chained along `+d.values`; context kept — see §4.8.5.                                                                                               |
+| `±d.dim => val`          | Dimension Morphism               | Links fresh cell with `val` along canonical dimension `±d.dim`; context kept on origin cell — see §4.8.5.                                                                                      |
+| `[{...}]`                | Shape Predicate                  | Fast L1 CSR row match: tests presence, absence, and values of local dimensional connections (sugar for `[. ~ {...}]`) — see §4.8.2.                                                            |
+| `$path{...}`             | Shape Mask / Lens                | Projects a shape onto context cells, masking unmentioned dimensions and remapping links (replaces `@lens`) — see §4.8.3.                                                                       |
+| `{}`                     | Empty Shape                      | Drops all connections in projection; tests for unlinked cell (valence 0) in predicates — see §4.8.1.                                                                                           |
+| `{*}`                    | Universal Shape                  | Projects all connections; tests for cell with valence $\ge 1$ — see §4.8.1.                                                                                                                    |
+| `{*, !d.dim}`            | Complement Shape                 | Derives from universal shape `*`, subtracting `d.dim` — see §4.8.1.                                                                                                                            |
+| `{!*, d.dim}`            | Exclusive Shape                  | Derives from empty shape `!*`, including only posward `d.dim` — see §4.8.1.                                                                                                                    |
+| `{ $shape, !d.dim }`     | Shape Derivation                 | Derives a new shape from `$shape`, subtracting or overriding dimensions — see §4.8.1.                                                                                                          |
+| `{ func(.) }`            | Dynamic Shape Embedding          | Embeds dynamically generated shape from a function invocation — see §4.8.1.                                                                                                                    |
+| `{ d.dim: { ... } }`     | Nested Shape                     | Defines multi-hop neighborhood schemas and deep matching — see §4.8.9.                                                                                                                         |
+| `$s/d.dim`, `$s[d.dim]`  | Dimension Extraction             | Extracts sub-shape or target value from shape descriptor via virtual path step or indexing — see §4.8.9.                                                                                       |
+| `{~d.dim}`               | Bidirectional Shape Filter       | Filters out everything except negward and posward on `d.dim` — see §4.8.4.                                                                                                                     |
+| `{ ., d.dim: $var }`     | Shape Destructuring              | Destructures orthogonal neighbors into variables with symmetric `:` syntax — see §4.8.6.                                                                                                       |
+| `sort_into(d, by: ...)`  | Topological Sorter               | Weaves an ordered sequence along `d` sorted by lambda or dimension shorthand (`by: +d.tag` $\equiv$ `by: \(.) ./+d.tag`) — see §4.8.7.                                                         |
+| `def name(...) := ...`   | User-Defined Function            | Declares reusable topological function or shape generator with dual-wing invocation — see §4.8.8.                                                                                              |
+| `A><B`                   | Clone (`link(A, +d.clone, B)`)   | Puts `A` and `B` on one clone rank, so both read its master; chainable (`A><B><C`) and combinable with `%` — see §4.6.                                                                         |
+| `.[offset, length]`      | `value(ctx, off, len)`           | A slice, answered as an ephemeral cell quoting that range of addresses — a transclusion, not a copy.                                                                                           |
+| ~~`@`~~                  | *retired*                        | Was "the numerical `cell_id` of the context node". A cell reference *is* a `cell_id`, so this was `.` spelled twice — see §7.6.                                                                |
+| `[...]`                  | Predicate / Index Window         | Applies inline boolean filters or relative index clamps to a stream. Negative indices count from the end, `-1` being the last cell, so `[1, -2]` is every cell but the last.                   |
+| `d.dim::tail/head/fixed` | Placement                        | Where on the rank a step acts, and whether the path's context follows. `::tail` is the default and is what `%` used to do silently — see §4.5.                                                 |
+| `any/all/none(...)`      | Predicate Assertion              | Quantifies a stream instead of leaving the quantifier implied by position — see §4.3, and the reason `[. != $x]` is not the negation of `[. = $x]`.                                            |
+| `(...)`                  | Macro Dimension Group            | Groups dimensional sequences into a compound traversal segment.                                                                                                                                |
+| `*`                      | Kleene Repetition                | Repeats the preceding macro group zero or more times until termination.                                                                                                                        |
+| `{...}`                  | Weave Block                      | Groups a comma-separated list of effect items under `weave`.                                                                                                                                   |
 
 There is a single traversal operator: `/` already walks a whole rank, so there is no "one hop" form
 to distinguish it from, and direction is a property of the dimension name (an optional leading `-`
@@ -243,7 +243,7 @@ CloneTail             ::= ( "><" CloneOperand )+
 CloneOperand          ::= PathExpression | BareCreate
 BareCreate            ::= "%" CreateValue?
 
-DimensionIdentifier   ::= [a-zA-Z_][a-zA-Z0-9_]* ( "." [a-zA-Z_][a-zA-Z0-9_]* )*
+DimensionIdentifier   ::= "d." [a-zA-Z0-9_]+ ( "." [a-zA-Z0-9_]+ )*
 MacroDimensionGroup   ::= "(" PathStep+ ")" RepetitionModifier?
 RepetitionModifier     ::= "*" | "+" | "?"
 
@@ -346,13 +346,19 @@ A few grammar points worth calling out explicitly:
   intermediate cell partway through either one. See §4.6 for the creation-combining forms
   (`%VALUE><$a`, `$a><%VALUE`).
 
+- **Dimensions are strictly canonical (`d.name`).** VQL requires all dimension identifiers to be
+  prefixed with `d.` (e.g., `d.tag`, `+d.tag`, `-d.parent`, `~d.edge`). Shortened or unprefixed
+  tokens (such as bare `tag` or `title`) are prohibited in dimension position. This enforces
+  universal Nelsonian dimensional invariants and guarantees that unquoted tokens can never collide
+  with metadata keys or language keywords.
+
 ______________________________________________________________________
 
 ## 4. Evaluation Semantics & Compilation Rules
 
 ### 4.1 Lazy Rank-Streaming Engine
 
-`/dim` and `/-dim` compile to the same loop; the sign only picks `direction`:
+`/d.dim` and `/-d.dim` compile to the same loop; the sign only picks `direction`:
 
 ```cpp
 cell_id current = start_node;
@@ -842,9 +848,9 @@ context anchored to the left-hand subject**:
 A foundational architectural requirement in zzstructures is distinguishing **topological
 dimensions** from **data payloads**:
 
-- **Dimensions (`SignedDimension`)** are coordinate axes in the matrix manifold (`+d.tag`,
-  `-d.parent`, `d.status`, or bare `status`). In a path step, unquoted tokens are reserved
-  exclusively for dimension identifiers.
+- **Dimensions (`SignedDimension`)** are coordinate axes in the matrix manifold, **always written in
+  their canonical `d.name` form** (`+d.tag`, `-d.parent`, `d.status`, `~d.edge`). Shortened forms
+  without the `d.` prefix (such as bare `tag` or `status`) are prohibited in VQL.
 - **Keys (`StringLiteral`)** are cell payloads stored on the `+d.vars` metadata rank.
 
 To prevent syntactic ambiguity, **keys in sprout morphisms must always be quoted string literals**
@@ -852,15 +858,15 @@ To prevent syntactic ambiguity, **keys in sprout morphisms must always be quoted
 
 - `$node/"title" => "Hamlet"`: Quoted string on LHS $\implies$ Sprout Morphism
   (`+d.vars%"title"/+d.values%"Hamlet"!keep`).
-- `$node/+d.tag => "video/mp4"`: Unquoted signed dimension on LHS $\implies$ Dimension Morphism
+- `$node/+d.tag => "video/mp4"`: Canonical signed dimension on LHS $\implies$ Dimension Morphism
   (`+d.tag%"video/mp4"!keep`).
-- `$node/tag => "video/mp4"`: Unquoted identifier on LHS $\implies$ Dimension Morphism along
-  dimension `+tag`.
+- `$node/d.tag => "video/mp4"`: Canonical unsigned dimension on LHS (defaults to `+d.tag`)
+  $\implies$ Dimension Morphism along `+d.tag`.
 - `$node/$key => "value"`: Dynamic variable on LHS $\implies$ If `$key` resolves to a string, acts
   as a sprout morphism key; if `$key` is a cell, acts as a subject morphism.
 
-This eliminates all heuristic guessing by the compiler: an unquoted name is always a dimension, and
-a quoted literal is always a metadata key payload.
+This eliminates all heuristic guessing by the compiler: an unquoted canonical `d.` name is always a
+dimension, and a quoted literal is always a metadata key payload.
 
 ##### Chaining Morphisms
 
