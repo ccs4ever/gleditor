@@ -145,4 +145,48 @@ TEST(VQLLambdaStepTest, UserDefinedFunctionBlockBodyAndWeave) {
   EXPECT_EQ(arena.textOf(statusCell), "processed");
 }
 
+TEST(VQLLambdaStepTest, UserDefinedFunctionWithDefaultParameters) {
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core(arena);
+  VQLEngine engine(core);
+
+  const std::string scriptDef = R"(
+    def pure get_prefix($c, $prefix := "tag:") := $prefix;
+    get_prefix("alpha")
+  )";
+  auto res1                   = engine.execute(scriptDef);
+  ASSERT_EQ(res1.size(), 1u);
+  EXPECT_EQ(arena.textOf(res1[0]), "tag:");
+
+  const std::string scriptOverride = R"(
+    def pure get_prefix($c, $prefix := "tag:") := $prefix;
+    get_prefix("alpha", "custom:")
+  )";
+  auto res2                        = engine.execute(scriptOverride);
+  ASSERT_EQ(res2.size(), 1u);
+  EXPECT_EQ(arena.textOf(res2[0]), "custom:");
+}
+
+TEST(VQLLambdaStepTest, UserDefinedFunctionDestructuringParameter) {
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core(arena);
+  VQLEngine engine(core);
+
+  zigzag::DimRef dItems = engine.resolveDimension("d.items");
+  zigzag::DimRef dTitle = engine.resolveDimension("d.title");
+
+  zigzag::CellRef item1  = arena.makeCell("Item1");
+  zigzag::CellRef title1 = arena.makeCell("Nelsonian Hypertext");
+  EXPECT_TRUE(arena.link(core.home(), dItems, DimVector::POS, item1));
+  EXPECT_TRUE(arena.link(item1, dTitle, DimVector::POS, title1));
+
+  const std::string script = R"(
+    def pure get_title({ ., +d.title: $t }) := $t;
+    ##/+d.items/get_title()
+  )";
+  auto res                 = engine.execute(script);
+  ASSERT_EQ(res.size(), 1u);
+  EXPECT_EQ(res[0], title1);
+}
+
 } // namespace
