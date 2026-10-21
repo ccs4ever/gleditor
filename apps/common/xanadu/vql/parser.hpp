@@ -34,6 +34,27 @@ public:
   /// Parses a complete VQL query expression.
   QueryExpression parseQuery();
 
+  /// Parses a script body (sequence of statements).
+  ScriptBody parseScriptBody();
+
+  /// Parses a single statement.
+  Statement parseStatement();
+
+  /// Parses a watch statement.
+  WatchStatement parseWatchStatement();
+
+  /// Parses a perspective block.
+  PerspectiveBlock parsePerspectiveBlock();
+
+  /// Parses a mount declaration.
+  MountDeclaration parseMountDeclaration();
+
+  /// Parses a weave statement.
+  WeaveStatement parseWeaveStatement();
+
+  /// Parses a store anchor.
+  StoreAnchor parseStoreAnchor();
+
   /// Parses a single path expression.
   PathExpression parsePathExpression(bool allowCloneTail = true);
 
@@ -66,7 +87,16 @@ private:
   PredicateTest parsePredicateTest();
 
   ValueExpr parseValueExpr();
+  ValueExpr parseValueOrComparisonExpr();
   FunctionInvocation parseFunctionInvocation();
+
+  DefDeclaration parseDefDeclaration();
+  ShapeLiteral parseShapeLiteral();
+  ShapeRule parseShapeRule();
+  VersionPin parseVersionPin();
+  VersionExpr parseVersionExpr();
+  DestructurePattern parseDestructurePattern();
+  PathLambda parsePathLambda();
 
   // Token stream navigation
   Token currentToken();

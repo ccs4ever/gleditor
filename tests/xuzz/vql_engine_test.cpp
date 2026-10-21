@@ -54,7 +54,7 @@ TEST(VQLEngineTest, MultiStoreAndNamedStoreSugar) {
 
   VQLEngine engine(coordinator);
 
-  // ##users should desugar to ##/d.stores>[d.name == "users"]
+  // ##users should desugar to ##/d.stores>[d.name = "users"]
   auto resUsers = engine.execute("##users/d.users");
   ASSERT_EQ(resUsers.size(), 1u);
   EXPECT_EQ(resUsers[0], uAlice);
@@ -173,8 +173,8 @@ TEST(VQLEngineTest, PredicatesAndQuantifiers) {
   EXPECT_EQ(results[0], c25);
   EXPECT_EQ(results[1], c40);
 
-  // Equality filter: [. == 50]
-  auto resEq = engine.execute("##/d.numbers[. == 50]");
+  // Equality filter: [. = 50]
+  auto resEq = engine.execute("##/d.numbers[. = 50]");
   ASSERT_EQ(resEq.size(), 1u);
   EXPECT_EQ(resEq[0], c50);
 }
@@ -283,6 +283,145 @@ TEST(VQLEngineTest, SlicingSugar) {
   auto res = engine.execute("$h.[0, 6]");
   ASSERT_EQ(res.size(), 1u);
   EXPECT_EQ(arena.textOf(res[0]), "Xanadu");
+}
+
+TEST(VQLEngineTest, ExtendedShapePredicates) {
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core(arena);
+  VQLEngine engine(core);
+
+  zigzag::DimRef dItems = engine.resolveDimension("d.items");
+  zigzag::DimRef dTag   = engine.resolveDimension("d.tag");
+  zigzag::DimRef dArch  = engine.resolveDimension("d.archived");
+
+  zigzag::CellRef item1 = arena.makeCell("Item1");
+  zigzag::CellRef tag1  = arena.makeCell("urgent");
+  EXPECT_TRUE(arena.link(item1, dTag, DimVector::POS, tag1));
+
+  zigzag::CellRef item2 = arena.makeCell("Item2");
+  zigzag::CellRef tag2  = arena.makeCell("low");
+  EXPECT_TRUE(arena.link(item2, dTag, DimVector::POS, tag2));
+
+  zigzag::CellRef item3 = arena.makeCell("Item3");
+  zigzag::CellRef tag3  = arena.makeCell("urgent");
+  zigzag::CellRef arch3 = arena.makeCell("true");
+  EXPECT_TRUE(arena.link(item3, dTag, DimVector::POS, tag3));
+  EXPECT_TRUE(arena.link(item3, dArch, DimVector::POS, arch3));
+
+  EXPECT_TRUE(arena.link(core.home(), dItems, DimVector::POS, item1));
+  EXPECT_TRUE(arena.link(item1, dItems, DimVector::POS, item2));
+  EXPECT_TRUE(arena.link(item2, dItems, DimVector::POS, item3));
+
+  // Match urgent items: ##/d.items[{ +d.tag: "urgent" }]
+  auto urgentItems = engine.execute("##/d.items[{ +d.tag: \"urgent\" }]");
+  ASSERT_EQ(urgentItems.size(), 2u);
+  EXPECT_EQ(urgentItems[0], item1);
+  EXPECT_EQ(urgentItems[1], item3);
+
+  // Match urgent AND not archived: ##/d.items[{ +d.tag: "urgent", !d.archived
+  // }]
+  auto activeUrgent =
+      engine.execute("##/d.items[{ +d.tag: \"urgent\", !d.archived }]");
+  ASSERT_EQ(activeUrgent.size(), 1u);
+  EXPECT_EQ(activeUrgent[0], item1);
+}
+
+TEST(VQLEngineTest, BidirectionalTraversal) {
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core(arena);
+  VQLEngine engine(core);
+
+  zigzag::DimRef dTag         = engine.resolveDimension("d.tag");
+  zigzag::CellRef center      = arena.makeCell("Center");
+  zigzag::CellRef posNeighbor = arena.makeCell("PosNeighbor");
+  zigzag::CellRef negNeighbor = arena.makeCell("NegNeighbor");
+
+  EXPECT_TRUE(arena.link(center, dTag, DimVector::POS, posNeighbor));
+  EXPECT_TRUE(arena.link(center, dTag, DimVector::NEG, negNeighbor));
+
+  engine.setVariable("c", center);
+
+  // Bidirectional step: $c/~d.tag
+  auto results = engine.execute("$c/~d.tag");
+  ASSERT_EQ(results.size(), 2u);
+  EXPECT_EQ(results[0], posNeighbor);
+  EXPECT_EQ(results[1], negNeighbor);
+}
+
+TEST(VQLEngineTest, DestructuringInForClause) {
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core(arena);
+  VQLEngine engine(core);
+
+  zigzag::DimRef dPeople = engine.resolveDimension("d.people");
+  zigzag::DimRef dTag    = engine.resolveDimension("d.tag");
+
+  zigzag::CellRef p1 = arena.makeCell("Person1");
+  zigzag::CellRef t1 = arena.makeCell("developer");
+  EXPECT_TRUE(arena.link(p1, dTag, DimVector::POS, t1));
+
+  zigzag::CellRef p2 = arena.makeCell("Person2");
+  zigzag::CellRef t2 = arena.makeCell("designer");
+  EXPECT_TRUE(arena.link(p2, dTag, DimVector::POS, t2));
+
+  EXPECT_TRUE(arena.link(core.home(), dPeople, DimVector::POS, p1));
+  EXPECT_TRUE(arena.link(p1, dPeople, DimVector::POS, p2));
+
+  // for { ., +d.tag: $t } in ##/d.people return $t
+  auto results =
+      engine.execute("for { ., +d.tag: $t } in ##/d.people return $t");
+  ASSERT_EQ(results.size(), 2u);
+  EXPECT_EQ(arena.textOf(results[0]), "developer");
+  EXPECT_EQ(arena.textOf(results[1]), "designer");
+}
+
+TEST(VQLEngineTest, SproutMorphism) {
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core(arena);
+  VQLEngine engine(core);
+
+  zigzag::CellRef root = arena.makeCell("Root");
+  engine.setVariable("r", root);
+
+  auto sprouts = engine.execute("$r/=> [ \"Alpha\", \"Beta\" ]");
+  ASSERT_EQ(sprouts.size(), 2u);
+  EXPECT_EQ(arena.textOf(sprouts[0]), "Alpha");
+  EXPECT_EQ(arena.textOf(sprouts[1]), "Beta");
+}
+
+TEST(VQLEngineTest, RootStepsOnSlices) {
+  MultiStoreCoordinator coordinator;
+  auto &arena = coordinator.core().arena();
+
+  zigzag::CellRef workerHome = arena.makeCell("worker_home");
+  zigzag::DimRef dCursors    = coordinator.core().dims().cursors;
+
+  zigzag::CellRef defaultCursor = arena.makeCell("default");
+  zigzag::CellRef workerCursor  = arena.makeCell("worker");
+
+  EXPECT_TRUE(arena.link(workerHome, dCursors, DimVector::POS, defaultCursor));
+  EXPECT_TRUE(
+      arena.link(defaultCursor, dCursors, DimVector::POS, workerCursor));
+
+  coordinator.addSlice("worker_slice", "worker", workerHome);
+
+  VQLEngine engine(coordinator);
+  engine.setVariable("slice", workerHome);
+
+  // 1. /$slice/## -> workerHome
+  auto genesisRes = engine.execute("/$slice/##");
+  ASSERT_EQ(genesisRes.size(), 1u);
+  EXPECT_EQ(genesisRes[0], workerHome);
+
+  // 2. /$slice/^ -> defaultCursor
+  auto activeCursorRes = engine.execute("/$slice/^");
+  ASSERT_EQ(activeCursorRes.size(), 1u);
+  EXPECT_EQ(activeCursorRes[0], defaultCursor);
+
+  // 3. /$slice/^worker -> workerCursor
+  auto namedCursorRes = engine.execute("/$slice/^worker");
+  ASSERT_EQ(namedCursorRes.size(), 1u);
+  EXPECT_EQ(namedCursorRes[0], workerCursor);
 }
 
 } // namespace

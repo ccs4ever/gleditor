@@ -20,21 +20,31 @@ enum class TokenKind : std::uint8_t {
   Error,
 
   // Anchors & Sigils
-  Home,        ///< "##"
-  NamedStore,  ///< "##NAME"
-  Root,        ///< "#"
-  Cursor,      ///< "^"
-  NamedCursor, ///< "^NAME"
-  Variable,    ///< "$var"
-  Dot,         ///< "."
-  Slash,       ///< "/"
-  DoubleColon, ///< "::"
-  Bang,        ///< "!"
-  Percent,     ///< "%"
-  CloneJoin,   ///< "><"
-  Assign,      ///< ":="
-  Question,    ///< "?"
-  DerefMaster, ///< ">"
+  Home,            ///< "##"
+  NamedStore,      ///< "##NAME"
+  Root,            ///< "#"
+  Cursor,          ///< "^"
+  NamedCursor,     ///< "^NAME"
+  AllCursors,      ///< "^^"
+  AllNamedCursors, ///< "^^NAME"
+  Variable,        ///< "$var"
+  Dot,             ///< "."
+  Slash,           ///< "/"
+  DoubleColon,     ///< "::"
+  Colon,           ///< ":"
+  Bang,            ///< "!"
+  Percent,         ///< "%"
+  CloneJoin,       ///< "><"
+  Assign,          ///< ":="
+  Question,        ///< "?"
+  DerefMaster,     ///< ">"
+  Arrow,           ///< "=>"
+  Tilde,           ///< "~"
+  At,              ///< "@"
+  DotDot,          ///< ".."
+  Transclude,      ///< "<~"
+  DimPivot,        ///< "<=>"
+  Backslash,       ///< "\"
 
   // Delimiters
   OpenParen,    ///< "("
@@ -44,6 +54,7 @@ enum class TokenKind : std::uint8_t {
   OpenBrace,    ///< "{"
   CloseBrace,   ///< "}"
   Comma,        ///< ","
+  Semicolon,    ///< ";"
 
   // Comparisons & Operators
   Equal,        ///< "="
@@ -71,12 +82,39 @@ enum class TokenKind : std::uint8_t {
   KwTrue,
   KwFalse,
 
+  // Extended Keywords
+  KwCurrent,
+  KwLocal,
+  KwTopic,
+  KwBtpk,
+  KwSlices,
+  KwDocs,
+  KwCiting,
+  KwBacklinks,
+  KwFind,
+  KwSystem,
+  KwBtih,
+  KwLedger,
+  KwDef,
+  KwMount,
+  KwAs,
+  KwWatch,
+  KwSince,
+  KwLens,
+  KwList,
+  KwUntil,
+  KwWith,
+  KwPerspective,
+  KwBreak,
+
   // Literals & Identifiers
   Identifier,
   StringLiteral,
   IntegerLiteral,
   FloatLiteral,
   BareLiteral,
+  MicroversionLiteral, ///< "@88", "@2a9", "@0"
+  TypedVersionLiteral, ///< 'v"2a9"'
 };
 
 struct Token {

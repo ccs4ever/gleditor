@@ -633,6 +633,8 @@ CellRef VQLCompiler::compileAnchor(const AnchorNode &anchor) {
   case AnchorKind::Root:
   case AnchorKind::Cursor:
   case AnchorKind::NamedCursor:
+  case AnchorKind::AllCursors:
+  case AnchorKind::AllNamedCursors:
     res = core_.home();
     break;
   case AnchorKind::Variable: {
@@ -674,6 +676,11 @@ CellRef VQLCompiler::compileAnchor(const AnchorNode &anchor) {
     }
     break;
   }
+  case AnchorKind::StoreGenerator:
+  case AnchorKind::StoreAnchor:
+  case AnchorKind::Microversion:
+    res = core_.home();
+    break;
   }
 
   if (anchor.derefMaster) {
@@ -848,6 +855,11 @@ CellRef VQLCompiler::compileValueExpr(const ValueExpr &expr, CellRef ctxCell) {
             CellRef outCell = core_.arena().makeCell();
             emitOutput(callOp, outCell);
             return outCell;
+          }
+          return core_.home();
+        } else if constexpr (std::is_same_v<T, std::shared_ptr<BooleanExpr>>) {
+          if (val) {
+            return compileBooleanExpr(*val, ctxCell);
           }
           return core_.home();
         } else {

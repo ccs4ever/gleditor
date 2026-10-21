@@ -101,4 +101,97 @@ TEST(VQLLexerTest, ComparisonsAndDelimiters) {
   EXPECT_EQ(tokens[12].kind, TokenKind::Comma);
 }
 
+TEST(VQLLexerTest, ExtendedTokensAndSigils) {
+  Lexer lexer(": => ~ @ .. <~ <=> \\");
+  auto tokens = lexer.tokenizeAll();
+
+  ASSERT_EQ(tokens.size(), 9u);
+  EXPECT_EQ(tokens[0].kind, TokenKind::Colon);
+  EXPECT_EQ(tokens[1].kind, TokenKind::Arrow);
+  EXPECT_EQ(tokens[2].kind, TokenKind::Tilde);
+  EXPECT_EQ(tokens[3].kind, TokenKind::At);
+  EXPECT_EQ(tokens[4].kind, TokenKind::DotDot);
+  EXPECT_EQ(tokens[5].kind, TokenKind::Transclude);
+  EXPECT_EQ(tokens[6].kind, TokenKind::DimPivot);
+  EXPECT_EQ(tokens[7].kind, TokenKind::Backslash);
+  EXPECT_EQ(tokens[8].kind, TokenKind::EndOfFile);
+}
+
+TEST(VQLLexerTest, MicroversionLiterals) {
+  Lexer lexer("@0 @1 @88 @2a9 @8c5 v\"2a9\" @(2a9)");
+  auto tokens = lexer.tokenizeAll();
+
+  ASSERT_GE(tokens.size(), 8u);
+  EXPECT_EQ(tokens[0].kind, TokenKind::MicroversionLiteral);
+  EXPECT_EQ(tokens[0].stringValue, "0");
+  EXPECT_EQ(tokens[0].text, "@0");
+
+  EXPECT_EQ(tokens[1].kind, TokenKind::MicroversionLiteral);
+  EXPECT_EQ(tokens[1].stringValue, "1");
+
+  EXPECT_EQ(tokens[2].kind, TokenKind::MicroversionLiteral);
+  EXPECT_EQ(tokens[2].stringValue, "88");
+
+  EXPECT_EQ(tokens[3].kind, TokenKind::MicroversionLiteral);
+  EXPECT_EQ(tokens[3].stringValue, "2a9");
+
+  EXPECT_EQ(tokens[4].kind, TokenKind::MicroversionLiteral);
+  EXPECT_EQ(tokens[4].stringValue, "8c5");
+
+  EXPECT_EQ(tokens[5].kind, TokenKind::TypedVersionLiteral);
+  EXPECT_EQ(tokens[5].stringValue, "2a9");
+
+  // @(2a9) should lex as At, OpenParen, MicroversionLiteral (or
+  // Identifier/BareVersion), CloseParen
+  EXPECT_EQ(tokens[6].kind, TokenKind::At);
+  EXPECT_EQ(tokens[7].kind, TokenKind::OpenParen);
+}
+
+TEST(VQLLexerTest, ExtendedKeywords) {
+  Lexer lexer("current local topic btpk slices docs citing backlinks find "
+              "system btih ledger def mount as watch since lens list");
+  auto tokens = lexer.tokenizeAll();
+
+  ASSERT_EQ(tokens.size(), 20u);
+  EXPECT_EQ(tokens[0].kind, TokenKind::KwCurrent);
+  EXPECT_EQ(tokens[1].kind, TokenKind::KwLocal);
+  EXPECT_EQ(tokens[2].kind, TokenKind::KwTopic);
+  EXPECT_EQ(tokens[3].kind, TokenKind::KwBtpk);
+  EXPECT_EQ(tokens[4].kind, TokenKind::KwSlices);
+  EXPECT_EQ(tokens[5].kind, TokenKind::KwDocs);
+  EXPECT_EQ(tokens[6].kind, TokenKind::KwCiting);
+  EXPECT_EQ(tokens[7].kind, TokenKind::KwBacklinks);
+  EXPECT_EQ(tokens[8].kind, TokenKind::KwFind);
+  EXPECT_EQ(tokens[9].kind, TokenKind::KwSystem);
+  EXPECT_EQ(tokens[10].kind, TokenKind::KwBtih);
+  EXPECT_EQ(tokens[11].kind, TokenKind::KwLedger);
+  EXPECT_EQ(tokens[12].kind, TokenKind::KwDef);
+  EXPECT_EQ(tokens[13].kind, TokenKind::KwMount);
+  EXPECT_EQ(tokens[14].kind, TokenKind::KwAs);
+  EXPECT_EQ(tokens[15].kind, TokenKind::KwWatch);
+  EXPECT_EQ(tokens[16].kind, TokenKind::KwSince);
+  EXPECT_EQ(tokens[17].kind, TokenKind::KwLens);
+  EXPECT_EQ(tokens[18].kind, TokenKind::KwList);
+  EXPECT_EQ(tokens[19].kind, TokenKind::EndOfFile);
+}
+
+TEST(VQLLexerTest, VQL15_1TokensAndKeywords) {
+  Lexer lexer("^^ ^^foo until with perspective break");
+  auto tokens = lexer.tokenizeAll();
+
+  ASSERT_EQ(tokens.size(), 7u);
+  EXPECT_EQ(tokens[0].kind, TokenKind::AllCursors);
+  EXPECT_EQ(tokens[0].text, "^^");
+
+  EXPECT_EQ(tokens[1].kind, TokenKind::AllNamedCursors);
+  EXPECT_EQ(tokens[1].text, "^^foo");
+  EXPECT_EQ(tokens[1].stringValue, "foo");
+
+  EXPECT_EQ(tokens[2].kind, TokenKind::KwUntil);
+  EXPECT_EQ(tokens[3].kind, TokenKind::KwWith);
+  EXPECT_EQ(tokens[4].kind, TokenKind::KwPerspective);
+  EXPECT_EQ(tokens[5].kind, TokenKind::KwBreak);
+  EXPECT_EQ(tokens[6].kind, TokenKind::EndOfFile);
+}
+
 } // namespace

@@ -767,6 +767,12 @@ static void dumpPathExpression(std::ostringstream &oss,
   case AnchorKind::NamedCursor:
     oss << "^" << path.anchor.name;
     break;
+  case AnchorKind::AllCursors:
+    oss << "^^";
+    break;
+  case AnchorKind::AllNamedCursors:
+    oss << "^^" << path.anchor.name;
+    break;
   case AnchorKind::Variable:
     oss << "$" << path.anchor.name;
     break;
@@ -781,6 +787,19 @@ static void dumpPathExpression(std::ostringstream &oss,
     if (path.anchor.createValue && !path.anchor.createValue->literal.empty()) {
       oss << path.anchor.createValue->literal;
     }
+    break;
+  case AnchorKind::StoreGenerator:
+    if (path.anchor.generator) {
+      oss << path.anchor.generator->opName << "(...)";
+    }
+    break;
+  case AnchorKind::StoreAnchor:
+    if (path.anchor.storeAnchor) {
+      oss << "##" << path.anchor.storeAnchor->method << "(...)";
+    }
+    break;
+  case AnchorKind::Microversion:
+    oss << "@" << path.anchor.microversionId;
     break;
   }
   if (path.anchor.derefMaster) {

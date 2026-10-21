@@ -26,6 +26,10 @@ std::string_view tokenKindName(TokenKind kind) noexcept {
     return "^";
   case TokenKind::NamedCursor:
     return "^NAME";
+  case TokenKind::AllCursors:
+    return "^^";
+  case TokenKind::AllNamedCursors:
+    return "^^NAME";
   case TokenKind::Variable:
     return "$var";
   case TokenKind::Dot:
@@ -46,6 +50,22 @@ std::string_view tokenKindName(TokenKind kind) noexcept {
     return "?";
   case TokenKind::DerefMaster:
     return ">";
+  case TokenKind::Colon:
+    return ":";
+  case TokenKind::Arrow:
+    return "=>";
+  case TokenKind::Tilde:
+    return "~";
+  case TokenKind::At:
+    return "@";
+  case TokenKind::DotDot:
+    return "..";
+  case TokenKind::Transclude:
+    return "<~";
+  case TokenKind::DimPivot:
+    return "<=>";
+  case TokenKind::Backslash:
+    return "\\";
   case TokenKind::OpenParen:
     return "(";
   case TokenKind::CloseParen:
@@ -60,6 +80,8 @@ std::string_view tokenKindName(TokenKind kind) noexcept {
     return "}";
   case TokenKind::Comma:
     return ",";
+  case TokenKind::Semicolon:
+    return ";";
   case TokenKind::Equal:
     return "=";
   case TokenKind::NotEqual:
@@ -104,6 +126,52 @@ std::string_view tokenKindName(TokenKind kind) noexcept {
     return "true";
   case TokenKind::KwFalse:
     return "false";
+  case TokenKind::KwCurrent:
+    return "current";
+  case TokenKind::KwLocal:
+    return "local";
+  case TokenKind::KwTopic:
+    return "topic";
+  case TokenKind::KwBtpk:
+    return "btpk";
+  case TokenKind::KwSlices:
+    return "slices";
+  case TokenKind::KwDocs:
+    return "docs";
+  case TokenKind::KwCiting:
+    return "citing";
+  case TokenKind::KwBacklinks:
+    return "backlinks";
+  case TokenKind::KwFind:
+    return "find";
+  case TokenKind::KwSystem:
+    return "system";
+  case TokenKind::KwBtih:
+    return "btih";
+  case TokenKind::KwLedger:
+    return "ledger";
+  case TokenKind::KwDef:
+    return "def";
+  case TokenKind::KwMount:
+    return "mount";
+  case TokenKind::KwAs:
+    return "as";
+  case TokenKind::KwWatch:
+    return "watch";
+  case TokenKind::KwSince:
+    return "since";
+  case TokenKind::KwLens:
+    return "lens";
+  case TokenKind::KwList:
+    return "list";
+  case TokenKind::KwUntil:
+    return "until";
+  case TokenKind::KwWith:
+    return "with";
+  case TokenKind::KwPerspective:
+    return "perspective";
+  case TokenKind::KwBreak:
+    return "break";
   case TokenKind::Identifier:
     return "Identifier";
   case TokenKind::StringLiteral:
@@ -114,6 +182,10 @@ std::string_view tokenKindName(TokenKind kind) noexcept {
     return "FloatLiteral";
   case TokenKind::BareLiteral:
     return "BareLiteral";
+  case TokenKind::MicroversionLiteral:
+    return "MicroversionLiteral";
+  case TokenKind::TypedVersionLiteral:
+    return "TypedVersionLiteral";
   }
   return "Unknown";
 }
@@ -222,8 +294,26 @@ Token Lexer::nextToken() {
                  .loc  = startLoc};
   }
 
-  // Cursors: ^, ^NAME
+  // Cursors: ^, ^NAME, ^^, ^^NAME
   if (c == '^') {
+    if (match('^')) {
+      if (std::isalpha(static_cast<unsigned char>(peekChar())) ||
+          peekChar() == '_') {
+        std::size_t nameStart = pos_;
+        while (std::isalnum(static_cast<unsigned char>(peekChar())) ||
+               peekChar() == '_') {
+          advanceChar();
+        }
+        std::string_view name = source_.substr(nameStart, pos_ - nameStart);
+        return Token{.kind        = TokenKind::AllNamedCursors,
+                     .text        = source_.substr(startPos, pos_ - startPos),
+                     .loc         = startLoc,
+                     .stringValue = std::string(name)};
+      }
+      return Token{.kind = TokenKind::AllCursors,
+                   .text = source_.substr(startPos, pos_ - startPos),
+                   .loc  = startLoc};
+    }
     if (std::isalpha(static_cast<unsigned char>(peekChar())) ||
         peekChar() == '_') {
       std::size_t nameStart = pos_;
@@ -274,9 +364,19 @@ Token Lexer::nextToken() {
                  .loc  = startLoc};
   }
 
-  // Less than / Less equal
+  // Less than / Less equal / Transclude (<~) / DimPivot (<=>)
   if (c == '<') {
+    if (match('~')) {
+      return Token{.kind = TokenKind::Transclude,
+                   .text = source_.substr(startPos, 2),
+                   .loc  = startLoc};
+    }
     if (match('=')) {
+      if (match('>')) {
+        return Token{.kind = TokenKind::DimPivot,
+                     .text = source_.substr(startPos, 3),
+                     .loc  = startLoc};
+      }
       return Token{.kind = TokenKind::LessEqual,
                    .text = source_.substr(startPos, 2),
                    .loc  = startLoc};
@@ -286,7 +386,7 @@ Token Lexer::nextToken() {
                  .loc  = startLoc};
   }
 
-  // Colons: ::, :=
+  // Colons: ::, :=, :
   if (c == ':') {
     if (match(':')) {
       return Token{.kind = TokenKind::DoubleColon,
@@ -298,6 +398,9 @@ Token Lexer::nextToken() {
                    .text = source_.substr(startPos, 2),
                    .loc  = startLoc};
     }
+    return Token{.kind = TokenKind::Colon,
+                 .text = source_.substr(startPos, 1),
+                 .loc  = startLoc};
   }
 
   // Exclamation: !=, !
@@ -312,8 +415,39 @@ Token Lexer::nextToken() {
                  .loc  = startLoc};
   }
 
-  // Single-character tokens
+  // Single-character and operator tokens
+  if (c == '~') {
+    return Token{.kind = TokenKind::Tilde,
+                 .text = source_.substr(startPos, 1),
+                 .loc  = startLoc};
+  }
+  if (c == '\\') {
+    return Token{.kind = TokenKind::Backslash,
+                 .text = source_.substr(startPos, 1),
+                 .loc  = startLoc};
+  }
+  if (c == '@') {
+    if (std::isdigit(static_cast<unsigned char>(peekChar()))) {
+      std::size_t verStart = pos_;
+      while (std::isalnum(static_cast<unsigned char>(peekChar()))) {
+        advanceChar();
+      }
+      std::string_view verStr = source_.substr(verStart, pos_ - verStart);
+      return Token{.kind        = TokenKind::MicroversionLiteral,
+                   .text        = source_.substr(startPos, pos_ - startPos),
+                   .loc         = startLoc,
+                   .stringValue = std::string(verStr)};
+    }
+    return Token{.kind = TokenKind::At,
+                 .text = source_.substr(startPos, 1),
+                 .loc  = startLoc};
+  }
   if (c == '.') {
+    if (match('.')) {
+      return Token{.kind = TokenKind::DotDot,
+                   .text = source_.substr(startPos, 2),
+                   .loc  = startLoc};
+    }
     return Token{.kind = TokenKind::Dot,
                  .text = source_.substr(startPos, 1),
                  .loc  = startLoc};
@@ -334,6 +468,11 @@ Token Lexer::nextToken() {
                  .loc  = startLoc};
   }
   if (c == '=') {
+    if (match('>')) {
+      return Token{.kind = TokenKind::Arrow,
+                   .text = source_.substr(startPos, 2),
+                   .loc  = startLoc};
+    }
     if (match('=')) {
       return Token{.kind = TokenKind::Equal,
                    .text = source_.substr(startPos, 2),
@@ -378,6 +517,11 @@ Token Lexer::nextToken() {
                  .text = source_.substr(startPos, 1),
                  .loc  = startLoc};
   }
+  if (c == ';') {
+    return Token{.kind = TokenKind::Semicolon,
+                 .text = source_.substr(startPos, 1),
+                 .loc  = startLoc};
+  }
   if (c == '*') {
     return Token{.kind = TokenKind::Star,
                  .text = source_.substr(startPos, 1),
@@ -400,17 +544,82 @@ Token Lexer::nextToken() {
                  .loc  = startLoc};
   }
 
+  // Typed version literal: v"..."
+  if (c == 'v' && peekChar() == '"') {
+    advanceChar(); // consume '"'
+    std::size_t vStart = pos_;
+    while (pos_ < source_.size() && peekChar() != '"') {
+      advanceChar();
+    }
+    std::string_view vStr = source_.substr(vStart, pos_ - vStart);
+    if (pos_ < source_.size() && peekChar() == '"') {
+      advanceChar(); // consume closing '"'
+    }
+    return Token{.kind        = TokenKind::TypedVersionLiteral,
+                 .text        = source_.substr(startPos, pos_ - startPos),
+                 .loc         = startLoc,
+                 .stringValue = std::string(vStr)};
+  }
+
   // String literals
   if (c == '"' || c == '\'') {
     return scanString(c);
   }
 
-  // Number literals
+  // Number literals or alphanumeric/microversion literals starting with a digit
+  // (e.g. 2a9, 8c5)
   if (std::isdigit(static_cast<unsigned char>(c))) {
-    pos_--; // back up so scanNumber reads the first digit
+    pos_--; // back up so scanNumber or lookahead reads the first digit
     if (column_ > 1) {
       column_--;
     }
+
+    // Check if this is an alphanumeric microversion literal (contains letters
+    // like 2a9, 8c5)
+    std::size_t lookahead = pos_;
+    bool hasLetter        = false;
+    bool isLikelyFloat    = false;
+    while (lookahead < source_.size()) {
+      char ch = source_[lookahead];
+      if (ch == '.' && lookahead + 1 < source_.size() &&
+          std::isdigit(static_cast<unsigned char>(source_[lookahead + 1]))) {
+        isLikelyFloat = true;
+        lookahead += 2;
+        continue;
+      }
+      if (std::isalpha(static_cast<unsigned char>(ch)) || ch == '_') {
+        if ((ch == 'e' || ch == 'E') && !hasLetter) {
+          // Could be exponent of float
+          std::size_t next = lookahead + 1;
+          if (next < source_.size() &&
+              (source_[next] == '+' || source_[next] == '-')) {
+            next++;
+          }
+          if (next < source_.size() &&
+              std::isdigit(static_cast<unsigned char>(source_[next]))) {
+            isLikelyFloat = true;
+            lookahead     = next + 1;
+            continue;
+          }
+        }
+        hasLetter = true;
+      } else if (!std::isdigit(static_cast<unsigned char>(ch))) {
+        break;
+      }
+      lookahead++;
+    }
+
+    if (hasLetter && !isLikelyFloat) {
+      std::size_t startVer = pos_;
+      pos_                 = lookahead;
+      column_ += (pos_ - startVer);
+      std::string_view verStr = source_.substr(startVer, pos_ - startVer);
+      return Token{.kind        = TokenKind::MicroversionLiteral,
+                   .text        = verStr,
+                   .loc         = startLoc,
+                   .stringValue = std::string(verStr)};
+    }
+
     return scanNumber();
   }
 
@@ -470,9 +679,16 @@ Token Lexer::scanIdentifierOrKeyword() {
       continue;
     }
     // Allow compound identifiers like d.name, d.pinning-cursors, std:math
-    if ((c == '.' || c == '-' || c == ':') &&
+    if ((c == '.' || c == '-') &&
         (std::isalnum(static_cast<unsigned char>(peekChar(1))) ||
          peekChar(1) == '_')) {
+      advanceChar();
+      continue;
+    }
+    if (c == ':' &&
+        (std::isalnum(static_cast<unsigned char>(peekChar(1))) ||
+         peekChar(1) == '_') &&
+        !(peekChar(1) == 'd' && peekChar(2) == '.')) {
       advanceChar();
       continue;
     }
@@ -508,6 +724,53 @@ Token Lexer::scanIdentifierOrKeyword() {
     return Token{.kind = TokenKind::KwTrue, .text = text, .loc = startLoc};
   if (text == "false")
     return Token{.kind = TokenKind::KwFalse, .text = text, .loc = startLoc};
+  if (text == "current")
+    return Token{.kind = TokenKind::KwCurrent, .text = text, .loc = startLoc};
+  if (text == "local")
+    return Token{.kind = TokenKind::KwLocal, .text = text, .loc = startLoc};
+  if (text == "topic")
+    return Token{.kind = TokenKind::KwTopic, .text = text, .loc = startLoc};
+  if (text == "btpk")
+    return Token{.kind = TokenKind::KwBtpk, .text = text, .loc = startLoc};
+  if (text == "slice" || text == "slices")
+    return Token{.kind = TokenKind::KwSlices, .text = text, .loc = startLoc};
+  if (text == "doc" || text == "docs")
+    return Token{.kind = TokenKind::KwDocs, .text = text, .loc = startLoc};
+  if (text == "citing")
+    return Token{.kind = TokenKind::KwCiting, .text = text, .loc = startLoc};
+  if (text == "backlinks")
+    return Token{.kind = TokenKind::KwBacklinks, .text = text, .loc = startLoc};
+  if (text == "find")
+    return Token{.kind = TokenKind::KwFind, .text = text, .loc = startLoc};
+  if (text == "system")
+    return Token{.kind = TokenKind::KwSystem, .text = text, .loc = startLoc};
+  if (text == "btih")
+    return Token{.kind = TokenKind::KwBtih, .text = text, .loc = startLoc};
+  if (text == "ledger")
+    return Token{.kind = TokenKind::KwLedger, .text = text, .loc = startLoc};
+  if (text == "def")
+    return Token{.kind = TokenKind::KwDef, .text = text, .loc = startLoc};
+  if (text == "mount")
+    return Token{.kind = TokenKind::KwMount, .text = text, .loc = startLoc};
+  if (text == "as")
+    return Token{.kind = TokenKind::KwAs, .text = text, .loc = startLoc};
+  if (text == "watch")
+    return Token{.kind = TokenKind::KwWatch, .text = text, .loc = startLoc};
+  if (text == "since")
+    return Token{.kind = TokenKind::KwSince, .text = text, .loc = startLoc};
+  if (text == "lens")
+    return Token{.kind = TokenKind::KwLens, .text = text, .loc = startLoc};
+  if (text == "list")
+    return Token{.kind = TokenKind::KwList, .text = text, .loc = startLoc};
+  if (text == "until")
+    return Token{.kind = TokenKind::KwUntil, .text = text, .loc = startLoc};
+  if (text == "with")
+    return Token{.kind = TokenKind::KwWith, .text = text, .loc = startLoc};
+  if (text == "perspective")
+    return Token{
+        .kind = TokenKind::KwPerspective, .text = text, .loc = startLoc};
+  if (text == "break")
+    return Token{.kind = TokenKind::KwBreak, .text = text, .loc = startLoc};
 
   return Token{.kind        = TokenKind::Identifier,
                .text        = text,

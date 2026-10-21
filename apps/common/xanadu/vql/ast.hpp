@@ -1,6 +1,6 @@
 /**
  * @file ast.hpp
- * @brief Abstract Syntax Tree (AST) node representations for VQL v13.0.
+ * @brief Abstract Syntax Tree (AST) node representations for VQL v15.1.
  */
 #ifndef COMMON_XANADU_VQL_AST_HPP
 #define COMMON_XANADU_VQL_AST_HPP
@@ -52,15 +52,25 @@ enum class CompOp : std::uint8_t {
 };
 
 enum class AnchorKind : std::uint8_t {
-  Home,        ///< "##"
-  NamedStore,  ///< "##NAME"
-  Root,        ///< "#"
-  Cursor,      ///< "^"
-  NamedCursor, ///< "^NAME"
-  Variable,    ///< "$var"
+  Home,            ///< "##"
+  NamedStore,      ///< "##NAME"
+  Root,            ///< "#"
+  Cursor,          ///< "^"
+  NamedCursor,     ///< "^NAME"
+  AllCursors,      ///< "^^"
+  AllNamedCursors, ///< "^^NAME"
+  Variable,        ///< "$var"
   LiteralCellId,
-  Context, ///< "."
-  Create,  ///< "%" or "%VALUE"
+  Context,        ///< "."
+  Create,         ///< "%" or "%VALUE"
+  StoreGenerator, ///< "current()", "local(...) ", "topic(...)", etc.
+  StoreAnchor,    ///< "##btpk(...)", "##topic(...)", etc.
+  Microversion,   ///< "@2a9", "@88"
+};
+
+enum class ShapeWildcard : std::uint8_t {
+  Everything, ///< "*"
+  Nothing,    ///< "!*"
 };
 
 // -- Forward Declarations ----------------------------------------------------
@@ -69,6 +79,11 @@ struct PathExpression;
 struct FunctionInvocation;
 struct ActionClause;
 struct EffectClause;
+struct ShapeLiteral;
+struct VersionExpr;
+struct PathLambda;
+struct Statement;
+struct ScriptBody;
 
 // -- Literals and Value Expressions ------------------------------------------
 
@@ -76,15 +91,79 @@ struct ScalarLiteral {
   std::variant<std::string, double, std::int64_t, bool> value;
 };
 
+struct VersionExpr {
+  enum class Op : std::uint8_t {
+    Literal,  ///< raw microversion string
+    Variable, ///< $var
+    Next,     ///< + 1
+    Parent,   ///< - 1
+    Branch,   ///< / "branch"
+    Range,    ///< ..
+  };
+  Op op{Op::Literal};
+  std::string versionStr;
+  std::shared_ptr<VersionExpr> left{nullptr};
+  std::shared_ptr<VersionExpr> right{nullptr};
+  std::int64_t stepOffset{0};
+  std::string branchName;
+};
+
+struct VersionPin {
+  std::vector<VersionExpr> versions;
+  bool isRange{false}; ///< whether specified with ".."
+};
+
+struct PathLambda {
+  std::vector<std::string> params;
+  std::shared_ptr<PathExpression> path{nullptr};
+};
+
+struct BooleanExpr;
+
 struct ValueExpr {
   std::variant<std::shared_ptr<PathExpression>, ScalarLiteral,
-               std::string /*VariableRef*/, std::shared_ptr<FunctionInvocation>>
+               std::string /*VariableRef*/, std::shared_ptr<FunctionInvocation>,
+               std::shared_ptr<ShapeLiteral>, std::shared_ptr<VersionExpr>,
+               std::shared_ptr<PathLambda>, std::shared_ptr<BooleanExpr>>
       kind;
 };
 
 struct FunctionInvocation {
   std::string name;
   std::vector<ValueExpr> args;
+};
+
+// -- First-Class Shapes -------------------------------------------------------
+
+struct DimensionShapeRule {
+  bool negated{false}; ///< "!"
+  bool isBidir{false}; ///< "~"
+  zigzag::DimVector direction{zigzag::DimVector::POS};
+  std::string dimName;
+  std::shared_ptr<ValueExpr> targetValue{nullptr}; ///< optional ": expr"
+};
+
+struct DimensionPivotRule {
+  std::string fromDim;
+  std::string toDim;
+};
+
+struct VirtualDimensionDefRule {
+  std::string dimName;
+  zigzag::DimVector direction{zigzag::DimVector::POS};
+  std::shared_ptr<ValueExpr> expr{nullptr};
+};
+
+struct ShapeRule {
+  std::variant<ShapeWildcard, std::string /*VariableRef $shape*/,
+               std::shared_ptr<FunctionInvocation>, DimensionShapeRule,
+               DimensionPivotRule, VirtualDimensionDefRule,
+               std::shared_ptr<ShapeLiteral>>
+      rule;
+};
+
+struct ShapeLiteral {
+  std::vector<ShapeRule> rules;
 };
 
 // -- Boolean & Predicate Logic -----------------------------------------------
@@ -98,7 +177,8 @@ struct ComparisonExpr {
 struct PredicateTest {
   std::variant<std::shared_ptr<PathExpression>, bool /*ContextDot*/,
                std::shared_ptr<ValueExpr> /*ExtendedTruthiness*/,
-               std::shared_ptr<FunctionInvocation>>
+               std::shared_ptr<FunctionInvocation>,
+               std::shared_ptr<ShapeLiteral> /*ShapePredicate*/>
       kind;
 };
 
@@ -126,12 +206,30 @@ struct CreateValue {
 
 // -- Anchors & Range Clamps --------------------------------------------------
 
+struct StoreGeneratorCall {
+  std::string opName; ///< "current", "local", "topic", "btpk", "citing",
+                      ///< "backlinks", "find", "system", "btih", "ledger"
+  std::vector<ValueExpr> args;
+};
+
+struct StoreAnchor {
+  std::string method; ///< "btpk", "topic", etc.
+  std::vector<ValueExpr> args;
+  std::string sliceName;
+  bool derefMaster{false};
+};
+using StoreAnchorSpec = StoreAnchor;
+
 struct AnchorNode {
   AnchorKind kind{AnchorKind::Home};
   std::string name;
   std::uint64_t cellId{0};
   bool derefMaster{false}; ///< Suffixed with ">"
   std::optional<CreateValue> createValue{std::nullopt};
+  std::optional<StoreGeneratorCall> generator{std::nullopt};
+  std::optional<StoreAnchorSpec> storeAnchor{std::nullopt};
+  std::optional<VersionPin> versionPin{std::nullopt};
+  std::string microversionId;
 };
 
 struct RangeClamp {
@@ -142,21 +240,77 @@ struct RangeClamp {
 struct SignedDimensionStep {
   std::string dimName;
   zigzag::DimVector direction{zigzag::DimVector::POS};
+  bool isBidir{false}; ///< "~d.tag"
   Placement placement{Placement::Default};
   std::vector<CreateValue> creates;
 };
 
 struct MacroDimensionGroup;
 
+struct GenesisSelector {}; ///< "/##"
+
+struct SliceSelectorStep {
+  std::optional<std::string> nameFilter{std::nullopt};
+  std::shared_ptr<BooleanExpr> predicateFilter{nullptr};
+};
+
+struct DocSelectorStep {
+  std::optional<std::string> nameFilter{std::nullopt};
+  std::shared_ptr<BooleanExpr> predicateFilter{nullptr};
+};
+
+struct PathMorphism {
+  enum class Op : std::uint8_t { Arrow, Transclude };
+  Op op{Op::Arrow};
+  std::string perspective; ///< optional "@persp:"
+  ValueExpr subject;       ///< StringLiteral, SignedDimension, VariableRef
+  std::vector<ValueExpr> targets; ///< Sprout list or single ValueExpr
+  bool isSproutList{false};
+};
+
+struct DimensionPivotStep {
+  std::string fromDim;
+  std::string toDim;
+};
+
+struct VirtualDimensionStep {
+  SignedDimensionStep dimStep;
+  ValueExpr expr;
+};
+
+struct PathStep;
+
+struct RootSelectorStep {
+  enum class Kind : std::uint8_t {
+    Genesis,
+    RootMetacells,
+    ActiveCursor,
+    AllCursors,
+    NamedCursor,
+    AllNamedCursors,
+  };
+  Kind kind{Kind::Genesis};
+  std::string name;
+};
+
+struct PerspectiveStep {
+  std::string perspective;
+  std::shared_ptr<PathStep> targetStep{nullptr};
+};
+
 using StepSelector =
     std::variant<SignedDimensionStep, std::shared_ptr<MacroDimensionGroup>,
-                 FunctionInvocation>;
+                 FunctionInvocation, GenesisSelector, SliceSelectorStep,
+                 DocSelectorStep, PathMorphism, DimensionPivotStep,
+                 VirtualDimensionStep, RootSelectorStep, PerspectiveStep>;
 
 struct PathStep {
   StepSelector selector;
   bool derefMaster{false}; ///< Suffixed with ">"
   std::vector<BooleanExpr> predicates;
+  std::vector<ShapeLiteral> shapePredicates; ///< "[{ ... }]"
   std::optional<RangeClamp> rangeClamp{std::nullopt};
+  std::optional<VersionPin> versionPin{std::nullopt};
   YieldMode yieldMode{YieldMode::Default};
 };
 
@@ -179,6 +333,7 @@ struct PathExpression {
   /// `#[...]`: predicates on the anchor's own cells, before any step.
   std::vector<BooleanExpr> anchorPredicates;
   std::vector<PathStep> steps;
+  std::optional<ShapeLiteral> shapeProjection{std::nullopt}; ///< "$path{ ... }"
   std::optional<CloneTail> cloneTail{std::nullopt};
 };
 
@@ -196,8 +351,21 @@ struct ReturnClause {
   std::vector<ReturnItem> items;
 };
 
+struct DestructureField {
+  bool isContext{false}; ///< "."
+  std::string dimName;   ///< e.g. "d.tag"
+  zigzag::DimVector direction{zigzag::DimVector::POS};
+  bool isBidir{false};
+  std::string varName; ///< "$t"
+};
+
+struct DestructurePattern {
+  std::vector<DestructureField> fields;
+};
+
 struct ForClause {
   std::string varName;
+  std::optional<DestructurePattern> destructurePattern{std::nullopt};
   PathExpression inPath{};
 };
 
@@ -236,7 +404,49 @@ struct ExecutionBlock {
   ActionClause action{};
 };
 
+struct WatchStatement {
+  PathExpression targetPath;
+  std::optional<std::string> asVar{std::nullopt};
+  std::optional<DestructurePattern> asPattern{std::nullopt};
+  std::optional<VersionExpr> sinceVersion{std::nullopt};
+  std::optional<BooleanExpr> untilCondition{std::nullopt};
+  std::shared_ptr<ScriptBody> body{nullptr};
+};
+
+struct PerspectiveBlock {
+  std::string perspectiveName;
+  std::shared_ptr<ScriptBody> body{nullptr};
+};
+
+struct MountDeclaration {
+  StoreAnchor storeAnchor;
+  std::string dimName;
+  zigzag::DimVector direction{zigzag::DimVector::POS};
+};
+
+struct WeaveStatement {
+  EffectClause effect;
+};
+
+struct Statement : std::variant<ExecutionBlock, WatchStatement, WeaveStatement,
+                                PerspectiveBlock, PathExpression> {
+  using variant::variant;
+};
+
+struct ScriptBody {
+  std::vector<Statement> statements;
+};
+
+struct DefDeclaration {
+  std::string name;
+  std::vector<std::string> params;
+  ValueExpr body;
+};
+
 struct QueryExpression {
+  std::vector<DefDeclaration> defs;
+  std::vector<MountDeclaration> mounts;
+  ScriptBody body;
   std::variant<ExecutionBlock, PathExpression> expr;
 };
 

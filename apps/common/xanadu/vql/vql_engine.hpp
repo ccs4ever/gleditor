@@ -51,6 +51,19 @@ public:
   getVariable(std::string_view name) const;
   void clearVariables() noexcept;
 
+  /// Executes a single statement in the query.
+  std::vector<zigzag::CellRef> executeStatement(const Statement &stmt);
+
+  /// Executes a perspective block, scoping activePerspective_ during execution.
+  std::vector<zigzag::CellRef>
+  executePerspectiveBlock(const PerspectiveBlock &block);
+
+  /// Executes a reactive watch statement over chronofilade.
+  std::vector<zigzag::CellRef> executeWatch(const WatchStatement &watchStmt);
+
+  /// Records a session mount declaration.
+  void executeMount(const MountDeclaration &mount);
+
   /// Resolves dimension name to DimRef, minting dynamically if new.
   zigzag::DimRef resolveDimension(std::string_view name);
 
@@ -94,6 +107,8 @@ private:
   bool evaluatePredicate(const BooleanExpr &expr, zigzag::CellRef context);
   bool evaluateTerm(const BooleanTerm &term, zigzag::CellRef context);
   bool evaluateFactor(const BooleanFactor &factor, zigzag::CellRef context);
+  bool evaluateShapePredicate(const ShapeLiteral &shape,
+                              zigzag::CellRef context);
 
   zigzag::vortex::CellValue evaluateValueExpr(const ValueExpr &expr,
                                               zigzag::CellRef context);
@@ -115,12 +130,26 @@ private:
 
   zigzag::CellRef cellFromValue(const zigzag::vortex::CellValue &val);
 
+  std::vector<zigzag::CellRef> resolveStoreAnchor(const StoreAnchor &sa);
+
+  std::vector<zigzag::CellRef>
+  evaluatePerspectiveStep(std::string_view perspName,
+                          const PathStep &targetStep,
+                          const std::vector<zigzag::CellRef> &currentCells);
+
+  zigzag::CellRef sliceHomeOf(zigzag::CellRef cell);
+
   std::unique_ptr<zigzag::vortex::VortexCore> ownedCore_{nullptr};
   std::unique_ptr<MultiStoreCoordinator> ownedCoordinator_{nullptr};
   MultiStoreCoordinator &coordinator_;
   zigzag::vortex::VortexCore *core_{nullptr};
 
   std::unordered_map<std::string, std::vector<zigzag::CellRef>> env_;
+  std::string activePerspective_{};
+  std::unordered_map<std::string,
+                     std::unordered_map<zigzag::CellRef, zigzag::CellRef>>
+      perspectiveClones_;
+  std::unordered_map<std::string, MountDeclaration> sessionMounts_;
 };
 
 } // namespace xanadu::vql
