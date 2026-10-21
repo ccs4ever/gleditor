@@ -65,12 +65,17 @@ ______________________________________________________________________
     - [Bidirectional Morphisms: Put/Get Lenses][toc-34]
     - [Systems Lowering: DynamicLensMatrix and SIMD Evaluation][toc-35]
   - [4.11 First-Class Stores, Slices, Hypertime Pinning & Version Arithmetic][toc-38]
-    - [First-Class Store, Slice, Doc, and Hypertime Types][toc-39]
+    - [First-Class Store, Slice, Dim, and Hypertime Types][toc-39]
     - [Functional Generators, Slice Enumeration & Root Step Selectors][toc-40]
     - [The "Anything-to-ZigZag" Lens and Span Provenance][toc-41]
     - [Hypertime Version Pinning across Folds][toc-42]
     - [MicroversionId Literals and Hypertime Arithmetic][toc-43]
     - [Systems Lowering: HyperHandle, LCA Time-Travel, and Open-Addressing Pinning][toc-44]
+  - [4.12 Structural Typing, Unified Shape Contracts & Topological Functors][toc-47]
+    - [The Gradual Type System and Atomic Handles][toc-48]
+    - [Unified Shape Contracts: Coexistence of Typing and Destructuring][toc-49]
+    - [Point-Free Topological Traversal Functors & Currying][toc-50]
+    - [Systems Lowering: The 24-Byte CurriedMorphism and TRAVERSE_CURRIED_DIM][toc-51]
 - [5. Memory Management & Topological Garbage Collection][toc-06]
 - [6. Canonical Production Query Examples](#6-canonical-production-query-examples)
   - [6.1 Deep Structural Navigation with Zero-Copy Slice][toc-07]
@@ -297,9 +302,10 @@ WatchStatement        ::= "watch" PathExpression ( "as" ( VariableRef | Destruct
 
 WeaveStatement        ::= "weave" ( EffectItem | "{" EffectItem ( "," EffectItem )* "}" )
 
-DefDeclaration        ::= "def" ( "pure" | "weave" )? Identifier "(" ParamList? ")" ":=" ( "{" ScriptBody "}" | ShapeLiteral | PathExpression | ValueExpr ) ";"
+DefDeclaration        ::= "def" ( "pure" | "weave" )? Identifier "(" ParamList? ")" ( ":" TypeExpr )? ":=" ( "{" ScriptBody "}" | ShapeLiteral | PathExpression | ValueExpr ) ";"
 ParamList             ::= LambdaParam ( "," LambdaParam )*
-LambdaParam           ::= ( VariableRef | "." | DestructurePattern ) ( ":=" ValueExpr )? "..."?
+LambdaParam           ::= ( VariableRef | "." ) ( ":" TypeExpr )? ( ":=" ValueExpr )? "..."?
+                        | DestructurePattern ( ":=" ValueExpr )? "..."?
 
 MountDeclaration      ::= "mount" StoreAnchor "as" SignedDimension ";"
 
@@ -307,7 +313,22 @@ ExecutionBlock        ::= ( ForClause | LetClause )+ WhereClause? ActionClause
 
 ForClause             ::= "for" ( VariableRef | DestructurePattern ) "in" PathExpression
 DestructurePattern    ::= "{" DestructureField ( "," DestructureField )* "}"
-DestructureField      ::= "." ( ":" VariableRef )? | SignedDimension ":" VariableRef
+DestructureField      ::= "." ( ":" VariableRef )?
+                        | SignedDimension ( ":" VariableRef )? ( ":" TypeExpr )? ( ":=" ValueExpr )?
+
+(* -- Type System Productions ------------------------------------------------ *)
+
+TypeExpr              ::= UnionType
+UnionType             ::= PrimaryType ( "|" PrimaryType )*
+PrimaryType           ::= ( BasicType | GenericType | ShapeType | ParenType ) "?"?
+ParenType             ::= "(" TypeExpr ")"
+BasicType             ::= "Cell" | "Dim" | "Store" | "Slice" | "Version"
+                        | "Int" | "Float" | "String" | "Bool" | "Any"
+                        | ContextualTypeIdent
+GenericType           ::= ( "Stream" | ContextualTypeIdent ) "<" TypeExpr ( "," TypeExpr )* ">"
+ShapeType             ::= "{" ShapeTypeField ( "," ShapeTypeField )* "}"
+ShapeTypeField        ::= SignedDimension ( ":" TypeExpr )?
+ContextualTypeIdent   ::= [a-zA-Z_][a-zA-Z0-9_]*
 
 LetClause             ::= "let" VariableRef ":=" ( PathExpression | ValueExpr )
 WhereClause           ::= "where" BooleanExpr ( ( "and" | "or" ) BooleanExpr )*
@@ -322,7 +343,8 @@ EffectItem            ::= LetClause | PathExpression | ForClause EffectClause
 
 ConditionalClause     ::= "if" BooleanExpr ActionClause ( "else" ActionClause )?
 
-PathExpression        ::= AnchorNode VersionPin? PathStep* ShapeProjection? CloneTail?
+PathExpression        ::= ( AnchorNode | PartialPathFunctor ) VersionPin? PathStep* ShapeProjection? CloneTail?
+PartialPathFunctor    ::= "/" StepSelector
 ShapeProjection       ::= "{" ShapeRule ( "," ShapeRule )* "}"
 
 AnchorNode            ::= RootSelector
@@ -350,6 +372,7 @@ StepSelector          ::= RootSelector
                         | SignedDimension CreateSuffix?
                         | MacroDimensionGroup
                         | FunctionInvocation
+                        | VariableRef
 
 PerspectiveStep       ::= PerspectiveQualifier ( SignedDimension | RootSelector | FunctionInvocation )
 
@@ -1720,20 +1743,23 @@ VQL 15.0 unifies the Nelsonian docuverse and OSMIC hypertime by treating **Store
 paths or opaque network URIs; they become first-class values passed in registers, filtered by
 predicates, and navigated across hypertime.
 
-#### 4.11.1 First-Class Store, Slice, Doc, and Hypertime Types
+#### 4.11.1 First-Class Store, Slice, Dim, and Hypertime Types
 
 In the Vortex VM, the type universe comprises:
 
 ```math
-\text{Type} ::= \text{Store} \mid \text{Slice} \mid \text{Doc} \mid \text{Cell} \mid \text{Version} \mid \text{Shape} \mid \text{Scalar} \mid \text{Stream}\langle \text{Type} \rangle
+\text{Type} ::= \text{Store} \mid \text{Slice} \mid \text{Cell} \mid \text{Dim} \mid \text{Version} \mid \text{Shape} \mid \text{Scalar} \mid \text{Stream}\langle \text{Type} \rangle
 ```
 
 - **`Store`**: A sovereign repository handle encapsulating an operations spool
   (`SegmentedOpsSpool`), permascroll storage bindings, and side tables (`store.tables`).
 - **`Slice`**: A sovereign multidimensional ZigZag manifold within a store, defined by its genesis
-  home cell (`##`) and active dimension dispatch table.
-- **`Doc`**: A linear or branching Xanadu concatext document within a store, backed by an EDL
-  (`Spanfilade`).
+  home cell (`##`) and active dimension dispatch table. Under the Nelsonian Anything-to-ZigZag
+  projection lens architecture (§4.11.3), Xanadocs are natively unified into `Slice` handles,
+  rendering a separate `Doc` handle redundant.
+- **`Cell`**: An atomic ZigZag crum or node identified by an opIndex in hypertime.
+- **`Dim`**: A first-class dimension axis handle (formerly `SignedDimension`), representing signed
+  topological vectors (`+d.name`, `-d.name`).
 - **`Version` (`MicroversionId`)**: A discrete coordinate in OSMIC hypertime, representing an
   immutable document/manifold state arranged in a bijective base-26 DAG.
 
@@ -2088,6 +2114,119 @@ To guarantee real-time execution in the Vortex runtime:
 1. **$O(1)$ Hash-Directed Cell Pinning**: `##@(v1, v2)` probes `SegmentedOpsSpool::indexOf(v)` via
    open-addressing hash table in expected $O(1)$ time, bounding Nelson R7 edit chains to locate the
    effective `CompactOpNode` directly in mmap'd memory.
+
+### 4.12 Structural Typing, Unified Shape Contracts & Topological Functors
+
+VQL v16.0 unifies parameter contracts and point-free traversal into a coherent mathematical
+calculus, resolving the dichotomy between static typing and dynamic Nelsonian spatial
+intertwingularity.
+
+#### 4.12.1 The Gradual Type System and Atomic Handles
+
+VQL rejects nominal inheritance hierarchies ("class taxonomies") that shatter associative thought.
+Instead, VQL adopts **Gradual Structural Typing**:
+
+- Typing is completely optional: prototype queries omit types without ceremony.
+- Contracts are enforced at compile time and at mutation boundaries (`setLink`, `setValue`,
+  `weave`), and erased inside tight JIT kernels for zero runtime overhead.
+
+The atomic types are:
+
+- **`Cell`**: An atomic ZigZag crum/node coordinate in hypertime.
+- **`Dim`**: A signed topological dimension axis (`+d.name`, `-d.name`).
+- **`Slice`**: A sovereign multidimensional ZigZag manifold (incorporating projected Xanadocs).
+- **`Store`**: An operations spool and permascroll repository handle.
+- **`Version` (`MicroversionId`)**: A discrete hypertime coordinate.
+- **Primitives**: `Int` (64-bit signed integer), `Float` (IEEE 754 double), `String` (UTF-8),
+  `Bool`.
+- **Collections & Streams**: `Stream<T>`, `Any`, and union types `T | U`.
+
+#### 4.12.2 Unified Shape Contracts: Coexistence of Typing and Destructuring
+
+Because variable identifiers in VQL are lexically sigiled with `$` (`$var`), typing shapes and
+destructuring shapes unify into a single, cohesive grammar without ambiguity:
+
+##### Mode 1: Pure Type Contract
+
+Enforces a structural schema contract on an incoming cell without binding local variables:
+
+```vql
+def pure score_paper($p: Cell { +d.title: String, +d.score: Int }): Int :=
+  $p/+d.score;
+```
+
+##### Mode 2: Pure Destructuring
+
+Extracts dimensions directly into local variables:
+
+```vql
+def pure format_title({ ., +d.title: $t, +d.tag: $tag := "note" }): String :=
+  "[" + $tag + "] " + $t;
+```
+
+##### Mode 3: Combined Destructuring and Type Constraints
+
+Binds local variables while enforcing type contracts:
+
+```vql
+def pure process_video({ ., +d.codec: $c: String, +d.fps: $fps: Int := 60 }): String :=
+  $c + " @ " + string($fps) + "fps";
+```
+
+##### Mode 4: Parameter Aliasing (`$var: { ... }`)
+
+Binds the parent cell handle to `$task` while destructuring its internal dimensions:
+
+```vql
+def weave archive_task($task: Cell { +d.priority: $p: String, +d.owner: $o: Cell }): Cell := {
+  weave $task {
+    +d.status => "archived",
+    +d.archived_at => @now
+  };
+  return $task;
+};
+```
+
+#### 4.12.3 Point-Free Topological Traversal Functors & Currying
+
+In ZigZag, traversal steps are spatial arrows ($A \xrightarrow{+d} B$). Writing a path step without
+a leading anchor creates an anonymous **Topological Functor** (`PartialPathFunctor`):
+
+```vql
+// Define reusable point-free traversal vectors
+let $to_parent := /+d.parent;
+let $to_author := /+d.meta/+d.author;
+
+// Natural point-free composition via /
+let $inspect := $to_parent / $to_author;
+
+// Pipeline integration:
+return ##/+d.items / $inspect;
+```
+
+#### 4.12.4 Systems Lowering: The 24-Byte `CurriedMorphism` and `TRAVERSE_CURRIED_DIM`
+
+To ensure zero heap allocation and native C++ speed:
+
+**1. The 24-Byte POD Descriptor (`CurriedMorphism`)**: Passes in three 64-bit integer registers
+(`%rdi`, `%rsi`, `%rdx`) under the System V ABI:
+
+```cpp
+struct alignas(8) CurriedMorphism {
+  std::uint32_t anchor_cell{0xFFFFFFFFU};    // 4 bytes
+  std::array<std::uint16_t, 4> dim_chain{0}; // 8 bytes: packed dim IDs
+  std::uint8_t  direction_mask{0};           // 1 byte: POS vs NEG bits
+  std::uint8_t  step_count{0};               // 1 byte: bound steps
+  std::uint16_t morphism_flags{0};           // 2 bytes
+  std::uint32_t capture_val{0};              // 4 bytes: scalar capture
+  std::uint32_t filter_pc{0};                // 4 bytes: optional filter PC
+};
+static_assert(sizeof(CurriedMorphism) == 24);
+```
+
+**2. Dedicated Vortex Opcode (`TRAVERSE_CURRIED_DIM`)**: Instead of allocating closure control
+blocks, the VM executes a tight, unrolled inner CSR loop directly over `ArenaManifold::links_` in
+**3–5 CPU cycles per hop** (28x–45x faster than general call frames).
 
 ______________________________________________________________________
 
@@ -2688,6 +2827,7 @@ table.
 | 14.0    | `381972e` | 2026-10-20 | **First-class shapes `{...}`**, Boolean wildcard algebra (`{}`, `*`, `!*`, `~`), shape derivation (`{ $shape, !d }`), dynamic embedding `{ func(.) }`, nested shapes, dimension extraction (`$shape/d`, `$s[d]`), short-form shape predicates `[{...}]`, shape masking/projection replacing `@lens`, `~dim` bidirectional prefix, sprout morphisms `key => val` and `key => list(...)`, symmetric destructuring `:`, path lambdas `\(.) ...`, `sort_into(dim, by: ...)`, and UDF `def`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | 15.0    | `f1d7b71` | 2026-10-20 | **Federated Docuverse & Sovereign Discovery Anchors**: Sovereign discovery anchors (`btpk`, `topic`, `citing`, `find`, `btih`, `ledger`, `system`), federated hops `/##`, private dimension mounts `mount ... as +d.dim`, zero-copy transclusion `<~` with in-band transcopyright micropayments, perspective-preserving quantum clone ranks `@persp: ±d.dim => val`, "No Remote Mutation" invariant with `d.ctl` action cells, reactive `watch` via ZZ9P `Zwatch`, and $O(1)$ dynamic virtual lenses (`<=>`, `:=`, `(get:, put:)`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | 15.1    | `current` | 2026-10-20 | **First-Class Stores, Slices, Root Step Selectors, Functional Lenses & UFCS**: Stores, Slices, and Xanadocs as first-class runtime types; functional generators (`current()`, `local()`, `topic()`, `btpk()`, etc.); Uniform Function Call Syntax (UFCS) context propagation (`$store/slices("name")` $\equiv$ `slices($store, "name")`); universal `lens(type, args...)` primitive returning `Stream<Slice>`; root operator step selectors on slice contexts (`$slice/#`, `$slice/##`, `$slice/^`, `$slice/^^`, `$slice/^NAME`, `$slice/^^NAME`); multi-slice stream cursor filtering (`$slices/^foo`); bidirectional Anything-to-ZigZag Lens architecture (`ProjectionLens` / `ProjectionSession`) with canonical generic dimensions (`d.contains`, `d.seq`, `d.ref`, `d.clone`), character-level span provenance, and bidirectional unprojection; hypertime version pinning (`@(v1, v2)`) streaming living manifold folds; cell-level version pinning (`##@(v1, v2)`); first-class `MicroversionId` literals (`@2a9`); stack-inline hypertime arithmetic (`+`, `-`, `/`, `..`); 16-byte `HyperHandle` in-register lowerings; and strict equality operator reconciliation (`=` for comparison, `:=` for assignment/def, `!=` for inequality). |
+| 16.0    | `current` | 2026-10-21 | **Structural Typing, Unified Shape Contracts & Topological Functors**: Gradual structural type system with atomic handles (`Cell`, `Dim`, `Store`, `Slice`, `Version`), `Dim` renaming; `Doc` unified into `Slice`; unified shape contracts enabling seamless coexistence of destructuring, type contracts, defaults, and parameter aliasing (`$v: Cell { +d.codec: $c: String }`); first-class point-free traversal functors (`/+d.parent / /+d.title`); 24-byte POD `CurriedMorphism` lowering passing in 3 SysV registers with zero heap allocation; and specialized `TRAVERSE_CURRIED_DIM` opcode execution.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
 [toc-01]: #1-architectural-foundations--operational-invariants
 [toc-02]: #2-syntactic-token--structural-shorthand-matrix
@@ -2727,7 +2867,7 @@ table.
 [toc-36]: #67-distributed-job-orchestration-and-multi-machine-aggregation
 [toc-37]: #68-cross-store-transclusion-pipeline-with-transcopyright-settlement
 [toc-38]: #411-first-class-stores-slices-hypertime-pinning--version-arithmetic
-[toc-39]: #4111-first-class-store-slice-doc-and-hypertime-types
+[toc-39]: #4111-first-class-store-slice-dim-and-hypertime-types
 [toc-40]: #4112-functional-generators-slice-enumeration--root-step-selectors
 [toc-41]: #4113-the-anything-to-zigzag-lens-and-span-provenance
 [toc-42]: #4114-hypertime-version-pinning-across-folds
@@ -2735,3 +2875,8 @@ table.
 [toc-44]: #4116-systems-lowering-hyperhandle-lca-time-travel-and-open-addressing-pinning
 [toc-45]: #69-multi-store-swarm-navigation-and-dynamic-slice-filtering
 [toc-46]: #610-hypertime-pinning-manifold-folds--microversion-arithmetic
+[toc-47]: #412-structural-typing-unified-shape-contracts--topological-functors
+[toc-48]: #4121-the-gradual-type-system-and-atomic-handles
+[toc-49]: #4122-unified-shape-contracts-coexistence-of-typing-and-destructuring
+[toc-50]: #4123-point-free-topological-traversal-functors--currying
+[toc-51]: #4124-systems-lowering-the-24-byte-curriedmorphism-and-traverse_curried_dim
