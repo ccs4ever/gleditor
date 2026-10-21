@@ -194,4 +194,24 @@ TEST(VQLLexerTest, VQL15_1TokensAndKeywords) {
   EXPECT_EQ(tokens[6].kind, TokenKind::EndOfFile);
 }
 
+TEST(VQLLexerTest, VQLIteration2Tokens) {
+  Lexer lexer("pure ... $args...");
+  auto tokens = lexer.tokenizeAll();
+
+  ASSERT_EQ(tokens.size(), 5u);
+  EXPECT_EQ(tokens[0].kind, TokenKind::KwPure);
+  EXPECT_EQ(tokens[0].text, "pure");
+
+  EXPECT_EQ(tokens[1].kind, TokenKind::DotDotDot);
+  EXPECT_EQ(tokens[1].text, "...");
+
+  EXPECT_EQ(tokens[2].kind, TokenKind::Variable);
+  EXPECT_EQ(tokens[2].stringValue, "args");
+
+  EXPECT_EQ(tokens[3].kind, TokenKind::DotDotDot);
+  EXPECT_EQ(tokens[3].text, "...");
+
+  EXPECT_EQ(tokens[4].kind, TokenKind::EndOfFile);
+}
+
 } // namespace

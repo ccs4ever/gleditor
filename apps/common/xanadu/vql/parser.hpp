@@ -96,7 +96,10 @@ private:
   VersionPin parseVersionPin();
   VersionExpr parseVersionExpr();
   DestructurePattern parseDestructurePattern();
+  LambdaParam parseLambdaParam();
+  std::vector<LambdaParam> parseLambdaParams();
   PathLambda parsePathLambda();
+  bool isBlockBody();
 
   // Token stream navigation
   Token currentToken();

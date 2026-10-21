@@ -60,6 +60,8 @@ std::string_view tokenKindName(TokenKind kind) noexcept {
     return "@";
   case TokenKind::DotDot:
     return "..";
+  case TokenKind::DotDotDot:
+    return "...";
   case TokenKind::Transclude:
     return "<~";
   case TokenKind::DimPivot:
@@ -152,6 +154,8 @@ std::string_view tokenKindName(TokenKind kind) noexcept {
     return "ledger";
   case TokenKind::KwDef:
     return "def";
+  case TokenKind::KwPure:
+    return "pure";
   case TokenKind::KwMount:
     return "mount";
   case TokenKind::KwAs:
@@ -444,6 +448,11 @@ Token Lexer::nextToken() {
   }
   if (c == '.') {
     if (match('.')) {
+      if (match('.')) {
+        return Token{.kind = TokenKind::DotDotDot,
+                     .text = source_.substr(startPos, 3),
+                     .loc  = startLoc};
+      }
       return Token{.kind = TokenKind::DotDot,
                    .text = source_.substr(startPos, 2),
                    .loc  = startLoc};
@@ -750,6 +759,8 @@ Token Lexer::scanIdentifierOrKeyword() {
     return Token{.kind = TokenKind::KwLedger, .text = text, .loc = startLoc};
   if (text == "def")
     return Token{.kind = TokenKind::KwDef, .text = text, .loc = startLoc};
+  if (text == "pure")
+    return Token{.kind = TokenKind::KwPure, .text = text, .loc = startLoc};
   if (text == "mount")
     return Token{.kind = TokenKind::KwMount, .text = text, .loc = startLoc};
   if (text == "as")

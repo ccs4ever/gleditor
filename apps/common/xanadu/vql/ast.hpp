@@ -113,11 +113,6 @@ struct VersionPin {
   bool isRange{false}; ///< whether specified with ".."
 };
 
-struct PathLambda {
-  std::vector<std::string> params;
-  std::shared_ptr<PathExpression> path{nullptr};
-};
-
 struct BooleanExpr;
 
 struct ValueExpr {
@@ -302,7 +297,8 @@ using StepSelector =
     std::variant<SignedDimensionStep, std::shared_ptr<MacroDimensionGroup>,
                  FunctionInvocation, GenesisSelector, SliceSelectorStep,
                  DocSelectorStep, PathMorphism, DimensionPivotStep,
-                 VirtualDimensionStep, RootSelectorStep, PerspectiveStep>;
+                 VirtualDimensionStep, RootSelectorStep, PerspectiveStep,
+                 std::shared_ptr<PathLambda>>;
 
 struct PathStep {
   StepSelector selector;
@@ -437,10 +433,24 @@ struct ScriptBody {
   std::vector<Statement> statements;
 };
 
+struct LambdaParam {
+  std::variant<std::string /*$var*/, bool /*ContextDot*/, DestructurePattern>
+      target;
+  std::shared_ptr<ValueExpr> defaultValue{nullptr};
+  bool isVariadic{false};
+};
+
+struct PathLambda {
+  std::vector<LambdaParam> params;
+  std::variant<std::shared_ptr<ValueExpr>, std::shared_ptr<ScriptBody>> body;
+};
+
 struct DefDeclaration {
+  enum class Effect : std::uint8_t { Inferred, Pure, Weave };
+  Effect effect{Effect::Inferred};
   std::string name;
-  std::vector<std::string> params;
-  ValueExpr body;
+  std::vector<LambdaParam> params;
+  std::variant<std::shared_ptr<ValueExpr>, std::shared_ptr<ScriptBody>> body;
 };
 
 struct QueryExpression {

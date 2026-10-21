@@ -139,6 +139,20 @@ private:
 
   zigzag::CellRef sliceHomeOf(zigzag::CellRef cell);
 
+  std::vector<zigzag::CellRef> executeScriptBody(const ScriptBody &body);
+
+  std::vector<zigzag::CellRef> executeLambda(const PathLambda &lambda,
+                                             zigzag::CellRef context);
+
+  std::vector<zigzag::CellRef> callUserDef(const DefDeclaration &def,
+                                           const std::vector<ValueExpr> &args,
+                                           zigzag::CellRef context);
+
+  bool
+  matchDestructure(const DestructurePattern &pattern, zigzag::CellRef context,
+                   std::unordered_map<std::string, std::vector<zigzag::CellRef>>
+                       &scopedBindings);
+
   std::unique_ptr<zigzag::vortex::VortexCore> ownedCore_{nullptr};
   std::unique_ptr<MultiStoreCoordinator> ownedCoordinator_{nullptr};
   MultiStoreCoordinator &coordinator_;
@@ -150,6 +164,7 @@ private:
                      std::unordered_map<zigzag::CellRef, zigzag::CellRef>>
       perspectiveClones_;
   std::unordered_map<std::string, MountDeclaration> sessionMounts_;
+  std::unordered_map<std::string, DefDeclaration> userDefs_;
 };
 
 } // namespace xanadu::vql

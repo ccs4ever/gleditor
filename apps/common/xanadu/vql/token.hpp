@@ -42,6 +42,7 @@ enum class TokenKind : std::uint8_t {
   Tilde,           ///< "~"
   At,              ///< "@"
   DotDot,          ///< ".."
+  DotDotDot,       ///< "..."
   Transclude,      ///< "<~"
   DimPivot,        ///< "<=>"
   Backslash,       ///< "\"
@@ -96,6 +97,7 @@ enum class TokenKind : std::uint8_t {
   KwBtih,
   KwLedger,
   KwDef,
+  KwPure,
   KwMount,
   KwAs,
   KwWatch,

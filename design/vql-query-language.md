@@ -155,14 +155,15 @@ mutations driven by the atomic engine:
   nodes to input and output manifolds. The rank hangs off a detached head cell held up by a named
   pin on `d.pinning-cursors`, **not** off the origin — an origin-anchored cache is immortal, since
   the origin is in the Root Set. See §7.5.
-- **Universal Docuverse Anchoring & Federated Hops**: `##` is the universal Store Sigil. Rather than
-  adopting web-style hierarchical URLs, VQL anchors directly to native Xanadulogical discovery
-  primitives: BEP 46 author public keys and corpus salts (`##btpk(author, salt)`), deterministic DHT
-  topic rendezvous (`##topic(tag)`), transclusion backlinks (`##citing(target)`), embedded SQLite
-  FTS5 catalog search (`##find(query)`), immutable content hashes (`##btih(hash)`), append-only
-  Merkle ledgers (`##ledger(root)`), and sovereign system stores (`##system(domain)`). Slashes do
-  not denote filesystem paths or server hierarchies; `/##` is a federated boundary transition that
-  switches the ops spool context without copying or caching intermediate graphs.
+- **Universal Docuverse Anchoring & Genesis Selection (`/##`)**: Rather than adopting web-style
+  hierarchical URLs or ad-hoc keyword prefixes, VQL models store discovery as first-class generator
+  functions returning streams of sovereign `Store` handles: BEP 46 author public keys and corpus
+  salts (`btpk(author, salt)`), deterministic DHT topic rendezvous (`topic(tag)`), transclusion
+  backlinks (`citing(target)`), embedded SQLite FTS5 catalog search (`find(query)`), immutable
+  content hashes (`btih(hash)`), append-only Merkle ledgers (`ledger(root)`), and sovereign system
+  stores (`system(domain)`). The genesis selector `/##` resolves the origin/home `CellRef` from any
+  store, slice, or doc context, while `/##` as a federated hop switches ops spool contexts without
+  copying or caching intermediate graphs. Bare `##` anchors to the active ambient store's home cell.
 - **Strict 2-Rank Manifold Invariant Across Distributed Slices ($\deg^\pm(c, d) \le 1$)**: No
   distributed operation or multi-user edit may ever cause a cell to exceed valence 1 posward or
   negward along any dimension. Perspective-preserving clone ranks (`@persp: ±d.dim => target`)
@@ -220,13 +221,13 @@ ______________________________________________________________________
 | `$v + 1`, `$v - 1`          | Hypertime Step                   | Advances sequentially (`next()`) or steps backward to parent (`parent()`) in hypertime — see §4.11.5.                                                                        |
 | `$v / "a"`                  | Hypertime Branch                 | Forks a new child branch off hypertime state `$v` — see §4.11.5.                                                                                                             |
 | `$v1 .. $v2`                | Hypertime Range                  | Lazily streams the causal ancestry path of microversions between `$v1` and `$v2` — see §4.11.5.                                                                              |
-| `##btpk(key, salt)`         | BEP 46 Author Pointer            | Resolves author's mutable ops spool tip via Ed25519 key and salt — see §4.9.1.                                                                                               |
-| `##topic(tag)`              | Topic Swarm Stream               | Discovers and streams stores announced in DHT topic swarm — see §4.9.1.                                                                                                      |
-| `##citing(target)`          | Backlink Stream                  | Discovers all stores and documents transcluding or citing target — see §4.9.1.                                                                                               |
-| `##find(query)`             | Full-Text Search Stream          | In-process SQLite FTS5 BM25 ranked search across catalogs — see §4.9.1.                                                                                                      |
-| `##btih(hash)`              | Immutable Content Hash           | Binds to frozen BitTorrent publication archive by InfoHash — see §4.9.1.                                                                                                     |
-| `##ledger(root)`            | Merkle Ledger Checkpoint         | Opens append-only publication & identity ledger at Merkle root — see §4.9.1.                                                                                                 |
-| `##system(domain)`          | Sovereign System Store           | Binds to local sovereign store (`keymap`, `settings`, `activity`, etc.) — see §4.9.1.                                                                                        |
+| `btpk(key, salt)`           | BEP 46 Author Pointer            | Standard function resolving author's mutable ops spool tip via Ed25519 key and salt — see §4.11.2.                                                                           |
+| `topic(tag)`                | Topic Swarm Stream               | Standard function discovering and streaming stores announced in DHT topic swarm — see §4.11.2.                                                                               |
+| `citing(target)`            | Backlink Stream                  | Standard function discovering all stores and documents transcluding or citing target — see §4.11.2.                                                                          |
+| `find(query)`               | Full-Text Search Stream          | Standard function executing in-process SQLite FTS5 BM25 ranked search across catalogs — see §4.11.2.                                                                         |
+| `btih(hash)`                | Immutable Content Hash           | Standard function binding frozen BitTorrent publication archive by InfoHash — see §4.11.2.                                                                                   |
+| `ledger(root)`              | Merkle Ledger Checkpoint         | Standard function opening append-only publication & identity ledger at Merkle root — see §4.11.2.                                                                            |
+| `system(domain)`            | Sovereign System Store           | Standard function binding local sovereign store (`keymap`, `settings`, `activity`, etc.) — see §4.11.2.                                                                      |
 | `/##`                       | Federated Hop                    | Navigates across a foreign store reference or network bridge into a remote manifold — see §4.9.1.                                                                            |
 | `mount <anchor> as +d.d`    | Dimension Mount                  | Dynamically binds a remote store/slice into local session dimensions without spool mutation — see §4.9.2.                                                                    |
 | `.`                         | Context Identity                 | The current step's context cell — a valid anchor on its own, or `render(context)` when a host value is wanted.                                                               |
@@ -296,8 +297,9 @@ WatchStatement        ::= "watch" PathExpression ( "as" ( VariableRef | Destruct
 
 WeaveStatement        ::= "weave" ( EffectItem | "{" EffectItem ( "," EffectItem )* "}" )
 
-DefDeclaration        ::= "def" Identifier "(" ParamList? ")" ":=" ( ShapeLiteral | PathExpression | ValueExpr ) ";"
-ParamList             ::= VariableRef ( "," VariableRef )*
+DefDeclaration        ::= "def" ( "pure" | "weave" )? Identifier "(" ParamList? ")" ":=" ( "{" ScriptBody "}" | ShapeLiteral | PathExpression | ValueExpr ) ";"
+ParamList             ::= LambdaParam ( "," LambdaParam )*
+LambdaParam           ::= ( VariableRef | "." | DestructurePattern ) ( ":=" ValueExpr )? "..."?
 
 MountDeclaration      ::= "mount" StoreAnchor "as" SignedDimension ";"
 
@@ -341,6 +343,7 @@ LiteralCellId         ::= [0-9]+
 PathStep              ::= "/" StepSelector VersionPin? PredicateClause* RangeClamp? Yield?
 StepSelector          ::= RootSelector
                         | PerspectiveStep
+                        | PathLambda
                         | PathMorphism
                         | DimensionPivot
                         | VirtualDimensionDef
@@ -436,14 +439,14 @@ ValueExpr             ::= VersionExpr
                         | FunctionInvocation
 LensSpec              ::= "lens" "(" "get" ":" ValueExpr ( "," "put" ":" ValueExpr )? ")"
 ShapeIndexExpr        ::= VariableRef "[" SignedDimension "]"
-PathLambda            ::= "\\" "(" ( VariableRef | "." ) ( "," VariableRef )* ")" ( PathExpression | ValueExpr )
+PathLambda            ::= "\\" "(" ParamList? ")" ( "{" ScriptBody "}" | PathExpression | ValueExpr )
 
 ScalarLiteral          ::= StringLiteral | NumericLiteral | BooleanLiteral
 StringLiteral          ::= '"' [^"\\]* '"'
 NumericLiteral         ::= ("-" | "+")? [0-9]+ ( "." [0-9]+ )?
 BooleanLiteral         ::= "true" | "false"
 
-FunctionInvocation     ::= Identifier "(" ArgumentList? ")"
+FunctionInvocation     ::= Identifier "(" ArgumentList? ")" PathLambda?
 ArgumentList           ::= ValueExpr ( "," ValueExpr )*
 ```
 
@@ -505,12 +508,12 @@ A few grammar points worth calling out explicitly:
 
 - **`StoreAnchor` (`##method(...)#slice`) and `FederatedHop` (`/##`)**: A store anchor grounds the
   path context directly to a sovereign store or slice manifold via the library's native discovery
-  engines (§4.9.1). Rather than web URIs, it invokes first-class vectors: `##btpk(author, salt)`
-  (BEP 46 mutable tip), `##topic(tag)` (DHT topic swarm stream), `##citing(target)` (transclusion
-  backlink stream), `##find(query)` (SQLite FTS5 search stream), `##btih(hash)` (immutable torrent
-  archive), `##ledger(root)` (Merkle ledger checkpoint), and `##system(domain)` (local sovereign
-  store). The federated hop `/##` allows transitions across foreign store boundaries within a
-  continuous path expression (`$doc/+d.sources/##/+d.nodes`) without local copying.
+  engines (§4.9.1). Rather than web URIs, it invokes first-class vectors: `btpk(author, salt)` (BEP
+  46 mutable tip), `topic(tag)` (DHT topic swarm stream), `citing(target)` (transclusion backlink
+  stream), `find(query)` (SQLite FTS5 search stream), `btih(hash)` (immutable torrent archive),
+  `ledger(root)` (Merkle ledger checkpoint), and `system(domain)` (local sovereign store). The
+  federated hop `/##` allows transitions across foreign store boundaries within a continuous path
+  expression (`$doc/+d.sources/##/+d.nodes`) without local copying.
 
 - **Transclusion Morphisms (`<~`)**: `weave $target <~ $source.[off, len]` directly attaches an
   author-local or global `PrimediaSpan` into the target cell without copying characters into the
@@ -1152,21 +1155,96 @@ sort_into(##/d.videos, by: \($c) $c/d.scores/sum())
 - `sort_into` gathers the cells of the rank, sorts them stably by key, and weaves new `+dimension`
   links connecting the cells in sorted sequence.
 
-#### 4.8.8 User-Defined Functions (`def`) Returning Dynamic Shapes
+#### 4.8.8 User-Defined Functions (`def`), Lambdas, and Dynamic Shapes
 
-VQL 14.0 allows reusable topological functions and shape generators to be defined with `def`:
+VQL 14.0 introduced basic shape generators, and Iteration 2 completes the functional architecture by
+promoting user-defined functions and lambdas to first-class topological morphisms:
 
+##### Function Declarations and Effects (`pure` vs `weave`)
+
+Functions are declared at the query top level via `def`. Declarations can explicitly qualify their
+effect signature:
+
+```vql
+def pure add($a, $b) := $a + $b;
+
+def weave tag_cell($c, $tag) := {
+  weave $c { +d.tag => $tag };
+  return $c;
+};
 ```
-def video_schema($codec) :=
-  if $codec = "h264"
-    { +d.tag: "video/mp4", +d.container: "mp4" }
-  else
-    { +d.tag: "video/webm", +d.container: "webm" };
+
+- **`pure`**: Statically declares that the function is a read-only perspective that mints no
+  structure operations into the ops spool.
+- **`weave`**: Declares that the function weaves operations into the manifold.
+- **Inferred Effect**: When neither modifier is specified, the compiler infers the effect from the
+  body (pure expressions vs mutative weave blocks).
+
+##### Parameter Destructuring, Defaults, and Variadics
+
+Function and lambda parameter lists support pattern destructuring, parameter defaults, and
+variadics:
+
+```vql
+def format_title({ ., +d.title: $t, +d.tag: $tag := "note" }) :=
+  "[" + $tag + "] " + $t;
+
+def collect_tags($first, $rest...) :=
+  list($first, $rest);
 ```
 
-A user-defined function can return a dynamic shape based on input conditions. This shape can be
-applied directly to paths via shape projection (`$video{ video_schema($video/+d.codec) }`),
-dynamically configuring the cell's dimensional connections based on runtime data.
+- **Shape Destructuring (`{ ., +d.dim: $var }`)**: Automatically binds local variables to
+  dimensional values of the incoming cell. Candidates failing to match the pattern are filtered out.
+- **Context Dot (`.`)**: Binds the incoming context cell directly when destructuring.
+- **Defaults (`:= expr`)**: Evaluates a default value if the argument is omitted or the destructured
+  dimension is vacant.
+- **Variadics (`...`)**: Gathers all trailing arguments into a stream.
+
+##### Anonymous Path Step Lambdas
+
+Lambdas can be placed directly as steps in path expressions (`/$path / \(...) ...`):
+
+```vql
+// Anonymous path step lambda evaluating dynamic projections
+let $summaries := ##/d.documents / \(.) ./+d.title + " (v" + ./+d.version + ")";
+
+// Pattern-destructuring path step lambda with automatic filtering
+let $urgent := ##/d.tasks / \({ ., +d.priority: "high", +d.title: $t }) $t;
+```
+
+When evaluated as a path step, the lambda receives each candidate cell in the incoming stream. If
+the parameter pattern destructures dimensions (such as `+d.priority: "high"`), only matching cells
+are handed on, eliminating boilerplate `where` filters.
+
+##### Block Bodies vs. Shape Literals
+
+Lambdas and UDF bodies support multi-statement script blocks delimited by curly braces:
+
+```vql
+let $scored := ##/d.papers / \($p) {
+  let $s := $p/+d.score;
+  let $bonus := if $s > 90 10 else 0;
+  return $s + $bonus;
+};
+```
+
+To preserve LL(1) predictability, the parser disambiguates block bodies from shape literals using
+the statement delimiter invariant:
+
+- **Shape Literals**: Contain dimension rules and are comma-separated (`{ +d.tag: "val", * }`).
+- **Statement Blocks**: Contain sequential statements ending in semicolons
+  (`{ let $x := 1; return $x; }`).
+
+##### Trailing Lambdas and Uniform Function Call Syntax (UFCS)
+
+Functions taking lambdas support trailing lambda syntax outside parentheses:
+
+```vql
+let $active := ##/d.items/filter() \({ ., +d.status: "active" }) .;
+```
+
+Any user-defined function `def step($cell, $arg)` can be chained onto a path via UFCS:
+`$node/step($arg)` evaluates with `$node` passed as the first parameter.
 
 #### 4.8.9 Nested Shapes and Dimension Extraction
 
@@ -1232,52 +1310,52 @@ directly into the native store discovery and publication infrastructure implemen
 
 ```
 // Resolve a remote author's mutable publication tip via BEP 46
-let $corpus := ##btpk($author_pubkey, "library")#main_slice
+let $corpus := btpk($author_pubkey, "library")#main_slice
 let $title := $corpus/+d.catalog[d.genre = "hypertext"]/+d.title
 ```
 
-##### The Seven Sovereign Store Discovery Vectors
+##### The Seven Sovereign Store Discovery Generators
 
-A store anchor `##` binds a query context to any local or distributed store via seven first-class
-discovery vectors:
+VQL binds query contexts to local or distributed stores via seven first-class standard generator
+functions returning lazy streams of `Store` handles:
 
-1. **BEP 46 Author Mutable Pointers (`##btpk(author, salt)`)**: Addresses the mutable publication
-   tip of a sovereign author. Lowered to `PublicationDiscoveryTransport::author(PublicKey)`, the
-   engine queries the Mainline DHT for mutable item
+1. **BEP 46 Author Mutable Pointers (`btpk(author, salt)`)**: Addresses the mutable publication tip
+   of a sovereign author. Lowered to `PublicationDiscoveryTransport::author(PublicKey)`, the engine
+   queries the Mainline DHT for mutable item
    $\text{Target} = \text{SHA-1}(\text{author\_pubkey} \parallel \text{salt})$. It verifies the
    Ed25519 signature in `AUTHORSHIP.tsv` and extracts the latest `MicroversionId` and `InfoHash`
    from `SignedAuthorCatalog`.
 
-1. **Deterministic Topic Swarms (`##topic(tag)`)**: Discovers and streams stores published under an
+1. **Deterministic Topic Swarms (`topic(tag)`)**: Discovers and streams stores published under an
    intertwingled semantic topic. The engine invokes `canonicalPublicationTopic(tag)` and computes
    the DHT rendezvous target
    $\text{Target} = \text{SHA-1}("xanadu:topic:" \parallel \text{canonicalTopic})$. It returns a
    lazy stream of candidate store roots without relying on centralized aggregators.
 
-1. **Transclusion Backlinks & Citations (`##citing(target)` / `##backlinks(target)`)**: The
+1. **Transclusion Backlinks & Citations (`citing(target)` / `backlinks(target)`)**: The
    bidirectional heart of Nelsonian hypertext: discovers every store, document, or slice across the
    network that quotes, links to, or transcludes `target` (a cell, span, or scroll key). The engine
    invokes `PublicationDiscoveryTransport::backlinks(scrollKeys)` over DHT target
    $\text{Target} = \text{SHA-1}("xanadu:link-package:" \parallel \text{scrollKey})$, streaming
    citing link packages across hypertime.
 
-1. **Embedded Catalog Search (`##find(query)`)**: Executes high-performance in-process full-text and
+1. **Embedded Catalog Search (`find(query)`)**: Executes high-performance in-process full-text and
    metadata search over known author catalogs via `SwarmCatalogIndex` (backed by an embedded SQLite
    FTS5 engine). Results stream as rank-ordered store roots with BM25 relevance scores (`+d.score`)
    and matched snippets (`+d.snippet`). Supports structured search predicates (`author:`, `topic:`,
    `quotes:`, `is:verified`).
 
-1. **Immutable Content Hash (`##btih(infohash)`)**: Binds an immutable, frozen BitTorrent archive
+1. **Immutable Content Hash (`btih(infohash)`)**: Binds an immutable, frozen BitTorrent archive
    snapshot directly by its 20-byte (BitTorrent v1) or 32-byte (BitTorrent v2) `InfoHash`. The
    content is strictly immutable and verified against the Merkle piece tree.
 
-1. **Append-Only Merkle Ledgers (`##ledger(root)`)**: Binds an append-only publication checkpoint
-   from `PublicationLedger` / `MerkleLedger`. Validates $O(\log N)$ cryptographic inclusion proofs
+1. **Append-Only Merkle Ledgers (`ledger(root)`)**: Binds an append-only publication checkpoint from
+   `PublicationLedger` / `MerkleLedger`. Validates $O(\log N)$ cryptographic inclusion proofs
    against verified author identities and Hashcash PoW stamps.
 
-1. **Sovereign Local System Stores (`##system(domain)`)**: Resolves local sovereign configuration
-   and state manifolds (`keymap`, `settings`, `layout`, `ui`, `pouches`, `activity`). Replayed
-   directly from the user's `$XDG_CONFIG_HOME` and `$XDG_DATA_HOME` without network overhead.
+1. **Sovereign Local System Stores (`system(domain)`)**: Resolves local sovereign configuration and
+   state manifolds (`keymap`, `settings`, `layout`, `ui`, `pouches`, `activity`). Replayed directly
+   from the user's `$XDG_CONFIG_HOME` and `$XDG_DATA_HOME` without network overhead.
 
 ##### StoreAnchor Syntax and LL(1) Grammar
 
@@ -1320,7 +1398,7 @@ Plan 9 demonstrated the power of per-process private namespaces via mount tables
 this concept into multidimensional zzspace through **Private Dimension Mounts**:
 
 ```
-mount ##btpk($cluster_key, "analytics")#active as +d.cluster;
+mount btpk($cluster_key, "analytics")#active as +d.cluster;
 let $load := ##/+d.cluster/+d.metrics/+d.cpu_load
 ```
 
@@ -1342,7 +1420,7 @@ introduces the **Transclusion Morphism** (`<~`):
 
 ```
 weave ##/d.anthology/d.entries% {
-  <~ ##btpk($author_vault_key, "scroll")#slice/d.essays[d.title = "Literary Machines"]/d.body.[1024, 256],
+  <~ btpk($author_vault_key, "scroll")#slice/d.essays[d.title = "Literary Machines"]/d.body.[1024, 256],
   max_spend: 50,
   +d.commentary: "Essential Nelsonian principle"
 }
@@ -1411,7 +1489,7 @@ graph LR
 
   1. **Quantum Clone Ranks in Sovereign Activity Stores**: The master cell $P$ remains pristine.
      Establishing a link under `@alice:` mints a perspective clone $CA$ along `d.clone` inside
-     Alice's sovereign activity store (`system://activity` or `##system(alice)`).
+     Alice's sovereign activity store (`system://activity` or `system(alice)`).
 
   1. **Zero-Copy Span Provenance**: $CA$ contains zero duplicated text bytes; it resolves its text
      and payload directly to master $P$ via `Manifold::cloneMaster()`. However, $CA$ possesses
@@ -1444,7 +1522,7 @@ graph LR
      `@(alice + bob)` combines layers with explicit precedence.
 
   1. **Bidirectional Discovery & Backlinks**: Links never rot or disappear into one-way dead ends.
-     The Nelsonian backlink ledger discovers all perspective commentary: querying `##citing(P)` or
+     The Nelsonian backlink ledger discovers all perspective commentary: querying `citing(P)` or
      traversing `~d.clone` discovers all perspective clones across the docuverse.
 
 #### 4.9.5 The "No Remote Mutation" Invariant and Action Cells
@@ -1460,7 +1538,7 @@ Instead, cross-machine coordination compiles down to two pure topological mechan
    the remote store's control manifold:
 
    ```
-   weave ##btpk($render_farm_key, "manager")#active/+d.ctl%"render_frame"! {
+   weave btpk($render_farm_key, "manager")#active/+d.ctl%"render_frame"! {
      "scene" => "shot_42.xuzz",
      "frame" => 120,
      "samples" => 4096
@@ -1482,7 +1560,7 @@ To automate complex event pipelines across machines without polling loops or CPU
 provides the `watch` statement:
 
 ```
-watch ##topic("ci-pipelines")/d.active[d.status = "failed"] as $failed_job since @88 {
+watch topic("ci-pipelines")/d.active[d.status = "failed"] as $failed_job since @88 {
   weave ##/d.alerts%"alert"! {
     "job_id" => $failed_job/+d.id,
     "reason" => $failed_job/+d.error_message
@@ -2232,8 +2310,8 @@ metrics using `watch`:
 
 ```
 // Mount remote worker node manifolds over ZZ9P
-mount ##btpk($worker_alpha_key, "tasks")#active as +d.alpha;
-mount ##btpk($worker_beta_key, "tasks")#active  as +d.beta;
+mount btpk($worker_alpha_key, "tasks")#active as +d.alpha;
+mount btpk($worker_beta_key, "tasks")#active  as +d.beta;
 
 // Dispatch pending batch jobs to idle workers
 for $worker in (##/+d.alpha, ##/+d.beta)
@@ -2277,7 +2355,7 @@ Demonstrates authentic Nelsonian character-level transclusion across independent
 with in-band transcopyright micropayment authorization:
 
 ```
-let $archive := ##find("corpus:xanadu author:nelson is:verified")[1]#canon_slice
+let $archive := find("corpus:xanadu author:nelson is:verified")[1]#canon_slice
 for $passage in $archive/d.essays[d.author = "Ted Nelson"]
 let $excerpt := $passage/d.text.[512, 128]
 weave ##/d.curated_anthology/d.sections% {
@@ -2287,14 +2365,14 @@ weave ##/d.curated_anthology/d.sections% {
 }
 
 // Discover foreign slices transcluding this excerpt across the docuverse
-for $citing_slice in ##citing($excerpt)
+for $citing_slice in citing($excerpt)
 return $citing_slice/+d.title, $citing_slice/+d.author
 ```
 
 Under this workflow:
 
-- `##find("corpus:xanadu ...")[1]#canon_slice` queries the local `SwarmCatalogIndex` via SQLite
-  FTS5, ranking verified Nelsonian corpora with BM25 and resolving the canon slice without hardcoded
+- `find("corpus:xanadu ...")[1]#canon_slice` queries the local `SwarmCatalogIndex` via SQLite FTS5,
+  ranking verified Nelsonian corpora with BM25 and resolving the canon slice without hardcoded
   locations.
 - `$passage/d.text.[512, 128]` isolates a 128-character span without copying raw character bytes.
 - `<~ $excerpt, max_spend: 150` executes the transclusion morphism:
@@ -2304,7 +2382,7 @@ Under this workflow:
   1. Lights up the gold transclusion beam in `xuzz` connecting the local anthology cell to the
      author's original permascroll paragraph.
   1. Appends zero text bytes to the local author's permascroll.
-- `##citing($excerpt)` queries the DHT rendezvous topic
+- `citing($excerpt)` queries the DHT rendezvous topic
   $\text{SHA-1}("xanadu:link-package:" \parallel \text{scrollKey})$, streaming all foreign stores
   and slices across the docuverse that link to or quote the selected passage.
 
@@ -2608,7 +2686,7 @@ table.
 | 11.1    | `ae9362f` | 2026-09-11 | The yield axis given four values — `!new`, `!last`, `!both`, `!keep` — with bare `!` as `!keep`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | 12.0    | `a03ddcc` | 2026-09-11 | **The fan-out generator never hands out the master**; every attachment is a fresh clone.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | 14.0    | `381972e` | 2026-10-20 | **First-class shapes `{...}`**, Boolean wildcard algebra (`{}`, `*`, `!*`, `~`), shape derivation (`{ $shape, !d }`), dynamic embedding `{ func(.) }`, nested shapes, dimension extraction (`$shape/d`, `$s[d]`), short-form shape predicates `[{...}]`, shape masking/projection replacing `@lens`, `~dim` bidirectional prefix, sprout morphisms `key => val` and `key => list(...)`, symmetric destructuring `:`, path lambdas `\(.) ...`, `sort_into(dim, by: ...)`, and UDF `def`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| 15.0    | `f1d7b71` | 2026-10-20 | **Federated Docuverse & Sovereign Discovery Anchors**: Sovereign discovery anchors (`##btpk`, `##topic`, `##citing`, `##find`, `##btih`, `##ledger`, `##system`), federated hops `/##`, private dimension mounts `mount ... as +d.dim`, zero-copy transclusion `<~` with in-band transcopyright micropayments, perspective-preserving quantum clone ranks `@persp: ±d.dim => val`, "No Remote Mutation" invariant with `d.ctl` action cells, reactive `watch` via ZZ9P `Zwatch`, and $O(1)$ dynamic virtual lenses (`<=>`, `:=`, `(get:, put:)`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| 15.0    | `f1d7b71` | 2026-10-20 | **Federated Docuverse & Sovereign Discovery Anchors**: Sovereign discovery anchors (`btpk`, `topic`, `citing`, `find`, `btih`, `ledger`, `system`), federated hops `/##`, private dimension mounts `mount ... as +d.dim`, zero-copy transclusion `<~` with in-band transcopyright micropayments, perspective-preserving quantum clone ranks `@persp: ±d.dim => val`, "No Remote Mutation" invariant with `d.ctl` action cells, reactive `watch` via ZZ9P `Zwatch`, and $O(1)$ dynamic virtual lenses (`<=>`, `:=`, `(get:, put:)`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | 15.1    | `current` | 2026-10-20 | **First-Class Stores, Slices, Root Step Selectors, Functional Lenses & UFCS**: Stores, Slices, and Xanadocs as first-class runtime types; functional generators (`current()`, `local()`, `topic()`, `btpk()`, etc.); Uniform Function Call Syntax (UFCS) context propagation (`$store/slices("name")` $\equiv$ `slices($store, "name")`); universal `lens(type, args...)` primitive returning `Stream<Slice>`; root operator step selectors on slice contexts (`$slice/#`, `$slice/##`, `$slice/^`, `$slice/^^`, `$slice/^NAME`, `$slice/^^NAME`); multi-slice stream cursor filtering (`$slices/^foo`); bidirectional Anything-to-ZigZag Lens architecture (`ProjectionLens` / `ProjectionSession`) with canonical generic dimensions (`d.contains`, `d.seq`, `d.ref`, `d.clone`), character-level span provenance, and bidirectional unprojection; hypertime version pinning (`@(v1, v2)`) streaming living manifold folds; cell-level version pinning (`##@(v1, v2)`); first-class `MicroversionId` literals (`@2a9`); stack-inline hypertime arithmetic (`+`, `-`, `/`, `..`); 16-byte `HyperHandle` in-register lowerings; and strict equality operator reconciliation (`=` for comparison, `:=` for assignment/def, `!=` for inequality). |
 
 [toc-01]: #1-architectural-foundations--operational-invariants

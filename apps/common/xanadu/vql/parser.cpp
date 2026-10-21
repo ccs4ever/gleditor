@@ -230,9 +230,15 @@ StoreAnchor Parser::parseStoreAnchor() {
   StoreAnchor anchor;
   if (match(TokenKind::Home)) {
     anchor.method = "";
-  } else if (check(TokenKind::NamedStore)) {
+  } else if (check(TokenKind::KwCurrent) || check(TokenKind::KwLocal) ||
+             check(TokenKind::KwTopic) || check(TokenKind::KwBtpk) ||
+             check(TokenKind::KwCiting) || check(TokenKind::KwBacklinks) ||
+             check(TokenKind::KwSystem) || check(TokenKind::KwBtih) ||
+             check(TokenKind::KwLedger) || check(TokenKind::KwSlices) ||
+             check(TokenKind::KwDocs) || check(TokenKind::NamedStore)) {
     Token tok     = advance();
-    anchor.method = tok.stringValue;
+    anchor.method = (tok.kind == TokenKind::NamedStore) ? tok.stringValue
+                                                        : std::string(tok.text);
     if (match(TokenKind::OpenParen)) {
       if (!check(TokenKind::CloseParen)) {
         while (true) {
@@ -291,39 +297,45 @@ MountDeclaration Parser::parseMountDeclaration() {
 
 DefDeclaration Parser::parseDefDeclaration() {
   consume(TokenKind::KwDef, "Expected 'def'");
+  DefDeclaration::Effect effect = DefDeclaration::Effect::Inferred;
+  if (match(TokenKind::KwPure)) {
+    effect = DefDeclaration::Effect::Pure;
+  } else if (match(TokenKind::KwWeave)) {
+    effect = DefDeclaration::Effect::Weave;
+  }
+
   Token nameTok =
       consume(TokenKind::Identifier, "Expected function name after 'def'");
   consume(TokenKind::OpenParen, "Expected '(' after function name");
-  std::vector<std::string> params;
-  if (!check(TokenKind::CloseParen)) {
-    while (true) {
-      if (check(TokenKind::Variable)) {
-        Token pTok = advance();
-        params.push_back(pTok.stringValue);
-      } else if (check(TokenKind::Identifier)) {
-        Token pTok = advance();
-        params.push_back(std::string(pTok.text));
-      } else if (match(TokenKind::Dot)) {
-        params.push_back(".");
-      }
-      if (!match(TokenKind::Comma)) {
-        break;
-      }
-    }
-  }
+  std::vector<LambdaParam> params = parseLambdaParams();
   consume(TokenKind::CloseParen, "Expected ')' after parameters in 'def'");
   consume(TokenKind::Assign, "Expected ':=' after parameter list in 'def'");
-  ValueExpr body = parseValueExpr();
-  return DefDeclaration{.name   = std::string(nameTok.text),
-                        .params = std::move(params),
-                        .body   = std::move(body)};
+
+  if (check(TokenKind::OpenBrace) && isBlockBody()) {
+    consume(TokenKind::OpenBrace, "Expected '{'");
+    ScriptBody body = parseScriptBody();
+    consume(TokenKind::CloseBrace, "Expected '}' after block body");
+    return DefDeclaration{
+        .effect = effect,
+        .name   = std::string(nameTok.text),
+        .params = std::move(params),
+        .body   = std::make_shared<ScriptBody>(std::move(body)),
+    };
+  }
+  ValueExpr bodyExpr = parseValueOrComparisonExpr();
+  return DefDeclaration{
+      .effect = effect,
+      .name   = std::string(nameTok.text),
+      .params = std::move(params),
+      .body   = std::make_shared<ValueExpr>(std::move(bodyExpr)),
+  };
 }
 
 PathExpression Parser::parsePathExpression(bool allowCloneTail) {
   bool implicitContext = false;
   if (check(TokenKind::Identifier) || check(TokenKind::Plus) ||
       check(TokenKind::Minus) || check(TokenKind::OpenParen) ||
-      check(TokenKind::Tilde) ||
+      check(TokenKind::Tilde) || check(TokenKind::Backslash) ||
       (check(TokenKind::KwFind) && peekToken().is(TokenKind::OpenParen))) {
     implicitContext = true;
   }
@@ -659,7 +671,8 @@ AnchorNode Parser::parseAnchorNode() {
   if (check(TokenKind::Slash) || check(TokenKind::Identifier) ||
       check(TokenKind::Plus) || check(TokenKind::Minus) ||
       check(TokenKind::OpenParen) || check(TokenKind::Tilde) ||
-      check(TokenKind::KwFind) || check(TokenKind::OpenBrace)) {
+      check(TokenKind::KwFind) || check(TokenKind::OpenBrace) ||
+      check(TokenKind::Backslash)) {
     return AnchorNode{.kind = AnchorKind::Context};
   }
 
@@ -731,6 +744,9 @@ PathStep Parser::parsePathStep(bool requireSlash) {
 }
 
 StepSelector Parser::parseStepSelector() {
+  if (match(TokenKind::Backslash)) {
+    return std::make_shared<PathLambda>(parsePathLambda());
+  }
   if (match(TokenKind::Home)) {
     return RootSelectorStep{.kind = RootSelectorStep::Kind::Genesis};
   }
@@ -1086,7 +1102,17 @@ ExecutionBlock Parser::parseExecutionBlock() {
                      current_.loc);
   }
 
-  ActionClause action = parseActionClause();
+  ActionClause action{};
+  if (check(TokenKind::KwReturn) || check(TokenKind::KwWeave) ||
+      check(TokenKind::KwIf)) {
+    action = parseActionClause();
+  } else if (!bindings.empty() &&
+             (check(TokenKind::Semicolon) || check(TokenKind::CloseBrace) ||
+              check(TokenKind::EndOfFile))) {
+    action = ActionClause{.clause = ReturnClause{}};
+  } else {
+    action = parseActionClause();
+  }
 
   return ExecutionBlock{
       .bindings = std::move(bindings),
@@ -1469,6 +1495,11 @@ FunctionInvocation Parser::parseFunctionInvocation() {
   }
 
   consume(TokenKind::CloseParen, "Expected ')' after function arguments");
+  if (check(TokenKind::Backslash)) {
+    advance(); // consume '\'
+    args.push_back(
+        ValueExpr{.kind = std::make_shared<PathLambda>(parsePathLambda())});
+  }
   return FunctionInvocation{.name = std::string(nameTok.text),
                             .args = std::move(args)};
 }
@@ -1509,27 +1540,112 @@ DestructurePattern Parser::parseDestructurePattern() {
   return DestructurePattern{.fields = std::move(fields)};
 }
 
-PathLambda Parser::parsePathLambda() {
-  consume(TokenKind::OpenParen, "Expected '(' after '\\'");
-  std::vector<std::string> params;
-  while (!check(TokenKind::CloseParen) && !check(TokenKind::EndOfFile)) {
-    if (match(TokenKind::Dot)) {
-      params.push_back(".");
-    } else if (check(TokenKind::Variable)) {
-      Token vTok = advance();
-      params.push_back(vTok.stringValue);
-    } else if (check(TokenKind::Identifier)) {
-      Token pTok = advance();
-      params.push_back(std::string(pTok.text));
+LambdaParam Parser::parseLambdaParam() {
+  bool isVariadic = match(TokenKind::DotDotDot);
+  std::variant<std::string, bool, DestructurePattern> target;
+
+  if (check(TokenKind::OpenBrace)) {
+    target = parseDestructurePattern();
+  } else if (match(TokenKind::Dot)) {
+    target = true;
+  } else if (check(TokenKind::Variable)) {
+    Token vTok = advance();
+    target     = vTok.stringValue;
+    if (!isVariadic && match(TokenKind::DotDotDot)) {
+      isVariadic = true;
     }
-    if (!match(TokenKind::Comma)) {
-      break;
+  } else if (check(TokenKind::Identifier)) {
+    Token idTok = advance();
+    target      = std::string(idTok.text);
+    if (!isVariadic && match(TokenKind::DotDotDot)) {
+      isVariadic = true;
+    }
+  } else {
+    throw ParseError(
+        "Expected parameter name ($var, identifier, '.', or '{ ... }')",
+        current_.loc);
+  }
+
+  std::shared_ptr<ValueExpr> defVal = nullptr;
+  if (match(TokenKind::Assign)) {
+    defVal = std::make_shared<ValueExpr>(parseValueExpr());
+  }
+
+  return LambdaParam{
+      .target       = std::move(target),
+      .defaultValue = std::move(defVal),
+      .isVariadic   = isVariadic,
+  };
+}
+
+std::vector<LambdaParam> Parser::parseLambdaParams() {
+  std::vector<LambdaParam> params;
+  if (!check(TokenKind::CloseParen)) {
+    while (true) {
+      params.push_back(parseLambdaParam());
+      if (!match(TokenKind::Comma)) {
+        break;
+      }
     }
   }
+  return params;
+}
+
+bool Parser::isBlockBody() {
+  if (!check(TokenKind::OpenBrace)) {
+    return false;
+  }
+  Token next = peekToken();
+  if (next.is(TokenKind::KwLet) || next.is(TokenKind::KwFor) ||
+      next.is(TokenKind::KwIf) || next.is(TokenKind::KwReturn) ||
+      next.is(TokenKind::KwWatch) || next.is(TokenKind::KwWith) ||
+      next.is(TokenKind::KwWeave) || next.is(TokenKind::Semicolon) ||
+      next.is(TokenKind::KwBreak)) {
+    return true;
+  }
+  Lexer tempLexer = lexer_;
+  Token cur       = next;
+  int braceDepth  = 1;
+  while (cur.kind != TokenKind::EndOfFile) {
+    if (cur.kind == TokenKind::OpenBrace) {
+      braceDepth++;
+    } else if (cur.kind == TokenKind::CloseBrace) {
+      braceDepth--;
+      if (braceDepth == 0) {
+        break;
+      }
+    } else if (braceDepth == 1) {
+      if (cur.kind == TokenKind::Semicolon) {
+        return true;
+      }
+      if (cur.kind == TokenKind::Comma) {
+        return false;
+      }
+    }
+    cur = tempLexer.nextToken();
+  }
+  return false;
+}
+
+PathLambda Parser::parsePathLambda() {
+  consume(TokenKind::OpenParen, "Expected '(' after '\\'");
+  std::vector<LambdaParam> params = parseLambdaParams();
   consume(TokenKind::CloseParen, "Expected ')' after lambda parameter list");
-  PathExpression path = parsePathExpression();
-  return PathLambda{.params = std::move(params),
-                    .path = std::make_shared<PathExpression>(std::move(path))};
+
+  if (check(TokenKind::OpenBrace) && isBlockBody()) {
+    consume(TokenKind::OpenBrace, "Expected '{'");
+    ScriptBody body = parseScriptBody();
+    consume(TokenKind::CloseBrace, "Expected '}' after block body");
+    return PathLambda{
+        .params = std::move(params),
+        .body   = std::make_shared<ScriptBody>(std::move(body)),
+    };
+  }
+  ValueExpr expr = parseValueOrComparisonExpr();
+  return PathLambda{
+      .params = std::move(params),
+      .body   = std::make_shared<ValueExpr>(std::move(expr)),
+  };
 }
 
 ShapeLiteral Parser::parseShapeLiteral() {

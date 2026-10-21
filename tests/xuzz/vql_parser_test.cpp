@@ -497,14 +497,14 @@ TEST(VQLParserTest, DefDeclarations) {
   ASSERT_EQ(query.defs.size(), 1u);
   EXPECT_EQ(query.defs[0].name, "my_filter");
   ASSERT_EQ(query.defs[0].params.size(), 1u);
-  EXPECT_EQ(query.defs[0].params[0], "x");
+  EXPECT_EQ(std::get<std::string>(query.defs[0].params[0].target), "x");
   ASSERT_TRUE(std::holds_alternative<PathExpression>(query.expr));
 }
 
 TEST(VQLParserTest, MultiStatementScriptAndMounts) {
   const std::string script = R"(
-    mount ##btpk($worker_alpha_key, "tasks")#active as +d.alpha;
-    mount ##btpk($worker_beta_key, "tasks")#active as +d.beta;
+    mount btpk($worker_alpha_key, "tasks")#active as +d.alpha;
+    mount btpk($worker_beta_key, "tasks")#active as +d.beta;
 
     for $worker in ##/+d.alpha
     where $worker/+d.status = "idle"
@@ -558,7 +558,7 @@ TEST(VQLParserTest, MultiStatementScriptAndMounts) {
 
 TEST(VQLParserTest, WatchStatementWithSinceAndUntil) {
   Parser parser(R"(
-    watch ##topic("ci-pipelines")/d.active[d.status = "failed"] as $failed_job since @88 until $cond {
+    watch topic("ci-pipelines")/d.active[d.status = "failed"] as $failed_job since @88 until $cond {
       weave ##/d.alerts%"alert"! {
         "job_id" => $failed_job/+d.id
       }
@@ -675,6 +675,110 @@ TEST(VQLParserTest, RootSelectorSteps) {
     EXPECT_EQ(rs.kind, RootSelectorStep::Kind::NamedCursor);
     EXPECT_EQ(rs.name, "worker");
   }
+}
+
+TEST(VQLParserTest, AnonymousPathStepLambdas) {
+  {
+    Parser p("## / \\(.) ./+d.tag");
+    auto q = p.parseQuery();
+    ASSERT_TRUE(std::holds_alternative<PathExpression>(q.expr));
+    const auto &path = std::get<PathExpression>(q.expr);
+    ASSERT_EQ(path.steps.size(), 1u);
+    ASSERT_TRUE(std::holds_alternative<std::shared_ptr<PathLambda>>(
+        path.steps[0].selector));
+    const auto &lambda =
+        *std::get<std::shared_ptr<PathLambda>>(path.steps[0].selector);
+    ASSERT_EQ(lambda.params.size(), 1u);
+    ASSERT_TRUE(std::holds_alternative<bool>(lambda.params[0].target));
+    EXPECT_TRUE(std::get<bool>(lambda.params[0].target));
+    ASSERT_TRUE(
+        std::holds_alternative<std::shared_ptr<ValueExpr>>(lambda.body));
+  }
+  {
+    Parser p("$path / \\({ ., +d.score: $s }) $s");
+    auto q = p.parseQuery();
+    ASSERT_TRUE(std::holds_alternative<PathExpression>(q.expr));
+    const auto &path = std::get<PathExpression>(q.expr);
+    ASSERT_EQ(path.steps.size(), 1u);
+    ASSERT_TRUE(std::holds_alternative<std::shared_ptr<PathLambda>>(
+        path.steps[0].selector));
+    const auto &lambda =
+        *std::get<std::shared_ptr<PathLambda>>(path.steps[0].selector);
+    ASSERT_EQ(lambda.params.size(), 1u);
+    ASSERT_TRUE(
+        std::holds_alternative<DestructurePattern>(lambda.params[0].target));
+    const auto &pat = std::get<DestructurePattern>(lambda.params[0].target);
+    ASSERT_EQ(pat.fields.size(), 2u);
+    EXPECT_TRUE(pat.fields[0].isContext);
+    EXPECT_EQ(pat.fields[1].dimName, "d.score");
+    EXPECT_EQ(pat.fields[1].varName, "s");
+  }
+}
+
+TEST(VQLParserTest, LambdaBlockBodies) {
+  Parser p("\\($x) { let $y := $x; return $y; }");
+  auto q = p.parseQuery();
+  ASSERT_TRUE(std::holds_alternative<PathExpression>(q.expr));
+  const auto &path = std::get<PathExpression>(q.expr);
+  ASSERT_EQ(path.steps.size(), 1u);
+  ASSERT_TRUE(std::holds_alternative<std::shared_ptr<PathLambda>>(
+      path.steps[0].selector));
+  const auto &lambda =
+      *std::get<std::shared_ptr<PathLambda>>(path.steps[0].selector);
+  ASSERT_EQ(lambda.params.size(), 1u);
+  EXPECT_EQ(std::get<std::string>(lambda.params[0].target), "x");
+  ASSERT_TRUE(std::holds_alternative<std::shared_ptr<ScriptBody>>(lambda.body));
+  const auto &sb = *std::get<std::shared_ptr<ScriptBody>>(lambda.body);
+  EXPECT_EQ(sb.statements.size(), 2u);
+}
+
+TEST(VQLParserTest, EnhancedDefDeclarations) {
+  {
+    Parser p("def pure add($a, $b := 0) := $a; ##");
+    auto q = p.parseQuery();
+    ASSERT_EQ(q.defs.size(), 1u);
+    EXPECT_EQ(q.defs[0].name, "add");
+    EXPECT_EQ(q.defs[0].effect, DefDeclaration::Effect::Pure);
+    ASSERT_EQ(q.defs[0].params.size(), 2u);
+    EXPECT_EQ(std::get<std::string>(q.defs[0].params[0].target), "a");
+    EXPECT_EQ(std::get<std::string>(q.defs[0].params[1].target), "b");
+    EXPECT_NE(q.defs[0].params[1].defaultValue, nullptr);
+  }
+  {
+    Parser p("def variadic_fn($first, ...$rest) := $first; ##");
+    auto q = p.parseQuery();
+    ASSERT_EQ(q.defs.size(), 1u);
+    EXPECT_EQ(q.defs[0].effect, DefDeclaration::Effect::Inferred);
+    ASSERT_EQ(q.defs[0].params.size(), 2u);
+    EXPECT_FALSE(q.defs[0].params[0].isVariadic);
+    EXPECT_TRUE(q.defs[0].params[1].isVariadic);
+    EXPECT_EQ(std::get<std::string>(q.defs[0].params[1].target), "rest");
+  }
+  {
+    Parser p("def weave set_tag($c, $t) := { weave $c { +d.tag => $t }; return "
+             "$c; }; ##");
+    auto q = p.parseQuery();
+    ASSERT_EQ(q.defs.size(), 1u);
+    EXPECT_EQ(q.defs[0].name, "set_tag");
+    EXPECT_EQ(q.defs[0].effect, DefDeclaration::Effect::Weave);
+    ASSERT_TRUE(
+        std::holds_alternative<std::shared_ptr<ScriptBody>>(q.defs[0].body));
+  }
+}
+
+TEST(VQLParserTest, TrailingLambdaInFunctionInvocation) {
+  Parser p("##/filter(10) \\($x) $x > 5");
+  auto q = p.parseQuery();
+  ASSERT_TRUE(std::holds_alternative<PathExpression>(q.expr));
+  const auto &path = std::get<PathExpression>(q.expr);
+  ASSERT_EQ(path.steps.size(), 1u);
+  ASSERT_TRUE(
+      std::holds_alternative<FunctionInvocation>(path.steps[0].selector));
+  const auto &fn = std::get<FunctionInvocation>(path.steps[0].selector);
+  EXPECT_EQ(fn.name, "filter");
+  ASSERT_EQ(fn.args.size(), 2u);
+  ASSERT_TRUE(
+      std::holds_alternative<std::shared_ptr<PathLambda>>(fn.args[1].kind));
 }
 
 } // namespace
