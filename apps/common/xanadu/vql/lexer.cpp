@@ -68,6 +68,8 @@ std::string_view tokenKindName(TokenKind kind) noexcept {
     return "<=>";
   case TokenKind::Backslash:
     return "\\";
+  case TokenKind::Pipe:
+    return "|";
   case TokenKind::OpenParen:
     return "(";
   case TokenKind::CloseParen:
@@ -422,6 +424,11 @@ Token Lexer::nextToken() {
   // Single-character and operator tokens
   if (c == '~') {
     return Token{.kind = TokenKind::Tilde,
+                 .text = source_.substr(startPos, 1),
+                 .loc  = startLoc};
+  }
+  if (c == '|') {
+    return Token{.kind = TokenKind::Pipe,
                  .text = source_.substr(startPos, 1),
                  .loc  = startLoc};
   }

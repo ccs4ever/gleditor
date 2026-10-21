@@ -1,13 +1,40 @@
 /**
  * @file parser.cpp
- * @brief Recursive-descent parser implementation for VQL v13.0.
+ * @brief Recursive-descent parser implementation for VQL v16.0.
  */
 #include "common/xanadu/vql/parser.hpp"
 
+#include <algorithm>
+#include <array>
 #include <format>
 #include <utility>
 
 namespace xanadu::vql {
+
+namespace {
+/// An unknown name is a ContextualTypeIdent, kept for the engine to refuse by
+/// name rather than misread here.
+BasicType::Kind basicTypeKind(std::string_view name) {
+  using K = BasicType::Kind;
+  static constexpr std::array<std::pair<std::string_view, K>, 10> named{
+      {
+          {"Cell", K::Cell},
+          {"Dim", K::Dim},
+          {"Store", K::Store},
+          {"Slice", K::Slice},
+          {"Version", K::Version},
+          {"Int", K::Int},
+          {"Float", K::Float},
+          {"String", K::String},
+          {"Bool", K::Bool},
+          {"Any", K::Any},
+      },
+  };
+  const auto *const it =
+      std::ranges::find(named, name, &std::pair<std::string_view, K>::first);
+  return it != named.end() ? it->second : K::Contextual;
+}
+} // namespace
 
 ParseError::ParseError(std::string_view message, SourceLocation loc)
     : std::runtime_error(std::format("Parse error at line {}:{}: {}", loc.line,
@@ -309,6 +336,10 @@ DefDeclaration Parser::parseDefDeclaration() {
   consume(TokenKind::OpenParen, "Expected '(' after function name");
   std::vector<LambdaParam> params = parseLambdaParams();
   consume(TokenKind::CloseParen, "Expected ')' after parameters in 'def'");
+  std::shared_ptr<TypeExpr> returnType;
+  if (match(TokenKind::Colon)) {
+    returnType = std::make_shared<TypeExpr>(parseTypeExpr());
+  }
   consume(TokenKind::Assign, "Expected ':=' after parameter list in 'def'");
 
   if (check(TokenKind::OpenBrace) && isBlockBody()) {
@@ -316,22 +347,26 @@ DefDeclaration Parser::parseDefDeclaration() {
     ScriptBody body = parseScriptBody();
     consume(TokenKind::CloseBrace, "Expected '}' after block body");
     return DefDeclaration{
-        .effect = effect,
-        .name   = std::string(nameTok.text),
-        .params = std::move(params),
-        .body   = std::make_shared<ScriptBody>(std::move(body)),
+        .effect     = effect,
+        .name       = std::string(nameTok.text),
+        .params     = std::move(params),
+        .returnType = std::move(returnType),
+        .body       = std::make_shared<ScriptBody>(std::move(body)),
     };
   }
   ValueExpr bodyExpr = parseValueOrComparisonExpr();
   return DefDeclaration{
-      .effect = effect,
-      .name   = std::string(nameTok.text),
-      .params = std::move(params),
-      .body   = std::make_shared<ValueExpr>(std::move(bodyExpr)),
+      .effect     = effect,
+      .name       = std::string(nameTok.text),
+      .params     = std::move(params),
+      .returnType = std::move(returnType),
+      .body       = std::make_shared<ValueExpr>(std::move(bodyExpr)),
   };
 }
 
 PathExpression Parser::parsePathExpression(bool allowCloneTail) {
+  // A leading '/' has no anchor to read from: PartialPathFunctor (§4.12.3).
+  const bool isFunctor = check(TokenKind::Slash);
   bool implicitContext = false;
   if (check(TokenKind::Identifier) || check(TokenKind::Plus) ||
       check(TokenKind::Minus) || check(TokenKind::OpenParen) ||
@@ -418,6 +453,7 @@ PathExpression Parser::parsePathExpression(bool allowCloneTail) {
   }
 
   return PathExpression{.anchor           = std::move(anchor),
+                        .isFunctor        = isFunctor,
                         .anchorPredicates = std::move(anchorPredicates),
                         .steps            = std::move(steps),
                         .shapeProjection  = std::move(shapeProjection),
@@ -687,6 +723,9 @@ PathStep Parser::parsePathStep(bool requireSlash) {
   } else {
     match(TokenKind::Slash);
   }
+  // `$up / /+d.title`: composing with a functor literal is appending its
+  // steps, so the functor's own leading '/' is the step's.
+  match(TokenKind::Slash);
   StepSelector selector = parseStepSelector();
 
   bool derefMaster = false;
@@ -1347,7 +1386,7 @@ BooleanFactor Parser::parseBooleanFactor() {
     return BooleanFactor{
         .negated = negated,
         .test    = PredicateTest{
-            .kind = std::get<std::shared_ptr<PathExpression>>(left.kind)}};
+               .kind = std::get<std::shared_ptr<PathExpression>>(left.kind)}};
   }
 
   return BooleanFactor{
@@ -1508,36 +1547,94 @@ DestructurePattern Parser::parseDestructurePattern() {
   consume(TokenKind::OpenBrace, "Expected '{' for destructuring pattern");
   std::vector<DestructureField> fields;
   while (!check(TokenKind::CloseBrace) && !check(TokenKind::EndOfFile)) {
-    if (match(TokenKind::Dot)) {
-      fields.push_back(DestructureField{.isContext = true});
-    } else {
-      bool isBidir                = match(TokenKind::Tilde);
-      zigzag::DimVector direction = zigzag::DimVector::POS;
-      if (match(TokenKind::Plus)) {
-        direction = zigzag::DimVector::POS;
-      } else if (match(TokenKind::Minus)) {
-        direction = zigzag::DimVector::NEG;
-      }
-      Token dimTok = consume(TokenKind::Identifier,
-                             "Expected dimension in destructuring field");
-      consume(TokenKind::Colon,
-              "Expected ':' after dimension in destructure field");
-      Token varTok = consume(TokenKind::Variable,
-                             "Expected $variable in destructure field");
-      fields.push_back(DestructureField{
-          .isContext = false,
-          .dimName   = std::string(dimTok.text),
-          .direction = direction,
-          .isBidir   = isBidir,
-          .varName   = varTok.stringValue,
-      });
-    }
+    fields.push_back(parseDestructureField());
     if (!match(TokenKind::Comma)) {
       break;
     }
   }
   consume(TokenKind::CloseBrace, "Expected '}' after destructuring pattern");
   return DestructurePattern{.fields = std::move(fields)};
+}
+
+DestructureField Parser::parseDestructureField() {
+  if (match(TokenKind::Dot)) {
+    DestructureField field{.isContext = true};
+    if (match(TokenKind::Colon)) {
+      field.varName = consume(TokenKind::Variable,
+                              "Expected $variable after '.:' in destructure")
+                          .stringValue;
+    }
+    return field;
+  }
+
+  DestructureField field;
+  field.isBidir = match(TokenKind::Tilde);
+  if (match(TokenKind::Plus)) {
+    field.direction = zigzag::DimVector::POS;
+  } else if (match(TokenKind::Minus)) {
+    field.direction = zigzag::DimVector::NEG;
+  }
+  field.dimName =
+      std::string(consume(TokenKind::Identifier,
+                          "Expected dimension in destructuring field")
+                      .text);
+
+  // `: $var`, `: Type` and `: $var: Type` are told apart by the '$' sigil,
+  // which no type name carries.
+  if (match(TokenKind::Colon)) {
+    if (check(TokenKind::Variable)) {
+      field.varName = advance().stringValue;
+      if (match(TokenKind::Colon)) {
+        field.type = std::make_shared<TypeExpr>(parseTypeExpr());
+      }
+    } else {
+      field.type = std::make_shared<TypeExpr>(parseTypeExpr());
+    }
+  }
+  if (match(TokenKind::Assign)) {
+    field.defaultValue = std::make_shared<ValueExpr>(parseValueExpr());
+  }
+  return field;
+}
+
+TypeExpr Parser::parseTypeExpr() {
+  UnionType unionType;
+  unionType.members.push_back(parsePrimaryType());
+  while (match(TokenKind::Pipe)) {
+    unionType.members.push_back(parsePrimaryType());
+  }
+  return TypeExpr{.unionType = std::move(unionType)};
+}
+
+PrimaryType Parser::parsePrimaryType() {
+  PrimaryType primary;
+  if (check(TokenKind::OpenBrace)) {
+    primary.kind = ShapeType{.pattern = parseDestructurePattern()};
+  } else if (match(TokenKind::OpenParen)) {
+    primary.kind = std::make_shared<TypeExpr>(parseTypeExpr());
+    consume(TokenKind::CloseParen, "Expected ')' after parenthesised type");
+  } else {
+    const Token nameTok =
+        consume(TokenKind::Identifier, "Expected a type name, '{' or '('");
+    const std::string name(nameTok.text);
+    if (match(TokenKind::LessThan)) {
+      GenericType generic{.name = name};
+      generic.args.push_back(std::make_shared<TypeExpr>(parseTypeExpr()));
+      while (match(TokenKind::Comma)) {
+        generic.args.push_back(std::make_shared<TypeExpr>(parseTypeExpr()));
+      }
+      consume(TokenKind::GreaterThan, "Expected '>' after type arguments");
+      primary.kind = std::move(generic);
+    } else {
+      primary.kind = BasicType{.kind = basicTypeKind(name), .name = name};
+    }
+    // `Cell { +d.title: String }`: the named type, refined by a shape.
+    if (check(TokenKind::OpenBrace)) {
+      primary.refinement = ShapeType{.pattern = parseDestructurePattern()};
+    }
+  }
+  primary.isOptional = match(TokenKind::Question);
+  return primary;
 }
 
 LambdaParam Parser::parseLambdaParam() {
@@ -1566,13 +1663,23 @@ LambdaParam Parser::parseLambdaParam() {
         current_.loc);
   }
 
+  std::shared_ptr<TypeExpr> type = nullptr;
+  if (!std::holds_alternative<DestructurePattern>(target) &&
+      match(TokenKind::Colon)) {
+    type = std::make_shared<TypeExpr>(parseTypeExpr());
+  }
+
   std::shared_ptr<ValueExpr> defVal = nullptr;
   if (match(TokenKind::Assign)) {
     defVal = std::make_shared<ValueExpr>(parseValueExpr());
   }
+  if (!isVariadic && match(TokenKind::DotDotDot)) {
+    isVariadic = true;
+  }
 
   return LambdaParam{
       .target       = std::move(target),
+      .type         = std::move(type),
       .defaultValue = std::move(defVal),
       .isVariadic   = isVariadic,
   };

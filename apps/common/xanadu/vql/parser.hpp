@@ -1,6 +1,6 @@
 /**
  * @file parser.hpp
- * @brief Recursive-descent parser for VQL v13.0 adhering strictly to formal
+ * @brief Recursive-descent parser for VQL v16.0 adhering strictly to formal
  * EBNF.
  */
 #ifndef COMMON_XANADU_VQL_PARSER_HPP
@@ -96,6 +96,9 @@ private:
   VersionPin parseVersionPin();
   VersionExpr parseVersionExpr();
   DestructurePattern parseDestructurePattern();
+  DestructureField parseDestructureField();
+  TypeExpr parseTypeExpr();
+  PrimaryType parsePrimaryType();
   LambdaParam parseLambdaParam();
   std::vector<LambdaParam> parseLambdaParams();
   PathLambda parsePathLambda();

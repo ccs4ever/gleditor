@@ -1,12 +1,16 @@
 /**
  * @file vql_engine.hpp
- * @brief Direct query evaluation engine for VQL v13.0 operating over
+ * @brief Direct query evaluation engine for VQL v16.0 operating over
  * ArenaManifold and Store.
  */
 #ifndef COMMON_XANADU_VQL_VQL_ENGINE_HPP
 #define COMMON_XANADU_VQL_VQL_ENGINE_HPP
 
+#include <cstdint>
 #include <memory>
+#include <optional>
+#include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -20,6 +24,14 @@
 namespace xanadu::vql {
 
 using xanadu::MultiStoreCoordinator;
+
+/// A def's result outside its declared return type, or a type name the engine
+/// does not know (§4.12.1). A parameter that misses its contract is not one:
+/// that call matches nothing, as a failed destructure always has.
+class TypeContractError : public std::runtime_error {
+public:
+  using std::runtime_error::runtime_error;
+};
 
 class VQLEngine {
 public:
@@ -148,10 +160,49 @@ private:
                                            const std::vector<ValueExpr> &args,
                                            zigzag::CellRef context);
 
-  bool
-  matchDestructure(const DestructurePattern &pattern, zigzag::CellRef context,
-                   std::unordered_map<std::string, std::vector<zigzag::CellRef>>
-                       &scopedBindings);
+  using Bindings =
+      std::unordered_map<std::string, std::vector<zigzag::CellRef>>;
+  /// A point-free functor's steps, composed once when it is bound (§4.12.3).
+  using FunctorSteps = std::shared_ptr<const std::vector<PathStep>>;
+
+  /// What a field with nothing on its dimension does: a lambda or def
+  /// parameter refuses the cell, a `for` or `watch` binding binds nothing.
+  enum class MissingField : std::uint8_t { Refuse, BindEmpty };
+
+  bool matchDestructure(const DestructurePattern &pattern,
+                        zigzag::CellRef context, Bindings &scopedBindings,
+                        MissingField missing = MissingField::Refuse);
+
+  /// Whether @p cells, as one stream, inhabit @p type. A shape inside the
+  /// type binds its fields' variables into @p scopedBindings when given.
+  bool satisfiesType(const TypeExpr &type,
+                     std::span<const zigzag::CellRef> cells,
+                     Bindings *scopedBindings);
+  bool satisfiesPrimary(const PrimaryType &type,
+                        std::span<const zigzag::CellRef> cells,
+                        Bindings *scopedBindings);
+  bool satisfiesAtom(const PrimaryType &type, zigzag::CellRef cell,
+                     Bindings *scopedBindings);
+  bool hasBasicType(const BasicType &type, zigzag::CellRef cell);
+
+  /// The cells @p expr names: a path's or variable's own, so passing a cell
+  /// mints nothing, and a fresh scalar only for a literal or computed value.
+  std::vector<zigzag::CellRef> cellsOfValueExpr(const ValueExpr &expr,
+                                                zigzag::CellRef context);
+
+  /// @p path as a functor when it is one: a leading '/', or an anchor that
+  /// names a bound functor. Functor variables among its steps are inlined.
+  [[nodiscard]] std::optional<FunctorSteps>
+  functorOf(const PathExpression &path) const;
+  [[nodiscard]] std::optional<FunctorSteps>
+  functorNamed(std::string_view name) const;
+  std::vector<zigzag::CellRef> applyFunctor(const std::vector<PathStep> &steps,
+                                            std::vector<zigzag::CellRef> cells);
+
+  /// Binds a `let`, as a functor when its target is one.
+  std::vector<zigzag::CellRef> bindLet(const LetClause &let);
+  /// Binds a parameter name to an argument, as a functor when it is one.
+  void bindName(const std::string &name, std::vector<zigzag::CellRef> cells);
 
   std::unique_ptr<zigzag::vortex::VortexCore> ownedCore_{nullptr};
   std::unique_ptr<MultiStoreCoordinator> ownedCoordinator_{nullptr};
@@ -159,6 +210,8 @@ private:
   zigzag::vortex::VortexCore *core_{nullptr};
 
   std::unordered_map<std::string, std::vector<zigzag::CellRef>> env_;
+  /// Names bound to functors rather than cells; a name is in one or the other.
+  std::unordered_map<std::string, FunctorSteps> functors_;
   std::string activePerspective_{};
   std::unordered_map<std::string,
                      std::unordered_map<zigzag::CellRef, zigzag::CellRef>>

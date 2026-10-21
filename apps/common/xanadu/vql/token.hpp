@@ -46,6 +46,7 @@ enum class TokenKind : std::uint8_t {
   Transclude,      ///< "<~"
   DimPivot,        ///< "<=>"
   Backslash,       ///< "\"
+  Pipe,            ///< "|", a union type's separator
 
   // Delimiters
   OpenParen,    ///< "("

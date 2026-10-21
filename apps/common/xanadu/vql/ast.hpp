@@ -1,6 +1,6 @@
 /**
  * @file ast.hpp
- * @brief Abstract Syntax Tree (AST) node representations for VQL v15.1.
+ * @brief Abstract Syntax Tree (AST) node representations for VQL v16.0.
  */
 #ifndef COMMON_XANADU_VQL_AST_HPP
 #define COMMON_XANADU_VQL_AST_HPP
@@ -84,6 +84,7 @@ struct VersionExpr;
 struct PathLambda;
 struct Statement;
 struct ScriptBody;
+struct TypeExpr;
 
 // -- Literals and Value Expressions ------------------------------------------
 
@@ -326,6 +327,10 @@ struct CloneTail {
 
 struct PathExpression {
   AnchorNode anchor{};
+  /// `/+d.parent` with no anchor: a PartialPathFunctor (§4.12.3). Evaluated
+  /// in place it reads from the context, as it always did; bound by `let` or
+  /// passed as an argument it is kept as steps and applied later.
+  bool isFunctor{false};
   /// `#[...]`: predicates on the anchor's own cells, before any step.
   std::vector<BooleanExpr> anchorPredicates;
   std::vector<PathStep> steps;
@@ -347,16 +352,70 @@ struct ReturnClause {
   std::vector<ReturnItem> items;
 };
 
+/// One field of a shape contract: `+d.fps: $fps: Int := 60`. Every part
+/// after the dimension is optional, so the same field serves a pure contract
+/// (`+d.fps: Int`), a pure binding (`+d.fps: $fps`) and both (§4.12.2).
 struct DestructureField {
   bool isContext{false}; ///< "."
   std::string dimName;   ///< e.g. "d.tag"
   zigzag::DimVector direction{zigzag::DimVector::POS};
   bool isBidir{false};
-  std::string varName; ///< "$t"
+  std::string varName;                     ///< "$t"; empty binds nothing
+  std::shared_ptr<TypeExpr> type{nullptr}; ///< ": String"
+  std::shared_ptr<ValueExpr> defaultValue{nullptr}; ///< `:= "note"`
 };
 
 struct DestructurePattern {
   std::vector<DestructureField> fields;
+};
+
+// -- Gradual Structural Types (§4.12.1) --------------------------------------
+
+struct BasicType {
+  enum class Kind : std::uint8_t {
+    Cell,
+    Dim,
+    Store,
+    Slice,
+    Version,
+    Int,
+    Float,
+    String,
+    Bool,
+    Any,
+    Contextual, ///< a ContextualTypeIdent; `name` holds it
+  };
+  Kind kind{Kind::Any};
+  std::string name;
+};
+
+/// `Stream<T>`, or a contextual identifier applied to arguments.
+struct GenericType {
+  std::string name;
+  std::vector<std::shared_ptr<TypeExpr>> args;
+};
+
+/// `{ +d.title: String, ... }`: a cell carrying these dimensions. Its fields
+/// are destructure fields, which is what lets a contract bind (Mode 4).
+struct ShapeType {
+  DestructurePattern pattern;
+};
+
+struct PrimaryType {
+  std::variant<BasicType, GenericType, ShapeType,
+               std::shared_ptr<TypeExpr> /*ParenType*/>
+      kind;
+  /// `Cell { ... }`: a basic or generic type refined by a shape.
+  std::optional<ShapeType> refinement{std::nullopt};
+  bool isOptional{false}; ///< "?": absence is also accepted
+};
+
+struct UnionType {
+  std::vector<PrimaryType> members; ///< separated by "|"
+};
+
+struct TypeExpr {
+  UnionType unionType;
 };
 
 struct ForClause {
@@ -436,6 +495,7 @@ struct ScriptBody {
 struct LambdaParam {
   std::variant<std::string /*$var*/, bool /*ContextDot*/, DestructurePattern>
       target;
+  std::shared_ptr<TypeExpr> type{nullptr}; ///< "$p: Cell { ... }"
   std::shared_ptr<ValueExpr> defaultValue{nullptr};
   bool isVariadic{false};
 };
@@ -450,6 +510,7 @@ struct DefDeclaration {
   Effect effect{Effect::Inferred};
   std::string name;
   std::vector<LambdaParam> params;
+  std::shared_ptr<TypeExpr> returnType{nullptr}; ///< "): Int :="
   std::variant<std::shared_ptr<ValueExpr>, std::shared_ptr<ScriptBody>> body;
 };
 

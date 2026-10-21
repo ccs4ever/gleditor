@@ -266,6 +266,14 @@ CellRef VQLCompiler::compileExecutionBlock(const ExecutionBlock &block) {
     if (std::holds_alternative<LetClause>(binding)) {
       const auto &let = std::get<LetClause>(binding);
       CellRef valCell = noCell;
+      if (const auto *path = std::get_if<PathExpression>(&let.target);
+          path != nullptr && path->isFunctor) {
+        // Compiled as a path it would bind the cells the functor reaches from
+        // home, not the functor.
+        throw std::invalid_argument(
+            "point-free path functors are not compiled to Vortex yet; run the "
+            "query with --engine direct");
+      }
       if (std::holds_alternative<PathExpression>(let.target)) {
         valCell = compilePathExpression(std::get<PathExpression>(let.target),
                                         core_.home());
@@ -722,17 +730,17 @@ CellRef VQLCompiler::compileBooleanExpr(const BooleanExpr &expr,
             [this, ctxCell](const auto &t) -> CellRef {
               using T = std::decay_t<decltype(t)>;
               if constexpr (std::is_same_v<T,
-                                           std::shared_ptr<PathExpression>>) {
+                                                 std::shared_ptr<PathExpression>>) {
                 if (t) return compilePathExpression(*t, ctxCell);
                 return emitConstant(false);
               } else if constexpr (std::is_same_v<T, bool>) {
                 return ctxCell;
               } else if constexpr (std::is_same_v<T,
-                                                  std::shared_ptr<ValueExpr>>) {
+                                                        std::shared_ptr<ValueExpr>>) {
                 if (t) return compileValueExpr(*t, ctxCell);
                 return emitConstant(false);
               } else if constexpr (std::is_same_v<T, std::shared_ptr<
-                                                         FunctionInvocation>>) {
+                                                               FunctionInvocation>>) {
                 if (t) {
                   CellRef callOp = emitOp(OpcodeKind::Call, "#CALL " + t->name);
                   CellRef outC   = core_.arena().makeCell();
