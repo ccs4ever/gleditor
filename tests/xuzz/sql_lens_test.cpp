@@ -18,6 +18,8 @@
 #include "common/xanadu/multi_store.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/user_permascroll.hpp"
+#include "common/xanadu/vortex/vortex_stdlib.hpp"
+#include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 #include "common/xanadu/zigzag/projection_session.hpp"
@@ -707,6 +709,44 @@ TEST(SqlLensTest, PromoteRefusesUnknownKey) {
   AnnotStore a;
   SqlPromotion promo(*p.lens, *a.store);
   EXPECT_FALSE(promo.promoteSubject("sql:sqlite:x:y:pk:i:9").has_value());
+}
+
+// The vprolog gate (spec section 9): a bound subject's sightings are
+// logic facts over the same arena, and a sighting's posward walk
+// terminates at its subject -- cell_link/cell_value, no SQL-aware
+// plumbing.
+TEST(SqlLensTest, VprologEnumeratesSightingsAsLogicFacts) {
+  ProjectedDb p;
+  ASSERT_NE(p.lens, nullptr);
+  ASSERT_TRUE(p.lens->browse("invoices").has_value());
+  (void)p.session->refresh();
+  const auto q   = p.childWithRole("sql.query");
+  const auto row = p.subjectOf(*p.child(*p.child(*q)));
+
+  using namespace zigzag::vortex;
+  VortexVM vm{p.core};
+  VortexStdLib stdlib{p.core, vm};
+
+  // cell_link(subj,'d.subject','neg',S),
+  // cell_link(S,'d.subject','pos',N),
+  // cell_value(N,T) -- out to the sighting, back to the row.
+  const auto subj =
+      p.core.arena().makeScalarCell(static_cast<std::int64_t>(row));
+  const auto dSubj  = p.core.arena().makeCell("d.subject");
+  const auto negDir = p.core.arena().makeCell("neg");
+  const auto posDir = p.core.arena().makeCell("pos");
+  const auto sightV = stdlib.makeVar("S");
+  const auto nextV  = stdlib.makeVar("N");
+  const auto textV  = stdlib.makeVar("T");
+  const std::vector<CellRef> goals{
+      stdlib.makeTerm("cell_link", {subj, dSubj, negDir, sightV}),
+      stdlib.makeTerm("cell_link", {sightV, dSubj, posDir, nextV}),
+      stdlib.makeTerm("cell_value", {nextV, textV}),
+  };
+  const auto sols = stdlib.solveQuery(goals);
+  ASSERT_EQ(sols.size(), 1u)
+      << "row 1's one sighting should walk back to the row";
+  EXPECT_EQ(sols.front().formatted.at("T"), "1,alice,10.5,one");
 }
 
 TEST(SqlLensTest, VqlTraversesSqlProjection) {

@@ -52,6 +52,7 @@
 #include "common/xanadu/zigzag/filesystem_lens.hpp"
 #include "common/xanadu/zigzag/projection_lens.hpp"
 #include "common/xanadu/zigzag/projection_session.hpp"
+#include "common/xanadu/zigzag/sql_lens.hpp"
 #include "common/xanadu/zigzag/xanadu_projector.hpp"
 #include "common/xanadu/zigzag/zzcore.hpp"
 
@@ -503,7 +504,86 @@ int XuzzApp::executeSessionImport(CliOptions &opts, int /*argc*/,
   return 0;
 }
 
-int XuzzApp::executeLensRaster(const std::string &lensPath) {
+int XuzzApp::executeSqlLensRaster(const std::string &uri,
+                                  const std::string &sqlBrowse,
+                                  const std::string &sqlQuery) {
+  // A sql: URI projects a read-only database: schema at open, then any
+  // requested browse/query materializes its first page (spec section
+  // 5.1's two modes). Read-only by construction -- browse/query mint no
+  // ops anywhere.
+  auto lens = zigzag::openSqlUri(uri);
+  if (!lens) {
+    std::cerr << "Error: " << lens.error() << "\n";
+    return 1;
+  }
+  auto *lensPtr = lens->get();
+  if (!sqlBrowse.empty()) {
+    if (const auto r = lensPtr->browse(sqlBrowse); !r) {
+      std::cerr << "Error: browse: " << r.error() << "\n";
+      return 1;
+    }
+  }
+  if (!sqlQuery.empty()) {
+    if (const auto r = lensPtr->query(sqlQuery, {}); !r) {
+      std::cerr << "Error: query: " << r.error() << "\n";
+      return 1;
+    }
+  }
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core(arena);
+  zigzag::ProjectionSession session(std::move(*lens), core);
+  (void)session.refresh();
+  printProjectionTree(uri, session, core);
+  return 0;
+}
+
+void XuzzApp::printProjectionTree(const std::string &label,
+                                  zigzag::ProjectionSession &session,
+                                  zigzag::vortex::VortexCore &core) {
+  auto &arena          = core.arena();
+  const auto dRole     = core.findOrMintDimension("d.role");
+  const auto dMime     = core.findOrMintDimension("d.mime");
+  const auto dContains = core.findOrMintDimension(
+      std::string(zigzag::genericDimName(zigzag::GenericDim::Containment)));
+  const auto dSeq = core.findOrMintDimension(
+      std::string(zigzag::genericDimName(zigzag::GenericDim::Sequence)));
+
+  auto attr = [&](zigzag::CellRef c, zigzag::DimRef d) -> std::string {
+    auto nb = arena.linked(c, d, zigzag::Posward);
+    return nb.has_value() ? arena.textOf(*nb) : std::string{};
+  };
+
+  std::cout << "lens: " << label << " -> " << session.cellCount() << " cells, "
+            << session.roots().size() << " root(s)\n";
+
+  auto printTree = [&](auto &&self, zigzag::CellRef cell, int depth) -> void {
+    std::string indent(static_cast<std::size_t>(depth) * 2, ' ');
+    std::cout << indent << arena.textOf(cell) << "  [" << attr(cell, dRole)
+              << ", " << attr(cell, dMime) << "]\n";
+    auto child = arena.linked(cell, dContains, zigzag::Posward);
+    for (auto cur = child; cur.has_value();
+         cur      = arena.linked(*cur, dSeq, zigzag::Posward)) {
+      self(self, *cur, depth + 1);
+    }
+  };
+  for (const auto root : session.roots()) {
+    printTree(printTree, root, 0);
+  }
+}
+
+int XuzzApp::executeLensRaster(const std::string &lensPath,
+                               const std::string &sqlBrowse,
+                               const std::string &sqlQuery) {
+  // A sql: URI (or a bare .db path, the shorthand) projects through
+  // SqlLens; anything else stays a FilesystemLens path.
+  if (lensPath.starts_with("sql:") || lensPath.ends_with(".db") ||
+      lensPath.ends_with(".sqlite") || lensPath.ends_with(".sqlite3")) {
+    return executeSqlLensRaster(lensPath, sqlBrowse, sqlQuery);
+  }
+  if (!sqlBrowse.empty() || !sqlQuery.empty()) {
+    std::cerr << "Error: --sql-browse/--sql-query need a sql: lens\n";
+    return 1;
+  }
   // Project a filesystem path through the FilesystemLens into an arena and
   // print its cells, proving a projected non-Xanadu source is visible in xuzz.
   if (lensPath.empty() || !fs::exists(lensPath)) {
@@ -515,37 +595,7 @@ int XuzzApp::executeLensRaster(const std::string &lensPath) {
     zigzag::vortex::VortexCore core(arena);
     zigzag::ProjectionSession session(
         std::make_unique<zigzag::FilesystemLens>(lensPath), core);
-
-    const auto dRole     = core.findOrMintDimension("d.role");
-    const auto dMime     = core.findOrMintDimension("d.mime");
-    const auto dContains = core.findOrMintDimension(
-        std::string(zigzag::genericDimName(zigzag::GenericDim::Containment)));
-    const auto dSeq = core.findOrMintDimension(
-        std::string(zigzag::genericDimName(zigzag::GenericDim::Sequence)));
-
-    auto attr = [&](zigzag::CellRef c, zigzag::DimRef d) -> std::string {
-      auto nb = arena.linked(c, d, zigzag::Posward);
-      return nb.has_value() ? arena.textOf(*nb) : std::string{};
-    };
-
-    std::cout << "lens: " << lensPath << " -> " << session.cellCount()
-              << " cells, " << session.roots().size() << " root(s)\n";
-
-    // Depth-first print of the projected tree: a cell, then its d.contains
-    // first child and the d.seq sibling chain, indented by depth.
-    auto printTree = [&](auto &&self, zigzag::CellRef cell, int depth) -> void {
-      std::string indent(static_cast<std::size_t>(depth) * 2, ' ');
-      std::cout << indent << arena.textOf(cell) << "  [" << attr(cell, dRole)
-                << ", " << attr(cell, dMime) << "]\n";
-      auto child = arena.linked(cell, dContains, zigzag::Posward);
-      for (auto cur = child; cur.has_value();
-           cur      = arena.linked(*cur, dSeq, zigzag::Posward)) {
-        self(self, *cur, depth + 1);
-      }
-    };
-    for (const auto root : session.roots()) {
-      printTree(printTree, root, 0);
-    }
+    printProjectionTree(lensPath, session, core);
     return 0;
   } catch (const std::exception &err) {
     std::cerr << "Error during lens projection: " << err.what() << "\n";
@@ -581,7 +631,7 @@ int XuzzApp::run(const int argc, char **argv) {
   }
 
   if (!opts.lensPath.empty()) {
-    return executeLensRaster(opts.lensPath);
+    return executeLensRaster(opts.lensPath, opts.sqlBrowse, opts.sqlQuery);
   }
 
   if (opts.rasterMode) {
@@ -922,7 +972,6 @@ int XuzzApp::run(const int argc, char **argv) {
       });
 
   auto radialMenu = std::make_shared<gleditor::RadialMenu>();
-
 
   xanadu::LinkBeams links(*session, renderer);
   links.setVisible(!opts.noBeams);
