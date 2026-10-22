@@ -405,6 +405,140 @@ TEST(SqlLensTest, RewindDropsMaterializedPagesAndBuffer) {
   EXPECT_EQ(p.attr(*p.child(*q2), "d.wincount"), "2");
 }
 
+TEST(SqlLensTest, QueryModeProjectsResultColsAndHashedRows) {
+  ProjectedDb p;
+  ASSERT_NE(p.lens, nullptr);
+  const std::vector<SqlValue> params = {std::int64_t{1}};
+  ASSERT_TRUE(p.lens
+                  ->query("SELECT customer, amount * 2 AS total "
+                          "FROM invoices WHERE id > ?",
+                          params)
+                  .has_value());
+  (void)p.session->refresh();
+
+  const auto q = p.childWithRole("sql.query");
+  ASSERT_TRUE(q.has_value());
+  EXPECT_EQ(p.attr(*q, "d.qhash").size(), 64u);
+  EXPECT_EQ(p.attr(*q, "d.params"), "i:1");
+  EXPECT_EQ(p.core.arena().textOf(*q), "SELECT customer, amount * 2 AS total "
+                                       "FROM invoices WHERE id > ?");
+
+  // Result-column cells join the query's d.colof rank.
+  std::vector<CellRef> colCells;
+  for (auto at = *p.core.arena().linked(*q, p.dim("d.colof"), Negward);;) {
+    colCells.push_back(at);
+    const auto n = p.core.arena().linked(at, p.dim("d.colof"), Negward);
+    if (!n.has_value()) {
+      break;
+    }
+    at = *n;
+  }
+  ASSERT_EQ(colCells.size(), 2u);
+  EXPECT_EQ(p.core.arena().textOf(colCells[1]), "customer");
+  EXPECT_EQ(p.core.arena().textOf(colCells[0]), "total");
+
+  // 4 rows pass the filter, each a hashed subject under the query's scope.
+  const auto page = p.child(*q);
+  ASSERT_TRUE(page.has_value());
+  EXPECT_EQ(p.attr(*page, "d.wincount"), "4");
+  const auto row = p.subjectOf(*p.child(*page));
+  EXPECT_EQ(p.attr(row, "d.keystab"), "hash");
+  EXPECT_TRUE(p.attr(row, "d.extkey").find(":q:") != std::string::npos);
+  EXPECT_TRUE(p.attr(row, "d.extkey").find(":h:") != std::string::npos);
+  // The 'total' value heads at the result column cell on d.ofcol.
+  bool sawTotal = false;
+  for (auto v = p.child(row); v.has_value(); v = p.next(*v)) {
+    if (p.attr(*v, "d.column") == "total") {
+      sawTotal        = true;
+      const auto head = p.core.arena().linked(*v, p.dim("d.ofcol"), Posward);
+      ASSERT_TRUE(head.has_value());
+      auto at = *head;
+      while (p.attr(at, "d.role") == "sql.val") {
+        at = *p.core.arena().linked(at, p.dim("d.ofcol"), Posward);
+      }
+      EXPECT_EQ(p.core.arena().textOf(at), "total");
+      EXPECT_EQ(p.attr(at, "d.role"), "sql.col");
+    }
+  }
+  EXPECT_TRUE(sawTotal);
+}
+
+TEST(SqlLensTest, QueryModePagesOrdinallyWithParams) {
+  ProjectedDb p(/*pageSize=*/2);
+  ASSERT_NE(p.lens, nullptr);
+  ASSERT_TRUE(p.lens->query("SELECT id, note FROM invoices", {}).has_value());
+  (void)p.session->refresh();
+  const auto q = p.childWithRole("sql.query");
+  ASSERT_TRUE(q.has_value());
+  const auto page0 = p.child(*q);
+  ASSERT_TRUE(page0.has_value());
+  EXPECT_EQ(p.attr(*page0, "d.wincount"), "2");
+  EXPECT_EQ(p.attr(*page0, "d.winhi"), "o:2");
+  EXPECT_TRUE(p.attr(*page0, "d.winlo").empty());
+  // The stub carries the ordinal continuation.
+  const auto stub    = *p.next(*page0);
+  const auto stubKey = p.session->keyFor(stub);
+  ASSERT_TRUE(stubKey.has_value());
+  EXPECT_TRUE(stubKey->find(":p:o:2") != std::string::npos);
+  ASSERT_TRUE(p.lens->materializePage(*stubKey).has_value());
+  (void)p.session->refresh();
+  const auto page1 = p.next(*page0);
+  ASSERT_TRUE(page1.has_value());
+  EXPECT_EQ(p.attr(*page1, "d.winlo"), "o:2");
+  EXPECT_EQ(p.attr(*page1, "d.wincount"), "2");
+}
+
+TEST(SqlLensTest, QueryModeRefusesNonWrappableKinds) {
+  ProjectedDb p;
+  ASSERT_NE(p.lens, nullptr);
+  // prepare() accepts these; the ordinal replay's own kind check is the
+  // honest refusal (spec section 5.1).
+  EXPECT_FALSE(p.lens->query("EXPLAIN SELECT 1 FROM invoices", {}).has_value());
+  EXPECT_FALSE(p.lens->query("PRAGMA table_list", {}).has_value());
+  // And writes never get past the backend's own gate.
+  EXPECT_FALSE(p.lens->query("DELETE FROM invoices", {}).has_value());
+  EXPECT_FALSE(
+      p.lens->query("INSERT INTO invoices VALUES (9)", {}).has_value());
+}
+
+TEST(SqlLensTest, QueryAndBrowseShareSubjectsIndex) {
+  ProjectedDb p;
+  ASSERT_NE(p.lens, nullptr);
+  ASSERT_TRUE(p.lens->browse("invoices").has_value());
+  const auto qr = p.lens->query("SELECT x, y FROM nopk", {});
+  ASSERT_TRUE(qr.has_value()) << qr.error();
+  (void)p.session->refresh();
+  // Two query nodes sit on conn's child rank; both kinds of subjects
+  // index under conn.d.subjects.
+  const auto conn     = p.session->roots()[0];
+  std::size_t queries = 0;
+  for (const auto c : p.siblings(*p.child(conn))) {
+    if (p.attr(c, "d.role") == "sql.query") {
+      ++queries;
+    }
+  }
+  EXPECT_EQ(queries, 2u);
+}
+
+TEST(SqlLensTest, SqlUriOpensBackends) {
+  FixtureDb db;
+  // The canonical URI, and bare-path shorthand.
+  {
+    auto l = openSqlUri("sql:sqlite://" + db.path.string());
+    EXPECT_TRUE(l.has_value()) << l.error();
+  }
+  {
+    auto l = openSqlUri(db.path.string());
+    EXPECT_TRUE(l.has_value()) << l.error();
+  }
+  // pg: is recognized as a backend but unimplemented this round.
+  const auto pg = openSqlUri("sql:pg://localhost/db");
+  EXPECT_FALSE(pg.has_value());
+  EXPECT_TRUE(pg.error().find("pg") != std::string::npos);
+  const auto unk = openSqlUri("sql:oracle://x");
+  EXPECT_FALSE(unk.has_value());
+}
+
 TEST(SqlLensTest, VqlTraversesSqlProjection) {
   ProjectedDb p;
   ASSERT_NE(p.lens, nullptr);

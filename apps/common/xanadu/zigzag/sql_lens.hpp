@@ -36,9 +36,11 @@ enum class SqlKeyClass : std::uint8_t { Pk, Rid, Hash };
 struct SqlSubject {
   ExternalKey key; ///< t:/q:-scoped row subject key
   SqlKeyClass cls;
-  std::string display;                ///< display key (cell content)
-  std::vector<SqlValue> values;       ///< select-order values (visible cols)
-  std::vector<std::string> colNames;  ///< the query's visible columns
+  std::string display;               ///< display key (cell content)
+  std::vector<SqlValue> values;      ///< select-order values (visible cols)
+  std::vector<std::string> colNames; ///< the query's visible columns
+  /// v: key suffixes matching colNames (from the producing query).
+  std::vector<std::string> vnames;
   std::vector<ExternalKey> sightings; ///< d.subject rank order (mint order)
 };
 
@@ -68,10 +70,17 @@ struct SqlQuery {
   std::string sqlSelect;
   std::string sqlOrder; ///< "ORDER BY .." or ""
   std::string stable;   ///< canonical table name
-  std::string tableKey; ///< t:<stable>
+  std::string tableKey; ///< t:<stable> ("" in query mode)
+  /// The subject-key scope: t:<stable> for browse, q:<qhash> for query.
+  std::string rowScope;
+  /// Bound parameters of a query-mode statement; feeds qhash + replay.
+  std::vector<SqlValue> params;
   SqlKeyClass cls{SqlKeyClass::Hash};
   bool ordinal{false};
-  std::vector<std::string> colNames;  ///< visible cols, select order
+  std::vector<std::string> colNames; ///< visible cols, select order
+  /// v: key suffix per visible col: the name, or "@<n>" after a duplicate
+  /// within this result (spec section 4.1's collision rule).
+  std::vector<std::string> vnames;
   std::vector<std::string> colTypes;  ///< declType per visible col
   std::vector<std::string> colKeys;   ///< schema-col keys, select order
   std::vector<int> pkCols;            ///< result-col idx, PK order
@@ -97,6 +106,13 @@ public:
   /// next refresh() projects the new materialization.
   [[nodiscard]] std::expected<void, std::string>
   browse(std::string_view tableName);
+
+  /// Query mode (spec section 5.1): run arbitrary read-only SQL as an
+  /// ordinal-paged query. Rows are hashed subjects under q:<qhash> (pk
+  /// attribution needs SQLITE_ENABLE_COLUMN_METADATA, absent here), and
+  /// windows replay via SELECT * FROM (<sql>) LIMIT/OFFSET.
+  [[nodiscard]] std::expected<void, std::string>
+  query(std::string_view sql, std::span<const SqlValue> params);
 
   // -- WindowedLens
   // ------------------------------------------------------------
@@ -147,6 +163,10 @@ private:
 
   /// Generate the browse SQL + paging spec for a table (keyset or ordinal).
   std::expected<SqlQuery, std::string> planBrowse(const SqlTable &t) const;
+  /// Plan a query-mode result: prepare for the column list, hash the raw
+  /// text + params into qhash, scope rows under q:<qhash>.
+  std::expected<SqlQuery, std::string>
+  planQuery(std::string_view sql, std::span<const SqlValue> params);
   /// Fetch one window into @p page (keyset or ordinal per @p q).
   std::expected<void, std::string> fetchWindow(SqlQuery &q, SqlPage &page);
   /// Append the trailing stub after the last materialized page, if the
@@ -174,6 +194,12 @@ private:
 /// Open a sqlite database read-only and wrap it in a SqlLens.
 [[nodiscard]] std::expected<std::unique_ptr<SqlLens>, std::string>
 openSqliteLens(std::string_view path, std::size_t pageSize = 64);
+
+/// Open the user-facing lens URI (spec section 7.4):
+///   sql:sqlite:///abs/path.db     -- sqlite (a bare path is shorthand)
+///   sql:pg://host:port/db         -- recognized, backend lands in phase 7
+[[nodiscard]] std::expected<std::unique_ptr<SqlLens>, std::string>
+openSqlUri(std::string_view uri, std::size_t pageSize = 64);
 
 } // namespace zigzag
 
