@@ -263,8 +263,8 @@ Structural decisions, each load-bearing:
    subject* — each window keeps its own `d.seq` chain intact (a cell can't hold two rank positions),
    and the subject's `d.subject` rank records both occurrences. Two `h:`-identical rows in one
    result are likewise two sightings of one subject — which is why there is no `d.dupcount`:
-   occurrence count is the rank's length. (Sighting cells are the answer to the §8A note about
-   needing annotatable *occurrences* alongside shared structure.)
+   occurrence count is the rank's *live* length (§5.2's stale-member rule). (Sighting cells are the
+   answer to the §8A note about needing annotatable *occurrences* alongside shared structure.)
 1. **A query is a node.** Its `d.qhash` scopes the keyspace of every *unkeyed* row it produces
    (§4.3) — keyed rows take table-scoped `pk:`/`rid:` keys that deliberately omit `qhash` so browse
    and query modes unify on `(schema, table, key)` (§4.4).
@@ -278,30 +278,30 @@ The generic structural ranks take their canonical meanings; SQL-specific ranks a
 `dimensions()` under their own names. A page is the materialized form of a window — the terms are
 used interchangeably from here.
 
-| dimension                        | kind           | meaning                                                 |
-| -------------------------------- | -------------- | ------------------------------------------------------- |
-| `d.contains`                     | generic (enum) | firstborn: conn→query→page→sight; row→value; table→col  |
-| `d.seq`                          | generic (enum) | sibling order: queries, pages, sightings, values, cols  |
-| `d.ref`                          | generic (enum) | FK referrer rank terminating at the target row          |
-| `d.role`                         | generic (attr) | node kind (`sql.row`, `sql.page`, …)                    |
-| `d.extkey`                       | generic (attr) | the subject's `ExternalKey`, for promotion (§6.3)       |
-| `d.subject`                      | sql custom     | sighting-membership rank terminating at the subject     |
-| `d.conforms`                     | sql custom     | row-membership rank terminating at a `sql.table` cell   |
-| `d.ofcol`                        | sql custom     | value-membership rank terminating at a `sql.col` cell   |
-| `d.colof`                        | sql custom     | result-column rank terminating at its query             |
-| `d.subjects`                     | sql custom     | subject-index rank terminating at the conn cell         |
-| `d.column`                       | sql custom     | a value's column name (display; `d.ofcol` is truth)     |
-| `d.type`                         | sql custom     | declared type / affinity (`TEXT`, `INTEGER`, …)         |
-| `d.pk`                           | sql custom     | present on a `sql.col` in the primary key, in order     |
-| `d.notnull`                      | sql custom     | present on a `sql.col` declared `NOT NULL`              |
-| `d.null`                         | sql custom     | present iff the value is SQL NULL (§3.4)                |
-| `d.ordinal`                      | sql custom     | position: on a sighting in its window; on a `sql.col`   |
-| `d.keystab`                      | sql custom     | key class on a subject: `pk`/`rid`/`hash`/`ord`         |
-| `d.qhash`                        | sql custom     | hash of raw query text + typed bound params             |
-| `d.params`                       | sql custom     | bound-parameter rendering (display)                     |
-| `d.winlo`/`d.winhi`/`d.wincount` | sql custom     | page window bounds, typed-encoded (§5.3)                |
-| `d.snapscope`                    | sql custom     | snapshot scope: `none`, `live`, or a snapshot id        |
-| `d.state`                        | sql custom     | `deferred`/`live`/`stale` on pages; `stale` on subjects |
+| dimension                        | kind           | meaning                                                           |
+| -------------------------------- | -------------- | ----------------------------------------------------------------- |
+| `d.contains`                     | generic (enum) | firstborn: conn→query→page→sight; row→value; table→col            |
+| `d.seq`                          | generic (enum) | sibling order: queries, pages, sightings, values, cols            |
+| `d.ref`                          | generic (enum) | FK referrer rank terminating at the target row                    |
+| `d.role`                         | generic (attr) | node kind (`sql.row`, `sql.page`, …)                              |
+| `d.extkey`                       | generic (attr) | the subject's `ExternalKey`, for promotion (§6.3)                 |
+| `d.subject`                      | sql custom     | sighting-membership rank terminating at the subject               |
+| `d.conforms`                     | sql custom     | row-membership rank terminating at a `sql.table` cell             |
+| `d.ofcol`                        | sql custom     | value-membership rank terminating at a `sql.col` cell             |
+| `d.colof`                        | sql custom     | result-column rank terminating at its query                       |
+| `d.subjects`                     | sql custom     | subject-index rank terminating at the conn cell                   |
+| `d.column`                       | sql custom     | a value's column name (display; `d.ofcol` is truth)               |
+| `d.type`                         | sql custom     | declared type / affinity (`TEXT`, `INTEGER`, …)                   |
+| `d.pk`                           | sql custom     | present on a `sql.col` in the primary key, in order               |
+| `d.notnull`                      | sql custom     | present on a `sql.col` declared `NOT NULL`                        |
+| `d.null`                         | sql custom     | present iff the value is SQL NULL (§3.4)                          |
+| `d.ordinal`                      | sql custom     | position: on a sighting in its window; on a `sql.col`             |
+| `d.keystab`                      | sql custom     | key class on a subject: `pk`/`rid`/`hash`/`ord`                   |
+| `d.qhash`                        | sql custom     | hash of raw query text + typed bound params                       |
+| `d.params`                       | sql custom     | bound-parameter rendering (display)                               |
+| `d.winlo`/`d.winhi`/`d.wincount` | sql custom     | page window bounds, typed-encoded (§5.3)                          |
+| `d.snapscope`                    | sql custom     | snapshot scope: `none`, `live`, or a snapshot id                  |
+| `d.state`                        | sql custom     | `deferred`/`live`/`stale` on pages; `stale` on subjects/sightings |
 
 An unknown rank name mints an empty dimension rather than erroring
 ([`multi_store.cpp:353`](apps/common/xanadu/multi_store.cpp), the fallthrough), so every name above
@@ -407,9 +407,10 @@ target). In the listings below, `→` is posward:
 - **`d.subjects`**: every materialized subject chains posward toward the `conn` cell — the subject
   index. Subjects float outside all page structure (§3.7), so this non-structural rank is what makes
   them enumerable without turning every one into a structural root (root election is lens-declared,
-  §3.7). The index keeps **stale** members too — it enumerates "every subject ever seen," and
-  consumers filter `d.state` (a vanished subject's membership is never retracted because nothing
-  re-enumerates it; the seen-history reading is the useful one anyway).
+  §3.7). The index is deliberately **ever-seen**: the lens keeps re-emitting a stale subject's
+  `d.subjects` membership (the key is still mapped, so the edge still resolves), so the index walks
+  every subject ever materialized and consumers filter `d.state`. Membership ranks are the opposite
+  convention — they re-emit over live members only, so stale members self-exclude (§5.2).
 
 In **query mode** the query node mints `sql.col` cells for the result's own column list (from cursor
 metadata, §7.1) on its `d.colof` rank in select order. A *row's* `d.conforms` membership is absent
@@ -468,8 +469,10 @@ ExternalKey (sql) ::= "sql:" <backend> ":" <dbid> ":" <subject>
                   alias-insensitive so one field is one key; on a v:
                   collision WITHIN one enumeration (an attributable
                   'amount' and a computed '... AS amount' in the same
-                  result), the colliding unattributable cell falls back
-                  to positional keying 'v:@<n>'
+                  result), the first same-named column keeps the name and
+                  colliders fall back to positional 'v:@<n>' where n is
+                  the result-column position (positional within that
+                  result — the ord: caveat applies, §6.4)
   <stable>  ::= <schema-qualified, canonically-cased table name>   -- §4.4
   <qhash>   ::= sha256 over (raw statement text || typed bound params)
               -- raw text, NOT sqlite3_normalized_sql: that API folds literals
@@ -504,7 +507,11 @@ Two encoding rules the nested grammar makes normative:
 
 - **Percent-encoding reserves**: `t:` payloads encode at minimum `%`, `:`, `,`, `@`, and NUL — those
   bytes are productions' delimiters, so payload bytes must never carry them or `q:…:p:k:t:…:@:o:…`
-  mis-parses.
+  mis-parses. The same reserved set applies to **name-bearing productions** (`<stable>`, `c:` column
+  names, `v:` column names — quoted identifiers can legally carry `:`, `@`, `,`, `%`, `.`, NUL):
+  each component encodes the reserved set plus `.`, so a table named `a:pk:i:5` can't forge a row
+  key and a schema `a` + table `"b.x"` can't collide with `a.b` + `x`. Keys are compared, not parsed
+  — the encoding is what keeps distinct names in distinct keyspaces.
 - **The sighting key is positional** — `(query, window, window-ordinal)`, not `(window, subject)`:
   two sightings of one subject in one window (a join fan-out, two `h:`-identical rows) get distinct
   cells, which is what makes the `d.subject` rank's length the true occurrence count (§3.7). A
@@ -605,7 +612,7 @@ ______________________________________________________________________
 
 | mode     | query source                         | window mechanism                                     |
 | -------- | ------------------------------------ | ---------------------------------------------------- |
-| `browse` | lens-generated `SELECT … ORDER BY …` | **keyset**: tuple predicate `WHERE (cols) > (:sk)`   |
+| `browse` | lens-generated `SELECT … ORDER BY …` | **keyset** (views → ordinal): `(cols) > (:sk)` tuple |
 | `query`  | arbitrary user SQL                   | **ordinal**: held cursor forward; replay by `OFFSET` |
 
 Key class is orthogonal — decided per §4.3 for *both* modes (`pk:`/`rid:` wherever eligible, `h:`
@@ -706,10 +713,12 @@ its cell — `keyToCell_` hits, no re-mint — so anything the session maps stay
 `sightings` model means the second page's chain doesn't fight the first's — §3.7). Two scoping notes
 worth stating once: **staleness is discovered per-window at that window's replay** — a subject is
 `stale` only when absent from every live page's most recent fetch, not "deleted from the database"
-(it may sit unrefreshed in another window's buffer); and a stale member's own rank position
-persists, but since every chain is re-emitted at refresh, no *live* member points into it — stale
-members self-exclude from rank walks (`d.subjects`, `d.subject`, `d.ofcol` all enumerate "ever
-seen," filtered by `d.state` where the distinction matters).
+(it may sit unrefreshed in another window's buffer). And **stale members have one split semantics
+across the two rank kinds**: the `d.subjects` index re-emits stale members' links so it enumerates
+ever-seen (readers filter `d.state`), while the membership ranks
+(`d.subject`/`d.ofcol`/`d.conforms`/`d.ref`/`d.colof`) are re-emitted over live members only — a
+stale member's own links persist, but every re-emitted live chain splices around it, so it
+self-excludes from walks and occurrence counts are *live* counts (§3.1).
 
 ### 5.3 A page is a cell that knows how to re-fetch itself
 
@@ -728,11 +737,12 @@ semantics, all against the recorded parameters:
    deletes; the honest default.
 1. **Keyset replay** (browse mode only). Re-prepare the recorded window SQL with `winlo`/`winhi`
    bound — `WHERE (sort cols) > (:lo) AND (sort cols) <= (:hi)` in row-value expansion (legal in
-   both engines; the exclusive lo mirrors how the window was fetched, and the appended PK makes the
-   tuple unique so boundary rows re-match exactly). Inserts whose sort key lands *inside* the range
-   appear — honestly, not hidden: the key list in the page buffer tells replay-originals from
-   inserts, and `d.wincount` stays the original count. A shortfall means rows were deleted and shows
-   as fewer live rows, not as wrong ones.
+   both engines; the exclusive lo mirrors how the window was fetched — an empty `lo`, the `k:start`
+   case, emits no lower predicate — and the appended PK makes the tuple unique so boundary rows
+   re-match exactly). Inserts whose sort key lands *inside* the range appear — honestly, not hidden:
+   the key list in the page buffer tells replay-originals from inserts, and `d.wincount` stays the
+   original count. A shortfall means rows were deleted and shows as fewer live rows, not as wrong
+   ones.
 1. **Snapshot replay.** Inside one consistent-read scope every window reads one version — backward
    paging re-reads bytes already read, deterministically. The mechanics differ honestly by backend
    (§7.2, §7.3): SQLite gets it only in **WAL mode** (a held read transaction pins a snapshot at
@@ -968,8 +978,10 @@ The contract annotation code gets, stated once:
   annotation visibly stops matching live data — honest staleness, shown as such.
 - **`ord:` subjects**: not emitted round one (§4.2); if ever emitted, `d.keystab=ord` warns that the
   identity is position only.
-- **A field, not just a row**: a value cell's `v:`-derived key means "the `amount` of invoice 1042"
-  is annotatable at field granularity, stable across windows *and* queries (§4.1).
+- **A field, not just a row**: a `v:` key derived from the base/result-column *name* is stable
+  across windows *and* queries — "the `amount` of invoice 1042" is annotatable at field granularity
+  (§4.1). The `v:@<n>` collision fallback is positional *within that result* — the same caveat as
+  `ord:` applies.
 
 Annotations never reach back into SQL — the read-only boundary is real: annotating a value cell does
 not `UPDATE` the column, and the lens's `apply*` stay at their refusing defaults
@@ -1436,3 +1448,10 @@ ______________________________________________________________________
   recorded (ever-seen indexes, filtered by `d.state`); `replayWindow` regenerates browse SQL from
   the generation spec; `__sql_sort_*` columns are backend-internal, never projected; foreign-mint
   counting includes attribute cells and reports dense indices.
+- **rev 6.** Final polish pass. Resolved the stale-member contradiction (the `d.subjects` index is
+  ever-seen — the lens keeps emitting stale members' index links — while membership ranks re-emit
+  over live members only, so stale members self-exclude and occurrence counts are live counts);
+  percent-encoding extended to name-bearing productions (`<stable>`, `c:`, `v:` names — quoted
+  identifiers can carry the reserved bytes); `v:@<n>` pinned as the result-column position with the
+  `ord:` caveat; `k:start` emits no lower predicate on replay; mode table shows the views→ordinal
+  exception; `d.state` scope covers sightings.
