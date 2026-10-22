@@ -717,8 +717,9 @@ worth stating once: **staleness is discovered per-window at that window's replay
 across the two rank kinds**: the `d.subjects` index re-emits stale members' links so it enumerates
 ever-seen (readers filter `d.state`), while the membership ranks
 (`d.subject`/`d.ofcol`/`d.conforms`/`d.ref`/`d.colof`) are re-emitted over live members only — a
-stale member's own links persist, but every re-emitted live chain splices around it, so it
-self-excludes from walks and occurrence counts are *live* counts (§3.1).
+stale member's *cell* persists while every re-emitted live chain splices around it, clearing its
+rank links by eviction, so it self-excludes from walks and occurrence counts are *live* counts
+(§3.1).
 
 ### 5.3 A page is a cell that knows how to re-fetch itself
 
