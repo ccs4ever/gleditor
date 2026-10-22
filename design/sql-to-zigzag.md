@@ -64,8 +64,9 @@ ______________________________________________________________________
 ## 2. Evidence: What Already Exists
 
 Read first: `projection_lens.hpp`, `projection_session.{hpp,cpp}`, `filesystem_lens.hpp`,
-`arena_manifold.hpp` (`promote`, `mark`/`release`, `attach(Space)`), `multi_store.cpp`
-`resolveDimension`, and [`anything-to-zigzag-lens.md`](anything-to-zigzag-lens.md) §4–§6, §8A.
+`arena_manifold.hpp` (`promote`, `mark`/`release`, `attach(Space)`, `insertIntoRank`/`linkChain`),
+`manifold.hpp` (`DimLink`, `ephemeralBit`), `multi_store.cpp` `resolveDimension`, and
+[`anything-to-zigzag-lens.md`](anything-to-zigzag-lens.md) §4–§6, §8A.
 
 ### 2.1 The trait and the session are real and landed
 
@@ -78,12 +79,12 @@ Read first: `projection_lens.hpp`, `projection_session.{hpp,cpp}`, `filesystem_l
   default state, not a limitation to add.
 - `NodeContent` is `std::variant<std::monostate, std::string, double, bool, std::int64_t>`
   ([`projection_lens.hpp:70-71`](apps/common/xanadu/zigzag/projection_lens.hpp)). `std::monostate`
-  mints an empty cell
+  mints a cell with no content span
   ([`projection_session.cpp:54-55`](apps/common/xanadu/zigzag/projection_session.cpp)) — the slot
-  SQL `NULL` maps onto (§3.3). There is no blob alternative; §3.4 defines the by-reference treatment
+  SQL `NULL` maps onto (§3.4). There is no blob alternative; §3.5 defines the by-budget treatment
   that avoids importing blob bytes for a browse.
 - `ProjectionSession` projects a lens into a `VortexCore`'s arena — **the same arena the query/logic
-  runtimes enumerate** (the §9A.2 project-into-bound-arena contract,
+  runtimes enumerate** (the project-into-bound-arena contract, lens doc §9A.2,
   [`projection_session.hpp:35-36`](apps/common/xanadu/zigzag/projection_session.hpp),
   [`vortex_core.hpp:100`](apps/common/xanadu/vortex/vortex_core.hpp)). It mints declared dimensions
   first, then a cell per node recording `keyToCell_`/`cellToKey_` both ways, attaches each node's
@@ -97,16 +98,41 @@ Read first: `projection_lens.hpp`, `projection_session.{hpp,cpp}`, `filesystem_l
   gate tests prove a projected directory and a hand-built slice of the same shape answer the same
   query strings ([`lens_vql_gate_test.cpp`](tests/xuzz/lens_vql_gate_test.cpp), header comment).
 
-### 2.2 SQLite is already in the tree
+### 2.2 The rank model the projection must respect
+
+Two facts about the manifold constrain the whole §3 shape, and the first draft of this document got
+both wrong:
+
+- **One pos, one neg per dimension.** A `CellSlot` carries `DimLink{dim,pos,neg}` entries
+  ([`manifold.hpp:250-264`](apps/common/xanadu/zigzag/manifold.hpp)); `arena.link(from,dim,dir,to)`
+  writes both ends and **evicts whatever either end held** — eviction is silent success, not a
+  refusal ([`arena_manifold.hpp`](apps/common/xanadu/zigzag/arena_manifold.hpp), the `link` doc
+  comment; `manifold.cpp`'s displaced-end repair). deg±(c,d) ≤ 1 is the invariant (plan A2,
+  [`zigzag-lenses-implementation-plan.md:47`](design/zigzag-lenses-implementation-plan.md)). The
+  canonical many-children encoding is therefore **parent → firstborn on `d.contains`, siblings
+  chained on `d.seq`**, exactly as `FilesystemLens::forEachEdge` documents ("parent -> FIRST child
+  only … siblings chain on d.seq", `filesystem_lens.cpp`) and `ProjectionSession::project()` assumes
+  for root detection ("only the first child is a containment target; the rest are sequence targets",
+  [`projection_session.cpp:83-85`](apps/common/xanadu/zigzag/projection_session.cpp)). Many-to-one
+  relations are encoded as a **membership rank**: the "one" side is the rank's headcell and the
+  "many" are its members (§3.6) — a column *is* a rank through the table.
+- **`promote()` walks an undirected graph.** The frontier expands *both* `edge.pos` and `edge.neg`
+  on every dimension (`arena_manifold.cpp`, the `discover(edge.dim)`/`discover(edge.pos)`/
+  `discover(edge.neg)` loop), skipping only `d.dims`, proxies, provenance cells, and read-through
+  base cells. Reachability from any cell inside a connected component is the *whole component* — the
+  spec's promotion shape must be a separate component, not a clever direction choice (§6.1).
+
+### 2.3 SQLite is already in the tree — as an API, not a sandbox
 
 `sqlite3` is a pkg-config dependency of the xanalogical engine ([`Makefile:277`](Makefile)), and
 `swarm_catalog_index.cpp` already opens a database, applies a schema, and reads rows through the C
-API ([`swarm_catalog_index.cpp:185-246`](apps/common/xanadu/swarm_catalog_index.cpp)). A `SqlLens`
-adds **no new dependency** for the first backend; the include lives in the one backend translation
-unit (§7.2), keeping the trait header free of `<sqlite3.h>` exactly as `FilesystemLens` keeps
-`<sys/stat.h>` inside one file (the §5.4 boundary rule).
+API ([`swarm_catalog_index.cpp:185-246`](apps/common/xanadu/swarm_catalog_index.cpp)) — behind an
+impl pointer that keeps `<sqlite3.h>` out of the header, the pattern §7.2 follows. That file opens
+its database `SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE` with no authorizer, so the read-only
+sandbox of §7.2 is *new* posture on a familiar API — the honest claim is "the tree already links and
+drives sqlite3," nothing stronger. A `SqlLens` adds **no new dependency** for the first backend.
 
-### 2.3 The persistence crossing and the memory budget exist
+### 2.4 The persistence crossing and the memory budget exist
 
 - `promote(store, parent, arena, root, budget)`
   ([`arena_manifold.hpp:834-836`](apps/common/xanadu/zigzag/arena_manifold.hpp)) writes the
@@ -115,160 +141,209 @@ unit (§7.2), keeping the trait header free of `<sqlite3.h>` exactly as `Filesys
   a persistent op refusing an ephemeral target is enforced at `applyStructure`
   ([`manifold.hpp:159`](apps/common/xanadu/zigzag/manifold.hpp), `ephemeralBit`).
 - The arena's choice-point machinery — `mark()`, `release(m)`
-  ([`arena_manifold.hpp:638-642`](apps/common/xanadu/zigzag/arena_manifold.hpp)) — is the O(1)
-  window-toss the implementation plan's invariant A9 prescribes for long-running lenses ("windowed
-  materialization + epoch tosses, using `ExternalKey` for cross-epoch identity",
-  [`zigzag-lenses-implementation-plan.md:54`](design/zigzag-lenses-implementation-plan.md)); spike
-  S5 measured a toss at ~0.6 µs. §5.4 turns this into the rewind/replay mechanism.
+  ([`arena_manifold.hpp:638-642`](apps/common/xanadu/zigzag/arena_manifold.hpp)) — is the O(1)-ish
+  window-toss the implementation plan's invariant A9 prescribes ("windowed materialization + epoch
+  tosses, using `ExternalKey` for cross-epoch identity",
+  [`zigzag-lenses-implementation-plan.md:54`](design/zigzag-lenses-implementation-plan.md)). Three
+  properties bound how it can be used (§5.4–§5.6): marks are a **stack** — "assumed well nested:
+  `release()` and `discard()` pop" (`arena_manifold.hpp`, the marks doc comment); `release`
+  truncates the contiguous mint suffix *and* replays the trail in reverse, so writes to pre-mark
+  cells are undone too; and `compact()` is refused while any mark is outstanding
+  ([`arena_manifold.hpp:648-669`](apps/common/xanadu/zigzag/arena_manifold.hpp)), so checkpoints
+  must be short-lived or garbage accumulates. CellRefs are dense indices — `ephemeralBit | dense`
+  (`arena_manifold.hpp`, `refOf`) — **reused** after a release truncates `slots_`: a stale CellRef
+  does not dangle, it *aliases* whatever now occupies the slot (§5.6's aliasing rule).
 - `attach(Space)` ([`arena_manifold.hpp:297`](apps/common/xanadu/zigzag/arena_manifold.hpp)) lets
   one arena host several spaces; combined with the string-keyed map, two `SqlLens` projections (or a
   lens plus a xanadoc) share one query surface without key collisions (§4.1).
 - `insertIntoRank`/`linkChain`
   ([`arena_manifold.hpp:617`](apps/common/xanadu/zigzag/arena_manifold.hpp),
   [`:632`](apps/common/xanadu/zigzag/arena_manifold.hpp)) are the shared "turn a vector into a rank"
-  primitives a window materialization uses to re-chain `d.seq`.
+  primitives a window materialization uses to chain `d.seq`.
 - `StoreActivityLog` (`system://activity`,
   [`store_activity_log.hpp:29-30`](apps/common/xanadu/store_activity_log.hpp)) is the append-only
-  record of reader walks; §5.6 reuses it to make a page's materialization parameters durable, so a
-  replay survives a session restart.
+  record of reader walks; §5.7 reuses it to make a page's materialization durable.
 - The enfilade layer is explicit that derived, replayable index products live in memory and never
   mint disk ops ([`arrayfilade.hpp`](apps/common/xanadu/enfilade/arrayfilade.hpp), the "Ruling R8"
-  bullet) — the same discipline §5 applies to windows: **paging mints cells in the arena, not
-  operations in a store.**
+  bullet) — a *different* R8 from the convergence's "view movement is not an edit"
+  ([`store-slice-convergence.md`](store-slice-convergence.md)); this doc always says which it means.
+  Both apply to windows: **paging mints cells in the arena, not operations in a store.**
 
-### 2.4 What is missing
+### 2.5 What is missing
 
 - **Incremental projection.** A `ProjectionSession` projects once, at construction
   ([`projection_session.cpp:15-19`](apps/common/xanadu/zigzag/projection_session.cpp)). There is no
   `refresh()` — `ProcLens::refreshFromHost`
   ([`proc_lens.hpp:67`](apps/common/xanadu/zigzag/proc_lens.hpp)) mutates lens state but nothing
-  re-runs enumeration. A windowed lens needs exactly this: §5.2 specifies
-  `ProjectionSession::refresh()` as the one new framework method, with union-identity semantics.
+  re-enumerates. A windowed lens needs exactly this: §5.2 specifies `ProjectionSession::refresh()`,
+  with union-identity semantics, as the one new framework verb.
 - **A session-level rewind.** `mark()`/`release()` exist on the arena, but the session's identity
-  map would dangle past a release — keys for tossed cells must be forgotten too. §5.4 specifies
-  `checkpoint()`/`rewind()` on the session.
-- **Promotion bookkeeping.** `promote()` knows nothing about `ExternalKey`s; nothing records "this
-  row is already promoted, annotate the durable twin." §6.3 specifies the reconciliation map.
+  map and root list would dangle or alias past a release — keys for tossed cells must be forgotten
+  too. §5.5 specifies `checkpoint()`/`rewind()` on the session, with the map-repair the raw
+  `release()` cannot do.
+- **Bounded promotion.** `promote()` knows nothing about `ExternalKey`s and walks the whole
+  connected component (§2.2); nothing records "this row is already promoted, annotate the durable
+  twin." §6 specifies a staging `promoteSubject` and the reconcile map.
 - **A write path.** Deferred to phase two (§8); the §8A v2 list is its prerequisite.
 
 ______________________________________________________________________
 
 ## 3. The Source Model: A Result Set as Cells and Ranks
 
-### 3.1 The shape
+### 3.1 The shape — strict firstborn + sibling + membership ranks
+
+Every "one-to-many" below is the canonical encoding — parent → **firstborn** on `d.contains`,
+siblings chained on `d.seq` — because a cell physically holds one pos and one neg neighbour per
+dimension (§2.2). Every "many-to-one" is a **membership rank**: the "one" side heads the rank and
+the "many" are members on it (§3.6).
 
 ```
- [conn]                                   d.role = sql.conn
-   │  +d.contains
+ [conn]
+   │ +d.contains → first query; queries chain +d.seq
    ▼
- [query]   d.role=sql.query               content: the SQL text
-   │  +d.contains                          attrs: d.qhash, d.params, d.winstate
+ [query]   d.role=sql.query      content: the SQL text
+   │ +d.contains → first page     attrs: d.qhash, d.params
+   ▼         (pages chain +d.seq)
+ [page₀]   d.role=sql.page       attrs: d.state, d.winlo, d.winhi, d.wincount
+   │ +d.contains → first row      (rows chain +d.seq)
    ▼
- [page₀] ─d.seq→ [page₁] ─d.seq→ …        d.role=sql.page
-   │  +d.contains                          attrs: d.winlo, d.winhi, d.wincount,
-   ▼            d.contains to EVERY row    d.state (live|deferred|tossed)
- [row₀] ─d.seq→ [row₁] ─d.seq→ …          d.role=sql.row
-   │  +d.contains                          content: display key (pk or ordinal)
-   ▼            attrs: d.extkey, d.keystab, d.ordinal
- [v₀] ─d.seq→ [v₁] ─d.seq→ …              d.role=sql.val
-                attrs: d.column (name), d.type (decl type/affinity),
-                       d.null (present iff NULL)
-                +d.ofcol→ [column cell]   (schema edge, §3.5)
- [row₀] ─d.conforms→ [table cell]         (schema edge, §3.5)
- [fk val] ─d.ref→ [target row]            (FK edges, §3.5, deferred)
+ [row₀]    d.role=sql.row        content: display key (§3.3)
+   │ +d.contains → first value    attrs: d.extkey, d.keystab, d.ordinal, d.dupcount
+   ▼         (values chain +d.seq)
+ [v₀]      d.role=sql.val        attrs: d.column, d.type, d.null (iff NULL)
+   │
+   │  membership ranks (§3.6):
+   │  [table]  ─d.conforms→ row₁ ─d.conforms→ row₂ ─…   (table is headcell)
+   │  [column] ─d.ofcol→   v₁   ─d.ofcol→   v₂   ─…    (column is headcell)
+   │  [target] ─d.ref→     fkval₁ ─d.ref→   fkval₂ ─…  (target is headcell)
+   │
+   └ [row] ─d.conforms? no: the row is a MEMBER of the table's rank;
+     it reaches the table by walking -d.conforms to the headcell.
 ```
 
 Three structural decisions, each load-bearing:
 
-1. **A page contains *every* row, rows chain `d.seq`.** `promote()` promotes the reachable subgraph
-   of a root ([`arena_manifold.hpp:823-826`](apps/common/xanadu/zigzag/arena_manifold.hpp)): a page
-   cell with `d.contains` to each row makes `promotePage` a single call (§6.2), while `d.seq` keeps
-   result order for traversal. This is the same firstborn/sibling split as `d.contains`/`d.seq`
-   elsewhere, with containment widened to all members so reachability does not depend on walking a
-   chain.
+1. **Firstborn `d.contains`, sibling `d.seq`, everywhere.** `conn` contains the first query, a query
+   contains the first page, a page contains the first row, a row contains the first value, a table
+   contains the first column; siblings chain `d.seq`. This is the only encoding `arena.link()`
+   realizes — anything else self-evicts (§2.2) — and it is what `project()`'s root detection and the
+   VQL idiom `##/d.contains/d.seq` already assume. (The first draft's "widened containment to all
+   members" was unimplementable: N `d.contains` edges leave only the last linked.)
 1. **A row's values are cells, not attributes.** Attribute-rank cells are the framework's metadata
    mechanism ([`projection_session.cpp:71-78`](apps/common/xanadu/zigzag/projection_session.cpp)),
    and a column value is *content*, not metadata: the user annotates "the `amount` field of row
-   1042", which must be a first-class addressable cell. Values therefore project as `d.contains`
-   children chained `d.seq` in select order, each carrying `d.column`/`d.type`/`d.null` attributes
-   and a `d.ofcol` edge to its schema column (§3.5).
-1. **A query is a node.** `forEachEdge` resolves ends through the identity map, and a query node's
-   `d.qhash` is part of every row key it produces (§4.2), so "the same SELECT re-run" lands in the
-   same keyspace and two different queries never collide — while two result sets that happen to
-   contain the same *source row* still share identity when the key is a primary key (§4.3).
+   1042", which must be a first-class addressable cell. Values project as `d.contains`/`d.seq`
+   children in select order, each carrying `d.column`/`d.type`/`d.null` attributes and membership in
+   its column's `d.ofcol` rank (§3.6).
+1. **A query is a node.** Its `d.qhash` scopes the keyspace of every *unkeyed* row it produces
+   (§4.3) — keyed rows take table-scoped `pk:` keys that deliberately omit `qhash` so browse and
+   query modes unify on `(schema, table, pk)` (§4.4).
 
 ### 3.2 Roles and the canonical/generic split
 
 Roles ride `d.role` as attribute cells, as every lens does: `sql.conn`, `sql.query`, `sql.page`,
-`sql.row`, `sql.val`, `sql.table`, `sql.col`. The generic structural ranks take their canonical
-meanings: `d.contains` (conn→query→page→row→value, query→page, table→column), `d.seq` (pages, rows,
-values, columns), `d.ref` (foreign-key and user cross-references), `d.clone` (only for genuine
-shared-authority content — a duplicate row value is *not* a clone; two equal strings are two
-occurrences). SQL-specific ranks are declared via `dimensions()` under their own names:
+`sql.row`, `sql.val`, `sql.table`, `sql.col`, `sql.count` (a `COUNT(*)` page, §5.4), `sql.annot`
+(the promotion envelope, §6.1). The generic structural ranks take their canonical meanings;
+SQL-specific ranks are declared via `dimensions()` under their own names. A page is the materialized
+form of a window — the terms are used interchangeably from here.
 
-| dimension                        | kind           | meaning                                         |
-| -------------------------------- | -------------- | ----------------------------------------------- |
-| `d.contains`                     | generic (enum) | conn→query→page→row→value; table→column         |
-| `d.seq`                          | generic (enum) | page order, row order, column order             |
-| `d.ref`                          | generic (enum) | foreign-key edge row→row                        |
-| `d.role`                         | generic (attr) | node kind (`sql.row`, `sql.page`, …)            |
-| `d.extkey`                       | generic (attr) | the row's `ExternalKey`, for promotion (§6.3)   |
-| `d.conforms`                     | sql custom     | row→table, value→column conformance (schema)    |
-| `d.ofcol`                        | sql custom     | value→schema-column edge                        |
-| `d.column`                       | sql custom     | a value's column name                           |
-| `d.type`                         | sql custom     | declared type / affinity (`TEXT`, `INTEGER`, …) |
-| `d.null`                         | sql custom     | present iff the value is SQL NULL (§3.3)        |
-| `d.ordinal`                      | sql custom     | the row's position in its result (scalar)       |
-| `d.keystab`                      | sql custom     | key stability class: `pk`/`hash`/`ordinal` (§4) |
-| `d.qhash`                        | sql custom     | hash of normalized query + bound params         |
-| `d.params`                       | sql custom     | bound parameter rendering                       |
-| `d.winlo`/`d.winhi`/`d.wincount` | sql custom     | page window bounds (§5.3)                       |
-| `d.state`                        | sql custom     | `live`/`deferred`/`tossed`/`stale` page state   |
+| dimension                        | kind           | meaning                                             |
+| -------------------------------- | -------------- | --------------------------------------------------- |
+| `d.contains`                     | generic (enum) | firstborn: conn→query→page→row→value; table→column  |
+| `d.seq`                          | generic (enum) | sibling order: queries, pages, rows, values, cols   |
+| `d.ref`                          | generic (enum) | FK referrer rank headed by the target row           |
+| `d.role`                         | generic (attr) | node kind (`sql.row`, `sql.page`, …)                |
+| `d.extkey`                       | generic (attr) | the subject's `ExternalKey`, for promotion (§6.3)   |
+| `d.conforms`                     | sql custom     | row-membership rank headed by a `sql.table` cell    |
+| `d.ofcol`                        | sql custom     | value-membership rank headed by a `sql.col` cell    |
+| `d.column`                       | sql custom     | a value's column name (display; `d.ofcol` is truth) |
+| `d.type`                         | sql custom     | declared type / affinity (`TEXT`, `INTEGER`, …)     |
+| `d.pk`                           | sql custom     | present on a `sql.col` in the primary key, in order |
+| `d.notnull`                      | sql custom     | present on a `sql.col` declared `NOT NULL`          |
+| `d.null`                         | sql custom     | present iff the value is SQL NULL (§3.4)            |
+| `d.ordinal`                      | sql custom     | the row's position in its result                    |
+| `d.dupcount`                     | sql custom     | occurrences the cell stands for, if > 1 (§4.3)      |
+| `d.keystab`                      | sql custom     | key stability class: `pk`/`rid`/`hash`/`ord` (§4)   |
+| `d.qhash`                        | sql custom     | hash of normalized query + bound params             |
+| `d.params`                       | sql custom     | bound-parameter rendering (display)                 |
+| `d.winlo`/`d.winhi`/`d.wincount` | sql custom     | page window bounds, typed-encoded (§5.3)            |
+| `d.state`                        | sql custom     | page state `deferred`/`live`; row state `stale`     |
 
 An unknown rank name mints an empty dimension rather than erroring
 ([`multi_store.cpp:353`](apps/common/xanadu/multi_store.cpp), the fallthrough), so every name above
-is declared in `dimensions()` up front — a missing declaration is a silent-empty-rank bug, the
-§4.3.1 failure mode.
+is declared in `dimensions()` up front — a missing declaration is a silent-empty-rank bug, the lens
+doc's §4.3.1 failure mode. All dimension minting goes through `VortexCore::findOrMintDimension`,
+never `ArenaManifold::ensureDimension`: the two consult different name maps (the `d.dims` rank vs
+`arenaDims_`), and mixing them mints two same-named dimensions — the same silent-empty-rank bug one
+level down (`vortex_core.cpp`, `findOrMintDimension`; `arena_manifold.cpp`, `ensureDimension`).
 
-### 3.3 NULL, empty string, and monostate
+Two honesty notes on this table: (a) attribute cells are minted as **text**
+(`arena.makeCell(std::string_view)` in `projection_session.cpp`), so `d.ordinal`/`d.wincount`/
+`d.dupcount` lose R6 scalar fidelity until the framework grows scalar attribute cells — a display
+and comparison limitation, not an identity one; (b) ~15 bespoke `d.*` names sit in unresolved
+tension with plan invariant A3 ("struct fields bastardize dimensions"), which the landed
+`FilesystemLens` (`d.size`/`d.mtime`/`d.perm`/`d.name`) and the parent lens doc's R13 ("metadata is
+cells on a dimension") already endorse — this spec follows the landed convention and records the
+tension rather than resolving it.
 
-SQL `NULL` maps to `NodeContent{std::monostate}` → an empty cell *plus* a `d.null` attribute. The
-attribute is load-bearing, not decoration: an empty-string value also mints a cell whose text is
-`""`, and `arena.textOf` cannot tell the two apart. The rule a query can rely on: **a NULL value
-cell carries `d.null`; an empty-string cell does not.** This closes the §8A "NULL ≠ '' ≠ 0"
-complaint without a parallel shadow rank — `d.null` is the flag, `d.type` carries the column's
-declared type, and the cell itself stays honestly empty.
+### 3.3 A row's content: the display key
 
-### 3.4 Blobs by reference, never by import
+A `sql.row` cell's content is a **display key**: the human-readable form of its key subject — the pk
+rendering for `pk:`/`rid:` rows, a short hash prefix for `h:` rows. It exists so a row cell has
+visible text; the machine identity is always `d.extkey`.
 
-A BLOB does not become a content span on browse. Projecting a 2 MB blob into the author's
-permascroll to *view* it is exactly the R8 violation §8A warned about — a read-only browse must not
-mutate the store. Round one projects a blob value cell whose content is a rendering —
-`blob(1048576 B, sha256:ab12…)` — with `d.type= BLOB` and the digest as the cache key. The bytes are
-fetched *through the backend on demand*: only when the user opens the cell for viewing, or when the
-row is promoted (§6.2, where `importFileStore` is the correct tool — promotion is the moment bytes
-legitimately enter the permascroll). The framework needs no `BlobRef` variant for round one; the
-rendering-plus-backend-fetch split keeps it honest.
+### 3.4 NULL, empty string, and monostate
 
-### 3.5 The schema projection (browse mode)
+SQL `NULL` maps to `NodeContent{std::monostate}` → a cell with no content span *plus* a `d.null`
+attribute. The attribute is load-bearing, not decoration: an empty-string value mints a cell whose
+content is a zero-length span, and `arena.textOf` cannot tell the two apart (the arena *can* — a
+NULL cell has `spanCount=0`, an `""` cell has one zero-length span — but the distinction **collapses
+at promotion**: both cross as `makeCell(version, "")`, so on the durable side `d.null` is the sole
+NULL marker). The rule a query can rely on, both sides of the crossing: **a NULL value cell carries
+`d.null`; an empty-string cell does not.**
 
-In **browse mode** (§5.1) the lens also projects the schema itself, because the schema is what makes
-rows explainable: `conn` → `d.contains` → a `sql.table` cell per table/view → `d.contains` → a
-`sql.col` cell per column (content: name; attributes: `d.type`, `d.pk`, `d.notnull`, `d.ordinal`).
-Rows get a `d.conforms` edge to their table cell; values get a `d.ofcol` edge to their column cell —
-the §8A "schema vs instance" node kinds expressed as edges rather than a new enum field, since the
-framework's `SourceNode` has no kind slot and doesn't need one: conformance is itself traversable
-structure. In **query mode** the lens still mints column cells for the result's own column list
-(from cursor metadata, §7.1) so `d.ofcol` resolves even where no base table is visible; a value's
-`d.conforms` is simply absent when the backend cannot attribute it to a base column — an honest
-omission, not a `NULL` rank.
+### 3.5 Blobs: a byte budget, not laziness-by-pretense
 
-Foreign keys mint `d.ref` edges row→row **only when both ends are already materialized** (both in
-the key map — an edge naming an unprojected node is skipped silently,
-[`projection_session.cpp:88-90`](apps/common/xanadu/zigzag/projection_session.cpp)). FK edges are
-therefore opportunistic in round one: emitted by `forEachEdge` where resolvable, never forced by
-materializing the target. Chasing references across pages is a navigation gesture that *requests* a
-window (§5.5), not a projection-time obligation.
+The `SqlValue` variant carries owned bytes (`std::vector<std::byte>`), so a blob is copied into the
+backend's row buffer at fetch time — true laziness after the cursor steps on is impossible without a
+re-query, and re-querying needs a rowid only `pk:`/`rid:` rows have. Honest treatment: **blobs are
+fetched up to a per-value byte budget** (`SqlBackend` declares it, e.g. 64 KiB). Within budget, the
+value cell's content is a size-only rendering (`blob(1048576 B)` — no digest, since a hash requires
+the eager read anyway and the bytes live in the backend buffer until the cell is opened or
+promoted); the bytes ride the buffer for the annotate/promote path. Over budget, the cell renders
+`blob(… B, truncated)` and bytes are re-fetchable **only** for `pk:`/`rid:` rows, by point-select or
+`sqlite3_blob_open` — for `h:` rows the over-budget blob is simply not viewable, and the cell says
+so. Bytes enter the permascroll only at promote time via `importFileStore` (§6.2) — the first moment
+they legitimately may (convergence R8).
+
+### 3.6 Membership ranks for schema and references
+
+In **browse mode** (§5.1) the lens also projects the schema, because schema is what makes rows
+explainable: `conn` → `d.contains`/`d.seq` → a `sql.table` cell per table/view →
+`d.contains`/`d.seq` → a `sql.col` cell per column (content: name; attributes: `d.type`, `d.pk`,
+`d.notnull`, `d.ordinal`). The many-to-one relations become ranks headed by the schema/row cell they
+name:
+
+- **`d.conforms`**: `[table] → row₁ → row₂ → …` — the table is the headcell; a row finds its table
+  by walking *negward* `d.conforms` to the headcell (`d.role = sql.table`), and the table enumerates
+  conforming rows *posward*. This is the §8A "schema vs instance" node-kind gap expressed as
+  structure rather than a field: conformance is traversable, which is the point.
+- **`d.ofcol`**: `[column] → v₁ → v₂ → …` — the same pattern from a `sql.col` headcell. A value's
+  column is its negward `d.ofcol` walk to the headcell; `d.column` remains as the cheap display
+  attribute (and the only column identity available in query mode when schema attribution fails).
+- **`d.ref`** (foreign keys): `[target row] → fkval₁ → fkval₂ → …` — the referenced row heads the
+  rank of its referrers, where a referrer member is the FK *value* cell (annotating "this reference"
+  is then annotating the member cell — the §8A incidence/occurrence cell for free). A referrer
+  resolves its target by negward walk; a row enumerates referrers posward. Emitted **only when both
+  ends are already materialized** — an edge naming an unprojected node is skipped silently
+  ([`projection_session.cpp:88-90`](apps/common/xanadu/zigzag/projection_session.cpp)); chasing a
+  reference across pages is a navigation gesture that *requests* a window (§5.4), never a
+  projection-time obligation. Many members on one rank is not a deg± violation: each member holds
+  its own pos/neg pair.
+
+In **query mode** the lens still mints `sql.col` cells for the result's own column list (from cursor
+metadata, §7.1) so `d.ofcol` resolves; a *row's* `d.conforms` is absent where the backend cannot
+attribute it to exactly one base table — an honest omission, not a `NULL` rank.
 
 ______________________________________________________________________
 
@@ -276,212 +351,341 @@ ______________________________________________________________________
 
 ### 4.1 The encoding
 
+Two grammars share the `sql:` prefix and must not be confused: the **lens URI** a user types
+(`sql:sqlite:///abs/path.db` — browse, §7.4) and the **ExternalKey** a node carries:
+
 ```
 ExternalKey (sql) ::= "sql:" <backend> ":" <dbid> ":" <subject>
-  <backend> ::= "sqlite" | "pg"                    -- §7, more later
-  <dbid>    ::= "f:" <sha256(canonical path)>      -- sqlite: the file
-              | "s:" <host> ":" <port> "/" <db>    -- pg: the service
-  <subject> ::= "t:" <table> ":" "pk:" <pk-rendering>          -- keyed row
-              | "q:" <qhash> ":" "h:" <sha256(row rendering)>  -- hashed row
-              | "q:" <qhash> ":" "ord:" <ordinal>              -- positional row
-              | "t:" <table>                                   -- table
-              | "t:" <table> ":" "c:" <column>                 -- column
-              | "q:" <qhash>                                   -- query
-              | "q:" <qhash> ":" "p:" <window-id>              -- page
+  <backend> ::= "sqlite" | "pg"                           -- §7
+  <dbid>    ::= "f:" <sha256(realpath of db file)>        -- sqlite: exactly one file;
+                                                        --   ATTACH is denied (§7.2), so a
+                                                        --   connection names one database
+              | "s:" <conninfo-hash>                      -- pg: hash of normalized
+                                                        --   host:port/db (+ user)
+  <subject> ::= "t:" <stable> ":" "pk:" <pk-rendering>    -- declared-PK row
+              | "t:" <stable> ":" "rid:" <rowid>          -- implicit-rowid row
+              | "q:" <qhash> ":" "h:" <rowhash>           -- hashed row (query or view)
+              | "q:" <qhash> ":" "ord:" <ordinal>         -- positional row (reserved)
+              | "t:" <stable>                             -- table/view
+              | "t:" <stable> ":" "c:" <column>           -- column
+              | "q:" <qhash>                              -- query
+              | "q:" <qhash> ":" "p:" <window-id>         -- page stub
+  <stable>  ::= <schema-qualified, canonically-cased table name>   -- see §4.5
+  <qhash>   ::= sha256 over (normalized SQL text || typed params)  -- see §4.5
 ```
 
-`<qhash>` is SHA-256 over normalized statement text plus the bound-parameter rendering — identical
-queries share a keyspace, and the hash is recorded on `d.qhash` so a stored reference can re-derive
-the query it names. The `backend`/`dbid` prefix is what lets one arena host two databases (or a
-database and a xanadoc) with zero key collisions — the string-key design already assumes disjoint
-prefixes (§5.2 of the lens doc).
+The typed renderings, all normative (they feed key *equality*):
+
+```
+<sql-value> ::= <tag> ":" <payload>
+  tag "n" NULL | "i" int64 decimal | "f" IEEE-754 bits as 16 hex
+    | "t" UTF-8 text, percent-encoded | "b" sha256 hex of the blob bytes
+<pk-rendering> ::= <sql-value> ("," <sql-value>)*   -- declared PK order:
+                                                   -- table_xinfo pk positions /
+                                                   -- conkey attnums (§7)
+rowhash input  ::= <sql-value>* in select order, joined by U+0000
+                 (column names excluded: qhash already scopes the keyspace)
+<window-id>  ::= "k:" <sql-value>*   -- keyset window: first row's full sort key
+              |  "o:" <ordinal>      -- ordinal window: start offset
+```
+
+Keys stay bounded: a blob contributes its digest, not its bytes. Composite keys are first-class —
+`<pk-rendering>` is a tuple — because the common case is multi-column.
 
 ### 4.2 The ladder, weakest to strongest
 
-1. **`pk:` — keyed.** The lens can prove the row's source identity: a single-table browse including
-   the primary key (or SQLite `rowid`) in the projection. Survives refresh, reorder, update of
-   *other* columns, and page moves. This is the only class whose annotation can safely follow a
-   replay by name (§6.4).
-1. **`h:` — hashed.** No provable key (a join, a grouped select, a keyless table): the key is the
-   row's content hash. Survives reorder and refresh-that-didn't-touch-this-row; two identical rows
-   collapse to one key — which is *correct* for deduplicated viewing but means an annotation on one
-   applies to all copies. Honest, and marked so.
-1. **`ord:` — positional.** Nothing better exists: the key is the row's ordinal in the result.
-   Survives nothing — a refresh that inserts a row above renumbers it. Legal only because
-   `d.keystab=ordinal` tells every consumer, including the annotation path, that this identity is
-   positional. The rule is the same as §5.2's no-inode fallback: say what the key can promise, never
-   pretend it is stable.
+1. **`pk:` — declared-key.** The result maps injectively to exactly one base table and includes
+   every declared PK column (any column of an `INTEGER PRIMARY KEY` alias counts — an IPK is stored
+   data and survives `VACUUM`). Survives refresh, reorder, update of other columns, page moves.
+1. **`rid:` — implicit rowid.** Single-table browse of a table with no declared PK but a rowid. The
+   rowid is volatile twice over — `VACUUM` renumbers it, and deletion of the max rowid lets a later
+   insert *reuse* it without any VACUUM — so it gets its own class rather than masquerading as `pk`
+   (this resolves the first draft's U-S2: the fourth class is adopted, not left open).
+1. **`h:` — hashed.** No provable key (joins, grouped selects, views, keyless `WITHOUT ROWID`,
+   missing column metadata): the key is the row's content hash over the typed encoding above.
+   Survives reorder and refresh-that-didn't-touch-this-row; an update mints a new key.
+1. **`ord:` — positional, reserved.** Not emitted in round one; reserved for a backend that cannot
+   buffer a row long enough to hash it (a future streaming cursor). If it is ever emitted, only
+   `d.keystab=ordinal` saves it from masquerading as stable — the first draft made it a live rung
+   with no trigger; there is no honest one.
 
-`d.keystab` carries the class (`pk`|`hash`|`ordinal`) on every row cell; it is the attribute a
-"rekey after VACUUM" or a refresh reconciliation consults first.
+`d.keystab` carries the class on every row cell; it is the attribute a rekey or refresh
+reconciliation consults first, and the attribute the annotation contract reads (§6.4).
 
-### 4.3 Which class applies is decided per query, not per row
+### 4.3 Eligibility is per query, and cells model *subjects*
 
-The backend reports, per result, whether each column is a base-table key column (§7.1
-`keyColumns()`): SQLite exposes `sqlite3_column_table_name`/`origin_name` when compiled in (a
-build-time probe, not an assumption — §7.2), PostgreSQL exposes `PQftable`/`PQftablecol`. A result
-containing *all* key columns of *one* base table gets `pk:` keys; anything else falls to `h:`, with
-`ord:` reserved for results where even hashing is meaningless (a streaming `ord:` fallback the
-backend can disable in favour of `h:` always — the default is `h:`).
+The backend reports, per result column, its base-table attribution and key membership (§7.1
+`SqlColumn`): SQLite uses `PRAGMA table_xinfo` (whose `pk` field carries composite-PK *position* —
+`table_info` lacks generated/hidden columns and positions) plus, where the build provides them,
+`sqlite3_column_table_name`/`origin_name` (`SQLITE_ENABLE_COLUMN_METADATA` — a **link probe**, not
+an `#ifdef`: defining it against a lib that lacks the symbols fails at link); PostgreSQL uses
+`PQftable`/`PQftablecol` attnums joined to `pg_constraint` `conkey` (`contype='p'`). A result gets
+`pk:` keys when **exactly one** base table qualifies *and* rows map injectively — an equijoin on two
+tables' PKs satisfies the test twice and is refused to `h:`, and a join fan-out that duplicates one
+table's rows collapses them: **a cell models a subject, not an occurrence**, so two result rows with
+one key become one cell carrying `d.dupcount = 2`. The same rule governs `h:` duplicates; the lens
+dedups at emission (one `SourceNode` per distinct key), and duplicate keys inside one enumeration
+are a lens bug, never a silent collapse. When column metadata is unavailable the degradation is
+per-mode, not global: **browse keeps `pk:`** (the lens generated the query and knows its table —
+`table_xinfo` alone suffices), **query falls to `h:`**.
 
-### 4.4 What breaks each rung
+### 4.4 What unifies and what breaks each rung
 
-- `VACUUM` renumbers rowids of `INTEGER PRIMARY KEY`-less tables — the §8A `rekey()` case. For `pk:`
-  rows the *user-declared* PK is preferred over rowid exactly because rowid is volatile; where rowid
-  is all there is, the key embeds it and `d.keystab` still reads `pk` — a documented lie the open
-  questions (U-S2) own.
-- An `UPDATE` to a key column or to any hashed column changes the key — by design; the old key's
-  promoted twin keeps its recorded `d.extkey` as provenance (§6.3), and refresh reconciliation is
-  what notices "same row, new key" (a `h:`-collision or a `pk:`-match on other columns — policy, not
-  mechanism; U-S3).
-- A cross-query `pk:` row *is* the same subject — browse and query-mode keys for the same
-  `(table, pk)` pair are equal by construction, so annotations unify across the two modes. This is
-  deliberate and worth the constraint it imposes: `pk:` keys never include `<qhash>`.
+- **Cross-query unification.** `pk:`/`rid:` keys name `(stable, key)` — never `<qhash>` — so a row
+  reached by browse and by two different queries is *one subject, one cell, one annotation target*.
+  This is the deliberate payoff of the key grammar.
+- **Implicit-rowid reuse (`rid:`).** `max(rowid)+1` assignment means a deleted high-water rowid is
+  re-issued to a later insert; `VACUUM` renumbers wholesale. A `rid:` key asserts position, not
+  history — `d.keystab=rid` is the honest label and the annotation contract treats it accordingly.
+- **Key/hashing column updates.** An `UPDATE` to a PK or any hashed column changes the key — by
+  design; the promoted twin keeps its `d.extkey` as provenance and refresh reconciliation is what
+  notices "same row, new key" (policy, not mechanism; U-S3).
+- **Schema-qualified names (`<stable>`).** PG tables resolve to `<schema>.<table>` via
+  `PQftable`→`pg_class.relnamespace`/`relname` (also fixing `search_path` aliasing — `users` and
+  `public.users` must produce one key); SQLite uses the canonical case from `sqlite_schema`, so
+  `FROM Invoice` and `FROM invoice` key alike.
+- **`qhash`.** `sqlite3_normalized_sql()` (3.27+, where built) or canonical raw text, plus the typed
+  parameter encoding — identical queries share a keyspace regardless of literal-vs-bound spelling.
+
+### 4.5 What breaks the whole ladder
+
+- **`ATTACH`ed databases.** The `<dbid>` grammar names one file; a connection attaching several
+  breaks it. Resolution: **`ATTACH` is denied by the authorizer** (§7.2) — the single-file keyspace
+  is enforced, not assumed. Temp tables live in the `temp` database and never mint `pk:`/`rid:` keys
+  (they are `h:` — nothing about them is durable).
+- **Path aliasing.** `realpath(3)` (not `weakly_canonical` alone) resolves symlinks so two spellings
+  of one file hash identically; PG endpoints alias similarly (unix sockets vs TCP to one cluster) —
+  `<conninfo-hash>` normalizes what libpq reports, not what the user typed.
+- **Text rendering is not a key input.** Floats (`-0.0`, precision drift), dates, `money` — text
+  renderings vary by platform/GUC. The typed encoding above is the canonical form; on PG the backend
+  pins session GUCs (`DateStyle`,`IntervalStyle`,`extra_float_digits`,`bytea_output`) at connect so
+  renderings are stable *within* a session too.
 
 ______________________________________________________________________
 
 ## 5. Windowing and Replay
 
-### 5.1 Two modes, two paging guarantees
+### 5.1 Two modes, two paging mechanisms
 
-| mode     | query source                         | window mechanism                       | key class      |
-| -------- | ------------------------------------ | -------------------------------------- | -------------- |
-| `browse` | lens-generated `SELECT … ORDER BY k` | **keyset**: `WHERE k > :last LIMIT :n` | `pk:`          |
-| `query`  | arbitrary user SQL                   | **ordinal**: `LIMIT :n OFFSET :m`      | `h:` or `ord:` |
+| mode     | query source                         | window mechanism                                     |
+| -------- | ------------------------------------ | ---------------------------------------------------- |
+| `browse` | lens-generated `SELECT … ORDER BY …` | **keyset**: tuple predicate `WHERE (cols) > (:sk)`   |
+| `query`  | arbitrary user SQL                   | **ordinal**: held cursor forward; replay by `OFFSET` |
 
-Browse mode is how the user reaches a table without writing SQL (a `sql.table` cell's "open" gesture
-generates the query); the lens controls the text, so it appends the key column to `ORDER BY` and
-paginates by key — windows are *stable under insertion* and replayable by name. Query mode wraps
-arbitrary SQL: the lens cannot rewrite it safely (it appends `LIMIT`/`OFFSET` via a subquery —
-`SELECT * FROM (<sql>) LIMIT :n OFFSET :m` — never by text surgery on the original), so windows are
-positional and `d.keystab` tells the truth about them.
+Key class is orthogonal — decided per §4.3 for *both* modes (`pk:`/`rid:` wherever eligible, `h:`
+otherwise); the first draft wrongly tied `pk:` to browse mode, which would have broken §4.4's
+cross-mode unification. In browse mode the lens generates `SELECT <cols>, <sort key>` over one table
+— it appends the sort columns **plus the PK** to `ORDER BY` so the sort key is unique, then
+paginates by keyset (row-value tuple comparison `(c1,…,ck) > (?,?,…)`, SQLite ≥ 3.15 and PG both
+support row values; a nullable sort column degrades that query to ordinal windows — stated, not
+hidden). For an implicit-rowid browse the generated SELECT *explicitly adds* `rowid` — `SELECT *`
+does not include it, and a user column literally named `rowid` would shadow it (detected via
+`table_xinfo`, not the name). Query mode wraps nothing into the user's text: live windows read the
+held cursor forward (which preserves the query's own `ORDER BY` perfectly); a *replay* of an ordinal
+window re-prepares `SELECT * FROM (<sql>) LIMIT :n OFFSET :m` — with the `;`-stripping,
+single-statement tail check, and "ORDER BY inside a FROM-subquery is not contractually guaranteed"
+caveat documented at §7.2.
 
-### 5.2 `ProjectionSession::refresh()` — the one new framework method
+### 5.2 `ProjectionSession::refresh()` — the one new framework verb
 
-A windowed lens is stateful: `SqlLens` holds the backend cursor and a buffer of materialized pages;
-`forEachNode` enumerates *the current materialized state* — structural nodes plus every row of every
-`live` page. To open page k, the app asks the lens to fetch page k into its buffer, then calls a new
-session method:
+A windowed lens is stateful: `SqlLens` owns the backend and a buffer of materialized pages;
+`forEachNode` enumerates *the current materialized state* — structural cells plus every row of every
+`live` page. To open page k, the app asks the lens to fetch page k into its buffer
+(`materializePage`, §5.4), then calls a new session method:
 
 ```cpp
-/// Re-enumerate the lens and reconcile the arena with it: mint cells for keys
-/// not yet in the map, leave existing cells (and their CellRefs) untouched,
-/// re-assert edges (a page's d.seq chain and d.contains set are rebuilt each
-/// refresh), and mark projected cells whose key no longer appears as stale
-/// via their d.state attribute. Union semantics for identity; replace
-/// semantics for structure.
+/// Re-enumerate the lens and reconcile the arena with it:
+///  - mint cells for keys not yet in the map (same key -> same CellRef);
+///  - re-assert edges (link() overwrites in place, so a page's d.seq chain and
+///    firstborn d.contains reflect THIS enumeration);
+///  - rewrite attribute cells whose re-emitted value changed (the old attr
+///    cell is orphaned garbage reclaimed at the next rewind/compaction);
+///  - for keys in the map absent from this enumeration, ask the lens for
+///    staleAttributes(key) and write those attributes (SqlLens answers
+///    {{"d.state","stale"}}) — the framework never hardcodes a rank name;
+///  - recompute roots().
+/// Returns the count of newly minted node cells. Failures inside the mint
+/// path are engine bugs (expectWritten); a failure to reach the lens is
+/// caller-visible and leaves the arena unchanged.
 [[nodiscard]] std::size_t refresh();
 ```
 
 Union-on-identity is what makes replay safe: a row seen in page 1 and re-fetched in page 5 keeps its
-cell — `keyToCell_` hits, no re-mint — so anything pointing at that cell (a selection, an ephemeral
-note draft, a promoted twin's proxy) is undisturbed. Structure is replace-on-refresh: the page's
-`d.contains`/`d.seq` reflect *this* fetch, so a row that vanished is unlinked from the page and its
-`d.state` attribute flips to `stale` — the cell persists (the arena is append-only; nothing
-un-mints) but no live page reaches it. `refresh()` is framework code, not lens code: the same loop
-serves `ProcLens::refreshFromHost` and any future live lens — the current one-shot `project()`
-becomes the first `refresh()`.
+cell — `keyToCell_` hits, no re-mint — so anything the session maps stays valid. Structure is
+replace-on-refresh: a row that vanished is simply not re-asserted; the page's `d.seq`/`d.contains`
+reflect *this* fetch, and the missing key gets the lens's stale attributes — the cell persists (the
+arena is append-only; nothing un-mints outside a release) but no live page reaches it. `refresh()`
+is framework code, not lens code: the same loop serves `ProcLens::refreshFromHost` and any future
+live lens — the current one-shot `project()` becomes the first `refresh()`.
 
 ### 5.3 A page is a cell that knows how to re-fetch itself
 
-Each page cell carries its own replay parameters as attributes — `d.winlo`/`d.winhi` (keyset
-bounds), `d.wincount`, `d.qhash`, `d.state` — so a page is self-describing: any session that can
-reach the backend can replay it without out-of-band state. The three replay semantics, all against
-the *recorded* parameters:
+Each page cell carries its replay parameters — `d.winlo`/`d.winhi` (the window's sort-key bounds as
+typed `<sql-value>` encodings, not display strings — rebinding needs the type: `'1042'` ≠ `1042`
+under SQLite affinity), `d.wincount`, `d.qhash`, `d.state` — so a page is self-describing. The lens
+also keeps the typed `SqlValue`s in its page buffer; the attributes are the durable/display form of
+the same data. The three replay semantics, all against the recorded parameters:
 
-1. **Live replay.** Re-execute the window SQL against current data. Cheapest; sees inserts and
-   deletes; the honest default for dashboards.
-1. **Keyset replay** (browse mode only). `WHERE k BETWEEN :winlo AND :winhi` — re-fetch *the same
-   rows by key*, so the window is stable under concurrent insertions elsewhere. `d.wincount` bounds
-   the fetch; a shortfall means rows were deleted and shows as fewer live rows, not as wrong ones.
-1. **Snapshot replay.** Inside one `REPEATABLE READ`/`SERIALIZABLE` transaction (or SQLite's
-   read-transaction snapshot), every window reads one consistent version — paging backward re-reads
-   bytes already read, *deterministically*. The page's `d.state` records which snapshot scope it
-   belongs to; crossing a snapshot boundary is defined as a live replay so no cell silently mixes
-   versions.
+1. **Live replay.** Re-execute the window fetch against current data. Cheapest; sees inserts and
+   deletes; the honest default.
+1. **Keyset replay** (browse mode only). Re-prepare the recorded window SQL with `winlo`/`winhi`
+   bound — `WHERE (sort cols) BETWEEN (:lo) AND (:hi)` as row-value predicates — re-fetching *the
+   same rows by key*, stable under concurrent insertions elsewhere. A shortfall vs `d.wincount`
+   means rows were deleted and shows as fewer live rows, not as wrong ones.
+1. **Snapshot replay.** Inside one consistent-read scope every window reads one version — backward
+   paging re-reads bytes already read, deterministically. The mechanics differ honestly by backend
+   (§7.2, §7.3): SQLite gets it only in **WAL mode** (a held read transaction pins a snapshot at
+   first read — `BEGIN DEFERRED` itself pins nothing; a `PRAGMA journal_mode` conversion is a
+   persistent header write a read-only connection cannot make, so rollback-journal databases get no
+   snapshot replay and the page's `d.state` says so — a held SHARED lock there would deny every
+   writer); PostgreSQL gets it from the transaction wrapping its cursor/portal. `SQLITE_SCHEMA` from
+   concurrent DDL maps to `d.state=stale` + a `refresh()`. `PRAGMA data_version` is the cheap "did
+   another connection commit" probe; `sqlite3_snapshot_*` (build probe) is the round-two
+   transfer-capable option.
 
-### 5.4 Rewind: `checkpoint()`/`rewind()` — the A9 toss made session-safe
+### 5.4 Deferred pages and the stub horizon
 
-Scrolling forward without bound grows the arena forever — the exact failure A9 exists to prevent.
-The session gains:
+`forEachNode` cannot yield a stub per page — without an eager `COUNT(*)` the page count is unknown,
+and computing it is a scan the user didn't ask for. The enumeration is therefore a **bounded stub
+horizon**: the lens emits one `sql.page` stub per materialized window *plus one trailing stub*
+carrying `d.state=deferred` and the next window's `d.winlo` (the last seen sort key, or the next
+`OFFSET`). Materializing a stub is `materializePage(pageKey)` on the lens followed by
+`session.refresh()`; the trailing stub is re-emitted further along each refresh until a fetch comes
+up short, at which point it is simply absent — the end of the result is represented by *no stub*,
+not a marker. A page-cell state is only ever `deferred`/`live` — there is no `tossed` value, because
+a tossed page's row cells are gone (§5.5) and the stub, minted *below* all checkpoints at projection
+time, reverts to `deferred` when the trail replay restores its pre-checkpoint `d.state` attribute. A
+`count(*)` request is itself a replayable page of role `sql.count`, minted on demand.
+
+Stub cells are minted during initial `project()`, *below* every checkpoint — that is what lets them
+survive a rewind and revert cleanly (§5.5).
+
+### 5.5 Rewind: `checkpoint()`/`rewind()` — a stack, with map repair
+
+`mark()`/`release()` are strictly LIFO and `release` is contiguous truncation plus trail replay
+(§2.4): the session's rewind must be a stack too, and it must repair what the arena doesn't own.
 
 ```cpp
-struct Checkpoint { ArenaManifold::Mark mark; std::size_t mapHighWater; };
-[[nodiscard]] Checkpoint checkpoint();      ///< mark() + current map size
-void rewind(const Checkpoint &);            ///< release(mark); drop keys minted since
+/// One rewind boundary. High-waters let rewind() forget exactly what was
+/// minted after the mark: keyToCell_/cellToKey_ entries (by mint order),
+/// roots_ entries, and the checkpoint stack itself. Dimensions are NOT
+/// checkpointed — they must only ever be minted via findOrMintDimension
+/// (§3.2), whose d.dims rank survives a release.
+struct Checkpoint {
+  ArenaManifold::Mark mark;
+  std::size_t keyHighWater;
+  std::size_t rootsHighWater;
+};
+
+[[nodiscard]] Checkpoint checkpoint();
+
+/// Pop every checkpoint above @p cp, then release(cp.mark): tosses all cells
+/// minted after it, truncates the identity maps and roots_ to their
+/// high-waters, and reverses trail entries (a stub's d.state attr reverts to
+/// deferred; a link re-asserted since is restored). Refuses — naming the
+/// pinned key — if any pinned cell was minted after cp (a selection, a draft
+/// annotation anchor): there is no selective skip, because release() is
+/// contiguous truncation.
+std::expected<void, std::string> rewind(const Checkpoint &cp);
 ```
 
-`ProjectionSession` keeps a mint-order log alongside the two maps, so `rewind` can erase exactly the
-keys minted after the checkpoint — the map-repair the raw `release()` cannot do itself. The
-scroll-forward story is then free: take a checkpoint per page boundary; to go back to page 2,
-`rewind(cp2)` tosses pages 3…N in O(1) (the S5-measured toss), and revisiting page 3 is a *replay* —
-re-fetch, re-mint, same keys → same ExternalKeys → a *new* set of CellRefs this epoch, which is why
-A9 insists identity cross epochs as `ExternalKey`, not CellRef. Anything the user might attach to —
-a selection, a draft annotation — pins its page: pinned pages are skipped by rewind, or the gesture
-refuses with the pin named (policy in §11, U-S4). **Promoted rows are immune to all of this**: they
-live in the `Store`, not the arena (§6).
+The rules the design lives by, each forced by the machinery:
 
-### 5.5 Deferred pages: bounded projection by construction
+- **Stack discipline.** `rewind(cp_k)` first discards `cp_{k+1..N}` then releases `cp_k` — passing a
+  stale mark to `release()` while newer marks are outstanding is not a wrong-answer bug, it is
+  vector-growth corruption (a mark recorded with larger sizes than the truncated vectors makes
+  `resize` *fabricate* slots). Scroll checkpoints are also **outermost**: they may be taken and
+  released only while no solver choice point (`mark()` from vlog/vprolog evaluation) is outstanding,
+  since marks are one shared stack.
+- **CellRef aliasing.** Dense indices are reused after a release, so a CellRef held across a rewind
+  does not dangle — it *aliases* a different cell. Cross-epoch identity is `ExternalKey` only: every
+  consumer re-resolves `cellFor(key)` after `refresh()`/`rewind()` rather than caching a `CellRef`,
+  and the session may expose an epoch counter for cheap staleness checks. (The first draft claimed
+  replay produces "a new set of CellRefs"; the truth — same indices, new occupants — is worse and is
+  why the rule exists.)
+- **Pin = refuse, never skip.** A pinned key minted after `cp` makes `rewind(cp)` return
+  `std::unexpected` naming it; the caller may rewind to a deeper checkpoint or promote the pinned
+  subject first (§6). "Skipped by rewind" is deleted — contiguous truncation cannot skip.
+- **Cost model.** While any mark is outstanding, writes to pre-mark cells trail — the slot *and* its
+  link/content runs copy to the arena tail — and `compact()` is refused. Two consequences: attribute
+  rewrites during `refresh()` (a `d.state` flip) mint an orphaned attr cell each, reclaimed only by
+  the next rewind or compaction; and checkpoints must be **short-lived** — a long-lived checkpoint
+  under an actively refreshing lens pays trail+relocation per touched cell with no reclamation.
+- **Overlay boundary.** A checkpoint must not straddle writes to non-projected cells — base-overlay
+  shadows, attached-space proxies, quote occurrences — because `release()` un-shadows/un-mints those
+  along with the window. The mint-order log suffices for the two identity maps (attribute cells were
+  never mapped — `cellToKey_` records node cells only), but any other `CellRef`-keyed state the
+  session grows must get the same high-water repair.
 
-`forEachNode` yields a page-stub node for every page of the result (the count comes from a
-`LIMIT`-ed probe or `d.wincount=unknown` — a stub need not know the total), marked
-`d.state=deferred` with its `d.winlo`/`d.winhi` recorded but no row children. Materializing a stub
-is the `refresh()` of §5.2. Total count is deliberately *not* computed eagerly: `SELECT COUNT(*)` on
-a large join is a scan the user didn't ask for; the UI shows "N+ rows" from the stub count, not a
-false exact total. A `count(*)` request is itself a replayable page of role `sql.count`.
+**Scrollback policy (honest bound).** Forward scrolling accumulates mints until a rewind — a deque
+of K checkpoints gives K pages of backward reach; scrolling past the horizon is a *slide*: note the
+current page key, `rewind` to the horizon floor, re-materialize from there. Backward history is
+sacrificed, never skipped around; re-fetching is a replay (§5.3). Pinned pages stop a slide at their
+checkpoint (refuse-and-name).
 
 ### 5.6 Recording the walk
 
-Each materialization can append the page's replay parameters (query hash, window bounds, snapshot
-scope, key class) to `system://activity`
-([`store_activity_log.hpp:29`](apps/common/xanadu/store_activity_log.hpp)) as a visit — the same
-append-only record navigation already keeps. A replay is then also *auditable*: "which version of
-page 3 did I annotate from" is a lookup, not a guess. This is optional in round one (the activity
-log is the user's own store), but the hook is cheap because a page is already self-describing
-(§5.3).
+Each materialization gesture — not each fetch — can append the page's replay parameters (query hash,
+window bounds, snapshot scope, key class) to `system://activity`
+([`store_activity_log.hpp:29`](apps/common/xanadu/store_activity_log.hpp)) as a visit, coalesced per
+navigation gesture so a scroll doesn't spam the walk history. Optional in round one; the hook is
+cheap because a page is already self-describing (§5.3).
 
 ______________________________________________________________________
 
 ## 6. Promotion on Demand: The Annotation Crossing
 
 The arena projection is ephemeral — `ephemeralBit`-tagged refs that a persistent `SetLink` refuses
-([`manifold.hpp:159`](apps/common/xanadu/zigzag/manifold.hpp); the lens doc's invariant 4). A row a
-user wants to annotate must cross into a `Store`, and the only legal crossing is `promote()`
+([`manifold.hpp:159`](apps/common/xanadu/zigzag/manifold.hpp)). A row a user wants to annotate must
+cross into a `Store`, and the only legal crossing is `promote()`
 ([`arena_manifold.hpp:834`](apps/common/xanadu/zigzag/arena_manifold.hpp)). Nothing in the lens
-promotes by itself: **promotion is a user gesture**, which is what keeps R8 intact — browsing and
-replaying mint zero ops anywhere.
+promotes by itself: **promotion is a user gesture**, which is what keeps convergence R8 intact —
+browsing and replaying mint zero ops anywhere.
 
-### 6.1 `promoteRow`
+### 6.1 The staging envelope: why `promote(row)` alone cannot work
 
-The gesture on a `sql.row` cell: `promote(store, parent, arena, rowCell, budget)`. Reachability does
-the rest — the row's `d.contains` value cells (with their `d.column`/`d.type`/`d.null` attribute
-cells) and its `d.extkey`/`d.keystab`/`d.ordinal` attribute cells all travel, because the page→row
-direction is *into* the row. The promoted row lands in the user's annotation store as an ordinary
-structure cell — after which annotation is **the generic mechanism, not SQL machinery**: note cells
-`d.contains`/`d.ref`-linked to the row or to an individual value cell, a xanalink from a value's
-text into a xanadoc, a transclusion of the row's rendering. The SQL lens's job ends at the crossing;
-it deliberately does not know what an annotation is.
+`promote()` walks *every* link of every reached cell, both directions (§2.2): from a `sql.row` cell
+the walk climbs negward `d.contains` to page→query→conn, runs `d.seq` to every sibling, descends
+`d.conforms`/`d.ofcol` to the entire schema — the whole projection is one connected component, so
+`promote(rowCell)` would write *the whole materialized database* to the user's store (or exceed
+`PromotionBudget` and return `std::nullopt` — silently nothing). Envelope cells linked *into* the
+projection don't help: the walk follows them right back out.
 
-### 6.2 `promotePage`
+The mechanism that works without changing `promote()` is a **staging envelope**: for each promote
+gesture the session mints a small, *disconnected* subgraph in the arena — a `sql.annot` envelope
+cell holding copies of the subject: the row's display-key content, its value cells (copied with
+their `d.column`/`d.type`/`d.null`/`d.extkey`/`d.keystab` attributes), and for `promotePage` one
+envelope containing the window's rows on `d.contains`/`d.seq`. The envelope links to **nothing** in
+the projection, so `promote(store, parent, arena, envelope, budget)` persists exactly the intended
+set — "promote the answer, not the search" restored by construction. (The alternative — a
+`promote()` variant taking an expand-predicate or dimension stoplist — is noted as a cleaner
+framework primitive for trait v2; the envelope needs no signature change.)
 
-The gesture on a `sql.page` cell promotes the whole materialized window — §3.1's decision that a
-page `d.contains` *every* row exists for exactly this: one `promote()` call, one durable snapshot of
-the window as seen (a "this is what the report looked at" artefact, the workflow use-case for
-promoting a page rather than a row). Blobs under a promoted row are imported through
-`importFileStore` at this point — the first moment their bytes legitimately enter the permascroll
-(§3.4).
+### 6.2 `promoteRow` / `promotePage`
 
-### 6.3 Idempotent promotion: the reconcile map
+Both gestures run the same `promoteSubject(key)` path with a different copy set: a row's subtree, or
+a page's rows. Blobs under a promoted row are imported via `importFileStore` at this point — the
+first moment their bytes legitimately enter the permascroll (§3.5). `d.null` travels on promoted
+value cells and is the *sole* NULL marker on the durable side (§3.4) — annotation code must read it,
+not the cell content.
+
+### 6.3 Idempotent promotion: the reconcile map and the `sql.promoted` anchor
 
 `promote()` knows nothing about `ExternalKey`s, so the session keeps a third map:
-`ExternalKey → GlobalOpRef` ("this subject is promoted, at this op"). The gesture consults it first:
-re-annotating an already-promoted row resolves to the *existing* durable cell instead of minting a
-second twin — the difference between "annotate the invoice" and "annotate a copy of the invoice".
-`d.extkey` travels on the promoted cells (the §5.3(b) mechanism, with its recorded promote-skip
-caveat), so the map is *rebuildable*: opening a store that already contains promoted rows walks
-`d.extkey` and re-derives it, which is also how annotations on `pk:`-keyed rows survive a fresh
-session — the durable cell still names `"sql:sqlite:…:t:invoice:pk:1042"` in hypertime, and the live
-projection keys the same row identically (§4.3).
+`ExternalKey → (Store*, opIndex)` — a *local* op reference, not `GlobalOpRef`, because a private
+never-published annotation store has no seal to globalize under (`GlobalOpRef` needs `sealedAs`);
+globalization happens lazily if the store is ever published. The gesture consults it first:
+re-annotating an already-promoted row resolves to the *existing* durable cell — the difference
+between "annotate the invoice" and "annotate a copy of the invoice."
+
+The map must be rebuildable on open, and "walk every cell looking for `d.extkey`" is O(store) — a
+generic attr rank other lenses mint too, so the walk can't even early-exit. Resolution: promoted
+envelopes link under a **`sql.promoted` headcell rank in the annotation store**, one rank per
+projected database (keyed by `<dbid>`) — rebuild walks that one rank, O(promoted subjects), reading
+each cell's `d.extkey`. This is the lens doc's §5.3 option (b) applied with the promote-skip caveat
+answered: `d.extkey` is minted on the *durable* copy (by the envelope, at staging — it need not
+survive `promote()`'s traversal of the projection, because the envelope *is* the durable shape), so
+the skip debate doesn't apply to it.
 
 ### 6.4 What annotation may assume
 
@@ -489,14 +693,20 @@ The contract annotation code gets, stated once:
 
 - **`pk:` rows**: re-fetches find the same row; an annotation pinned to the durable cell stays
   meaningful across refresh, reorder, and window toss.
-- **`h:` rows**: the annotation is pinned to *content*; an update changing the row mints a new key
-  and the annotation visibly stops matching live data — honest staleness, shown as such.
-- **`ord:` rows**: the annotation is pinned to *position*; the promote gesture should warn, and the
-  durable cell's `d.keystab=ordinal` is the permanent record of why its identity is fragile.
+- **`rid:` rows**: identity is positional-in-table; reuse and `VACUUM` can rebind it — annotations
+  carry the caveat on `d.keystab` and reconciliation is user-confirmed (U-S3).
+- **`h:` rows**: the annotation is pinned to *content*; an update mints a new key and the annotation
+  visibly stops matching live data — honest staleness, shown as such.
+- **`ord:` rows**: not emitted round one (§4.2); if ever emitted, `d.keystab=ordinal` warns that the
+  identity is position only.
 
 Annotations never reach back into SQL — the read-only boundary is real: annotating a value cell does
-not UPDATE the column, and the lens's `apply*` stay at their refusing defaults
-([`projection_lens.hpp:122-133`](apps/common/xanadu/zigzag/projection_lens.hpp)).
+not `UPDATE` the column, and the lens's `apply*` stay at their refusing defaults
+([`projection_lens.hpp:122-133`](apps/common/xanadu/zigzag/projection_lens.hpp)). For completeness:
+the A10 alternative — a Persistent Proxy Cell (`ValueKind::ForeignOpHandle`) dynamically bound to
+the live ephemeral ref — is considered and **rejected for round one**: promotion-first gives the
+annotation a real ops-index name (R7) with no dangling binding, which is both more durable and more
+Nelsonian than proxying.
 
 ______________________________________________________________________
 
@@ -508,102 +718,173 @@ ______________________________________________________________________
 // apps/common/xanadu/zigzag/sql_backend.hpp  (proposed)
 namespace zigzag {
 
-/// One column of a result, as the backend reports it.
+/// One column of a result or a schema table, as the backend reports it.
 struct SqlColumn {
   std::string name;
-  std::string declType;             ///< backend's declared type, "" if none
-  std::optional<std::string> baseTable;  ///< set iff attributable (§4.3)
-  bool keyColumn{false};            ///< part of that table's primary key
+  std::string declType;                    ///< declared type, "" if none
+  std::optional<std::string> baseTable;    ///< set iff attributable (§4.3)
+  bool keyColumn{false};                   ///< declared PK member
+  std::uint32_t keyPosition{0};            ///< its position in the PK (§4.3)
 };
 
-/// A backend-typed value. monostate is SQL NULL (§3.3); bytes is a blob the
-/// lens renders by reference (§3.4).
+struct SqlTable {                          ///< for the schema projection (§3.6)
+  std::string schemaName;                  ///< "" for sqlite "main"; pg schema
+  std::string name;                        ///< canonical case (§4.4)
+  bool isView{false};
+  std::vector<SqlColumn> columns;
+};
+
+/// A backend-typed value. monostate is SQL NULL (§3.4); bytes is a blob
+/// fetched up to the backend's byte budget (§3.5).
 using SqlValue = std::variant<std::monostate, std::int64_t, double,
                               std::string, std::vector<std::byte>>;
 
-/// The port the lens speaks. One connection, one active read cursor; all
-/// methods are synchronous — the lens runs on the caller's thread and the
-/// app owns threading, exactly as sqlite3's serialized mode assumes.
+struct SqlCapabilities {
+  bool keysetPaging{false};       ///< row-value tuple predicates
+  bool columnProvenance{false};   ///< base-table attribution per column
+  bool snapshots{false};          ///< consistent-read scope (WAL / txn cursor)
+  bool blobReopen{false};         ///< rowid point-select / sqlite3_blob_open
+};
+
+/// One active read cursor: RAII over the prepared statement. Move-only;
+/// destroyed at end of window scope. fetchNext reads the cursor forward —
+/// the live-window path that preserves the query's own ORDER BY.
+class SqlCursor {
+public:
+  virtual ~SqlCursor() = default;
+  [[nodiscard]] virtual const std::vector<SqlColumn> &columns() const = 0;
+  [[nodiscard]] virtual std::expected<std::vector<std::vector<SqlValue>>,
+                                      std::string>
+  fetchNext(std::size_t limit) = 0;
+};
+
+/// A consistent-read scope (§5.3 replay-3): RAII transaction/portal guard.
+class SqlSnapshot {
+public:
+  virtual ~SqlSnapshot() = default;
+};
+
 class SqlBackend {
 public:
   virtual ~SqlBackend() = default;
 
-  /// Tables and their columns, for the schema projection (§3.5).
   [[nodiscard]] virtual std::expected<std::vector<SqlTable>, std::string>
   schema() = 0;
 
-  /// Prepare a read-only statement. Refuses anything not a SELECT (§8.1).
-  [[nodiscard]] virtual std::expected<SqlCursor, std::string>
+  /// Prepare a read-only statement. Refuses anything that writes (§7.2) and
+  /// refuses multi-statement input (tail must be empty). Refuses with
+  /// unexpected while another cursor or a snapshot is live — one connection
+  /// serializes its reads; coexisting prepared stmts are allowed, a second
+  /// ACTIVE cursor is not, because window state must be unambiguous.
+  [[nodiscard]] virtual std::expected<std::unique_ptr<SqlCursor>, std::string>
   prepare(std::string_view sql, std::span<const SqlValue> params) = 0;
 
-  [[nodiscard]] virtual const std::vector<SqlColumn> &columns() const = 0;
+  /// Re-prepare a bounded window for replay: the backend owns the wrapping
+  /// (subquery+LIMIT/OFFSET for ordinal; tuple predicate for keyset) so the
+  /// user's SQL text is never text-surgered.
+  [[nodiscard]] virtual std::expected<std::unique_ptr<SqlCursor>, std::string>
+  replayWindow(std::string_view sql, std::span<const SqlValue> params,
+               std::span<const SqlValue> lo, std::span<const SqlValue> hi,
+               std::size_t offset, std::size_t limit) = 0;
 
-  /// A window of rows starting at ordinal @p offset; empty span past the end.
-  [[nodiscard]] virtual std::expected<std::vector<std::vector<SqlValue>>,
+  /// Consistent-read scope for snapshot replay; refused where unsupported
+  /// (rollback-journal SQLite). Scopes a cursor's reads to one version.
+  [[nodiscard]] virtual std::expected<std::unique_ptr<SqlSnapshot>,
                                       std::string>
-  fetch(std::size_t offset, std::size_t limit) = 0;
-
-  /// Keyset variant for browse mode (§5.1): rows with key > :lastKey.
-  [[nodiscard]] virtual std::expected<std::vector<std::vector<SqlValue>>,
-                                      std::string>
-  fetchAfter(const SqlValue &lastKey, std::size_t limit) = 0;
-
-  /// Snapshot scope for §5.3 replay-3; refused where unsupported.
-  [[nodiscard]] virtual std::expected<SqlSnapshot, std::string>
   snapshot() = 0;
 
-  /// What this backend can prove: keyset paging, column provenance, snapshots.
   [[nodiscard]] virtual SqlCapabilities capabilities() const noexcept = 0;
 };
 
 } // namespace zigzag
 ```
 
-`SqlLens` is *backend-agnostic*; everything SQLite- or PostgreSQL-shaped lives behind this port. The
-`ExternalKey`'s `<backend>` prefix (§4.1) is the same string `capabilities()` names, so a mixed
-arena — a SQLite file and a Postgres service in one session — has disjoint keyspaces by
-construction.
+`SqlLens` is *backend-agnostic*; everything SQLite- or PostgreSQL-shaped lives behind this port,
+with `<sqlite3.h>`/`<libpq-fe.h>` confined to backend translation units (the
+`SwarmCatalogIndex::Impl` pattern, §2.3). The `ExternalKey`'s `<backend>` prefix (§4.1) is what
+`capabilities()` names, so a mixed arena has disjoint keyspaces by construction.
 
 ### 7.2 `SqliteBackend` (round one)
 
-- `sqlite3_open_v2(path, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI)` — a read-only lens opens
-  read-only. `PRAGMA query_only = ON` as belt-and-braces.
-- `prepare()` rejects non-SELECT up front with `sqlite3_stmt_readonly()`, then an authorizer
-  (`sqlite3_set_authorizer`) allowing only `SELECT`/`READ`/`RECURSIVE`/`FUNCTION` minus a denylist
-  (`load_extension`, `readfile`, `writefile`) — the same sandbox posture the codebase already takes
-  for embedded SQLite (`swarm_catalog_index.cpp` wraps the same C API,
-  [`swarm_catalog_index.cpp:185`](apps/common/xanadu/swarm_catalog_index.cpp)).
-- Cancellation: a progress handler plus a busy timeout, so a runaway query or a locked database (WAL
-  writer elsewhere) returns `std::unexpected` instead of hanging the UI thread.
-- Column provenance (§4.3): `sqlite3_column_table_name`/`origin_name` where the build provides them
-  — probed at compile time, since Debian's sqlite enables them and a minimal build may not; their
-  absence downgrades results to `h:` keys honestly.
-- `fetchAfter` implements keyset paging by binding the recorded `d.winhi`; `snapshot()` is a
-  deferred read transaction held across `fetch` calls.
-- BLOBs fetch lazily — the cursor returns a `SqlValue::bytes` *handle* the lens renders by reference
-  (§3.4); `sqlite3_column_blob` runs only when the row is opened or promoted.
+- **Open.** `sqlite3_open_v2(path, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI | SQLITE_OPEN_NOMUTEX)` —
+  read-only, URI-parsing (enables `file:…?immutable=1` for truly-static files), NOMUTEX because the
+  backend is single-threaded by contract (§7.1). Minimum SQLite 3.22: a read-only open over a hot
+  `-wal` needs the heap-memory wal-index fallback or it fails on a read-only directory — state the
+  floor and return the error cleanly.
+- **Prepare-time gates, in order:** prepare the raw SQL; refuse a `NULL` stmt (comment-only/empty
+  input); check `sqlite3_stmt_readonly()` — it gates *"doesn't write"*, which is the right contract
+  (it accepts `VALUES`, `EXPLAIN`, transaction controls, and correctly refuses `WITH…UPDATE`; SQLite
+  has no DML-in-CTE syntax, so no hole there); require the `pzTail` remainder empty (single
+  statement — a `;`-terminated second statement never reaches the authorizer); *then* wrap/replay.
+- **Authorizer** (`sqlite3_set_authorizer`), installed *after* the connection's own pragmas run (a
+  blanket `SQLITE_PRAGMA` deny would silently neuter `PRAGMA query_only` in the open sequence):
+  allow `SELECT`, `READ`, `RECURSIVE`, `TRANSACTION`, `SAVEPOINT` (snapshot/`BEGIN` would otherwise
+  die on the deny — the first draft's allowlist broke its own `snapshot()`), `FUNCTION` with a
+  per-name denylist (`load_extension`, `writefile`, `readfile`, `fts3_tokenizer`), and
+  `SQLITE_PRAGMA` against a read-only name allowlist (`table_xinfo`, `foreign_key_list`,
+  `data_version`, `query_only`, `database_list`; never `writable_schema`, `journal_mode`,
+  `trusted_schema`). Explicitly deny `ATTACH`/`DETACH` — load-bearing for the one-file `<dbid>`
+  grammar (§4.5). All DDL/DML codes fall through unlisted → denied.
+- **Connection pragmas:** `PRAGMA query_only = ON` (belt-and-braces over the authorizer).
+- **Cancellation:** `sqlite3_busy_timeout` (it *is* an internally installed busy handler — pick it,
+  not a custom one) plus a progress handler, so a runaway query or a WAL-locked database returns
+  `std::unexpected` instead of hanging the UI thread.
+- **Provenance (§4.3):** `table_xinfo` for PK positions and generated columns;
+  `sqlite3_column_table_name`/`origin_name` behind the link probe; their absence degrades *query*
+  mode to `h:` while browse keeps `pk:` (the lens knows its table). Column case comes from
+  `sqlite_schema`.
+- **Snapshots:** WAL-only per §5.3 — a held `BEGIN DEFERRED` read txn pins a snapshot at first read
+  and never blocks writers (but pins the WAL file — a long-lived snapshot grows `-wal`, so snapshot
+  scope is bounded like a checkpoint); rollback-journal databases refuse `snapshot()`.
+- **Blobs:** fetched into the `SqlValue::bytes` budget at fetch time (the variant forces it — §3.5);
+  over-budget re-fetch via `sqlite3_blob_open`/`SELECT … WHERE rowid` only for `pk:`/`rid:` rows.
+- **Concurrency:** one `sqlite3*`, one thread — the app owns threading; coexisting prepared
+  statements interleave fine, so `schema()`, `snapshot()` and blob point-selects share the
+  connection.
 
 ### 7.3 `PgBackend` (the later port)
 
-- `libpq`, an **optional** dependency behind a Makefile probe in the `GLEDITOR_SDL`/
-  `GLEDITOR_ENABLE_A11Y` style — `GLEDITOR_SQL_PG=1` to require it, unset probes `pkg-config libpq`
-  — so the tree still builds without it. Connection via a URI in the `sql:pg://host:port/db` key
-  form (§4.1).
-- Read-only is enforced twice: `default_transaction_read_only = on` at session level plus the lens's
-  own SELECT-only refusal — a defense in depth a network backend owes (a hostile string reaching a
-  shared server is worse than reaching a local file).
-- Windows map to server-side cursors: `DECLARE c CURSOR FOR <sql>` + `FETCH :n`, which gives
-  snapshot paging (replay-3) natively — `fetch(offset,limit)` is `FETCH`/`MOVE`, and the cursor is
-  the snapshot. Keyset `fetchAfter` is the same SQL shape as SQLite's.
-- Column provenance via `PQftable`/`PQftablecol` + `PQfmod`; `pk:` keys resolve through a
-  `pg_constraint` lookup in `schema()`.
-- Async: `PQsendQuery`/`PQconsumeInput`/`PQgetResult` let a slow remote query stay off the UI thread
-  — the one backend concern SQLite doesn't have, listed because the port's synchronous shape (§7.1)
-  was chosen deliberately: the *backend* hides async inside `fetch` so the lens never sees a thread.
-- Wire-level alternative the design keeps open: a remote manifold over 9Z
-  ([`zz9p.hpp`](apps/common/xanadu/zigzag/zz9p.hpp) — `Zhop`/`Zread`/`Zwatch` pairs already exist)
-  could serve a `SqlLens` projection itself, making the PostgreSQL case a *lens server* rather than
-  a linked backend; the port boundary is identical either way.
+- **Dependency.** `libpq` behind a Makefile probe in the `GLEDITOR_ENABLE_A11Y` style —
+  `GLEDITOR_SQL_PG=1` requires, `=0` disables, unset probes `pkg-config libpq`; a `GLEDITOR_HAVE_PG`
+  compile flag builds a stub backend refusing `sql:pg:` URIs so the binary always parses the scheme
+  (toggling flips a compile flag → whole-tree rebuild, same cost as `GLEDITOR_DISABLE_VULKAN`).
+- **Read-only, layered honestly.** `default_transaction_read_only = on` at session level,
+  `SET TRANSACTION READ ONLY` inside every `BEGIN` the backend opens (the GUC alone is overridable —
+  defense in depth, not a boundary), and a *hard* guarantee is stated to need a read-only role
+  (`pg_read_all_data` or no write grants) — because client-side SELECT-only checking cannot see PG's
+  data-modifying CTEs (`WITH d AS (DELETE … RETURNING *) SELECT …`), which the read-only transaction
+  correctly errors on at execution.
+- **Windows are server-side.** `DECLARE CURSOR` must run inside a transaction block (in autocommit
+  it errors), so a snapshot scope is `BEGIN` + `SET TRANSACTION READ ONLY` + `DECLARE`, and a
+  `NO SCROLL` cursor can't go backward — rewind/replay is re-`DECLARE`, or `SCROLL` where needed.
+  `DECLARE` cannot bind `$n` parameters — the parameterized path is extended-protocol **portals**
+  (Bind/Execute with a row limit; a suspended portal *is* a parameterized server cursor), used for
+  user queries; literal browse SQL may use `DECLARE` directly.
+- **Provenance:** `PQftable`→`pg_class` OID, `PQftablecol` attnums joined to `pg_constraint.conkey`
+  (`contype='p'`; `contype='u'` UNIQUE+NOT NULL is a legitimate second identity rung — noted, not
+  required); `PQftype` for `d.type` (not `PQfmod`, which is the type *modifier*); `relkind='v'`
+  marks views → `h:` keys; no rowid analogue exists — `ctid` changes on every update including HOT,
+  so `rid:` never applies to PG.
+- **Values:** `PQgetvalue` text is GUC-dependent — pin `DateStyle`, `IntervalStyle`,
+  `extra_float_digits`, `bytea_output` at connect (§4.5) or run a binary cursor; `bytea` arrives as
+  `\x` hex — decode into `SqlValue::bytes`; large objects (`lo_*`) are OID references, not `bytea` —
+  round one renders them as integer OIDs and says so.
+- **Liveness:** `statement_timeout` + `PQcancel` is the runaway-query analog of the progress
+  handler; `PQsendQuery`/`PQconsumeInput` keep a slow remote query off the UI thread inside the
+  synchronous `fetchNext` shape; `LISTEN`/`NOTIFY` is an optional refresh-invalidation hint.
+- **Alternative kept open:** a remote manifold over 9Z
+  ([`zz9p.hpp`](apps/common/xanadu/zigzag/zz9p.hpp) — `Zhop`/`Zread`/`Zwatch` pairs) could serve a
+  `SqlLens` projection itself — the port boundary is identical either way (U-S6).
+
+### 7.4 Entry points
+
+The lens URI and the `ExternalKey` grammar are different things (§4.1): a user types
+`xuzz --lens sql:sqlite:///abs/path.db` (browse mode — the URI dispatches *before* the existing
+`fs::exists` check in [`xuzz_app.cpp:509`](apps/xuzz/xuzz_app.cpp)) and adds `--sql 'SELECT …'` or
+`--sql @file.sql` for query mode — arbitrary SQL does **not** go in the URI (percent-encoding soup,
+and query text in a URI leaks via `ps`). The interactive surface the gestures live in is the xuzz
+slice view (browse/page/rewind/promote) and `vquery` (the §9 traversals); the `--lens` raster path
+exists for smoke output only.
 
 ______________________________________________________________________
 
@@ -614,10 +895,10 @@ ______________________________________________________________________
 Round one overrides **nothing** in the unproject half: `applyContentChange`/`applyAttributeChange`
 stay at their `std::unexpected("this lens is read-only")` defaults
 ([`projection_lens.hpp:122-133`](apps/common/xanadu/zigzag/projection_lens.hpp)). Enforcement is
-three-layered: the trait defaults refuse; the backend refuses non-SELECTs at `prepare()` and opens
-the database read-only (§7.2); and the UI treats `sql.*` cells as browse-only — there is no edit
-gesture to wire to a refusal. The dirty-cell/`commit()` path of the lens doc §6 is **not part of
-round one** — `ProjectionSession` has no `commit()` yet anyway (§2.4).
+three-layered: the trait defaults refuse; the backend refuses writes at prepare + authorizer +
+read-only open (§7.2/§7.3); and the UI offers no edit gesture on `sql.*` cells. The dirty-cell/
+`commit()` path of the lens doc §6 is **not part of round one** — `ProjectionSession` has no
+`commit()` yet anyway (§2.5).
 
 ### 8.2 Phase two, scoped against §8A
 
@@ -627,17 +908,17 @@ When writing arrives, the §8A additions map onto SQL mechanically:
 | ----------------------------------- | --------------------------------------------------------------------------------------------- |
 | `beginBatch`/`endBatch`             | one SQL transaction per `commit()` — rollback, not partial failure                            |
 | batched `applyCreate`               | one `INSERT` per created row, all value cells in one statement                                |
-| edge properties + `applyEdgeChange` | FK constraint names/actions on `d.ref`/`d.conforms` edges                                     |
-| NULL/BlobRef content                | already the round-one model (§3.3, §3.4) — adopted, not deferred                              |
-| multi-key rebind                    | `ALTER TABLE RENAME` rekeys every `t:<table>:` subject                                        |
-| `rekey()`                           | `VACUUM`/reindex invalidates rowid keys wholesale (§4.4)                                      |
+| edge properties + `applyEdgeChange` | FK constraint names/actions on `d.ref`/`d.conforms` ranks                                     |
+| schema-vs-instance `NodeKind`       | expressed as `d.conforms`/`d.ofcol` headcell ranks (§3.6) — adopted in r1                     |
+| NULL/BlobRef content                | already the round-one model (§3.4, §3.5) — adopted, not deferred                              |
+| multi-key rebind                    | `ALTER TABLE RENAME` rekeys every `t:<stable>:` subject                                       |
+| `rekey()`                           | `VACUUM`/reindex invalidates `rid:` keys wholesale (§4.4)                                     |
 | reparent dimension                  | `d.ref` reparent = `UPDATE … SET fk=?`; `d.contains` refuses (rows don't move between tables) |
 
 Writes also need guards the read path doesn't: an optimistic precondition (`SELECT` the expected
-value before `UPDATE`, compare-and-set semantics), a permission story (read-only database user for
-pg; file mode for sqlite), and the same authorizer posture flipped to admit `INSERT`/`UPDATE`/
-`DELETE` only — never DDL. These are phase-two design inputs, listed here so round one's shape
-doesn't foreclose them.
+value before `UPDATE`, compare-and-set semantics), a permission story (read-only role for pg; file
+mode for sqlite), and the authorizer flipped to admit `INSERT`/`UPDATE`/`DELETE` only — never DDL.
+These are phase-two design inputs, listed so round one's shape doesn't foreclose them.
 
 ______________________________________________________________________
 
@@ -647,10 +928,10 @@ Everything §9A of the lens doc promises applies unchanged, because the mechanis
 names, not the source:
 
 ```text
-##/d.contains/d.seq                 -- every row of every page, in order
+##/d.contains/d.seq                 -- every child rank, in order
+#query/d.contains/d.seq            -- a query's pages, in order
+#row/d.contains/d.seq              -- a row's value cells, in select order
 [/d.role = 'sql.row']              -- restrict to row cells
-#row/d.contains                     -- a row's value cells, in select order
-#val/d.ofcol                        -- a value's schema column
 [/d.column = 'amount']             -- one field across the materialized set
 [/d.keystab = 'pk']                -- rows whose identity survives refresh
 ```
@@ -658,11 +939,13 @@ names, not the source:
 run identically over a projected database, a projected directory, and a hand-built slice — the
 `lens_vql_gate_test.cpp` equivalence is the gate to extend (`tests/xuzz/sql_lens_test.cpp` reusing
 the same assert-both-shapes pattern). vprolog's `cell_link(Row,'d.contains',pos,V)` enumerates a
-row's fields as facts with no SQL awareness; `extkey/2` (the §9A.3 predicate — currently a
+row's fields as facts with no SQL awareness; `extkey/2` (the lens doc §9A.3 predicate — currently a
 doc-comment contract on `ProjectionSession::keyFor`,
 [`projection_session.hpp:42-44`](apps/common/xanadu/zigzag/projection_session.hpp)) is what lets a
-goal recover `"sql:sqlite:…:pk:1042"` from a bound cell, which is *more* load-bearing for SQL than
-for any prior lens: the ExternalKey is how a logic fact names a database row without an ops index.
+goal recover `"sql:sqlite:…:pk:i:1042"` from a bound cell — *more* load-bearing for SQL than for any
+prior lens, because the ExternalKey is how a logic fact names a database row without an ops index.
+Membership ranks mean conformance is a goal too: `cell_link(Col,'d.ofcol',pos,V)` enumerates a
+column's values; `cell_link(Tab,'d.conforms',pos,R)` its rows.
 
 Two SQL-specific notes:
 
@@ -680,31 +963,32 @@ ______________________________________________________________________
 Each phase is one commit; after each, `make -j$(nproc)` builds and `make -j$(nproc) test` passes.
 
 1. **`SqlBackend` + `SqliteBackend`, no lens.** The port (§7.1), the read sandbox (§7.2),
-   `schema()`, ordinal `fetch`, keyset `fetchAfter`, the column-provenance probe. Unit tests over a
-   temp `.db`: read-only enforcement refuses `UPDATE`, `fetch` windows deterministically, blob
-   values come back as bytes-by-reference.
+   `schema()`, cursor `fetchNext`, `replayWindow`, the provenance probe, WAL-snapshot support. Unit
+   tests over a temp `.db`: non-SELECT refused, `ATTACH` refused, `BEGIN` under the authorizer
+   allowed, ordinal and keyset windows deterministic, blobs budgeted.
 1. **`ProjectionSession::refresh()` + `checkpoint()`/`rewind()`.** The union-identity re-projection
-   and the map-repaired toss (§5.2, §5.4) with the mint-order log — framework changes tested with an
-   in-memory lens whose node set mutates between refreshes: same key → same CellRef, dropped key →
-   `d.state=stale`, rewind → keys forgotten.
-1. **`SqlLens` browse mode.** Schema projection (tables/columns), page stubs, row materialization on
-   `refresh`, the `pk:` key rung, `d.extkey`/`d.keystab`/`d.null` attributes. Gate: a known fixture
-   `.db` projects a known cell layout deterministically; `lens_vql_gate`-style tests run the same
-   VQL strings over the projection and a hand-built slice.
-1. **Query mode.** Arbitrary `SELECT` through a `sql:` URI (`--lens 'sql:sqlite:///db?q=…'`),
-   `h:`/`ord:` keys, ordinal windows, deferred stubs, the three replay semantics (§5.3) with
-   fixtures asserting keyset replay returns identical rows under a concurrent inserter.
-1. **Promotion + the reconcile map.** `promoteRow`/`promotePage` gestures, `d.extkey` on durable
-   cells, `ExternalKey → GlobalOpRef` map rebuilt on open (§6.3); blobs imported at promote time.
-   Gate: annotate a `pk:` row, close, re-project, re-derive the same durable cell; annotate an
-   `ord:` row → warning path exercised.
-1. **`xuzz --lens sql:` entry + the vquery/vprolog surface.** Extend `executeLensRaster`
-   ([`xuzz_app.cpp:506`](apps/xuzz/xuzz_app.cpp)) from a path to a URI; the same VQL/Prolog gates
-   over `SqlLens` (§9A.4 of the lens doc — the cross-lens equivalence). UX journey per the repo's
-   validation workflow: browse a table, page, rewind, promote a row, annotate, close, resume.
-1. **`PgBackend`.** `libpq` behind the `GLEDITOR_SQL_PG` probe (§7.3); the SQLite tests rerun
-   against a postgres fixture where the environment provides one (skipped, not faked, otherwise);
-   server cursors for snapshot replay.
+   with the `staleAttributes` hook, and the stack-disciplined rewind with high-water map/roots
+   repair and pin-refusal (§5.2, §5.5) — tested with an in-memory lens whose node set mutates: same
+   key → same CellRef, dropped key → stale attrs, rewind → keys forgotten + roots trimmed, pinned
+   key → refused. **Highest-risk item, deliberately early.**
+1. **`SqlLens` browse mode.** Schema projection (tables/columns + membership ranks), the stub
+   horizon, `materializePage`, `pk:`/`rid:`/`h:` keys with typed renderings, `d.extkey`/`d.keystab`/
+   `d.dupcount`/`d.null` attributes. Gate: a known fixture `.db` projects a known cell layout
+   deterministically; `lens_vql_gate`-style tests run the same VQL strings over the projection and a
+   hand-built slice.
+1. **Query mode + replay.** The `sql:` URI + `--sql` flag (§7.4), `h:` keys, ordinal windows, the
+   three replay semantics (§5.3) with fixtures asserting keyset replay returns identical rows under
+   a concurrent inserter, and WAL-vs-rollback snapshot honesty.
+1. **Promotion + the reconcile map.** The staging `promoteSubject` envelope (§6.1), the
+   `sql.promoted` anchor rank and `ExternalKey → (Store*, opIndex)` map rebuilt on open (§6.3), blob
+   import at promote time. Gate: annotate a `pk:` row, close, re-project, re-derive the same durable
+   cell; `rid:`/`h:` rows show their `d.keystab` caveat.
+1. **The interactive surface + query gates.** xuzz slice-view gestures (browse → page → rewind →
+   promote → annotate → resume) and the same VQL/Prolog gates over `SqlLens` (lens doc §9A.4). UX
+   journey per the repo's validation workflow.
+1. **`PgBackend`.** `libpq` behind `GLEDITOR_SQL_PG` (§7.3); the SQLite tests rerun against a
+   postgres fixture where the environment provides one (skipped, not faked, otherwise); portals for
+   parameterized windows.
 1. **Phase two (separate design): the write path.** Trait v2 (§8.2), guarded UPDATE/INSERT/DELETE in
    one transaction per `commit()`, `rekey()` on `VACUUM`, permission model. Out of scope here by
    construction.
@@ -713,57 +997,60 @@ ______________________________________________________________________
 
 ## 11. Fidelity, Limits, and Honest Edges
 
-| aspect                            | behaviour                                                  | faithful?                             |
-| --------------------------------- | ---------------------------------------------------------- | ------------------------------------- |
-| keyed row identity across refresh | `pk:` key → same cell after `refresh()`                    | faithful                              |
-| unkeyed row identity              | `h:` hash — survives reorder, dies on update               | faithful, marked (`d.keystab`)        |
-| positional row identity           | `ord:` — survives nothing                                  | honest by marking                     |
-| a row in two different queries    | same `(table,pk)` → same `pk:` key → one cell              | faithful by construction (§4.3)       |
-| NULL vs `''` vs `0`               | `d.null` flag + `d.type`                                   | faithful                              |
-| BLOB                              | rendered by reference; bytes at open/promote only          | faithful, lazy (§3.4)                 |
-| window under concurrent insert    | keyset replay: same rows; ordinal: shifts honestly         | faithful in browse; honest in query   |
-| deleted row after replay          | unlinked, `d.state=stale`, cell persists                   | honest (append-only arena)            |
-| total row count                   | never computed eagerly; "N+" from stubs                    | honest bound                          |
-| `rowid` renumbered by `VACUUM`    | `rekey()`-shaped invalidation; prefer declared PKs (§4.4)  | **lossy** where rowid is all there is |
-| `WITHOUT ROWID` table             | declared PK only — the good case                           | faithful                              |
-| aggregate/computed column         | no base column → no `d.ofcol`, `h:`/`ord:` keys            | faithful — it has no source identity  |
-| FK to an unmaterialized row       | edge skipped (both ends must be minted)                    | honest omission, §3.5                 |
-| two identical rows, `h:` keys     | one cell — deduplication by identity                       | faithful to the hash, caveat on notes |
-| concurrent writer (WAL)           | busy-timeout + `unexpected`, snapshot for consistency      | bounded, no hang                      |
-| schema change mid-session         | `rekey()`-adjacent; column cells re-resolve on `refresh()` | honest re-projection                  |
+| aspect                            | behaviour                                                        | faithful?                           |
+| --------------------------------- | ---------------------------------------------------------------- | ----------------------------------- |
+| keyed row identity across refresh | `pk:`/`rid:` key → same cell after `refresh()`                   | faithful (class-dependent, §6.4)    |
+| unkeyed row identity              | `h:` hash — survives reorder, dies on update                     | faithful, marked (`d.keystab`)      |
+| a row in two different queries    | same `(stable,pk)` → same `pk:` key → one cell                   | faithful by construction (§4.4)     |
+| duplicate subjects in one result  | one cell + `d.dupcount`, any class                               | faithful to subject, not rowcount   |
+| NULL vs `''` vs `0`               | `d.null` flag + `d.type`; survives promote only via the flag     | faithful                            |
+| BLOB                              | budgeted fetch at read; bytes at open/promote; `pk:`-only reopen | faithful, bounded (§3.5)            |
+| window under concurrent insert    | keyset replay: same rows; ordinal: shifts honestly               | faithful in browse; honest in query |
+| deleted row after replay          | stale-marked via `staleAttributes`, cell persists                | honest (append-only arena)          |
+| total row count                   | never computed eagerly; stub horizon + on-demand `sql.count`     | honest bound                        |
+| implicit rowid reuse / `VACUUM`   | own class `rid:`, caveat on `d.keystab`                          | **lossy on identity**, marked       |
+| `WITHOUT ROWID` / temp / view     | declared PK only, else `h:`                                      | faithful                            |
+| aggregate/computed column         | `d.ofcol` to a result-column cell; `h:` keys                     | faithful — no base identity exists  |
+| FK to an unmaterialized row       | rank membership skipped until both ends exist                    | honest omission, §3.6               |
+| concurrent writer                 | WAL: snapshot clean; rollback journal: snapshot refused          | bounded, no hang                    |
+| schema change mid-session         | `SQLITE_SCHEMA` → `d.state=stale` + `refresh()`                  | honest re-projection                |
+| CellRef held across a rewind      | aliases a different cell — consumers re-resolve by key           | honest hazard, stated (§5.5)        |
 
-"Faithful" means: the projection shows what the query returned, identity means what `d.keystab` says
-it means, and a refresh never silently transfers an annotation. The genuinely lossy row —
-`rowid`-only tables across `VACUUM` — is a source limitation, not a projector limitation, and the
-ladder's marking is what keeps it honest rather than hidden.
+"Faithful" means: the projection shows what the query returned (up to subject-level dedup, which is
+marked by `d.dupcount`), identity means what `d.keystab` says it means, and a refresh never silently
+transfers an annotation. The genuinely lossy row — implicit-rowid identity — is a source limitation,
+not a projector limitation, and the ladder's marking keeps it honest rather than hidden.
 
 ______________________________________________________________________
 
 ## 12. Open Questions
 
-- **U-S1. Where the cursor lives.** A long-lived `sqlite3_stmt` per page is simple but pins a read
-  snapshot implicitly; a re-prepare per fetch is snapshot-fresh but needs the window bounds
-  re-bound. The §5.3 split (snapshot scope explicit on the page) decides it — but who *closes* a
-  snapshot when the user wanders away is a lifetime question the port leaves to the session.
-- **U-S2. `rowid` honesty.** `pk:` keys over rowid claim `d.keystab=pk` while `VACUUM` can renumber
-  — either the attr distinguishes `pk-declared` from `pk-rowid` (a fourth class), or `rekey()`
-  learns to detect it. The doc prefers the fourth class; it is a one-word change to §4.2.
+- **U-S1. Cursor lifetime.** One `SqlCursor` per window scope is cheap to re-prepare for replay but
+  pins nothing; holding one open preserves `ORDER BY` naturally for live paging. The port (§7.1)
+  makes the cursor RAII and the snapshot explicit, which answers the mechanism — what remains open
+  is the *policy*: how long a live cursor may idle before the lens drops it and pays a re-prepare.
+
 - **U-S3. Refresh reconciliation policy.** A row whose key changed (`UPDATE` to a hashed or key
   column) is a delete+create in identity space. Matching "same row, new key" by remaining-column
   similarity is a heuristic — worth it for annotation continuity, dangerous if wrong. Recorded as
   policy, not mechanism: the reconcile map keeps `d.extkey` history so a *user-confirmed* rekey can
   be recorded rather than guessed.
-- **U-S4. Pinning vs rewind.** A selection or draft annotation on an unpromoted cell pins its page
-  against `rewind()` — refuse the rewind naming the pin, or auto-promote the pinned rows first?
-  Auto-promote is friendlier and violates "promotion is a user gesture"; the doc leans
-  refuse-and-name, with the pin visible.
+
+- **U-S4. Pin escalation.** `rewind` refuses naming the pin (§5.5) — decided. What stays open is
+  whether the refusal path should offer "promote the pinned subject now" as the escape (violates
+  gesture-purity) or leave it to the user (current lean).
+
 - **U-S5. The annotation store.** Where promoted rows live — the user's private annotation store
   alongside `system://activity`, or a per-database sibling store — is a workflow decision (the same
   question every lens's promote gesture asks); this spec needs only that the store exists and the
-  reconcile map (§6.3) can walk it.
+  `sql.promoted` rank (§6.3) can be walked.
+
 - **U-S6. Serving a lens over 9Z.** `zz9p` already defines the wire pairs; whether PostgreSQL
   eventually arrives as a remote `SqlLens` server (the database *is* the manifold) rather than a
   linked backend changes where the port sits but not the key scheme — deferred, deliberately.
+
+- **Resolved since rev 1.** U-S2 (implicit-rowid honesty) is answered: `rid:` is its own stability
+  class, §4.2.
 
 ______________________________________________________________________
 
@@ -771,8 +1058,27 @@ ______________________________________________________________________
 
 - **rev 1.** Initial design: the conn→query→page→row→value shape, the `pk:`/`h:`/`ord:` ExternalKey
   ladder with `d.keystab` marking, windowed projection via `ProjectionSession::refresh()` +
-  `checkpoint()`/`rewind()` (union-identity re-projection over A9 epoch tosses), three replay
-  semantics (live / keyset / snapshot), `promoteRow`/`promotePage` with the
-  `ExternalKey → GlobalOpRef` reconcile map as the annotation crossing, the `SqlBackend` port
-  (SQLite first, PostgreSQL behind it), read-only round one with the §8A trait-v2 list scoped as
-  phase two.
+  `checkpoint()`/`rewind()`, three replay semantics, `promoteRow`/`promotePage` with a reconcile map
+  as the annotation crossing, the `SqlBackend` port, read-only round one.
+- **rev 2.** Folded a five-perspective critique (Xanadu/ZigZag purist, technical writer,
+  Vortex/runtime expert, system architect, SQL expert). Structural corrections: replaced the
+  unimplementable "widened `d.contains`" with strict firstborn `d.contains` + `d.seq` chains and
+  headcell membership ranks for `d.conforms`/`d.ofcol`/`d.ref` (deg±≤1 — the first draft's fan-out
+  self-evicted silently); replaced `promote(row)` — which walks an undirected graph and would dump
+  the whole projection — with the disconnected staging-envelope `promoteSubject`; made
+  `checkpoint()`/`rewind()` a LIFO stack with high-water map/roots repair, pin-refusal, the CellRef
+  *aliasing* rule, and the trail/compaction cost model; replaced the contradictory stub-per-page
+  enumeration with the bounded stub horizon (materialized stubs + one trailing `deferred` stub).
+  Identity corrections: defined the typed `<sql-value>`/`<pk-rendering>`/`rowhash`/`<window-id>`
+  encodings; split `rid:` (implicit rowid, reuse- and `VACUUM`-volatile) out of `pk:`; demoted
+  `ord:` to reserved; made key class orthogonal to mode; added subjects-not-occurrences dedup with
+  `d.dupcount`; schema-qualified `<stable>` names; ATTACH denied to keep `<dbid>` single-file.
+  Backend corrections: full authorizer action list (`TRANSACTION`/`SAVEPOINT`/read-`PRAGMA`
+  allowlist — the first draft denied the `BEGIN` its own snapshot needed); cursor/snapshot as RAII
+  objects on the port; composite keyset via tuple predicates; blob byte-budget instead of impossible
+  laziness; WAL-vs-rollback-journal snapshot honesty; PG portal/transaction/`relkind`/
+  `PQftype`/`bytea`/GUC details; `default_transaction_read_only` downgraded to defense-in-depth.
+  Documentation: reconciled the mode/key-class table, the `d.state` value set, rank-table
+  completeness (`d.pk`/`d.notnull`/`sql.count`/`sql.annot`), the two R8s, lens-doc-vs-local § refs,
+  the `swarm_catalog_index` sandbox overclaim, and the reconcile-map rebuild path (`sql.promoted`
+  anchor rank, local `(Store*, opIndex)` rather than `GlobalOpRef`).
