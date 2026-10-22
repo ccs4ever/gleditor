@@ -7,7 +7,7 @@
 | compiles to   | Vortex opcode streams over an `ArenaManifold`, run one turn at a time by a Spool-Mesh actor executor                                                                                                                        |
 | rests on      | Vortex ([runtime](vortex-hyperstructural-runtime.md)), Vlog ([logic](vlog-logic-extension.md)), vicon ([goals](vicon-goal-directed-language.md)), the Spool-Mesh actor runtime (`apps/common/xanadu/vortex/mesh_actor.hpp`) |
 | prerequisites | Vlog §6 clause database (specified, unbuilt); vicon §6's scanning functions `tab`, `move`, `find`, `many`, `upto`, `match`, `any`, `bal` (specified; `std:goal` registers only `scan`, `subject` and `pos` today)           |
-| proposes      | new code (front end, loader, adapter) and eleven changes to existing code, each pending separate approval ([§11](#11-what-the-c-core-has-to-gain))                                                                          |
+| changes       | new code (front end, loader, adapter) and eleven changes to existing code, each approved by the owner ([§11](#11-what-the-c-core-has-to-gain))                                                                              |
 
 `vagent` is a front end for agent-oriented programs. It takes SARL's metamodel (agents, events,
 capacities, skills, behaviors, spaces, contexts, holons) and adds the parts of the BDI model SARL
@@ -58,21 +58,21 @@ ______________________________________________________________________
 "Built" means present in the tree at the cited place. "Prerequisite" means specified by a sibling
 document and not yet built. "Owed" means this document asks for it and
 [§11](#11-what-the-c-core-has-to-gain) prices it; an owed change to existing code is a proposal
-(P1–P11) pending separate approval. vicon's lexer, parser, compiler and driver exist under
-`apps/common/xanadu/vicon/`; vagent reuses vicon's design, not its compiler, because that compiler
-records what it cannot yet do (`vicon/compiler.cpp:12-22`). Code paths below are under
-`apps/common/xanadu/` unless stated.
+(P1–P11), each approved separately by the owner (2026-10-22). vicon's lexer, parser, compiler and
+driver exist under `apps/common/xanadu/vicon/`; vagent reuses vicon's design, not its compiler,
+because that compiler records what it cannot yet do (`vicon/compiler.cpp:12-22`). Code paths below
+are under `apps/common/xanadu/` unless stated.
 
 | Concept                    | Mechanism                                                                                                 | State                                                         |
 | -------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
 | Agent identity             | A stable agent name; `ActorPid` (`identity/identity_layout.hpp:304`) is only its current address          | name owed (V16); pid built                                    |
 | Agent state                | Cells under one agent cell in the actor's `ArenaManifold` (`MeshActorRuntime::spawn`)                     | built (arena); layout owed by the compiler                    |
 | A turn per message         | `MeshActorRuntime::pumpOne` runs the executor on one mailbox message                                      | built                                                         |
-| A turn with no message     | A local wake that runs the executor without a mailbox entry                                               | **proposed**, P4                                              |
+| A turn with no message     | A local wake that runs the executor without a mailbox entry                                               | **approved**, P4                                              |
 | Turn executor              | A `MeshActorRuntime::Executor` that decodes, dispatches, drains the outbox                                | **owed** (adapter, §11.1)                                     |
 | Speculation in a turn      | `#Choice`/`#Fail`/`#Cut` over `mark`/`release`/`discard` (`VortexVM::step`)                               | built                                                         |
 | Calls                      | `#Call`/`#Return` on the cursor's `+d.stack` (`VortexVM::step`)                                           | built                                                         |
-| Bounded statements         | A choice point per statement, cut to the depth recorded at its start                                      | **proposed**: one opcode, P1                                  |
+| Bounded statements         | A choice point per statement, cut to the depth recorded at its start                                      | **approved**: one opcode, P1                                  |
 | Reversible assignment `<-` | A `Value` write the arena trails under the live mark (`ArenaManifold::release`)                           | built in the arena; vagent's lowering owed                    |
 | Beliefs                    | Clauses on `d.clause` off predicate cells (Vlog §6.1); unification by `#Unify`                            | `#Unify` built; clause database a prerequisite; routines owed |
 | Goals, plans, intentions   | Intention cells holding goal, plan name, step path, waits and frame                                       | owed in Vortex (`std:agent`)                                  |
@@ -82,12 +82,12 @@ records what it cannot yet do (`vicon/compiler.cpp:12-22`). Code paths below are
 | Perception                 | Host drivers post percept events as host deliveries                                                       | **owed** (adapter)                                            |
 | Spaces                     | A host agent holds a member rank and relays emissions                                                     | owed in Vortex; single-owner only (U-A2)                      |
 | Spawning a child           | `MeshActorRuntime::spawn` under a capability the adapter issues, carrying the agent's parameters          | runtime built; issuer and bridge **owed**                     |
-| Stopping an agent          | Mark stopped, notify monitors, free the actor's slots                                                     | **proposed**, P7                                              |
+| Stopping an agent          | Mark stopped, notify monitors, free the actor's slots                                                     | **approved**, P7                                              |
 | Child loss                 | `monitor` and `ActorDown` after suspicion, lease expiry and discovery evidence (`MeshActorRuntime::tick`) | built; remote children only, minutes of latency (§5.4)        |
 | Timers and deadlines       | Deadlines stored in cells; the adapter derives its timer heap from them                                   | **owed** (adapter)                                            |
-| Lease renewal              | Replace a live actor's grant in place                                                                     | **proposed**, P6                                              |
+| Lease renewal              | Replace a live actor's grant in place                                                                     | **approved**, P6                                              |
 | Checkpoint and migration   | `checkpointView`, `publishValue`, `resume` (`vortex/mesh_value.hpp`)                                      | built; migration changes the pid (§4.5)                       |
-| Long-lived agents          | Reaping deliveries and slots, sender floors, configurable value limits, fair pumping                      | **proposed**, P2, P3, P5, P7, P8                              |
+| Long-lived agents          | Reaping deliveries and slots, sender floors, configurable value limits, fair pumping                      | **approved**, P2, P3, P5, P7, P8                              |
 | Swarm-wide spaces          | `mesh_swarm` topics bound to a space                                                                      | not proposed ([§18](#18-open-questions), U-A4)                |
 
 vagent asks for **one opcode and no other change to the VM, no change to `ArenaManifold`, no change
@@ -1492,7 +1492,9 @@ spawns the launcher with a source pid it mints for itself.
 
 ### 11.2 Proposed changes to existing code
 
-All proposals are **pending approval**.
+All eleven proposals were **approved** by the owner on 2026-10-22, individually, after this register
+was written. The design depends on them as approved changes; the "Without it" column remains as the
+record of what each buys.
 
 | No. | Change                                                                                                                                                                                                                         | Where                                                                                                                                                                                                                                            | Why it cannot live in `std:agent` or the adapter                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Without it                                                                                                                                                                                                                                                      | Used by                              |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
