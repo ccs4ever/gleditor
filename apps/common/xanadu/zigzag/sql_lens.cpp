@@ -11,6 +11,7 @@
 #include <ranges>
 #include <utility>
 
+#include "common/xanadu/zigzag/arena_manifold.hpp"
 #include "common/xanadu/zigzag/sql_keys.hpp"
 #include "common/xanadu/zigzag/sqlite_backend.hpp"
 
@@ -372,6 +373,7 @@ std::expected<void, std::string> SqlLens::fetchWindow(SqlQuery &q,
     }
     auto &sn    = subjects_.find(rk)->second;
     sn.colNames = q.colNames;
+    sn.colTypes = q.colTypes;
     sn.vnames   = q.vnames;
     subjects_.find(rk)->second.sightings.push_back(
         sightKey(page, page.rowKeys.size() - 1));
@@ -480,6 +482,109 @@ SqlLens::query(std::string_view sql, std::span<const SqlValue> params) {
   }
   appendStub(back);
   return {};
+}
+
+// -- promotion: the staging envelope -----------------------------------
+
+namespace {
+
+/// A staging-cell copy of one SqlValue: scalars keep their bits, text and
+/// blob bytes cross as scratch content (spec section 6.2's blob path).
+CellRef copyValue(ArenaManifold &staging, const SqlValue &v) {
+  if (const auto *i = std::get_if<std::int64_t>(&v)) {
+    return staging.makeScalarCell(*i);
+  }
+  if (const auto *d = std::get_if<double>(&v)) {
+    return staging.makeScalarCell(*d);
+  }
+  if (const auto *t = std::get_if<std::string>(&v)) {
+    return staging.makeCell(*t);
+  }
+  if (const auto *b = std::get_if<std::vector<std::byte>>(&v)) {
+    return staging.makeCell(
+        std::string_view{reinterpret_cast<const char *>(b->data()), b->size()});
+  }
+  return staging.makeCell(""); // NULL: d.null is the marker, not content
+}
+
+} // namespace
+
+std::expected<CellRef, std::string>
+SqlLens::buildEnvelope(ArenaManifold &staging, const ExternalKey &key) const {
+  // Gather the subject set: a page -> its subjects in window order; a
+  // subject -> itself.
+  std::vector<const SqlSubject *> subs;
+  if (const auto it = subjects_.find(key); it != subjects_.end()) {
+    subs.push_back(&it->second);
+  } else {
+    for (const auto &q : queries_) {
+      for (const auto &p : q.pages) {
+        if (p.key != key) {
+          continue;
+        }
+        for (const auto &rk : p.rowKeys) {
+          if (const auto it = subjects_.find(rk); it != subjects_.end()) {
+            subs.push_back(&it->second);
+          }
+        }
+      }
+    }
+  }
+  if (subs.empty()) {
+    return std::unexpected("no subject or page with key: " + key);
+  }
+
+  auto dim = [&staging](std::string_view n) {
+    return staging.ensureDimension(n);
+  };
+  auto attr = [&](CellRef c, std::string_view d, std::string_view v) {
+    (void)staging.link(c, dim(d), Posward, staging.makeCell(v));
+  };
+
+  const CellRef env = staging.makeCell("");
+  attr(env, "d.role", "sql.annot");
+  attr(env, "d.extkey", key);
+
+  std::vector<CellRef> twins;
+  twins.reserve(subs.size());
+  for (const SqlSubject *s : subs) {
+    const CellRef twin = staging.makeCell(s->display);
+    attr(twin, "d.role", "sql.row");
+    attr(twin, "d.extkey", s->key);
+    attr(twin, "d.keystab", keyStab(s->cls));
+    std::vector<CellRef> vals;
+    vals.reserve(s->values.size());
+    for (std::size_t c = 0; c < s->values.size(); ++c) {
+      const CellRef vc = copyValue(staging, s->values[c]);
+      attr(vc, "d.role", "sql.val");
+      attr(vc, "d.column", c < s->colNames.size() ? s->colNames[c] : "?");
+      attr(vc, "d.type",
+           c < s->colTypes.size() && !s->colTypes[c].empty() ? s->colTypes[c]
+                                                             : "ANY");
+      attr(vc, "d.extkey",
+           valueKeyFor(s->key, c < s->vnames.size() ? s->vnames[c] : "?"));
+      if (std::holds_alternative<std::monostate>(s->values[c])) {
+        attr(vc, "d.null", "1");
+      }
+      vals.push_back(vc);
+    }
+    for (std::size_t i = 0; i < vals.size(); ++i) {
+      if (i == 0) {
+        (void)staging.link(twin, dim("d.contains"), Posward, vals[0]);
+      } else {
+        (void)staging.link(vals[i - 1], dim("d.seq"), Posward, vals[i]);
+      }
+    }
+    twins.push_back(twin);
+  }
+  for (std::size_t i = 0; i < twins.size(); ++i) {
+    if (i == 0) {
+      (void)staging.link(env, dim("d.contains"), Posward, twins[0]);
+    } else {
+      (void)staging.link(twins[i - 1], dim("d.seq"), Posward, twins[i]);
+    }
+  }
+  return env;
 }
 
 std::expected<void, std::string>

@@ -11,6 +11,7 @@
 #ifndef COMMON_XANADU_ZIGZAG_SQL_LENS_HPP
 #define COMMON_XANADU_ZIGZAG_SQL_LENS_HPP
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -27,6 +28,8 @@
 
 namespace zigzag {
 
+class ArenaManifold;
+
 /// Which rung of the identity ladder a result's rows sit on (spec §4.2).
 /// ord: is reserved, never emitted in round one.
 enum class SqlKeyClass : std::uint8_t { Pk, Rid, Hash };
@@ -39,6 +42,7 @@ struct SqlSubject {
   std::string display;               ///< display key (cell content)
   std::vector<SqlValue> values;      ///< select-order values (visible cols)
   std::vector<std::string> colNames; ///< the query's visible columns
+  std::vector<std::string> colTypes; ///< declared types, select order
   /// v: key suffixes matching colNames (from the producing query).
   std::vector<std::string> vnames;
   std::vector<ExternalKey> sightings; ///< d.subject rank order (mint order)
@@ -113,6 +117,24 @@ public:
   /// windows replay via SELECT * FROM (<sql>) LIMIT/OFFSET.
   [[nodiscard]] std::expected<void, std::string>
   query(std::string_view sql, std::span<const SqlValue> params);
+
+  // -- promotion (spec section 6)
+  // -------------------------------------------------
+
+  /// The ranks a promote envelope writes -- declare these in the
+  /// annotation store before the staging overlay is read, or the
+  /// envelope's dims land as anonymous cells (spec section 6.1).
+  static constexpr std::array<std::string_view, 9> envelopeDims = {
+      "d.contains", "d.seq",  "d.role", "d.extkey",   "d.keystab",
+      "d.column",   "d.type", "d.null", "d.promoted",
+  };
+
+  /// Mint a disconnected sql.annot envelope in @p staging -- copies of the
+  /// subject (or every subject of the page) @p key names, content-level,
+  /// never refs (spec section 6.1's cross-arena rule). The caller
+  /// sequences the gesture and owns the d.promoted membership link.
+  [[nodiscard]] std::expected<CellRef, std::string>
+  buildEnvelope(ArenaManifold &staging, const ExternalKey &key) const;
 
   // -- WindowedLens
   // ------------------------------------------------------------

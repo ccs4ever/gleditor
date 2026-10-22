@@ -16,11 +16,14 @@
 #include <vector>
 
 #include "common/xanadu/multi_store.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/user_permascroll.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 #include "common/xanadu/zigzag/projection_session.hpp"
 #include "common/xanadu/zigzag/sql_keys.hpp"
 #include "common/xanadu/zigzag/sql_lens.hpp"
+#include "common/xanadu/zigzag/sql_promotion.hpp"
 
 namespace {
 
@@ -537,6 +540,173 @@ TEST(SqlLensTest, SqlUriOpensBackends) {
   EXPECT_TRUE(pg.error().find("pg") != std::string::npos);
   const auto unk = openSqlUri("sql:oracle://x");
   EXPECT_FALSE(unk.has_value());
+}
+
+/// An annotation store for the promotion tests.
+struct AnnotStore {
+  fs::path dir;
+  std::shared_ptr<xanadu::Store> store;
+
+  AnnotStore() {
+    dir =
+        fs::temp_directory_path() / ("sql-annot-" + std::to_string(::getpid()));
+    xanadu::UserPermascroll::Config cfg;
+    cfg.storageDir = dir / "permascroll";
+    auto perma     = std::make_shared<xanadu::UserPermascroll>(cfg);
+    store          = std::make_shared<xanadu::Store>(perma);
+  }
+  ~AnnotStore() {
+    store.reset();
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+  }
+
+  /// The text of a cell's attr in the folded view.
+  std::string attrOf(CellRef c, std::string_view rank,
+                     const zigzag::Manifold &m) {
+    const auto d = m.dimensionNamed(rank);
+    if (!d) {
+      return "";
+    }
+    const auto a = m.linked(c, *d, Posward);
+    return a.has_value() ? m.textOf(*a, *store) : "";
+  }
+};
+
+TEST(SqlLensTest, PromoteSubjectBuildsDurableEnvelope) {
+  ProjectedDb p;
+  ASSERT_NE(p.lens, nullptr);
+  ASSERT_TRUE(p.lens->browse("invoices").has_value());
+  (void)p.session->refresh();
+  const auto q      = p.childWithRole("sql.query");
+  const auto row    = p.subjectOf(*p.child(*p.child(*q)));
+  const auto rowKey = *p.session->keyFor(row);
+
+  AnnotStore a;
+  SqlPromotion promo(*p.lens, *a.store);
+  const auto env = promo.promoteSubject(rowKey);
+  ASSERT_TRUE(env.has_value()) << env.error();
+
+  const auto *m = promo.base();
+  // The durable envelope: sql.annot root -> contains -> subject twin.
+  EXPECT_EQ(a.attrOf(*env, "d.role", *m), "sql.annot");
+  EXPECT_EQ(a.attrOf(*env, "d.extkey", *m), rowKey);
+  const auto twin = m->linked(*env, *m->dimensionNamed("d.contains"), Posward);
+  ASSERT_TRUE(twin.has_value());
+  EXPECT_EQ(a.attrOf(*twin, "d.role", *m), "sql.row");
+  EXPECT_EQ(a.attrOf(*twin, "d.extkey", *m), rowKey);
+  EXPECT_EQ(a.attrOf(*twin, "d.keystab", *m), "pk");
+  // Value twins chain under the subject, scalars intact.
+  const auto v0 = m->linked(*twin, *m->dimensionNamed("d.contains"), Posward);
+  ASSERT_TRUE(v0.has_value());
+  EXPECT_EQ(a.attrOf(*v0, "d.role", *m), "sql.val");
+  EXPECT_EQ(a.attrOf(*v0, "d.column", *m), "id");
+  // NULL travels as d.null, and the v: extkey names the field.
+  bool sawNull = false, sawExtkey = false;
+  for (auto v = v0; v.has_value();
+       v      = m->linked(*v, *m->dimensionNamed("d.seq"), Posward)) {
+    if (!a.attrOf(*v, "d.extkey", *m).empty()) {
+      sawExtkey = true;
+    }
+    if (!a.attrOf(*v, "d.null", *m).empty()) {
+      sawNull = true;
+    }
+  }
+  EXPECT_TRUE(sawExtkey);
+  EXPECT_FALSE(sawNull); // row 1's note is 'one', not NULL
+}
+
+TEST(SqlLensTest, PromoteIsIdempotentOnSubjectKey) {
+  ProjectedDb p;
+  ASSERT_NE(p.lens, nullptr);
+  ASSERT_TRUE(p.lens->browse("invoices").has_value());
+  (void)p.session->refresh();
+  const auto q      = p.childWithRole("sql.query");
+  const auto row    = p.subjectOf(*p.child(*p.child(*q)));
+  const auto rowKey = *p.session->keyFor(row);
+
+  AnnotStore a;
+  SqlPromotion promo(*p.lens, *a.store);
+  ASSERT_TRUE(promo.promoteSubject(rowKey).has_value());
+  const auto before = a.store->opCount();
+  const auto again  = promo.promoteSubject(rowKey);
+  ASSERT_TRUE(again.has_value());
+  EXPECT_EQ(*promo.twinOf(rowKey), *again);
+  EXPECT_EQ(a.store->opCount(), before);
+}
+
+TEST(SqlLensTest, PromotePageEnvelopesSubjectsInOrder) {
+  ProjectedDb p;
+  ASSERT_NE(p.lens, nullptr);
+  ASSERT_TRUE(p.lens->browse("invoices").has_value());
+  (void)p.session->refresh();
+  const auto q       = p.childWithRole("sql.query");
+  const auto page    = p.child(*q);
+  const auto pageKey = *p.session->keyFor(*page);
+
+  AnnotStore a;
+  SqlPromotion promo(*p.lens, *a.store);
+  const auto env = promo.promotePage(pageKey);
+  ASSERT_TRUE(env.has_value()) << env.error();
+  const auto *m = promo.base();
+  EXPECT_EQ(a.attrOf(*env, "d.extkey", *m), pageKey);
+  // Five subject twins under one envelope, each keyed.
+  std::size_t subjects = 0;
+  for (auto at = m->linked(*env, *m->dimensionNamed("d.contains"), Posward);
+       at.has_value();
+       at = m->linked(*at, *m->dimensionNamed("d.seq"), Posward)) {
+    EXPECT_EQ(a.attrOf(*at, "d.role", *m), "sql.row");
+    EXPECT_TRUE(a.attrOf(*at, "d.extkey", *m).find("pk:i:") !=
+                std::string::npos);
+    ++subjects;
+  }
+  EXPECT_EQ(subjects, 5u);
+}
+
+TEST(SqlLensTest, PromotedRankFindableFromHome) {
+  ProjectedDb p;
+  ASSERT_NE(p.lens, nullptr);
+  ASSERT_TRUE(p.lens->browse("invoices").has_value());
+  (void)p.session->refresh();
+  const auto q      = p.childWithRole("sql.query");
+  const auto row    = p.subjectOf(*p.child(*p.child(*q)));
+  const auto rowKey = *p.session->keyFor(row);
+
+  AnnotStore a;
+  SqlPromotion promo(*p.lens, *a.store);
+  ASSERT_TRUE(promo.promoteSubject(rowKey).has_value());
+
+  // The sql.promoted headcell sits under home.d.contains, and the
+  // envelope joins its d.promoted rank negward.
+  const auto *m   = promo.base();
+  const auto home = a.store->homeCell();
+  ASSERT_NE(home, noCell);
+  const auto dContains = *m->dimensionNamed("d.contains");
+  const auto dSeq      = *m->dimensionNamed("d.seq");
+  CellRef headCell     = noCell;
+  for (auto at = m->linked(home, dContains, Posward); at.has_value();
+       at      = m->linked(*at, dSeq, Posward)) {
+    if (m->textOf(*at, *a.store).find("sql.promoted") != std::string::npos) {
+      headCell = *at;
+    }
+  }
+  ASSERT_NE(headCell, noCell);
+  const auto dPromoted = *m->dimensionNamed("d.promoted");
+  const auto env       = m->linked(headCell, dPromoted, Negward);
+  ASSERT_TRUE(env.has_value());
+  EXPECT_EQ(a.attrOf(*env, "d.role", *m), "sql.annot");
+  // And its member walks to the subject twin.
+  const auto twin = m->linked(*env, dContains, Posward);
+  ASSERT_TRUE(twin.has_value());
+  EXPECT_EQ(a.attrOf(*twin, "d.extkey", *m), rowKey);
+}
+
+TEST(SqlLensTest, PromoteRefusesUnknownKey) {
+  ProjectedDb p;
+  ASSERT_NE(p.lens, nullptr);
+  AnnotStore a;
+  SqlPromotion promo(*p.lens, *a.store);
+  EXPECT_FALSE(promo.promoteSubject("sql:sqlite:x:y:pk:i:9").has_value());
 }
 
 TEST(SqlLensTest, VqlTraversesSqlProjection) {
