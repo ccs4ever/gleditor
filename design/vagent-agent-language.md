@@ -1,19 +1,21 @@
 # vagent: An Agent-Oriented Language over Vortex and the Spool-Mesh
 
-| field       | value                                                                                                                                                                                                                       |
-| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| version     | 2.0 (see [Appendix](#appendix-versioning-and-change-history))                                                                                                                                                               |
-| status      | Specification only. Nothing here is built or wired into the gleditor build.                                                                                                                                                 |
-| compiles to | Vortex opcode streams over an `ArenaManifold`, run one turn at a time by a Spool-Mesh actor executor                                                                                                                        |
-| rests on    | Vortex ([runtime](vortex-hyperstructural-runtime.md)), Vlog ([logic](vlog-logic-extension.md)), vicon ([goals](vicon-goal-directed-language.md)), the Spool-Mesh actor runtime (`apps/common/xanadu/vortex/mesh_actor.hpp`) |
-| owes C++    | a front end, a mesh executor adapter, and two retention changes in `mesh_actor.cpp` ([§11](#11-what-the-c-core-has-to-gain))                                                                                                |
+| field         | value                                                                                                                                                                                                                       |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| version       | 3.0 (see [Appendix](#appendix-versioning-and-change-history))                                                                                                                                                               |
+| status        | Specification only. Nothing here is built or wired into the gleditor build.                                                                                                                                                 |
+| compiles to   | Vortex opcode streams over an `ArenaManifold`, run one turn at a time by a Spool-Mesh actor executor                                                                                                                        |
+| rests on      | Vortex ([runtime](vortex-hyperstructural-runtime.md)), Vlog ([logic](vlog-logic-extension.md)), vicon ([goals](vicon-goal-directed-language.md)), the Spool-Mesh actor runtime (`apps/common/xanadu/vortex/mesh_actor.hpp`) |
+| prerequisites | Vlog §6 clause database (specified, unbuilt); vicon's front end and `std:goal` (partly built, `apps/common/xanadu/vicon/`, with the deviation recorded at `vicon/compiler.cpp:12-22`)                                       |
+| owes C++      | one opcode, a front end, a mesh executor adapter, and five changes in `mesh_actor.cpp` ([§11](#11-what-the-c-core-has-to-gain))                                                                                             |
 
 `vagent` is a front end for agent-oriented programs. It takes SARL's metamodel (agents, events,
 capacities, skills, behaviors, spaces, contexts, holons) and adds the parts of the BDI model SARL
-leaves to libraries (beliefs, declarative goals, a plan library, intentions). It compiles onto the
-machinery the repository already has. An agent is one actor of `MeshActorRuntime` with a private
-`ArenaManifold`. It handles one message per turn, and evaluates with vicon's goal-directed
-`#Choice`/`#Fail`/`#Cut` regime inside that turn.
+leaves to libraries (beliefs, declarative goals, a plan library, intentions). An agent is one actor
+of `MeshActorRuntime` with a private `ArenaManifold`. It runs one turn at a time, and evaluates with
+vicon's goal-directed `#Choice`/`#Fail`/`#Cut` regime inside a turn. Everything an agent does
+outside its own arena (messages, spawns, device actions) is staged during the turn and performed
+after it.
 
 The siblings are [Vortex](vortex-hyperstructural-runtime.md) (the runtime),
 [VQL](vql-query-language.md), [VPL](vpl-array-language.md), [Vlog](vlog-logic-extension.md),
@@ -21,21 +23,21 @@ The siblings are [Vortex](vortex-hyperstructural-runtime.md) (the runtime),
 [`vql-agent-experiment.md`](vql-agent-experiment.md) tried the same metamodel as a VQL extension;
 [§13](#13-refused-alternatives) records why this document does not take that route.
 
-The document separates what is built, what is reused unchanged and what is owed. Where an earlier
-draft claimed a mechanism the tree does not have, the claim is withdrawn here rather than softened.
-The change history lists those withdrawals.
+The document separates what is built, what is a prerequisite specified elsewhere, and what this
+document owes. Claims an earlier version made and the tree does not support are withdrawn, and the
+change history lists them.
 
 ______________________________________________________________________
 
 ## Contents
 
-- [1. What is being claimed](#1-what-is-being-claimed)
+- [1. Status of each mechanism](#1-status-of-each-mechanism)
 - [2. Glossary](#2-glossary)
 - [3. Rulings](#3-rulings)
 - [4. The agent as one actor](#4-the-agent-as-one-actor)
 - [5. Structure in the arena](#5-structure-in-the-arena)
 - [6. Deliberation](#6-deliberation)
-- [7. Communication](#7-communication)
+- [7. Communication and perception](#7-communication-and-perception)
 - [8. The surface language](#8-the-surface-language)
 - [9. Lowering](#9-lowering)
 - [10. The `std:agent` package](#10-the-stdagent-package)
@@ -45,75 +47,81 @@ ______________________________________________________________________
 - [14. Properties, with their conditions](#14-properties-with-their-conditions)
 - [15. Breakages and costs](#15-breakages-and-costs)
 - [16. Reconciliation with the convergence](#16-reconciliation-with-the-convergence)
-- [17. Open questions](#17-open-questions)
-- [18. Comparison](#18-comparison)
+- [17. Comparison](#17-comparison)
+- [18. Open questions](#18-open-questions)
 - [Appendix: Versioning and Change History](#appendix-versioning-and-change-history)
 
 ______________________________________________________________________
 
-## 1. What is being claimed
+## 1. Status of each mechanism
 
-The table states each concept, the mechanism it uses, and whether that mechanism exists. "Built"
-means present in the tree at the cited place. "Owed" means this document asks for it, and
+"Built" means present in the tree at the cited place. "Prerequisite" means specified by a sibling
+document and not yet built. "Owed" means this document asks for it and
 [§11](#11-what-the-c-core-has-to-gain) prices it.
 
-| Concept                       | Mechanism                                                                                   | State                                               |
-| ----------------------------- | ------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| Agent identity                | One `MeshActorRuntime` actor; `ActorPid` (`identity_layout.hpp:304`)                        | built                                               |
-| Agent state                   | Cells under one agent cell in the actor's `ArenaManifold` (`mesh_actor.cpp:155-160`)        | built (arena); layout owed by the compiler          |
-| One event per turn            | `MeshActorRuntime::pumpOne` runs the executor on one mailbox message (`mesh_actor.cpp:458`) | built                                               |
-| Turn executor                 | A `MeshActorRuntime::Executor` that decodes, dispatches, drains the outbox                  | **owed** (adapter, §11.2)                           |
-| Speculation inside a turn     | vicon: `#Choice`/`#Fail`/`#Cut` over `mark`/`release`/`discard` (`vortex_vm.cpp:944-985`)   | built                                               |
-| Reversible assignment `<-`    | An ordinary write trailed by the enclosing `Mark` (vicon §4.3)                              | built                                               |
-| Beliefs                       | Vlog clauses on `d.clause` off predicate cells; query by `#Unify` (Vlog §6)                 | built (Vlog); `std:agent` wrappers owed in Vortex   |
-| Goals, plans, intentions      | Intention cells holding a goal, a plan ordinal and a step path; advanced turn by turn       | owed in Vortex (`std:agent`), no new opcode         |
-| Capacity dispatch             | A walk of the agent's `d.skill` rank comparing clone masters                                | owed in Vortex                                      |
-| Emission                      | Envelope cells staged on `d.outbox`; the adapter calls `MeshActorRuntime::send` at turn end | **owed** (adapter)                                  |
-| Spaces                        | A host agent holds a member rank and relays emissions                                       | owed in Vortex; single-owner only until §11.3 (c)   |
-| Spawning a child              | `MeshActorRuntime::spawn` (`mesh_actor.hpp:131`) called by the adapter                      | built (runtime); **owed** (bridge)                  |
-| Child death                   | `MeshActorRuntime::monitor` and `ActorDown` (`mesh_actor.cpp:425-448`)                      | built                                               |
-| Timers and deadlines          | A clock in the adapter that enqueues self-messages                                          | **owed** (adapter)                                  |
-| Checkpoint and migration      | `checkpointView` at a quiescent boundary (`mesh_actor.cpp:669-696`), then `resume`          | built                                               |
-| Long-lived agents             | Reaping completed deliveries and windowing remembered request ids                           | **owed** (`mesh_actor.cpp`; §11.3)                  |
-| Swarm-wide spaces over BEP 46 | `mesh_swarm` topics bound to a space                                                        | not proposed here ([§17](#17-open-questions), U-A4) |
+| Concept                    | Mechanism                                                                                                        | State                                                                     |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Agent identity             | One `MeshActorRuntime` actor; `ActorPid` (`identity_layout.hpp:304`)                                             | built                                                                     |
+| Agent state                | Cells under one agent cell in the actor's `ArenaManifold` (`mesh_actor.cpp:156`)                                 | built (arena); layout owed by the compiler                                |
+| A turn per message         | `MeshActorRuntime::pumpOne` runs the executor on one mailbox message (`mesh_actor.cpp:458`)                      | built                                                                     |
+| A turn with no message     | A local wake that runs the executor without a mailbox entry                                                      | **owed** (§11.3 d)                                                        |
+| Turn executor              | A `MeshActorRuntime::Executor` that decodes, dispatches, drains the outbox                                       | **owed** (adapter, §11.2)                                                 |
+| Speculation in a turn      | `#Choice`/`#Fail`/`#Cut` over `mark`/`release`/`discard` (`vortex_vm.cpp:944-985`)                               | built                                                                     |
+| Bounded statements         | Cut to the depth recorded at the statement's start                                                               | **owed**: one opcode, `#ChoiceDepth` (§11.1)                              |
+| Reversible assignment `<-` | A write the arena trails under the live mark; vicon's `Bind` reverts on backtrack (`vicon/compiler.cpp:358-361`) | built                                                                     |
+| Beliefs                    | Clauses on `d.clause` off predicate cells (Vlog §6.1); unification by `#Unify`                                   | `#Unify` built; clause database a prerequisite; `std:agent` routines owed |
+| Goals, plans, intentions   | Intention cells holding goal, plan ordinal, step path, waits and frame                                           | owed in Vortex (`std:agent`)                                              |
+| Capacity dispatch          | A walk of the agent's `d.skill` rank comparing capacity names                                                    | owed in Vortex                                                            |
+| Messages                   | Outbox entries; the adapter calls `MeshActorRuntime::send` after the turn                                        | **owed** (adapter)                                                        |
+| Effects (device actions)   | Outbox entries; the adapter runs host bindings and reports completion as a local delivery                        | **owed** (adapter, §11.3 d)                                               |
+| Perception                 | Host drivers post percept events as local deliveries                                                             | **owed** (adapter, §11.3 d)                                               |
+| Spaces                     | A host agent holds a member rank and relays emissions                                                            | owed in Vortex; single-owner only until §11.3 c                           |
+| Spawning a child           | `MeshActorRuntime::spawn` (`mesh_actor.hpp:132-134`) under a capability the adapter issues                       | runtime built; issuer and bridge **owed**                                 |
+| Child loss                 | `monitor` and `ActorDown` after lease expiry and discovery evidence (`mesh_actor.cpp:640-660`)                   | built; minutes of latency (§5.4)                                          |
+| Timers and deadlines       | Deadlines stored in cells; the adapter derives its timer heap from them                                          | **owed** (adapter)                                                        |
+| Checkpoint and migration   | `checkpointView`, `publishValue`, `resume` (`mesh_actor.cpp:669-696`, `mesh_value.hpp:88-93`)                    | built                                                                     |
+| Long-lived agents          | Reaping deliveries, windowing request ids, configurable value limits                                             | **owed** (§11.3 a, b, e)                                                  |
+| Swarm-wide spaces          | `mesh_swarm` topics bound to a space                                                                             | not proposed ([§18](#18-open-questions), U-A4)                            |
 
-What the table does not contain is as important. vagent asks for **no new opcode, no change to
-`ArenaManifold`, no change to `CompactOpNode`, and no new `SystemDimensions` field**. It does ask
-for C++, and §11 lists all of it. The C++ is owed at the boundary between the VM and the mesh
-runtime, which Vortex code cannot cross today. `OpcodeKind` has no send, spawn or host-call opcode
+vagent asks for **one opcode and no other change to the VM, no change to `ArenaManifold`, no change
+to `CompactOpNode`, and no new `SystemDimensions` field**. The opcode is needed by vicon as well
+(§11.1). Everything else it owes is at the boundary between the VM and the mesh runtime, which
+Vortex code cannot cross: `OpcodeKind` has no send, spawn or host-call opcode
 (`vortex_vm.hpp:24-96`), and the `WorkerContext` an executor receives has no handle to the runtime
-(`mesh_actor.hpp:117-118`). AGENTS.md admits C++ for driver and OS-event interfacing, and this
-boundary is that kind of interface.
+(`mesh_actor.hpp:114-116`). AGENTS.md admits C++ for driver and OS-event interfacing, which is what
+that boundary is.
 
 ______________________________________________________________________
 
 ## 2. Glossary
 
-One name per concept, used everywhere below.
+| Term                   | Meaning                                                                                                                                                    |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| agent                  | One actor of `MeshActorRuntime` running one compiled `agent` declaration                                                                                   |
+| agent cell             | The cell that heads every rank of agent state; the actor's `stateRoot`                                                                                     |
+| peer cell              | A cell whose content is an encoded `ActorPid`; how an agent names another. Peer cells are values: two naming one agent are two cells. (Not an `OpHandle`.) |
+| turn                   | One run of the executor: a message turn for one mailbox message, or a wake turn for local work                                                             |
+| event                  | A typed record: delivered in an `ActorSend`, posted locally by a host driver, or raised internally; decoded into an event cell for the turn                |
+| performative           | A message kind with fixed receiver semantics: `tell`, `untell`, `achieve`, `cancel`, `refuse`, `ask`, `outcome`                                            |
+| outbox entry           | A cell on `d.outbox` describing a message, spawn or effect the adapter performs after the turn                                                             |
+| envelope               | The `ActorMessage` the adapter builds from an outbox entry; never visible to vagent code                                                                   |
+| space                  | A named set of member peer cells held by one host agent, which relays every emission into it                                                               |
+| context                | SARL's grouping of spaces. Each agent can name two: `inner` (the space it hosts) and `outer` (the space it was spawned into)                               |
+| holon                  | An agent with children; its children are the members of its `inner` space                                                                                  |
+| launcher               | The agent `vagent run` starts first; it hosts the node's default space                                                                                     |
+| capacity               | A named set of method signatures                                                                                                                           |
+| skill                  | An implementation of one or more capacities: written in vagent, or native (bound by the adapter to host code)                                              |
+| behavior               | A reusable bundle of handlers, fields, goals and plans mounted on an agent                                                                                 |
+| belief                 | A ground fact in the agent's belief base, with the set of sources that assert it                                                                           |
+| goal                   | A declared desire with a success test (achieve), a holding condition (maintain) or neither (perform)                                                       |
+| plan                   | A procedure declared `for` a goal, with an applicability condition                                                                                         |
+| intention              | A goal instance being pursued, stored as cells: id, goal, plan, step path, waits and frame                                                                 |
+| suspension point       | A statement at which an intention ends its turn and waits                                                                                                  |
+| clone view             | A cell on another cell's `d.clone` rank that reads its master's content (Vortex §5.2)                                                                      |
+| mark, release, discard | `mark` records the arena's extent; `release` undoes every write since it; `discard` forgets it and keeps the writes (`arena_manifold.hpp:638-646`)         |
 
-| Term             | Meaning                                                                                                                                                                         |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| agent            | One actor of `MeshActorRuntime` running one compiled `agent` declaration                                                                                                        |
-| agent cell       | The single cell in the agent's arena that heads every rank of agent state; it is the actor's `stateRoot`                                                                        |
-| handle           | A cell whose content is an encoded `ActorPid`; how an agent names another agent. Handles are values: two handles naming one agent are two cells                                 |
-| turn             | One execution of the executor on one mailbox message                                                                                                                            |
-| event            | A typed record delivered as the payload of one `ActorSend` and decoded into an event cell for the turn                                                                          |
-| envelope         | The `ActorMessage` carrying an event; never visible to vagent code                                                                                                              |
-| space            | A named set of member handles held by one host agent, which relays every emission into it                                                                                       |
-| context          | SARL's grouping of spaces. In vagent each agent has exactly two contexts it can name: `inner` (the space it hosts for its children) and `outer` (the space it was spawned into) |
-| holon            | An agent with children; its children are the members of its `inner` space                                                                                                       |
-| capacity         | A named set of method signatures                                                                                                                                                |
-| skill            | An implementation of one or more capacities, installed on an agent                                                                                                              |
-| behavior         | A reusable bundle of handlers, fields and methods mounted on an agent                                                                                                           |
-| belief           | A ground Vlog fact in the agent's belief base                                                                                                                                   |
-| goal             | A declared, parameterised desire with a success test (achieve), a holding condition (maintain) or neither (perform)                                                             |
-| plan             | A procedure declared `for` a goal, with an applicability condition                                                                                                              |
-| intention        | A goal instance being pursued: a cell holding the goal, the plan chosen, the step path reached and the plan-local frame                                                         |
-| suspension point | A statement at which an intention may end a turn and continue in a later one: `achieve` of a subgoal, `ask`, `yield`                                                            |
-
-The words "ring", "mailbox ring" and "headcell" from version 1.0 are retired. Every structure below
-is an open **rank** with a head, as `store-slice-convergence.md` and the Vortex document use the
-word, and the mailbox is the C++ deque inside the runtime, not a structure in the arena.
+Every structure below is an open **rank** with a head, as `store-slice-convergence.md` and the
+Vortex document use the word. The mailbox is the runtime's C++ deque, not a structure in the arena.
 
 ______________________________________________________________________
 
@@ -122,93 +130,100 @@ ______________________________________________________________________
 Each ruling states what it decides, why, and what it costs. Alternatives are in
 [§13](#13-refused-alternatives).
 
-**V1. An agent is one actor; there are no links between arenas.** Each agent has its own
-`ArenaManifold` because `MeshActorRuntime::spawn` gives each actor its own `WorkerContext`
-(`mesh_actor.cpp:156`). An agent names another only through a handle, and changes another only by
-sending it a message. There is no population rank; the node's runtime keeps the actor table.
-*Price:* a holon cannot walk its children's state, and every holon interaction is a message. The
-default `ActorOptions::maxActors` of 128 (`mesh_actor.hpp:58`) bounds agents per runtime. That value
-is a default, so vagent reads it from `system://settings` and it is not a ceiling of the language.
+**V1. An agent is one actor; there are no links between arenas.** `MeshActorRuntime::spawn` gives
+each actor its own `WorkerContext` (`mesh_actor.cpp:156`). An agent names another only through a
+peer cell and affects another only by message. The node's runtime keeps the actor table; no arena
+holds a population. *Price:* a holon cannot read its children's state, and every holon interaction
+is a message. The runtime's `ActorOptions` (128 actors, 128 mailbox messages,
+`mesh_actor.hpp:57-65`) bound a node; they are constructor options the launcher reads from
+`system://settings`.
 
-**V2. Speculation is bounded by the turn.** Every `Mark` opened in a turn is discarded or released
+**V2. Speculation is bounded by the turn.** Every choice point and mark opened in a turn is gone
 before the turn ends. `checkpointView` refuses a non-zero `choiceDepth()` or `outstandingMarks()`
 (`mesh_actor.cpp:673-675`), so this is the only regime under which an agent can be checkpointed.
-`<-` is therefore vicon's trailed write and nothing more: the 1.0 `d.trail`, `d.shadow`, `d.choice`
-dimensions and the `ArenaSlice` type are withdrawn. *Price:* a reversible assignment is reversible
-only within the statement that makes it (vicon §4.4: a statement is bounded). Alternatives that
-remain after a turn ends are re-derived, not resumed (V4).
+`<-` is the arena's trailed write and nothing more. *Price:* a reversible assignment is reversible
+only within its statement. Alternatives that remain when a turn ends are re-derived, not resumed.
 
-**V3. One cursor per agent, one intention step per turn.** The executor runs a turn on one VM
-cursor. `VortexVM::backtrack` pops choice points belonging to other cursors without releasing them
-(`vortex_vm.cpp:198-215`), so two interleaved speculative cursors in one VM would corrupt each
-other. vagent never has two. *Price:* intentions do not run in parallel inside an agent; they take
-turns (§6.5). Parallelism is between agents.
+**V3. One cursor per agent.** `VortexVM::backtrack` pops choice points belonging to other cursors
+without releasing them (`vortex_vm.cpp:198-215`), so two interleaved speculative cursors in one VM
+would corrupt each other. vagent never runs two. *Price:* intentions take turns (§6.5); parallelism
+is between agents.
 
-**V4. Intentions persist as data, never as VM state.** An intention that continues across turns is
-stored as cells: its goal, the ordinal of its chosen plan, the ordinals of plans already tried, its
-step path, and its plan-local variables on `d.vars`/`d.values`. On resume, the executor re-enters
-the plan's code at the step path. This matches the comment on `ActorContinuation`: VM program
+**V4. Intentions persist as data, never as VM state.** An intention is a set of cells: a numeric id,
+its goal, the ordinal of its plan, the ordinals already tried, its step path, what it waits for
+(with a deadline), its delegator if any, and a frame of plan-local variables. On resume the executor
+re-enters the plan at the step path. This matches `ActorContinuation`'s comment that VM program
 counters stay local and application state lives in the published root (`mesh_actor.hpp:92-93`).
-*Price:* suspension points are restricted to places where the step path and the frame describe the
-whole state: statements of a plan body and the bodies of `if`, `while` and `for` over a list or a
-range, never inside an `&`/`|` expression or a generator operand ([§6.6](#66-suspension-points)).
+*Price:* suspension points are allowed only where a step path and a frame describe the whole state
+(§6.6).
 
-**V5. All emissions leave at the end of the turn.** `emit`, `tell`, `untell` and delegation write
-envelope cells onto `d.outbox`. Those cells are minted under whatever `Mark` is live, so a backtrack
-removes them with no extra mechanism. The adapter sends what remains when the turn finishes. A turn
-that ends in a hard failure sends nothing. *Price:* no message leaves mid-turn, so a turn cannot
-consult another agent except at a suspension point (`ask`), which ends the turn.
+**V5. Everything outside the arena is staged.** Messages, spawns and effects are outbox entries on
+`d.outbox`. They are minted under whatever mark is live, so a backtrack removes them for free. The
+adapter performs what remains after a successful turn. A turn that fails performs nothing. *Price:*
+nothing leaves mid-turn; a plan that needs an answer or a device result suspends (§6.6).
 
-**V6. Irreversible effects are statements.** A capacity method declared `effect` (hardware, external
-I/O) may be called only in a bounded position ([§8.3](#83-assignment-and-positions)): as a
-statement, or as a `then`, `else` or `do` body in a bounded position. The compiler rejects an
-`effect` call inside `&`, `|`, `\` or a generator operand. *Price:* an effect cannot be one arm of a
-search. That is the intent. After an effect has happened, plan failure is handled forward (§6.7),
-never by backtracking past it. This replaces 1.0's `commit;`, which round 1 showed being written on
-the wrong side of the failure point in every example.
+**V6. Effects are asynchronous and suspend.** A capacity method declared `effect` is implemented
+only by a native skill, which the adapter binds to host code. Calling one in a plan writes an outbox
+entry and suspends the intention; the host runs the action after the turn and reports its result or
+failure as a local delivery that resumes the intention. Calling one in a handler stages it without
+waiting. *Price:* an effect can never be one arm of a search, and a plan pays a turn per effect. In
+exchange, no device call runs inside a turn, so a failed or aborted turn never leaves the world
+changed and the arena rolled back, and an agent never blocks on a device.
 
-**V6a. Iteration that acts is deterministic.** The arena trails every write to a cell older than the
+**V7. Iteration that acts is deterministic.** The arena trails every write to a cell older than the
 live mark, and vicon's compiler records that even `:=` cannot skip the trail
 (`vicon/compiler.cpp:358-361`). Icon's `every e1 do e2` drives `e1` by failing back into it, so
-every arena write `e2` makes is undone at the next resumption, and all of them are gone when `e1`
-runs dry. vagent therefore has no `every`. It iterates with `for x in e do body`, where `e` is a
-list, a range `a to b [by c]`, or `believes t`, walked without a choice point (§8.2). *Price:* a
-generator cannot drive a loop that acts. A search that collects its results walks a rank instead, as
+every write `e2` makes is undone at the next resumption. vagent has no `every`. It iterates with
+`for x in e do body` over a list, a range or a belief query, walked without a choice point (§8.2).
+*Price:* a generator cannot drive a loop that acts. A search that collects results walks a rank, as
 `findall` does (§6.1).
 
-**V7. Beliefs are Vlog facts.** The belief base is a rank of predicate cells on `d.belief` off the
-agent cell, each heading its clauses on `d.clause` exactly as Vlog §6.1 lays them out. `believe` is
-`assertz` and `forget` is `retract`. A query is `#Unify` against the clauses. *Price:* belief lookup
-is a linear clause walk until convergence U1 (rank indexing) lands, as Vlog §6.3 already records.
+**V8. Beliefs are a set of facts with provenance.** The belief base is a rank of predicate cells on
+`d.belief`, each heading its clauses on `d.clause` as Vlog §6.1 lays them out. Believing a fact
+already present adds a source and raises no event. A fact is removed when its last source withdraws.
+*Price:* lookup is a linear clause walk until convergence U1 (rank indexing) lands, as Vlog §6.3
+records. The database itself is a prerequisite (Vlog §6 is unbuilt).
 
-**V8. Agent working state is arena state, not hypertime.** R8 says an arena dies with its owner and
-mints no operations. An agent's beliefs, intentions and fields are arena cells published as the
-checkpoint root. vagent never calls `promote` implicitly. An agent that must write to a `Store` uses
-an explicit `StoreWriter` capacity whose skill calls `zigzag::promote` (`arena_manifold.hpp:835`)
-and turns a refused promotion into a failed call. *Price:* "replay the agent's life from the spool"
-is not on offer (§14).
+**V9. Agent working state is arena state; the checkpoint is the one promotion.** R8 says an arena
+mints no operations. vagent never promotes into a store the user visits. A checkpoint, however, is
+`publishValue`, which promotes the reachable state into the published value's own transient `Store`
+(`mesh_value.hpp:88-93`). That is the only promotion, and §4.4 prices it. An agent that must write
+to a user's store uses an explicit `StoreWriter` capacity. *Price:* checkpoint cost grows with live
+state, and lifetime replay from a spool is not on offer (§14).
 
-**V9. Ten dimensions, minted as data.** `std:agent` mints `d.behavior`, `d.skill`, `d.capacity`,
-`d.space`, `d.member`, `d.holon`, `d.intention`, `d.subgoal`, `d.outbox` and `d.belief` on the
-`d.dims` rank when the package loads, as R12 requires and as `VortexCore::mintNamedDimension`
-already does (`vortex_core.cpp:20-26`). C++ learns none of their names. Everything else reuses an
-existing dimension with its existing meaning (§5.1). *Price:* ten cells at package load, and a name
-lookup per dimension per load.
+**V10. Eleven dimensions, minted as data.** `std:agent` mints `d.behavior`, `d.skill`, `d.capacity`,
+`d.space`, `d.member`, `d.holon`, `d.intention`, `d.subgoal`, `d.outbox`, `d.belief` and `d.pending`
+on the `d.dims` rank when it loads, as R12 requires and as `VortexCore::mintNamedDimension` does
+(`vortex_core.cpp:16-27`). C++ learns none of their names. *Price:* eleven cells per arena, and a
+name lookup per dimension per load.
 
-**V10. Many-to-one references go through clone views.** A link is reciprocal, so a cell can have
-only one negward neighbour along a dimension. Wherever several cells must refer to one (skills to a
-capacity), each referrer links to its own view cell appended posward to the target's `d.clone` rank,
-and readers compare `cloneMaster` (`arena_manifold.hpp:523`). *Price:* one extra cell per reference.
+**V11. Values are copied; nothing is pointed at twice.** A link is reciprocal, so a cell has one
+negward neighbour per dimension. Storing a value into a field, frame variable, event field, belief
+argument or outbox entry copies its cells. The one deliberate sharing is a skill's field frame,
+which its per-capacity instances reach through clone views (§5.3). *Price:* O(size) per store of a
+list or map, paid by the writer.
 
-**V11. The language is goal-directed, as vicon is.** Expressions succeed with a value or fail; there
-is no boolean test in control flow. The expression grammar follows Icon's precedence for `&`, `|`,
-`to`, assignment and comparison, so a vicon reader and a vagent reader parse the same text the same
-way. *Price:* programmers from SARL or Kotlin must learn that `a < b` produces `b` or fails, and
-that `&` is conjunction of generators, not bitwise or logical and.
+**V12. Agent state never links into the program.** A checkpoint promotes everything reachable from
+the agent cell along any dimension (`arena_manifold.hpp`, the comment above `promote`). A link from
+state into a program cell would drag the compiled program and `home` into every checkpoint. So
+capacities are matched by name, plans and handlers by ordinal, and the program region is never
+written at run time. *Price:* a name comparison per dispatch step. Ordinals are valid only for the
+same `programRef`, which `resume` already requires (`mesh_actor.cpp:216`).
 
-**V12. SARL's surface where SARL has one.** Handlers are `on Event [guard] { }`, the event is
-`occurrence`, capacities are imported with `uses`, emission is scoped. Where vagent differs (skills
-installed by `install`, BDI constructs SARL lacks), [§8.10](#810-differences-from-sarl) says so.
+**V13. Bounded statements cut to a recorded depth.** A statement takes its first result and drops
+its choice points (vicon §4.4). vicon's flag-and-drain scheme cannot do this, because the flags are
+trailed and undone (`vicon/compiler.cpp:12-22`). vagent records the choice depth when a statement
+starts and executes `#Cut` to that depth when it produces. Reading the depth needs one opcode
+(§11.1). *Price:* one opcode and one cell per statement.
+
+**V14. Goal-directed structure, statically typed spellings.** Expressions succeed with a value or
+fail; there is no boolean test in control flow. Precedence follows Icon for `&`, `|`, `to` and
+assignment. Spellings follow the statically typed family (`==`, `!=`, `++`), because one typed `==`
+replaces Icon's separate numeric and lexical comparisons. §8.11 lists every divergence from vicon.
+*Price:* a vicon reader must map the spellings.
+
+**V15. SARL's surface where SARL has one.** Handlers are `on Event [guard] { }`, the event is
+`occurrence`, capacities are imported with `uses`, emission is scoped. §8.10 lists the differences.
 
 ______________________________________________________________________
 
@@ -216,70 +231,109 @@ ______________________________________________________________________
 
 ### 4.1 One agent, one actor, one arena
 
-Spawning an agent spawns one actor: `MeshActorRuntime::spawn` checks the grant, creates a
-`WorkerContext` with its own `ArenaManifold` and `VortexVM`, and mints a cursor
-(`mesh_actor.cpp:150-175`). The executor's first turn builds the agent cell and its ranks. From then
-on every turn is one message.
+Spawning an agent spawns one actor under a grant. The runtime's `Authorizer` turns a signed
+capability into an `ActorGrant` (`mesh_actor.hpp:111-113`), checks that its `programRef` matches the
+request, and caps `maxOutputBytes` at 32 KiB (`mesh_actor.cpp:131-139`). A running agent cannot sign
+anything, so the adapter holds a **capability issuer** supplied by the host (the owner's delegated
+device key). It signs a child's capability with figures no larger than the parent's own grant.
 
-Two facts about the runtime shape what follows:
+Four facts about the runtime shape what follows:
 
-- **Only the actor's owner may send to it.** `receive` refuses an `ActorSend` whose authenticated
-  identity is not the actor's owner (`mesh_actor.cpp:402-405`). Agents spawned under one identity
-  can therefore talk to each other, and agents of different identities cannot. vagent v2.0 specifies
-  single-owner societies; cross-owner spaces need §11.3 (c).
+- **Only the actor's owner may send to it.** `receive` refuses an `ActorSend` from any identity but
+  the owner (`mesh_actor.cpp:402-405`). vagent v3.0 specifies single-owner societies.
 - **A failed executor stops the actor.** `pumpOne` sets `stopped` when the executor returns an error
-  (`mesh_actor.cpp:501`). The adapter therefore reports success to the runtime for every turn whose
-  failure is a language-level outcome (a failed handler, a failed intention, a contract violation),
-  and returns an error only for its own faults (an undecodable message). A vagent agent is not
-  killed by a soft failure.
+  (`mesh_actor.cpp:501`). The adapter reports success for every language-level outcome and returns
+  an error only for its own faults.
+- **A grant expires.** At `expiresAt`, `receive` refuses and `pumpOne` stops the actor with no
+  notice to anyone (`mesh_actor.cpp:438-440`, `462-466`). §4.5 gives the renewal path.
+- **Spawn carries no arguments.** `ActorSpawn` must have an empty `value` (`actor_wire.cpp:87-90`).
+  Agent parameters travel in the first message, `Initialize`.
 
 ### 4.2 The turn
 
-A turn processes one message. The executor:
+A **message turn** handles one mailbox message. A **wake turn** handles local work: a ready
+intention, a due timer, or a host delivery (an effect result or a percept). The adapter asks for
+wake turns through the local wake of §11.3 (d). Both kinds run the same steps:
 
-1. Re-arms fuel: `setExecutionLimits(cellCount() + maxCells, maxInstructions, maxOutputBytes)`
-   (`arena_manifold.hpp:400`). The runtime installs these limits once, at spawn
-   (`mesh_actor.cpp:165`), which makes them lifetime totals; the adapter makes them per turn.
-1. Takes `m0 = arena.mark()`.
-1. Decodes the message into an event cell (§5.5), or recognises it as a reply, a resume or a down
-   notice (§6.5).
-1. Runs the deliberation step for that message (§6.5).
-1. Checks maintain goals (§6.3).
-1. On success, `discard(m0)`: the turn's writes stand. On a hard failure, `release(m0)`: the arena
-   is exactly as it was before the turn, and the outbox written during the turn is gone with it.
-1. Hands every envelope left on `d.outbox` to `MeshActorRuntime::send`, unlinks them, and returns.
+1. Re-arm fuel: `setExecutionLimits(cellCount() + maxCells, maxInstructions, maxOutputBytes)`
+   (`arena_manifold.hpp:400`). The runtime sets these once at spawn (`mesh_actor.cpp:165`), which
+   makes them lifetime totals; the adapter makes them per turn.
+1. Read the clock once and write the turn time into the turn's event cell, so the turn's input is in
+   the arena.
+1. Push a base choice point (`VortexVM::pushChoicePoint`, which takes the turn's mark) whose
+   alternative is the adapter's failure routine.
+1. Decode the message or host delivery into an event cell, or pick the ready intention.
+1. Run the dispatcher (§6.5) or continue the intention.
+1. Run end-of-turn deliberation: reconsider live intentions, check maintain goals, wake matching
+   `await`s (§6.5).
+1. On success, `clearChoicePoints()` (`vortex_vm.cpp:242`), which discards every mark and keeps the
+   writes. On a hard failure, backtrack to the base choice point, which releases the turn's mark and
+   restores the arena, then run the recovery step below.
+1. Drain `d.outbox` in order: spawns first (filling their peer cells), then messages, then effects,
+   then timer changes. Unlink each entry.
+1. Rebuild the adapter's ready list and timer heap from the intention and timer cells.
 
-At step 7 no mark is outstanding and no choice point is live. If the mailbox is also empty and no
-sent message is still awaiting its delivery, the agent is quiescent and `checkpointView` accepts it.
+**Recovery after a hard failure.** The arena is back where it was, but the message or wake that
+caused the turn is consumed. If the turn was running an intention, the adapter runs a second, short
+turn of `std:agent`'s `fail_step(id, cause)`, which marks that plan failed with cause `fuel`,
+`depth` or `contract`. No user code runs in it. Selection then proceeds as for any plan failure. If
+the turn was handling an event, the event is dropped and counted (`dropped_events`).
+
+At the end of step 9 no mark or choice point is live. The agent is quiescent, and `checkpointView`
+accepts it, when in addition its mailbox is empty, no message it sent awaits completion, and the
+adapter holds no undelivered host delivery for it. Ready intentions and pending timers do not
+prevent a checkpoint: they are cells and travel with it.
 
 ### 4.3 What persists
 
-| Structure                          | Where                                     | Survives the turn | In the checkpoint root |
-| ---------------------------------- | ----------------------------------------- | ----------------- | ---------------------- |
-| Fields (`var`)                     | `d.vars`/`d.values` off the agent cell    | yes               | yes                    |
-| Beliefs                            | `d.belief` predicates, `d.clause` clauses | yes               | yes                    |
-| Installed skills and their fields  | `d.skill` rank                            | yes               | yes                    |
-| Mounted behaviors and their fields | `d.behavior` rank                         | yes               | yes                    |
-| Intentions and their frames        | `d.intention` rank, `d.subgoal` descent   | yes               | yes                    |
-| Hosted spaces and members          | `d.space`, `d.member`                     | yes               | yes                    |
-| Children                           | `d.holon` rank of handles                 | yes               | yes                    |
-| The turn's event cell              | unlinked at turn end                      | no                | no                     |
-| Outbox envelopes                   | `d.outbox`, drained at turn end           | no                | no (always empty)      |
-| Choice points, marks               | VM and arena                              | no                | no (V2)                |
-| Compiled program                   | `programRef`                              | n/a               | named, not copied      |
+| Structure                          | Where                                                | Survives the turn | In the checkpoint root |
+| ---------------------------------- | ---------------------------------------------------- | ----------------- | ---------------------- |
+| Fields (`var`)                     | `d.vars`/`d.values` off the agent cell               | yes               | yes                    |
+| Beliefs and their sources          | `d.belief`, `d.clause`, `d.source`                   | yes               | yes                    |
+| Installed skills and their fields  | `d.skill`; skill frames through `d.clone`            | yes               | yes                    |
+| Mounted behaviors and their fields | `d.behavior`                                         | yes               | yes                    |
+| Intentions, frames, waits          | `d.intention`, `d.subgoal`                           | yes               | yes                    |
+| Timers                             | the `timers` field owned by `std:agent`              | yes               | yes                    |
+| Hosted spaces and members          | `d.space`, `d.member`                                | yes               | yes                    |
+| Children                           | `d.holon`                                            | yes               | yes                    |
+| The turn's event cell              | unlinked at turn end                                 | no                | no                     |
+| Internal events of the turn        | `d.pending`, emptied during the turn                 | no                | no (always empty)      |
+| Outbox entries                     | `d.outbox`, drained after the turn                   | no                | no (always empty)      |
+| Choice points, marks               | VM and arena                                         | no                | no (V2)                |
+| Compiled program                   | named by `programRef`; never linked from state (V12) | n/a               | no                     |
 
-### 4.4 Fuel, cells, and reclamation
+### 4.4 Cells, checkpoints and their costs
 
 An arena frees cells only by `release` truncation (`arena_manifold.hpp:638-646`). `compact()` drops
 dead link entries and frees no cell (`arena_manifold.hpp:656-672`), and no reachability sweep is
-built. So a long-lived agent accumulates unreachable cells: consumed event cells, finished
+built. A long-lived agent therefore accumulates unreachable cells: consumed event cells, finished
 intentions, retracted clauses, uninstalled skills.
 
-vagent reclaims them by **checkpoint and resume**: publish the checkpoint, then `resume` it on a
-fresh arena, which rebuilds only what is reachable from the root. This needs the agent to be
-quiescent, which a busy agent may rarely be. The cost and the gap are recorded in §15 and U-A1. The
-1.0 claim of an O(1) "topological GC" is withdrawn: unlinking a subtree makes it unreachable, not
-reclaimed.
+vagent reclaims them by **checkpoint and resume**. `checkpointView` hands the arena and root to
+`publishValue`, which promotes what is reachable into a transient store, seals and signs it.
+`resume` rebuilds an arena from that history (`mesh_actor.cpp:255-262`), and only reachable cells
+come back. The costs, all paid per checkpoint:
+
+- **Operations.** Promotion mints about one operation per live cell plus one per link. It is bounded
+  by `PromotionBudget::maxOps` (65,536, `arena_manifold.hpp:232-234`) and by
+  `ValueLimits::operations` (65,536, `mesh_value.hpp:28`), which `resume` further clamps to the
+  grant's `maxCells` (`mesh_actor.cpp:259`). `resume` builds its `ValueLimits` locally, so the bound
+  cannot be raised today; §11.3 (e) makes it an option. Until then an agent whose live state needs
+  more than 65,536 operations cannot be checkpointed, moved or reclaimed.
+- **Permascroll growth.** Promotion spools constructed bytes (string fields, belief constants) into
+  the author's permascroll (`arena_manifold.hpp`, the comment above `promote`, step 1). The
+  permascroll is append-only, so every checkpoint re-appends the live strings.
+- **Quiescence.** A continuously busy agent may never reach the conditions of §4.2 (U-A1).
+
+### 4.5 Leases and renewal
+
+A grant's `expiresAt` ends the agent. The renewal path the runtime offers is checkpoint, publish,
+and `resume` under a fresh capability that names the checkpoint's content hash as its base
+(`mesh_actor.hpp`, the comment on `resume`). The adapter starts renewal when `vagent.renew_fraction`
+of the lease has elapsed: it stops asking for wake turns, waits for quiescence, and resumes with a
+capability from the issuer. If the lease ends first, the agent stops. Before a planned stop (lease
+end without renewal, or `Destroy`), the adapter stages a `ChildStopping` message to the parent, so a
+parent learns of an orderly stop at once and of a crash only through `ChildDown` (§5.4).
 
 ______________________________________________________________________
 
@@ -287,111 +341,135 @@ ______________________________________________________________________
 
 ### 5.1 Dimensions
 
-Minted by `std:agent` at load (V9):
+Minted by `std:agent` at load (V10):
 
-| Dimension     | From → to                                     | Shape                 | Why not an existing dimension                                                    |
-| ------------- | --------------------------------------------- | --------------------- | -------------------------------------------------------------------------------- |
-| `d.behavior`  | agent cell → behavior instances               | rank                  | `d.vars` is the field table; behaviors are not named fields                      |
-| `d.skill`     | agent cell → skill instances                  | rank                  | as above; dispatch walks this rank and nothing else                              |
-| `d.capacity`  | skill instance → its clone view of a capacity | one link per instance | a skill's capacity is a reference, not a member of any rank                      |
-| `d.space`     | agent cell → spaces it hosts                  | rank                  | no existing rank lists hosted spaces                                             |
-| `d.member`    | space cell → member handles                   | rank                  | `d.holon` is children only; a space can hold non-children                        |
-| `d.holon`     | agent cell → handles of its children          | rank                  | kept apart from `d.member` so monitoring and delegation never scan a space       |
-| `d.intention` | agent cell → intention cells                  | rank                  | `d.cursors` holds VM processes with program counters; an intention has none (V4) |
-| `d.subgoal`   | intention → the subgoal intention it awaits   | one link              | an intention awaits at most one subgoal at a time (§6.6)                         |
-| `d.outbox`    | agent cell → staged envelopes                 | rank                  | must be distinct so the drain cannot touch anything else                         |
-| `d.belief`    | agent cell → predicate cells                  | rank                  | Vlog has `d.clause` for clauses but no directory of an agent's predicates        |
+| Dimension     | From → to                                     | Shape    | Why not an existing dimension                                                    |
+| ------------- | --------------------------------------------- | -------- | -------------------------------------------------------------------------------- |
+| `d.behavior`  | agent cell → behavior instances               | rank     | `d.vars` is the name-keyed field table; behaviors are not named fields           |
+| `d.skill`     | agent cell → skill instances                  | rank     | as above; dispatch walks this rank and nothing else                              |
+| `d.capacity`  | skill instance → its own capacity-name cell   | one link | a reference by name to something outside the arena (V12)                         |
+| `d.space`     | agent cell → spaces it hosts                  | rank     | no existing rank lists hosted spaces                                             |
+| `d.member`    | space cell → member peer cells                | rank     | `d.holon` is children only; a space can hold non-children                        |
+| `d.holon`     | agent cell → peer cells of its children       | rank     | kept apart from `d.member` so monitoring and delegation never scan a space       |
+| `d.intention` | agent cell → top-level intention cells        | rank     | `d.cursors` holds VM processes with program counters; an intention has none (V4) |
+| `d.subgoal`   | intention → the subgoal intention it awaits   | one link | an intention awaits at most one subgoal                                          |
+| `d.outbox`    | agent cell → outbox entries                   | rank     | must be distinct so the drain touches nothing else                               |
+| `d.belief`    | agent cell → predicate cells                  | rank     | Vlog has `d.clause` for clauses but no directory of an agent's predicates        |
+| `d.pending`   | agent cell → internal events raised this turn | rank     | the dispatcher needs a queue it can walk in Vortex; emptied before the turn ends |
 
-Reused, with their existing meaning: `d.vars`/`d.values` (fields, frames, event fields, symbol
-tables, as `VortexCore::exportSymbol` uses them, `vortex_core.cpp:117-125`), `d.clause` (clauses),
-`d.clone` (views), `d.source` (a belief's provenance, the meaning `result_slice.cpp:34` gives it),
-`d.grab`/`d.step`/`d.spin`/`d.stack`/`d.contract` (calls, unchanged), and `d.scan` (vicon's scanning
-cursor).
+Reused with their existing meanings: `d.vars`/`d.values` (fields, frames, event fields, as
+`VortexCore::exportSymbol` uses them, `vortex_core.cpp:117-125`); `d.clause` (clauses, and on the
+program side the alternatives of a goal or an event type, §5.7); `d.clone` (skill frames);
+`d.source` (a belief's provenance, the meaning `result_slice.cpp:34` gives it); `d.scan` (vicon's
+scanning cursor).
 
-Every attachment uses `ArenaManifold::insertIntoRank` (`arena_manifold.hpp:617`) or
-`zigzag::rankTail` followed by `link` (the pattern at `vortex_core.cpp:113`). Never a bare `link`,
-which evicts whatever either end held (`arena_manifold.hpp:582-592`). Removing a cell from a rank
-links its predecessor to its successor, which leaves the removed cell with no link on that
-dimension.
+Attachment uses `ArenaManifold::insertIntoRank` (`arena_manifold.hpp:617`) or `zigzag::rankTail`
+followed by `link` (as at `vortex_core.cpp:113`), never a bare `link`, which evicts whatever either
+end held (`arena_manifold.hpp:582-592`). Removal links a cell's predecessor to its successor, which
+leaves the removed cell with no link on that dimension.
 
 ### 5.2 The agent cell
 
 ```text
-[agent cell: "PatrolDrone"]
-   ├─(+d.vars)──► [targets_seen] ─(+d.values)─► [scalar 3]
-   ├─(+d.skill)─► [ThrusterNav] ─(+d.skill)─► [Comms]
-   │                  └─(+d.capacity)─► [view] ─(-d.clone … master)─ [capacity Navigation]
-   ├─(+d.behavior)─► [ObstacleAvoidance] ─(+d.vars)─► …
-   ├─(+d.belief)─► [pred at/2] ─(+d.clause)─► [at(3,4)] ─(+d.clause)─► …
-   ├─(+d.intention)─► [intention Survey] ─(+d.intention)─► [intention Recharge]
-   │                        └─(+d.subgoal)─► [intention Reach]
-   ├─(+d.space)─► [space inner] ─(+d.member)─► [handle] ─(+d.member)─► [handle]
-   ├─(+d.holon)─► [handle child1] ─(+d.holon)─► [handle child2]
-   └─(+d.outbox)─► [envelope] ─(+d.outbox)─► [envelope]
+[agent cell "PatrolDrone"]
+  ├─(+d.vars)──► [targets_seen] ─(+d.values)─► [3]
+  │                └─(+d.vars)─► [timers] ─(+d.values)─► [list …]
+  ├─(+d.skill)─► [instance] ─(+d.skill)─► [instance]
+  │                ├─(+d.capacity)─► ["mars:Navigation"]
+  │                └─(-d.clone … master)─ [skill frame ThrusterNav] ─(+d.vars)─► fields
+  ├─(+d.behavior)─► [ObstacleAvoidance] ─(+d.vars)─► fields
+  ├─(+d.belief)─► [pred at/2] ─(+d.clause)─► [at(3,4)] ─(+d.source)─► [peer] ─(+d.source)─► [peer]
+  ├─(+d.intention)─► [intention 7: Survey] ─(+d.intention)─► [intention 9: KeepCharged]
+  │                      └─(+d.subgoal)─► [intention 8: Reach]
+  ├─(+d.space)─► [space inner] ─(+d.member)─► [peer] ─(+d.member)─► [peer]
+  ├─(+d.holon)─► [peer child1] ─(+d.holon)─► [peer child2]
+  ├─(+d.pending)─► (empty between turns)
+  └─(+d.outbox)─► (empty between turns)
 ```
 
-Every arrow is the only link its source has in that direction on that dimension, and every target
-has only that one negward link. The capacity master is the one cell referred to by many skills, and
-it is reached only through views (V10).
+Each arrow is the only link its source has in that direction on that dimension, and each target has
+only that one negward link. No arrow leaves the agent's state for the program or `home` (V12).
 
 ### 5.3 Capacities and skills
 
-A `capacity` declaration compiles to a capacity cell exported as a symbol of its module on the
-module's `d.vars` rank. That is the symbol table `VortexCore::exportSymbol` already builds. It is
-not a `d.capacity` chain, which 1.0 drew and which would have blocked the skill pointer.
+Installing a skill mints one **skill frame** cell, which holds the skill's fields on `d.vars`, and
+one **instance** cell per capacity the skill implements, including capacities those extend. Each
+instance is appended to the agent's `d.skill` rank, appended posward to the frame's `d.clone` rank,
+and linked along `+d.capacity` to its own cell holding the capacity's qualified name. The frame is
+the clone master and is never removed while an instance exists. A method body reaches its fields as
+`cloneMaster(instance, d.clone)` then `d.vars` (`arena_manifold.hpp:522-523`).
 
-Installing a skill appends a skill instance cell to the agent's `d.skill` rank. For each capacity
-the skill implements, it appends a view cell to that capacity's `d.clone` rank and links the
-instance to it along `+d.capacity`. A skill implementing several capacities gets one instance cell
-per capacity, which keeps `d.capacity` at one link per cell. The instances share the skill's field
-frame through `d.clone` in the same way.
+A capacity call walks `d.skill` and takes the first instance whose capacity name matches. The cost
+is O(installed instances). `install S` first uninstalls every installed skill that shares any
+capacity with `S`, whole, then installs `S`, so a skill is never split across capacities.
+`uninstall` runs the skill's `on uninstall` block, removes its instances, then its frame.
 
-A capacity call walks `d.skill` from the agent cell and takes the first instance whose
-`cloneMaster(link(instance, +d.capacity))` is the wanted capacity. The cost is O(installed skills),
-typically under ten. Re-installing a skill for the same capacity removes the old instance and
-appends the new one, so there is at most one instance per capacity. The call itself is the dual-wing
-convention unchanged (§9.2).
+A **native skill** has no body. The adapter binds it by qualified name to host code registered at
+start-up. Its methods are effects (V6), and it is the only kind of skill that may implement an
+`effect` method.
 
 ### 5.4 Spaces, contexts and holons
 
-A space is a cell on its host's `d.space` rank. Its members are handle cells on `d.member`. Every
-agent hosts exactly one space at creation, its `inner` space. Its children join it when spawned.
+A space is a cell on its host's `d.space` rank, with members as peer cells on `d.member`. Every
+agent hosts its `inner` space from creation; children join it when spawned. `outer` is a reference
+to the parent's `inner` (the parent's peer cell and the space name). A top-level agent's `outer` is
+the launcher's space.
 
-`outer` is a space reference: the parent's handle and the space name. A top-level agent's `outer` is
-the node's default space, hosted by the launcher agent (§8.8). An emission into a space the agent
-does not host is one `ActorSend` to the host with a relay marker. The host's `std:agent` relay
-handler sends one `ActorSend` per member, excluding the emitter. An emission into a hosted space
-fans out directly.
+An emission into a space the agent does not host is one `ActorSend` to the host with a relay marker;
+the host's `std:agent` relay handler sends one `ActorSend` per member, excluding the emitter. An
+emission into a hosted space fans out directly.
 
-A holon's children are separate actors. The holon holds their handles on `d.holon` and is monitoring
-each one through `MeshActorRuntime::monitor`, so `ActorDown` reaches it as a `ChildDown` event. A
-child knows its parent only through the spawn request's source, exposed as `parent`. No dimension
-links a child to its parent, because they are in different arenas (V1).
+A holon's children are separate actors, named by peer cells on `d.holon`. A child knows its parent
+only through the spawn request's source, exposed as `parent`. The holon monitors each child through
+`MeshActorRuntime::monitor`. `ActorDown` reaches a watcher only after phi-accrual suspicion, the
+lease (60 s by default, `mesh_actor.hpp:63`), and discovery evidence supplied through `observe()`
+(`mesh_actor.cpp:640-660`). So `ChildDown` means "the child's node is unreachable", minutes later.
+An orderly stop is announced at once by `ChildStopping` (§4.5).
 
 ### 5.5 Events
 
-An event is decoded into one event cell whose content is the event type's name. Its fields hang on
-`d.vars`/`d.values` exactly as a scope does, with scalars as R6 scalar cells. Two implicit fields
-are always present: `source` (the emitter's handle) and `space` (the space it arrived through, or
-none for a direct `tell`). The cell is quotable and queryable while the turn runs and is unlinked at
-turn end.
+An event cell's content is the event type's name. Its fields hang on `d.vars`/`d.values`, with
+scalars as R6 scalar cells. Four implicit fields are always present and their names may not be
+declared: `source` (the emitter's peer cell, or none for a host delivery), `space` (the space it
+arrived through, or none), `time` (the turn time, §4.2) and `ordinal` (the emitter's emission
+counter).
 
 On the wire the event is the `value` of an `ActorSend` (`identity_layout.hpp:315-327`): a bencoded
-dictionary of kind, type name, fields and correlation id. The frame limit is 64 KiB
-([vortex-distribution.md](vortex-distribution.md), wire table). A larger payload must travel as a
-torrent named by `infoHash`, which the adapter does not yet do (U-A3). The `requestId` is
-`sha256(emitter pid ‖ turn sequence ‖ emission ordinal)`, so a re-executed turn produces the same
-ids and the runtime's de-duplication (`DuplicateMismatch`, `mesh_actor.cpp:335-337`) treats a resend
-as a resend. Event identity is this id, not the content hash.
+dictionary of kind, type name, ordinal, fields and correlation id. `value` is limited to 32 KiB
+(`actor_wire.cpp:80`); a larger payload needs U-A3. `sequence` must be zero for `ActorSend`
+(`actor_wire.cpp:94-96`), so ordering information travels in the value. The `requestId` is
+`sha256(emitter pid ‖ turn number ‖ position in the outbox)`, so a turn the adapter re-drains
+produces the same ids, and the runtime's de-duplication treats a resend as a resend
+(`mesh_actor.cpp:333-337`).
+
+An event type that `extends` another matches handlers for both. The wire carries only the type name;
+the receiver resolves the chain from its own program, so sender and receiver must agree on the
+declaration.
 
 ### 5.6 Intentions
 
-An intention cell holds, on `d.vars`/`d.values`: `goal` (the goal's name and argument cells), `plan`
-(the chosen plan's ordinal in the goal's plan list), `tried` (the ordinals already failed, a
-`std:collections` list), `step` (the step path, §6.6), `waiting` (what it awaits: a subgoal, a
-correlation id, or a timer) and the plan-local variables. A subgoal it awaits is linked along
-`+d.subgoal`. Nothing in an intention is a `CellRef` into the program; ordinals are re-resolved
-against `programRef` on resume, so a checkpoint moved to another node resumes correctly.
+An intention cell's `d.vars` holds system attributes only: `id` (from a counter field on the agent
+cell), `goal` (name and copied arguments), `plan` (ordinal in the goal's plan list), `tried`, `step`
+(the step path), `waiting` (kind, key, deadline), `delegator` (a peer cell and correlation id, when
+adopted for another agent), `blocked_until` (maintain back-off, §6.3) and `frame`. User plan-local
+variables hang on the `frame` value's own `d.vars`, so a plan variable named `step` cannot collide
+with the system's.
+
+Top-level intentions are on `d.intention`. A subgoal intention is reached only along its parent's
+`+d.subgoal`. Messages and timers name an intention by its `id`, never by `CellRef`, because refs
+change when `resume` rebuilds the arena. Every deadline is an absolute time in a scalar cell, so the
+adapter's timer heap is rebuilt from cells after every turn and after `resume`.
+
+### 5.7 Program-side structure
+
+The compiled program is loaded from `programRef` and never written at run time (V12). Its module
+symbol table (`d.vars` off the module cell, as `exportSymbol` builds it) holds one name cell per
+goal and per event type. Each heads a rank on `d.clause` of its alternatives: the plans for a goal
+in plan-list order (§6.2), and the handlers for an event type in descending priority then
+declaration order. This is Vlog's predicate-and-clauses shape reused: a goal is a predicate whose
+clauses are plans. A behavior's program contributes its own ranks, and the dispatcher walks the
+agent's then each mounted behavior's. An ordinal is a position on such a rank, valid for one
+`programRef`.
 
 ______________________________________________________________________
 
@@ -399,36 +477,32 @@ ______________________________________________________________________
 
 ### 6.1 Beliefs
 
-The belief base is the agent's Vlog database (V7). Statements and expressions:
+The belief base is a set of facts, each with a set of sources (V8).
 
-- `believe at(rover, 3, 4)` asserts the fact (Vlog `assertz`) and queues a `+at/3` internal event.
-- `forget at(rover, ?x, ?y)` retracts every matching fact (Vlog `retract`) and queues one `-at/3`
-  per retraction.
-- `believes at(rover, ?x, ?y)` is a generator: it produces once per matching fact, binding `x` and
-  `y` for the rest of the expression. `?x` names a fresh logic variable; a plain identifier is a
-  value.
-- `findall(?x, at(rover, ?x, _))` is the list of bindings, from `std:agent` (§10).
+- `believe at(rover, 3, 4)` adds the fact with source `self`. If the fact is new, it raises a
+  `+at/3` internal event; if it was present, it only adds the source.
+- `forget at(rover, ?x, ?y)` removes source `self` from every matching fact. A fact with no source
+  left is retracted and raises `-at/3`.
+- `believes at(rover, ?x, ?y)` is a generator producing once per matching fact, binding `x` and `y`.
+  `believes t from s` matches only facts with `s` among their sources.
 - `for believes at(rover, ?x, ?y) do body` runs `body` once per matching fact.
+- `findall(?x, at(rover, ?x, _))` is the list of bindings.
 
-`findall` and `for believes` cannot use backtracking to visit the clauses, because a result gathered
-inside a branch is truncated when the branch is resumed (V6a). They walk the predicate's `d.clause`
-rank directly. For each clause they copy the query term with fresh variables, take a mark, and
-unify. On failure they release the mark. On success they discard it, keeping that copy's bindings,
-and run the body or append the binding. Each attempt has its own variables, so a kept binding cannot
-disturb the next attempt. The cost is one term copy per clause.
+`findall` and `for believes` do not visit clauses by backtracking, because a result gathered inside
+a branch is truncated when the branch resumes (V7). They first copy the predicate's clause list,
+which gives Vlog's logical update view (Vlog §6.2): facts added or removed by the loop body are not
+visited. Then for each clause they copy the query term with fresh variables, take a choice point,
+and unify. On failure the choice point's mark is released. On success it is cut, keeping that copy's
+bindings. The cost is one term copy per clause.
 
-A fact received by `tell` carries its sender's handle on `+d.source`, the provenance meaning that
-dimension already has. `believes` ignores provenance; `believes_from(sender, at(...))` filters on
-it.
+A fact received by `tell` gets the sender's peer cell as a source; `untell` removes it. Sources are
+a rank on `d.source` from the clause, each its own peer cell (V11). Revision is by explicit `forget`
+then `believe`, or `untell` then `tell`. The base is closed-world. Because beliefs are arena state
+(V9), there is no history of them.
 
-Revision is last-writer-wins per fact, by explicit `forget` then `believe`. The belief base is
-closed-world: a fact not present is not believed. Retracted clauses stay in the arena until
-reclamation (§4.4). Because beliefs are arena state (V8), the spool keeps no history of them.
-
-Internal belief events are handled in the same turn, after the handler that caused them, in the
-order they were queued. A handler for `+at` that itself believes or forgets queues further events.
-The executor stops after `belief_event_depth` rounds (a setting) and reports a hard failure. That
-bound stops a handler loop from consuming the turn's fuel silently.
+Internal events are cells on `d.pending`, handled after the handler that raised them, in raise
+order. A belief event carries the fact as a term, which handlers match (§8.5). Rounds stop at
+`vagent.belief_event_depth`; exceeding it is a hard failure.
 
 ### 6.2 Goals and plans
 
@@ -436,204 +510,227 @@ A goal is declared, not programmed:
 
 ```vagent
 goal Reach(location: Point) achieve {
-  succeed when position() == location
-  drop when not believes mission_active()
+  succeed when believes position(location)
 }
 goal KeepCharged() maintain {
-  holds battery() > reserve_floor()
+  holds believes battery(?level) & level > reserve_floor
 }
 goal Survey(target_id: Str, location: Point) perform
 ```
 
-| Kind       | Succeeds when                                         | Fails when                                                 | Re-adopted                                  |
-| ---------- | ----------------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------- |
-| `achieve`  | its `succeed when` condition holds at a step boundary | no applicable untried plan remains                         | no                                          |
-| `perform`  | a plan body completes                                 | no applicable untried plan remains                         | no                                          |
-| `maintain` | never ends while the agent lives                      | an adopted restoring intention fails (reported, not fatal) | whenever `holds` fails at the end of a turn |
+| Kind       | Succeeds when                                       | Fails when                                        | Re-adopted                                                 |
+| ---------- | --------------------------------------------------- | ------------------------------------------------- | ---------------------------------------------------------- |
+| `achieve`  | `succeed when` holds at a step boundary or turn end | no applicable untried plan remains                | no                                                         |
+| `perform`  | a plan body completes                               | no applicable untried plan remains                | no                                                         |
+| `maintain` | never ends while the agent lives                    | a restoring intention fails (reported, not fatal) | when `holds` fails at turn end and no back-off is in force |
 
-`drop when` applies to every kind: when it holds at a step boundary, the intention ends without
-success or failure, and a `GoalDropped` internal event is queued. A plan for an `achieve` goal whose
-body completes while `succeed when` does not hold counts as a failed plan, as in Jadex and GOAL.
+`drop when` applies to every kind; when it holds, the intention ends as dropped and `GoalDropped` is
+raised. A plan for an `achieve` or `maintain` goal whose body completes while the goal's condition
+does not hold counts as a failed plan, as in Jadex and GOAL. Goal clauses are resolved in the
+adopting agent's scope, so they may call that agent's capacities and read its fields and parameters.
 
-A plan is a procedure bound to a goal by name, with an applicability condition:
+A plan is bound to a goal by name, repeats the goal's parameter names, and has an applicability
+condition:
 
 ```vagent
-plan direct for Reach(location) where battery() > reserve_floor() + leg_cost(location) {
-  drive(location)
+plan direct for Reach(location) where believes battery(?level) & level > reserve_floor {
+  follow([location])
 }
 ```
 
-Many plans may be declared `for` one goal, in an agent, a behavior or at top level. Their order is
-declaration order: agent body, then behaviors in mount order, then imported modules in import order.
-That order is the plan list whose ordinals intentions store.
+Bindings made by `where` are visible in the body. Plans for one goal may be declared in an agent, a
+behavior or at top level; their order (agent, then behaviors in mount order, then imported modules
+in import order) is the plan list.
 
-### 6.3 Adoption and the plan selection function
+### 6.3 Adoption, selection and back-off
 
-`adopt G(args)` creates an intention for `G`, appends it to `d.intention`, queues a resume for it,
-and returns its handle. It does not wait. Inside a plan, `achieve G(args)` adopts `G` as a subgoal,
-links it on `+d.subgoal`, and suspends the calling intention until the subgoal ends (§6.6).
+`adopt G(args)` creates an intention, appends it to `d.intention`, marks it ready, and returns its
+handle. Inside a plan, `achieve G(args)` creates a subgoal intention, links it along `+d.subgoal`,
+and suspends the caller until the subgoal ends.
 
-Plan selection, on adoption and after each plan failure, takes the first plan in the plan list that
-is not in `tried` and whose `where` condition succeeds. The condition is evaluated as a bounded
-expression: its first result is taken and its bindings are kept for the body. If none applies, the
-goal fails.
+Plan selection takes the first plan in the plan list not in `tried` whose `where` condition
+succeeds, evaluated bounded. It runs when the intention is first continued and after each plan
+failure, always in a later wake turn than the failure, so a goal cannot spend one turn's fuel
+cycling through its plans. If none applies, the goal fails.
 
-At the end of every turn the executor evaluates each maintain goal's `holds` condition. For each one
-that fails and has no live restoring intention, it adopts one. The cost is the sum of the
-conditions' costs, every turn (§15).
+At the end of every turn, each maintain goal whose `holds` fails, that has no live restorer and no
+`blocked_until` in the future, gets a restorer adopted. A restorer that fails sets `blocked_until`
+to now plus `vagent.maintain_backoff`; a belief event touching a predicate in `holds` clears it.
+Without the back-off, a maintain goal with no applicable plan would adopt and fail a restorer every
+turn.
 
 ### 6.4 Commitment
 
-vagent v2.0 implements **single-minded commitment**. An intention keeps its goal until the goal
-succeeds, its `drop when` holds, or no applicable plan remains. Reconsideration happens only at step
-boundaries, which are the points where the intention resumes: before the first step, after each
-suspension, and when a plan fails. Blind and open-minded commitment are not offered (U-A5).
+vagent v3.0 implements **single-minded commitment**. An intention keeps its goal until the goal
+succeeds, its `drop when` holds, or no applicable plan remains. These conditions are checked when
+the intention resumes and also at the end of every turn for every live intention, including those
+waiting on a subgoal, a message, an effect or an `await`. Dropping a parent drops its subgoals and
+sends `cancel` for any delegated goal. Blind and open-minded commitment are not offered (U-A5).
 
 ### 6.5 The deliberation cycle
 
-The cycle is one message per turn. The three selection functions of the BDI literature are fixed in
-v2.0 and stated here:
+The three selection functions are fixed in v3.0:
 
-- **Event selection** is the runtime's mailbox order: FIFO, the `std::deque` in
-  `MeshActorRuntime::Actor` (`mesh_actor.cpp:350`). There is no priority mailbox; see §13.
-- **Option selection** is §6.3: first applicable untried plan in plan-list order.
-- **Intention selection** is message order. An intention advances only when a message for it
-  arrives: a `Resume` the agent sent itself, a reply it was waiting for, or a timer.
+- **Event selection** is mailbox order (FIFO, the deque in `MeshActorRuntime::Actor`,
+  `mesh_actor.cpp:350`), then host deliveries in arrival order. There is no priority mailbox (§13).
+- **Option selection** is §6.3.
+- **Intention selection** is ready order: an intention becomes ready when what it waits for arrives,
+  and the adapter runs ready intentions oldest first, one per wake turn.
 
 ```text
-turn(message):
-  match classify(message):
-    Event(e) | Performative(e):
-      for handler in matching(e) ordered by (priority desc, declaration order):
-        m = mark()
-        if guard(handler, e) succeeds and body(handler, e) succeeds: discard(m)
-        else: release(m)                      -- a failed handler leaves no trace
+message turn(m) or wake turn(w):
+  match source:
+    Event(e) | Performative(e) | Percept(e):
+      for handler in handlers(e) by (priority desc, declaration order):   -- §5.7
+        if guard(handler, e) succeeds and body(handler, e) succeeds: keep its writes
+        else: undo its writes                       -- its own choice point is released
         if e was consumed: break
-      run queued belief events the same way
-    Resume(i) | Reply(i, value) | Timer(i) | SubgoalEnded(i, outcome):
+      wake intentions awaiting a matching event
+    Ready(i) | Reply(i, value) | EffectDone(i, result) | Timer(i):
       continue(i)
     Down(child):
-      queue ChildDown(child); fail every intention waiting on child
-  check maintain goals; adopt restorers
-  drain d.outbox
+      raise ChildDown(child); fail intentions waiting on child
+  while d.pending is not empty and rounds < belief_event_depth:
+    take the first internal event; dispatch it as above; wake matching awaits
+  reconsider every live intention (§6.4); check maintain goals (§6.3)
 
 continue(i):
-  if i.goal's drop-when holds: end i as dropped
-  if i.goal is achieve and succeed-when holds: end i as achieved
+  if i's drop-when holds: end i as dropped
+  if i's goal is achieve and succeed-when holds: end i as achieved
+  if i has no plan: select one (§6.3); mark i ready; return
   run i's plan from i.step to the next suspension point or the end of the body
-    at a suspension point: record step, frame, waiting; return
-    at the end:            achieve → re-test succeed-when; perform → achieved
-    on failure:            add plan to tried; reselect; if none, end i as failed
-  ending i: unlink it from d.intention; send SubgoalEnded to its parent intention, if any,
-            or the outcome performative to its delegator, if any; queue GoalAchieved/GoalFailed
+    suspension point: record step, frame, waiting; return
+    end of body:      achieve and maintain re-test their condition; perform succeeds
+    failure:          add the plan to tried; clear plan; mark i ready
+  ending i: unlink it; mark its parent ready with SubgoalEnded, or stage the outcome
+            performative to its delegator; raise GoalAchieved, GoalFailed or GoalDropped
 ```
 
-`priority` orders handlers within one turn and nothing else. It is a scalar cell on the handler's
-program cell, defaulting to zero. A high-priority handler cannot interrupt a running intention step,
-because the step and the handler run in different turns. The handler can **drop** an intention, and
-the intention's queued `Resume` then finds it gone and does nothing. Preemption is therefore at turn
-granularity. A long plan step that must be preemptible inserts `yield`.
+`priority` orders handlers within one turn and nothing else. A handler cannot interrupt an
+intention, because they run in different turns; it can **drop** one. A reaction therefore waits
+behind every message and ready intention queued ahead of it, so worst-case reaction latency is the
+queue length times the turn time. §15 prices that, and U-A11 records the adapter-side fast lane that
+would shorten it.
 
-`consume` inside a handler stops lower-priority handlers from seeing the same event, as Jason's
-single-plan-per-event rule does. Without it, all matching handlers run, as in SARL.
+`consume` inside a handler stops lower-priority handlers seeing the event, as Jason's one plan per
+event does. Without it, all matching handlers run, as in SARL. An event no handler matches is
+dropped and counted (`unhandled_events`).
 
 ### 6.6 Suspension points
 
-A suspension point is where an intention may end its turn. There are three:
+| Statement                                    | Waits for                            | Resumed by                                    |
+| -------------------------------------------- | ------------------------------------ | --------------------------------------------- |
+| `achieve G(args)`                            | the subgoal intention to end         | `SubgoalEnded`                                |
+| `achieve G(args) by a within d`              | the delegate's outcome or refusal    | `outcome`, `refuse`, or the deadline          |
+| `x := ask a.q(args) within d`                | the answer                           | the reply, or the deadline                    |
+| `await t within d`                           | a fact matching term `t`             | a belief event, or the deadline               |
+| `await E [guard] within d`                   | an event of type `E` passing `guard` | the dispatcher, or the deadline               |
+| `x := m(args)` or `m(args)`, `m` an `effect` | the host's result                    | `EffectDone`, `EffectFailed`, or the deadline |
+| `yield`                                      | nothing; lets other work run         | its own ready mark                            |
 
-| Statement                             | Waits for                            | Resumed by                        |
-| ------------------------------------- | ------------------------------------ | --------------------------------- |
-| `achieve G(args)` (in a plan)         | the subgoal intention to end         | `SubgoalEnded`                    |
-| `achieve G(args) by agent within d`   | the delegate's outcome performative  | the reply, or the deadline timer  |
-| `x := ask agent.query(args) within d` | the answer                           | `ActorDeliverValue`, or the timer |
-| `yield`                               | nothing; gives other messages a turn | the `Resume` it queued            |
+A deadline is required on every wait for something outside the agent. For effects it is declared on
+the capacity method (`effect def follow(route: [Point]) within 10min`). An elapsed deadline fails
+the statement; `else e` supplies a value or recovery instead, with `cause` bound. A reply,
+completion or event that arrives for an intention that has ended is dropped and counted
+(`late_deliveries`).
 
 The compiler accepts a suspension point only where V4 can describe the whole state: a statement of a
-plan body, or a statement inside the `then`, `else` or `do` body of an `if`, `while` or `for` that
-is itself at such a place. The step path is the list of statement ordinals from the plan body down
-to the suspension point. A `while` loop's progress is in its frame variables, so resuming re-tests
-its condition. A `for` over a list or a range keeps its list and index in the frame, so it resumes
-at the next element. A `for believes` loop walks a clause rank that other turns may change, so it
-may not contain a suspension point. A suspension point inside a generator operand or inside an `&`
-or `|` expression is a compile-time error, because a generator's position is a choice point and
-choice points do not survive a turn (V2). This restriction is the price of V4, and §13 records the
-continuation-passing alternative.
-
-Deadlines are mandatory on `ask` and delegated `achieve`. A deadline elapsing fails the statement.
-`else e` on the statement supplies a value or recovery instead. A reply that arrives after its
-intention has ended is dropped and counted (`std:agent` statistic `late_replies`).
+plan body, or a statement in the `then`, `else` or `do` body of an `if`, `while` or `for` that is
+itself at such a place. The step path is the list of statement ordinals down to it. A `while`
+resumes by re-testing its condition from frame variables. A `for` over a list or range keeps the
+list and index in the frame and resumes at the next element. A `for believes` loop may not contain a
+suspension point. A suspension point inside an `&` or `|` expression or a generator operand is a
+compile-time error, because choice points do not survive a turn (V2).
 
 ### 6.7 Failure
 
-| Outcome            | Cause                                                                                     | Handled by                                                                      |
-| ------------------ | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| expression failure | a generator ran dry                                                                       | the enclosing `&`/\`                                                            |
-| statement failure  | a failed bounded expression, `fail`, an expired deadline                                  | fails the enclosing block, hence the handler or the plan                        |
-| handler failure    | its block failed                                                                          | the handler's mark is released; the event counts as unhandled                   |
-| plan failure       | the body failed, or an achieve plan ended with the goal unmet                             | `PlanFailed` queued; the next applicable plan is selected                       |
-| goal failure       | no applicable untried plan remains                                                        | `GoalFailed` queued; parent's `achieve` statement fails; delegator told         |
-| contract violation | `requires`/`ensures` on a capacity method (`ContractViolationKind`, `vortex_core.hpp:62`) | as plan failure, with cause `contract`; never kills the agent                   |
-| fuel exhaustion    | the turn's instruction or cell limit                                                      | `release(m0)`: the whole turn is undone; `TurnAborted` queued for the next turn |
-| child down         | `ActorDown` for a monitored child                                                         | `ChildDown` queued; intentions waiting on that child fail                       |
+| Outcome            | Cause                                                                            | Handled by                                                                    |
+| ------------------ | -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| expression failure | a generator ran dry                                                              | the enclosing `&`, `\|` or `if`; at statement level, the statement fails      |
+| statement failure  | a failed bounded expression, `fail`, an elapsed deadline                         | fails the enclosing block, hence the handler or the plan                      |
+| handler failure    | its block failed                                                                 | its writes are undone and its outbox entries removed; the event is unhandled  |
+| plan failure       | the body failed, or it ended with an achieve or maintain condition unmet         | `PlanFailed` raised; another plan is selected in a later turn                 |
+| goal failure       | no applicable untried plan remains                                               | `GoalFailed` raised; a parent's `achieve` fails; a delegator is told          |
+| effect failure     | the host reports failure, or its deadline elapses                                | the suspended statement fails, with `cause` from the host                     |
+| delivery failure   | a message is refused or never completed after `vagent.send_retries` (§7.3)       | `DeliveryFailed` raised; an `ask` or delegated `achieve` fails                |
+| refusal            | the receiver's `accepts` refused a delegated goal                                | the delegating `achieve` fails at once with cause `refused`                   |
+| contract violation | `requires`/`ensures` on a method (`ContractViolationKind`, `vortex_core.hpp:62`) | as plan failure, with cause `contract`; never stops the agent                 |
+| hard failure       | fuel or belief-event depth exhausted in the turn                                 | the turn is undone; recovery (§4.2) fails the running plan or drops the event |
+| child loss         | `ActorDown` for a monitored child                                                | `ChildDown` raised; intentions waiting on that child fail                     |
 
-There is no backtracking across an effect (V6), so a plan that fails after acting fails forward: its
-effects stand, the next plan starts from the world as it now is, and a `PlanFailed` handler can
-compensate. `achieve G(args) else e` at a subgoal runs `e` when the subgoal fails, with `cause`
-bound to the failure's cause.
-
-Every top-level handler body and intention step runs under a base choice point whose alternative is
-the failure path above. A `#Fail` with an empty choice stack makes the VM report failure
-(`vortex_vm.cpp:962-972`), and without the base choice point that would surface as an executor error
-and stop the actor (§4.1).
+A plan's statements up to its last suspension point have committed: each suspension ended a turn,
+and a turn's writes stand once it succeeds. So when a plan fails after an effect, the effect and the
+arena writes made before it both stand, and the next plan starts from the world and the beliefs as
+they now are. Writes made after the last suspension, in the failing turn, are undone with the failed
+statement. A `PlanFailed` handler or the next plan does any compensation.
 
 ______________________________________________________________________
 
-## 7. Communication
+## 7. Communication and perception
 
-### 7.1 Kinds of message
+### 7.1 Performatives
 
-| vagent form                        | Kind on the wire | Receiver's default handling (`std:agent`)                     | Reply                |
-| ---------------------------------- | ---------------- | ------------------------------------------------------------- | -------------------- |
-| `emit E{...}` / `emit E{...} in s` | `event`          | user handlers for `E`                                         | none awaited         |
-| `tell a fact`                      | `tell`           | `believe fact` with provenance; `+fact` handlers              | none awaited         |
-| `untell a fact`                    | `untell`         | `forget fact` where the sender is the provenance              | none awaited         |
-| `achieve G(args) by a within d`    | `achieve`        | `adopt G(args)` if `accepts(sender, G)` succeeds; else refuse | outcome performative |
-| `ask a.q(args) within d`           | `ask`            | runs the `answer q` declaration, read-only                    | the answer value     |
+| vagent form                           | Kind      | Receiver's default handling (`std:agent`)                                                     | Reply awaited         |
+| ------------------------------------- | --------- | --------------------------------------------------------------------------------------------- | --------------------- |
+| `emit E{...} [in s] [for r]`          | `event`   | user handlers for `E`                                                                         | no                    |
+| `tell a fact`                         | `tell`    | believe `fact` with the sender as a source; `+fact` handlers if new                           | no                    |
+| `untell a fact`                       | `untell`  | remove the sender as a source of `fact`                                                       | no                    |
+| `achieve G(args) by a within d`       | `achieve` | if `accepts(sender, G)` succeeds, adopt `G` with the sender as delegator; else stage `refuse` | `outcome` or `refuse` |
+| (on drop of the delegating intention) | `cancel`  | drop the intention adopted for that correlation id                                            | no                    |
+| `x := ask a.q(args) within d`         | `ask`     | run `answer q`, read-only; its value is the turn result                                       | the answer            |
 
 Every `ActorSend` is answered by the runtime with an `ActorDeliverValue` carrying the receiver's
-turn result (`mesh_actor.cpp:488-499`). For `ask`, that result is the answer. For the other kinds,
-the adapter recognises the reply as an acknowledgement, marks it, and ends the turn without running
-user code. That costs the sender one extra short turn per message sent (§15).
+turn result (`mesh_actor.cpp:486-499`). For `ask` that result is the answer. For other kinds the
+sender's adapter recognises the reply, completes it, and runs no user code; it still costs one short
+message turn (§15).
 
-`answer` declarations are compiled under a read-only check: no field assignment, no `believe` or
-`forget`, no `emit`/`tell`, no `effect` call, no `adopt`. The answer must fit `maxOutputBytes`,
-which the runtime caps at 32 KiB (`mesh_actor.cpp:135`).
+`answer` declarations are checked read-only: no assignment to a field, no `believe`, `forget`,
+`emit`, `tell`, `spawn`, `adopt`, `install` or effect. The answer must fit 32 KiB.
 
-`accepts` is a capacity every agent has, with a default skill that accepts delegation from the
-agent's parent and its own children and refuses everything else. Replacing the skill changes the
-policy.
+`accepts` is a capacity every agent has. Its default skill accepts delegation from the parent and
+from children, and refuses everything else.
 
 ### 7.2 Scopes
 
-`emit E{...}` goes to `outer`. `in s` names a space: `inner`, `outer`, or a space value obtained
-from `std:agent`. `for r` restricts delivery to the listed handles, which must be members. The
-emitter does not receive its own emission. The host receives every emission into the spaces it
-hosts, because it relays them.
+`emit E{...}` goes to `outer`. `in s` names a space: `inner`, `outer`, or a space value from
+`std:agent`. `for r` restricts delivery to the listed peers, which must be members of the space,
+`outer` when `in` is absent. The emitter does not receive its own emission. A host receives every
+emission into the spaces it hosts.
 
-### 7.3 Ordering and delivery
+### 7.3 Delivery
 
-Messages from one sender to one receiver arrive in send order, because the runtime numbers them
-(`ActorMessage::sequence`) and the transport is ordered per peer. No order holds across senders, and
-relay through a host adds one hop. Delivery is at least once with de-duplication by `requestId`
-(§5.5). A sent message is complete when its reply arrives (`mesh_actor.cpp:441-447`). Until then it
-blocks the sender's checkpoint (`mesh_actor.cpp:678-683`).
+A sent message is complete when its reply, a write-set delivery or an `ActorDown` for it arrives
+(`mesh_actor.cpp:443-448`). Until then it blocks the sender's checkpoint (`mesh_actor.cpp:678-683`).
+Several things leave a delivery incomplete for ever: a receiver that refuses with `MailboxFull`
+(`mesh_actor.cpp:344-349`), an unknown or expired receiver, and an `ask` whose deadline elapsed
+first. The adapter therefore drives `retry` for unacknowledged sends every
+`vagent.send_retry_interval`, up to `vagent.send_retries`, then **abandons** the delivery through
+§11.3 (a), raises `DeliveryFailed`, and frees its slot. `MailboxFull` is back-pressure: the sender's
+retries are the policy.
+
+There is no ordering guarantee. The runtime does not number messages, and it requires
+`sequence == 0` on `ActorSend` (`actor_wire.cpp:94-96`). Each event carries its emitter's ordinal,
+so a receiver can detect gaps and reorder in its own code; the adapter does not.
 
 ### 7.4 Liveness
 
-An agent never blocks: an intention waiting on an `ask` or a delegated goal has ended its turn, and
-the agent keeps handling messages. Two intentions can wait on each other through two agents, for
-example A's plan asks B while B's plan asks A. The mandatory deadline breaks that wait, so every
-wait is bounded by its deadline. §14 states the property with this condition.
+No vagent construct waits inside a turn. Every wait on something outside the agent ends the turn and
+has a deadline (§6.6), so a cycle of agents waiting on each other ends when the first deadline
+elapses.
+
+### 7.5 Perception
+
+Percepts come from native skills. A host driver posts an event (a declared event type, such as
+`Battery{level: Float}`) for its agent through the adapter, which queues it as a host delivery and
+asks for a wake turn. Handlers turn percepts into beliefs:
+
+```vagent
+on Battery as b { forget battery(_); believe battery(b.level) }
+```
+
+Host deliveries are not messages. They take no mailbox slot and need no reply. They are not in the
+checkpoint, so the adapter must hand them all to the agent before it checkpoints, and a crash loses
+the undelivered ones; a driver re-reports its state periodically for that reason.
 
 ______________________________________________________________________
 
@@ -641,188 +738,191 @@ ______________________________________________________________________
 
 ### 8.1 Lexical structure
 
-- Comments: `//` to end of line, and `/* ... */`, which do not nest.
+- Comments: `//` to end of line, and `/* ... */`, not nesting.
 
 - Identifiers: `[A-Za-z_][A-Za-z0-9_]*`. Types, events, goals, agents, behaviors, skills and
-  capacities are `PascalCase`; everything else is `snake_case`. The checker warns on a mismatch.
+  capacities are `PascalCase`; everything else is `snake_case`. `_` alone is a binder that binds
+  nothing.
 
 - Literals: integers (`42`, `1_000`, `0x2A`), floats (`3.5`, `1e-3`), strings (`"..."` with `\n`,
   `\t`, `\"`, `\\`, `\u{...}`), `true`, `false`, `()`, durations (`250ms`, `2s`, `5min`).
 
 - Statement termination: a newline ends a statement when the last token can end one (an identifier,
-  a literal, `)`, `]`, `}`, or a keyword such as `yield`). A line that begins with a binary operator
-  or `.` continues the previous statement. A line that begins with `(`, `[` or `{` never continues
-  one. Newlines inside `( )`, `[ ]`, a record literal's `{ }` or a handler guard are whitespace. `;`
-  separates statements on one line.
+  a literal, `)`, `]`, `}`, or a keyword such as `yield`). A line that begins with a binary
+  operator, `.`, `then`, `else` or `do` continues the previous statement. A line that begins with
+  `(`, `[` or `{` never continues one. Newlines inside `( )`, `[ ]`, a record literal's `{ }` or a
+  handler guard's `[ ]` are whitespace; inside a block nested in any of those they are significant
+  again. `;` separates statements on one line.
 
-- Reserved words:
+- Keywords. Reserved everywhere:
 
   ```text
-  achieve adopt agent answer as ask behavior believe believes by capacity consume def do drop
-  effect else emit ensures event extends fail findall for forget goal holds if implements import
-  in inner install let maintain module not occurrence on outer parent perform plan priority
-  requires self skill succeed tell then to uninstall untell uses var when where while within yield
+  achieve adopt agent answer ask await behavior believe believes by capacity consume def do drop
+  effect else emit event extends fail findall for forget goal if implements import in install let
+  native not on plan record return self skill spawn tell then to uninstall untell uses var where
+  while within yield
   ```
+
+  Contextual, reserved only in the position that uses them: `as`, `ensures`, `from`, `holds`,
+  `inner`, `maintain`, `module`, `occurrence`, `outer`, `parent`, `perform`, `priority`, `requires`,
+  `succeed`, `when`. A module path may use any word, so `import std:agent` parses.
 
 ### 8.2 Truth and failure
 
-An expression succeeds with a value or fails (V11, vicon §4.1). Consequences a reader must know:
+An expression succeeds with a value or fails (vicon §4.1).
 
-- `a < b` produces `b` or fails; `a == b` produces `b` or fails. A chain `a < b < c` works as in
-  Icon.
-- `true` and `false` are values of type `Bool`. They are not tests: `if flag then …` succeeds
-  whenever `flag` produces a value, including `false`. Write `if flag == true then …`, or make the
-  method fail instead of returning `false`. Capacity methods in this document fail instead of
-  returning `Bool`.
-- `not e` succeeds with `()` if `e` fails, and fails if `e` succeeds.
+- `a < b` produces `b` or fails; `a == b` produces `b` or fails. Comparison does not chain: write
+  `a < b & b < c`. `==` compares values of one static type; `1 == 1.0` is a type error.
+- `true` and `false` are values of type `Bool`. A `Bool`-typed expression is rejected as a
+  condition, a guard, or an operand of `&`, `|` or `not`, with the message "compare with `== true`",
+  because a `false` value is a success.
+- `not e` succeeds with `()` if `e` fails and fails if `e` succeeds. It binds looser than
+  comparison: `not a == b` is `not (a == b)`.
 - `&` is conjunction: `e1 & e2` evaluates `e2` for each result of `e1` until `e2` succeeds. `|` is
-  alternation: the results of `e1`, then those of `e2`. Neither is a boolean operator, and there is
-  no `&&` or `||`.
-- `!e` generates the elements of a list or the characters of a string, as in vicon. It is not
-  negation. `*e` is the size of a list or string.
-- A statement is bounded: its first result is taken and its choice points are dropped (vicon §4.4).
-  A failing statement fails its block. A block's value is its last statement's value, or `()`.
-- Handler guards (`[...]`), `where` conditions, `succeed when`, `drop when` and `holds` are bounded
-  expressions: they succeed or fail once.
+  alternation. There is no `&&` or `||`.
+- `!e` generates the elements of a list or the characters of a string. `*e` is the size of `e`.
+- A statement is bounded: its first result is taken and its choice points are cut (V13). A failing
+  statement fails its block. A block's value is its last statement's value, or `()`.
+- `if c then e` without `else` is total: when `c` fails, the `if` succeeds with `()`. The failing
+  form is `c & e`. This differs from vicon (§8.11), because in a handler or plan a failing `if`
+  would undo the writes before it.
+- Guards (`[...]`), `where`, `succeed when`, `drop when` and `holds` are bounded.
 - `for x in e do body` evaluates `e` once, bounded, to a list or a range, and runs `body` for each
-  element in order with no choice point between iterations. `body` is bounded each time, so its
-  writes and actions stand. The loop fails if `body` fails, and `break` is not offered: an early
-  exit is a `while`. `for believes t do body` walks the matching facts the same way (§6.1).
+  element with no choice point between iterations. `body` is bounded each time. The loop fails if
+  `body` fails. There is no `break`; an early exit is a `while`.
 
 ### 8.3 Assignment and positions
 
 `x := e` assigns irreversibly. `x <- e` assigns reversibly: if control backtracks past it within the
-same statement, the old value returns (V2). `let x := e` declares a local. `var x: T := e` declares
-a field of an agent, behavior or skill. Assignment targets are places: a local, a field, or a field
-or index of one. Anything else on the left is a compile-time error.
+statement, the old value returns. `let x := e` declares a local. `var x: T := e` declares a field.
+Targets are places: a local, a field, or a field or index of one.
 
 A position is **bounded** if it is a statement, or the `then`, `else` or `do` body of an `if`,
-`while` or `for` whose own position is bounded. Every other position is **speculative**: an operand
-of `&`, `|`, `\`, `to`, a comparison or a call, or anything inside one. A write or action in a
-speculative position is undone if control backtracks over it, which is what makes `<-` and a
-speculative `emit` useful. The compiler holds three rules about positions:
+`while` or `for`, or the `else` of an `achieve`, `ask` or `await`, whose own position is bounded.
+Every other position is **speculative**: an operand of `&`, `|`, `\`, `to`, a comparison or a call,
+or anything inside one. A write or staged action in a speculative position is undone if control
+backtracks over it; that is what makes `<-` and a speculative `emit` useful.
 
-| Construct                                                                                             | Allowed in                                     |
-| ----------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| `<-`, `emit`, `tell`, `untell`, `believe`, `forget`, `spawn`, `adopt`, `install`, `uninstall`, `drop` | any position; undone with a backtracked branch |
-| `:=`, `effect` calls, `consume`                                                                       | bounded positions only                         |
-| `achieve` (subgoal or delegated), `ask`, `yield`                                                      | suspension positions only (§6.6)               |
+| Construct                                                                                             | Allowed in                                                                                                                    |
+| ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `<-`, `emit`, `tell`, `untell`, `believe`, `forget`, `spawn`, `adopt`, `install`, `uninstall`, `drop` | any position in handlers, plans and methods; undone with a backtracked branch                                                 |
+| `:=`, `consume`                                                                                       | bounded positions only                                                                                                        |
+| effect call                                                                                           | plans: suspension positions; handlers: bounded positions, staged without waiting; methods, guards, conditions, answers: never |
+| `achieve`, `ask`, `await`, `yield`                                                                    | plans, suspension positions only (§6.6)                                                                                       |
 
-`:=` is restricted so that its name means what it says: in a speculative position it would be undone
-like `<-`, so the compiler asks for `<-` there.
+`:=` is restricted so that its name holds: in a speculative position it would be undone like `<-`.
 
 ### 8.4 Precedence
 
-From tightest to loosest. All binary operators associate left unless marked.
+From tightest to loosest. Binary operators associate left unless marked.
 
-| Level | Operators                              | Notes                                                              |
-| ----- | -------------------------------------- | ------------------------------------------------------------------ |
-| 1     | call `f(x)`, index `a[i]`, field `a.b` |                                                                    |
-| 2     | unary `-`, `not`, `!`, `*`             | `*xs` is the size of `xs`, as in Icon                              |
-| 3     | `\` (limitation)                       | `(1 to 10) \ 3`; binds tighter than arithmetic, as vicon writes it |
-| 4     | `*` `/` `%`                            |                                                                    |
-| 5     | `+` `-`                                |                                                                    |
-| 6     | `++` (concatenation)                   | strings and lists; `+` on strings is a type error                  |
-| 7     | `<` `<=` `>` `>=` `==` `!=`            | non-associative as written; chained comparison is explicit         |
-| 8     | `\|` (alternation)                     | below comparison, as in Icon: `x == 1 \| 2` is `(x == 1) \| 2`     |
-| 9     | `to` … `by`                            |                                                                    |
-| 10    | `?` (string scanning)                  | above assignment, unlike Icon, so `x := s ? e` is `x := (s ? e)`   |
-| 11    | `:=` `<-`                              | right-associative                                                  |
-| 12    | `&`                                    | loosest, as in Icon                                                |
+| Level | Operators                              | Notes                                                          |
+| ----- | -------------------------------------- | -------------------------------------------------------------- |
+| 1     | call `f(x)`, index `a[i]`, field `a.b` |                                                                |
+| 2     | unary `-`, `!`, `*`                    | `!xs` generates; `*xs` is the size                             |
+| 3     | `\` (limitation)                       | `(1 to 10) \ 3`                                                |
+| 4     | `*` `/` `%`                            |                                                                |
+| 5     | `+` `-`                                |                                                                |
+| 6     | `++` (concatenation)                   | strings and lists                                              |
+| 7     | `<` `<=` `>` `>=` `==` `!=`            | non-associative                                                |
+| 8     | `not`                                  | prefix; `not a == b` is `not (a == b)`                         |
+| 9     | `\|` (alternation)                     | below comparison, as in Icon: `x == 1 \| 2` is `(x == 1) \| 2` |
+| 10    | `to` … `by`                            |                                                                |
+| 11    | `?` (string scanning)                  | above assignment, so `x := s ? e` is `x := (s ? e)`            |
+| 12    | `:=` `<-`                              | right-associative                                              |
+| 13    | `&`                                    | loosest, as in Icon                                            |
 
 So `budget <- b - cost & budget > floor & route` is
-`(budget <- (b - cost)) & (budget > floor) & route`, which is the shape every plan writes.
+`(budget <- (b - cost)) & (budget > floor) & route`.
 
 ### 8.5 Declarations
+
+A fragment; the events it uses are declared elsewhere, and the literals stand for values a real
+program takes from parameters or settings.
 
 ```vagent
 event TargetDetected { target_id: Str, distance: Float }
 event Alarm extends TargetDetected { level: Int }
 
 capacity Navigation {
-  effect def move(speed: Float, heading: Float) requires speed >= 0.0
-  effect def stop()
-  def position(): Point
+  effect def move(speed: Float, heading: Float) within 30s requires speed >= 0.0
+  effect def stop() within 2s
 }
 
-skill ThrusterNav(max_speed: Float) implements Navigation {
-  var speed: Float := 0.0
-  effect def move(s: Float, heading: Float) {
-    s <= max_speed & { speed := s; thrusters.set(s, heading) }
-  }
-  effect def stop() { speed := 0.0; thrusters.set(0.0, 0.0) }
-  def position(): Point { thrusters.fix() }
-  on uninstall { stop() }
-}
+native skill ThrusterNav(max_speed: Float) implements Navigation
 
 behavior ObstacleAvoidance(threshold: Int) {
   uses Navigation
-  on CollisionWarning as w [w.threat > threshold] priority 100 {
+  on CollisionWarning as w [w.threat > threshold] priority 1 {
     stop()
     emit ObstacleEvaded{obstacle: w.obstacle_id}
   }
 }
 
-agent PatrolDrone(threshold: Int) {
+agent PatrolDrone(threshold: Int, max_speed: Float) {
   uses Navigation
-  install ThrusterNav(12.0)
+  install ThrusterNav(max_speed)
   behavior ObstacleAvoidance(threshold)
   var targets_seen: Int := 0
+
   on TargetDetected [occurrence.distance < 50.0] {
     targets_seen := targets_seen + 1
     emit TargetLogged{target: occurrence.target_id}
   }
+  on +at(?who, ?x, ?y) [who == self] {
+    emit Moved{x: x, y: y}
+  }
 }
 ```
 
-A method of a used capacity is called bare (`stop()`) when one used capacity defines that name, and
-qualified (`Navigation.stop()`) otherwise; an ambiguous bare call is a compile-time error.
+A handler binds the event as `occurrence`, or as the name after `as`, and reads fields by name. A
+belief handler's trigger is a term: `on +at(?who, ?x, ?y)` binds the fact's arguments. A method of a
+used capacity is called bare when one used capacity defines the name, and qualified
+(`Navigation.stop()`) otherwise. Agent parameters are fields, set from the `Initialize` message
+before `on Initialize` runs. `believe` members are asserted before `on Initialize`.
 
-A handler binds the event as `occurrence`, or as the name after `as`. Handlers read fields by name;
-there is no positional destructuring, so reordering an event's fields changes nothing.
+### 8.6 Actions
 
-### 8.6 Statements that act on the agent
+| Form                                                         | Value     | Notes                                                                  |
+| ------------------------------------------------------------ | --------- | ---------------------------------------------------------------------- |
+| `emit e [in s] [for r]`                                      | `()`      | staged (V5)                                                            |
+| `tell a fact`, `untell a fact`                               | `()`      | staged                                                                 |
+| `believe fact`, `forget fact`                                | `()`      | immediate in the arena; raise belief events (§6.1)                     |
+| `spawn A(args) [in s]`                                       | a peer    | staged; the peer cell is filled when the adapter spawns after the turn |
+| `adopt G(args)`                                              | intention | does not wait                                                          |
+| `achieve G(args) [by a within d] [else e]`                   | `()`      | suspension point                                                       |
+| `x := ask a.q(args) within d [else e]`                       | answer    | suspension point; also `let x := ask …`                                |
+| `await t within d [else e]`, `await E [g] within d [else e]` | `()`      | suspension point                                                       |
+| `drop i`                                                     | `()`      | ends an intention as dropped; sends `cancel` for delegated subgoals    |
+| `install S(args)`, `uninstall S`                             | `()`      | §5.3                                                                   |
+| `yield`, `consume`, `fail`, `return [e]`                     |           | as §8.3                                                                |
 
-| Form                                       | Value      | Notes                                                                    |
-| ------------------------------------------ | ---------- | ------------------------------------------------------------------------ |
-| `emit e [in s] [for r]`                    | `()`       | staged on `d.outbox` (V5)                                                |
-| `tell a fact`, `untell a fact`             | `()`       | staged                                                                   |
-| `believe fact`, `forget fact`              | `()`       | immediate in the arena; queue belief events                              |
-| `spawn A(args) [in s]`                     | handle     | staged; the handle is valid immediately, the child exists after the turn |
-| `adopt G(args)`                            | intention  | does not wait                                                            |
-| `achieve G(args) [by a within d] [else e]` | `()`       | plan bodies only; a suspension point                                     |
-| `x := ask a.q(args) within d [else e]`     | the answer | plan bodies only; a suspension point                                     |
-| `drop i`                                   | `()`       | ends an intention as dropped                                             |
-| `install S(args)`, `uninstall S`           | `()`       | replaces the skill for each capacity `S` implements                      |
-| `yield`                                    | `()`       | plan bodies only; a suspension point                                     |
-| `consume`                                  | `()`       | handlers only                                                            |
-| `fail`                                     | fails      |                                                                          |
-
-`spawn` is staged like an emission: the adapter performs the `ActorSpawn` after the turn. The handle
-it returns is computed in advance (`ActorPid` is derived from the spawn request, the node, the epoch
-and a sequence, `mesh_actor.cpp:159`); if the spawn is refused, the handle names no actor and the
-first message to it produces `ActorDown`, which arrives as `ChildDown`.
+A peer cell returned by `spawn` may be stored and used in the same turn: messages staged to it
+reference the cell, and the adapter performs the spawn first and fills the cell before it sends
+them. If the spawn is refused, the adapter raises `SpawnFailed{child}` in a wake turn and drops the
+messages staged to that peer.
 
 ### 8.7 Types
 
-`Int`, `Float`, `Str`, `Bool`, `()`, `Duration`, `Time`, `Agent` (a handle), `Space`, `Intention`,
-`[T]` (a list), `Map<K, V>`, and declared event types used as record types. Lists and maps are
-`std:collections` structures of cells, so their elements are cells and are quotable. Type checking
-is static for declarations and event fields, and the compiler infers the types of locals.
+`Int`, `Float`, `Str`, `Bool`, `()`, `Duration`, `Time`, `Agent` (a peer cell), `Space`,
+`Intention`, `Timer`, `Event` (the supertype of all events), `[T]` (a list), `Map<K, V>`, and
+declared events and records. `record Name { fields }` declares a record type with no wire kind.
+Lists and maps are `std:collections` structures of cells, and values are copied when stored (V11).
+Types are checked statically; locals are inferred.
 
 ### 8.8 Names in scope
 
-| Name         | Meaning                                                                            |
-| ------------ | ---------------------------------------------------------------------------------- |
-| `self`       | this agent's handle                                                                |
-| `parent`     | the handle of the agent that spawned this one; fails for a top-level agent         |
-| `inner`      | the space this agent hosts                                                         |
-| `outer`      | the space this agent was spawned into; for a top-level agent, the launcher's space |
-| `occurrence` | the event being handled                                                            |
-| `cause`      | in an `else` after `achieve` or `ask`, the failure cause as a `Str`                |
+| Name         | Meaning                                                                       |
+| ------------ | ----------------------------------------------------------------------------- |
+| `self`       | this agent's peer cell                                                        |
+| `parent`     | the peer cell of the agent that spawned this one; fails for a top-level agent |
+| `inner`      | the space this agent hosts                                                    |
+| `outer`      | the space this agent was spawned into; for a top-level agent, the launcher's  |
+| `occurrence` | the event being handled                                                       |
+| `cause`      | in an `else` after `achieve`, `ask`, `await` or an effect, the failure cause  |
 
-A program starts with `vagent run module:Agent(args)`, which spawns a launcher agent hosting the
-node's default space and then the named agent inside it.
+A program starts with `vagent run module:Agent(args)`, which starts the launcher and then the named
+agent in the launcher's space.
 
 ### 8.9 Grammar
 
@@ -830,22 +930,25 @@ node's default space and then the named agent inside it.
 Unit          ::= [ ModuleDecl ] { ImportDecl } { TopDecl } ;
 ModuleDecl    ::= 'module' ModulePath ;
 ImportDecl    ::= 'import' ModulePath [ 'as' Ident ] [ '(' IdentList ')' ] ;
-ModulePath    ::= Ident { ':' Ident } ;
+ModulePath    ::= Word { ':' Word } ;          (* Word: an identifier or any keyword *)
 
-TopDecl       ::= EventDecl | CapacityDecl | SkillDecl | BehaviorDecl | AgentDecl
-                | GoalDecl | PlanDecl ;
+TopDecl       ::= EventDecl | RecordDecl | CapacityDecl | SkillDecl | BehaviorDecl
+                | AgentDecl | GoalDecl | PlanDecl ;
 
 EventDecl     ::= 'event' Ident [ 'extends' Ident ] [ '{' [ FieldList ] '}' ] ;
+RecordDecl    ::= 'record' Ident '{' [ FieldList ] '}' ;
 FieldList     ::= Field { ',' Field } [ ',' ] ;
 Field         ::= Ident ':' Type ;
 
 CapacityDecl  ::= 'capacity' Ident [ 'extends' IdentList ] '{' { MethodSig } '}' ;
-MethodSig     ::= [ 'effect' ] 'def' Ident '(' [ ParamList ] ')' [ ':' Type ] { Contract } ;
+MethodSig     ::= [ 'effect' ] 'def' Ident '(' [ ParamList ] ')' [ ':' Type ]
+                  [ 'within' Duration ] { Contract } ;
 Contract      ::= ( 'requires' | 'ensures' ) Expr ;
 MethodDef     ::= MethodSig Block ;
 AnswerDef     ::= 'answer' Ident '(' [ ParamList ] ')' ':' Type Block ;
 
-SkillDecl     ::= 'skill' Ident [ '(' ParamList ')' ] 'implements' IdentList
+SkillDecl     ::= 'native' 'skill' Ident [ '(' ParamList ')' ] 'implements' IdentList
+                | 'skill' Ident [ '(' ParamList ')' ] 'implements' IdentList
                   '{' { VarDecl | MethodDef | LifecycleDef } '}' ;
 LifecycleDef  ::= 'on' ( 'install' | 'uninstall' ) Block ;
 
@@ -860,7 +963,7 @@ BeliefDecl    ::= 'believe' Term ;
 VarDecl       ::= 'var' Ident ':' Type [ ':=' Expr ] ;
 
 HandlerDef    ::= 'on' Trigger [ 'as' Ident ] [ '[' Expr ']' ] [ 'priority' IntLit ] Block ;
-Trigger       ::= Ident | ( '+' | '-' ) Ident [ '/' IntLit ] ;
+Trigger       ::= Ident | ( '+' | '-' ) Term ;
 
 GoalDecl      ::= 'goal' Ident '(' [ ParamList ] ')' GoalKind [ '{' { GoalClause } '}' ] ;
 GoalKind      ::= 'achieve' | 'perform' | 'maintain' ;
@@ -869,29 +972,28 @@ PlanDecl      ::= 'plan' Ident 'for' Ident '(' [ IdentList ] ')' [ 'where' Expr 
 
 Block         ::= '{' [ Stmt { Sep Stmt } ] [ Sep ] '}' ;
 Sep           ::= ';' | NEWLINE ;
-Stmt          ::= 'let' Ident [ ':' Type ] ':=' Expr
-                | 'return' [ Expr ]
-                | Expr ;
+Stmt          ::= 'let' Ident [ ':' Type ] ':=' Expr | 'return' [ Expr ] | Expr ;
 
 Expr          ::= Assign { '&' Assign } ;
 Assign        ::= Scan [ ( ':=' | '<-' ) Assign ] ;
 Scan          ::= ToExpr [ '?' ToExpr ] ;
 ToExpr        ::= Alt [ 'to' Alt [ 'by' Alt ] ] ;
-Alt           ::= Cmp { '|' Cmp } ;
+Alt           ::= NotExpr { '|' NotExpr } ;
+NotExpr       ::= 'not' NotExpr | Cmp ;
 Cmp           ::= Concat [ CmpOp Concat ] ;
 CmpOp         ::= '<' | '<=' | '>' | '>=' | '==' | '!=' ;
 Concat        ::= Add { '++' Add } ;
 Add           ::= Mul { ( '+' | '-' ) Mul } ;
 Mul           ::= Limit { ( '*' | '/' | '%' ) Limit } ;
 Limit         ::= Unary { '\' Unary } ;
-Unary         ::= ( '-' | 'not' | '!' | '*' ) Unary | Postfix ;
+Unary         ::= ( '-' | '!' | '*' ) Unary | Postfix ;
 Postfix       ::= Primary { '(' [ ArgList ] ')' | '[' Expr ']' | '.' Ident } ;
 Primary       ::= Ident | Literal | 'self' | 'parent' | 'inner' | 'outer' | 'occurrence'
                 | '(' Expr ')' | Block | ListLit | RecordLit
                 | 'if' Expr 'then' Expr [ 'else' Expr ]
                 | 'while' Expr 'do' Expr
                 | 'for' ( Ident 'in' Expr | 'believes' Term ) 'do' Expr
-                | 'believes' Term
+                | 'believes' Term [ 'from' Postfix ]
                 | 'findall' '(' TermArg ',' Term ')'
                 | Action ;
 Action        ::= 'emit' Postfix [ 'in' Postfix ] [ 'for' Postfix ]
@@ -901,6 +1003,7 @@ Action        ::= 'emit' Postfix [ 'in' Postfix ] [ 'for' Postfix ]
                 | 'adopt' GoalCall
                 | 'achieve' GoalCall [ 'by' Postfix 'within' Postfix ] [ 'else' Expr ]
                 | 'ask' Postfix 'within' Postfix [ 'else' Expr ]
+                | 'await' ( Term | Ident [ '[' Expr ']' ] ) 'within' Postfix [ 'else' Expr ]
                 | 'drop' Postfix
                 | 'install' Ident [ '(' [ ArgList ] ')' ] | 'uninstall' Ident
                 | 'yield' | 'consume' | 'fail' ;
@@ -918,45 +1021,55 @@ Type          ::= Ident [ '<' Type { ',' Type } '>' ] | '[' Type ']' | '(' ')' ;
 
 Notes the grammar cannot carry:
 
-- **Record literals and blocks.** `Ident '{'` in an expression is always a record literal. No
-  expression production puts a block directly after an identifier: bodies follow `then`, `do`,
-  `else`, `]`, `)` or a declaration header, and a block on the next line is a new statement by §8.1.
-  This is why `if`, `while` and `for` use `then` and `do`.
-- **Action operands are postfix expressions**, so `emit E{...} & next()` is `(emit E{...}) & next()`
-  and an `in`, `for`, `by`, `within` or `else` after an action belongs to it. A computed operand is
-  parenthesised: `drop (pick() | fallback())`.
-- **`else` binds to the nearest `if`, `achieve` or `ask`.**
-- **Static restrictions** checked after parsing: the position rules (§8.3), suspension points
-  (§6.6), `answer` bodies read-only (§7.1), assignment targets are places, `consume` only in
-  handlers, `achieve`/`ask`/`yield` only in plan bodies.
-- **Terms versus calls.** After `believe`, `forget`, `believes`, `findall`, `tell` and `untell`, and
-  in a `Trigger`, `name(args)` is a term, not a call.
+- **Record literals and blocks.** `Ident '{'` in an expression is a record literal, except in the
+  expression of a `where`, a `Contract` or a goal clause, where a record literal must be
+  parenthesised, as Rust does in `if` headers. Elsewhere no expression is directly followed by a
+  block: bodies follow `then`, `do`, `else`, `]`, `)` or a declaration header.
+- **Action operands are postfix expressions**, so `emit E{...} & next()` is
+  `(emit E{...}) & next()`, and an `in`, `for`, `by`, `within`, `from` or `else` after an action
+  belongs to it.
+- **`else` binds to the nearest `if`, `achieve`, `ask` or `await`.**
+- **`?` inside a term.** `?` immediately followed by an identifier inside a `Term` is a logic
+  variable; elsewhere `?` is the scan operator. Variables bound in an `if` condition, a `where`, a
+  guard or a `for believes` are visible in the corresponding body.
+- **Terms versus calls.** After `believe`, `forget`, `believes`, `findall`, `tell`, `untell` and
+  `await`, and in a `Trigger`, `name(args)` is a term.
+- **Static restrictions**: positions (§8.3), suspension points (§6.6), read-only answers (§7.1),
+  `Bool` conditions (§8.2), places as assignment targets, reserved implicit event fields (§5.5),
+  plan parameters named as the goal's.
 
 ### 8.10 Differences from SARL
 
-| SARL                                       | vagent                                                      | Why                                                                                                    |
-| ------------------------------------------ | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `on E [guard] { }`, `occurrence`           | same                                                        | kept                                                                                                   |
-| `uses Cap` imports capacity functions      | same                                                        | kept                                                                                                   |
-| `setSkill(new Impl)` at run time           | `install Impl(args)`, declared or as a statement            | a keyword form like every other agent action; arguments construct the skill                            |
-| `emit(e)` with `[scope]` lambda            | `emit e in s for r`                                         | a static list of handles is checkable; a scope lambda would run in the emitter's turn for every member |
-| `in`/`every` from the `Schedules` capacity | `Schedules.after`, `Schedules.periodic`, `Schedules.cancel` | `in` is a reserved word in vagent; one naming scheme for the three                                     |
-| `wake`                                     | `emit e in inner for [self]` is not offered                 | an agent's internal events are belief, goal and plan events                                            |
-| behaviors registered at run time           | `behavior B(args)` member, `Behaviors.mount/unmount`        | parameters added                                                                                       |
-| no priority                                | `priority n`, within-turn order only                        | extension; deterministic order of matching handlers                                                    |
-| no BDI                                     | beliefs, goals, plans, intentions                           | the point of the language                                                                              |
-| Janus thread pool, shared JVM heap         | one actor and one arena per agent                           | V1                                                                                                     |
+| SARL                                         | vagent                                                      | Why                                                                                                                               |
+| -------------------------------------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `on E [guard] { }`, `occurrence`             | same, plus `as name`                                        | kept; `as` names the event when handlers nest                                                                                     |
+| `uses Cap` imports capacity functions        | same                                                        | kept                                                                                                                              |
+| `setSkill(new Impl)`                         | `install Impl(args)`                                        | a keyword form like every other agent action                                                                                      |
+| `requires Cap` in a skill                    | not offered; `requires` is a method precondition            | a skill's needed capacities are found by `uses` in its methods                                                                    |
+| `emit(e)` with a `[scope]` lambda            | `emit e in s for r`                                         | a list of peers is checkable; a scope lambda would run once per member in the emitter's turn                                      |
+| `in(delay) [ ... ]`, `every(period) [ ... ]` | `Schedules.after`, `Schedules.periodic`, `Schedules.cancel` | vagent has no closures; a timer delivers an event instead                                                                         |
+| `wake(e)`                                    | not offered                                                 | SARL's `wake` posts to the agent itself; vagent's internal events are belief, goal and plan events, and a timer or `yield` defers |
+| event fields `var x : T`                     | `event E { x: T }`                                          | one field syntax for events and records                                                                                           |
+| `Initialize.parameters`                      | typed agent parameters                                      | checkable at the spawn site                                                                                                       |
+| agent `extends`                              | not offered; behaviors compose                              | inheritance of handlers and plan order would interact with plan lists                                                             |
+| no priority                                  | `priority n`, within a turn only                            | deterministic order of matching handlers                                                                                          |
+| no BDI                                       | beliefs, goals, plans, intentions                           | the point of the language                                                                                                         |
+| Janus thread pool, shared JVM heap           | one actor and one arena per agent                           | V1                                                                                                                                |
 
 ### 8.11 Relationship to the siblings
 
-| Concern            | vicon                                  | vagent                                  | Divergence and reason                                                                     |
-| ------------------ | -------------------------------------- | --------------------------------------- | ----------------------------------------------------------------------------------------- |
-| assignment         | `:=`, `<-`                             | `:=`, `<-`                              | none                                                                                      |
-| conditional, loops | `if then else`, `while do`, `every do` | `if then else`, `while do`, `for in do` | `every` drives a generator, and the trail undoes its body's writes (V6a)                  |
-| string scanning    | `s ? e`, `tab`, `move`                 | same, from `std:goal`                   | `?` binds tighter than assignment (§8.4)                                                  |
-| module paths       | `std:goal`                             | `std:agent`, `mars:exploration`         | none; vlace's string form `"std:xanadu"` and VQL's `std::` should converge on this (U-A6) |
-| local binding      | assignment to a fresh name             | `let x := e`                            | vagent declares locals so plan frames are known statically (§5.6)                         |
-| logic variables    | Vlog terms                             | `?x` inside terms only                  | only belief terms need them                                                               |
+| Concern              | vicon                                    | vagent                          | Divergence and reason                                                                                 |
+| -------------------- | ---------------------------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| assignment           | `:=`, `<-`                               | `:=`, `<-`                      | `:=` restricted to bounded positions (§8.3)                                                           |
+| comparison           | `=`, `~=`, numeric; `==`, `~==`, lexical | `==`, `!=`, typed               | vagent is statically typed, so one `==` replaces the numeric and lexical pairs (V14)                  |
+| concatenation        | `\|\|`                                   | `++`                            | `\|\|` would read as boolean or to programmers from typed languages                                   |
+| conditional          | `if then else`; fails without `else`     | total without `else`            | a failing `if` would undo the writes before it in a handler (§8.2)                                    |
+| loops                | `while do`, `every do`                   | `while do`, `for in do`         | `every` drives a generator, and the trail undoes its body's writes (V7)                               |
+| generator procedures | `suspend` in procedures                  | none; `def` returns once        | methods are called across skills and from handlers, where a live generator could not survive the turn |
+| string scanning      | `s ? e`, `tab`, `move`                   | same, from `std:goal`           | `?` binds tighter than assignment                                                                     |
+| module paths         | `std:goal`                               | `std:agent`, `mars:exploration` | none; vlace's `"std:xanadu"` and VQL's `std::` should converge (U-A6)                                 |
+| locals               | assignment to a fresh name               | `let x := e`                    | plan frames must be known statically (§5.6)                                                           |
+| logic variables      | Vlog terms                               | `?x` inside terms only          | only belief terms need them                                                                           |
 
 ______________________________________________________________________
 
@@ -965,56 +1078,59 @@ ______________________________________________________________________
 ### 9.1 Cross-walk
 
 The last column names what each construct needs beyond `link`, `value` and the existing opcodes.
-"Adapter" means the owed executor (§11.2).
 
-| Construct                              | Lowering                                                                                                                                  | Beyond link/value                             |
-| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| agent creation (first turn)            | `makeCell(type name)` for the agent cell; `setStateRoot`; ranks created empty                                                             | `setStateRoot` (built)                        |
-| `var` field                            | name cell on `d.vars` off the owner, value on `d.values`                                                                                  | none                                          |
-| `install S(args)`                      | skill instance per capacity on `d.skill` via `rankTail`+`link`; view appended to the capacity's `d.clone` rank; `+d.capacity` to the view | none                                          |
-| capacity call                          | Vortex routine walks `d.skill` comparing `cloneMaster`; `#Call` with the method entry on `+d.grab`, arguments on `+d.step`                | none                                          |
-| `on E [g] priority p { b }`            | handler program cell with `p` as a scalar; the dispatcher routine matches the type name, runs `g` then `b` under a mark                   | none                                          |
-| `believe t` / `forget t`               | Vlog `assertz` / `retract` on the predicate's `d.clause` rank; belief event cell queued                                                   | none                                          |
-| `believes t`                           | Vlog clause walk with `#Unify`, one `#Choice` per clause                                                                                  | none                                          |
-| `e1 & e2`, `e1 \| e2`, `\`, `to`, `<-` | exactly vicon's lowering (vicon §4–§5)                                                                                                    | none                                          |
-| `for x in e do b`                      | bounded `e` to a list or range; a deterministic rank walk or counter; `b` bounded per element                                             | none                                          |
-| `for believes t do b`, `findall`       | clause-rank walk; per clause: copy `t`, mark, `#Unify`, release or discard (§6.1)                                                         | none                                          |
-| `emit e in s for r`                    | envelope cell (type, fields, space, recipients) appended to `d.outbox`                                                                    | adapter: `send` at turn end                   |
-| `tell`, `untell`                       | envelope cell on `d.outbox`                                                                                                               | adapter                                       |
-| `spawn A(args)`                        | envelope cell on `d.outbox`; handle cell computed and returned                                                                            | adapter: `MeshActorRuntime::spawn`, `monitor` |
-| `adopt G(args)`                        | intention cell appended to `d.intention`; `Resume` envelope to `self` on `d.outbox`                                                       | adapter (self-send)                           |
-| `achieve G(args)` in a plan            | as `adopt`, plus `+d.subgoal` link and `waiting`; the step returns                                                                        | none beyond `adopt`                           |
-| `achieve … by a within d`              | `achieve` envelope on `d.outbox`; timer request; `waiting` set; the step returns                                                          | adapter: send, timer                          |
-| `ask a.q() within d`                   | `ask` envelope; timer request; `waiting` set; the step returns                                                                            | adapter: send, timer                          |
-| `drop i`                               | unlink `i` from `d.intention`; subgoals dropped recursively                                                                               | none                                          |
-| `yield`                                | `Resume` envelope to `self`; the step returns                                                                                             | adapter (self-send)                           |
-| `requires` / `ensures`                 | the existing `-d.contract` / `+d.contract` chains on the method's call site                                                               | none                                          |
-| turn end                               | `discard` or `release` of the turn mark                                                                                                   | adapter: drain, fuel re-arm                   |
+| Construct                              | Lowering                                                                                                                                              | Beyond link/value                   |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| a statement                            | `d := #ChoiceDepth` at entry; the expression; `#Cut d` on its first result                                                                            | `#ChoiceDepth` (owed)               |
+| `e1 & e2`, `e1 \| e2`, `\`, `to`, `<-` | vicon's lowering (vicon §4–§5)                                                                                                                        | none                                |
+| `if c then a [else b]`                 | `#Choice alt=ELSE`; `c`; `#Cut d`; `a`; ELSE: `b`, or `()` when absent                                                                                | `#ChoiceDepth`                      |
+| `for x in e do b`                      | bounded `e`; a counter or a rank walk; `b` as a statement per element                                                                                 | none                                |
+| `for believes t do b`, `findall`       | copy the clause list; per clause: copy `t`, `#Choice`, `#Unify`, `#Cut d` or `#Fail`                                                                  | none                                |
+| agent creation                         | `makeCell(type name)`; `setStateRoot`; ranks empty; fields from `Initialize`                                                                          | `setStateRoot` (built)              |
+| `var` field                            | name cell on `d.vars` off the owner, value on `d.values`                                                                                              | none                                |
+| `install S(args)`                      | skill frame; one instance per capacity on `d.skill` and on the frame's `d.clone` rank; capacity-name cell on `+d.capacity`                            | none                                |
+| capacity call                          | dispatch walk (§5.3), then vicon's call convention: `Bind` per argument, `Bind` of the return continuation, `Jump` (`vicon/compiler.cpp`, `emitCall`) | none                                |
+| effect call                            | outbox entry (capacity, method, copied arguments, deadline); intention `waiting` set; the step returns                                                | adapter: host binding               |
+| `on E [g] priority p { b }`            | handler cell on the event type's `d.clause` rank (§5.7); dispatcher routine in `std:agent`                                                            | none                                |
+| `believe t`, `forget t`                | clause add or source add; source removal and retraction with rank repair; belief event cell on `d.pending`                                            | none                                |
+| `believes t`                           | clause walk with `#Unify`, one `#Choice` per clause                                                                                                   | none                                |
+| `emit`, `tell`, `untell`               | outbox entry with copied fields                                                                                                                       | adapter: `send`                     |
+| `spawn A(args)`                        | outbox entry; an unfilled peer cell returned                                                                                                          | adapter: issuer, `spawn`, `monitor` |
+| `adopt G(args)`                        | intention on `d.intention`, marked ready                                                                                                              | adapter: wake                       |
+| `achieve G(args)` in a plan            | subgoal intention on `+d.subgoal`; `waiting` set; the step returns                                                                                    | none                                |
+| `achieve … by a within d`, `ask`       | outbox entry; `waiting` set with deadline; the step returns                                                                                           | adapter: `send`, timers             |
+| `await`                                | `waiting` set with the term or event pattern and deadline; the step returns                                                                           | adapter: timers                     |
+| `drop i`                               | unlink `i`; drop subgoals; outbox `cancel` entries                                                                                                    | none                                |
+| `yield`                                | intention marked ready; the step returns                                                                                                              | adapter: wake                       |
+| `requires`, `ensures`                  | the call site's `-d.contract`/`+d.contract` chains (Vortex §3)                                                                                        | none                                |
+| turn end                               | `clearChoicePoints()`; drain; rebuild ready list and timers                                                                                           | adapter                             |
 
-### 9.2 Capacity calls
+### 9.2 Calls
 
-The call uses the dual-wing convention as built, with no change. `#Call` pushes a return frame on
-the cursor's `+d.stack` and jumps to `inputs[0]` (`vortex_vm.cpp:665-687`). Argument cells are the
-call opcode's `+d.grab`/`+d.step` operands; the callee reads them through the frame. Method
-contracts are the call site's `-d.contract` and `+d.contract` chains, evaluated as the Vortex
-document §3 describes. A violation returns `ExecutionResult::contractViolation`
-(`vortex_core.hpp:62-70`), which §6.7 maps to plan failure.
-
-The compiler emits one call opcode per call site in the program, with `inputs[0]` patched by the
-dispatch routine at run time. It does not mint a call cell per call, which would spend fuel on every
-invocation.
+vagent uses vicon's procedure-call lowering, not `#Call`. `#Call` pushes a return frame holding one
+opcode reference and jumps (`vortex_vm.cpp:665-687`); nothing binds arguments for the callee. vicon
+binds each argument with `Bind` on the cursor's scope, binds the return continuation, and jumps
+(`vicon/compiler.cpp`, `emitCall`). Capacity dispatch chooses the jump target at run time by binding
+the chosen method's entry and jumping through it, so no program cell is rewritten (V12). Contracts
+are evaluated as Vortex §3 describes; a violation returns `ExecutionResult::contractViolation`
+(`vortex_core.hpp:62-70`).
 
 ### 9.3 A handler, lowered
 
-`on TargetDetected [occurrence.distance < 50.0] { targets_seen := targets_seen + 1 }` becomes:
+`on TargetDetected [occurrence.distance < 50.0] { targets_seen := targets_seen + 1 }`:
 
 ```text
-handler cell "TargetDetected"  (+d.vars: priority = 0, ordinal = 3)
-  guard stream (+d.spin):   #Load occurrence.distance → #Lt 50.0 → (fails or continues)
-  body stream (+d.spin):    #Load targets_seen → #Add 1 → #Store targets_seen
-dispatcher (std:agent, Vortex):
-  for each handler cell matching the event type name, in (priority, ordinal) order:
-    #Choice alt=next-handler ; m = mark ; run guard ; run body ; discard(m) ; #Cut
+program: name cell "TargetDetected" ─(+d.clause)─► handler cell (priority 0, ordinal 3)
+  guard stream (+d.spin): Resolve occurrence.distance → Lt 50.0 → produce or Fail
+  body stream (+d.spin):  ChoiceDepth → d0; Resolve targets_seen → Add 1 → Bind; Cut d0
+
+dispatcher (std:agent, Vortex), per handler on the rank:
+  ChoiceDepth → h
+  Choice alt=NEXT                -- the handler's own choice point and mark
+  run guard; run body
+  Cut h                          -- success: drop the choice point, keep the writes
+  Jump NEXT_AFTER
+NEXT: (reached by Fail)          -- failure: the mark was released, writes undone
 ```
 
 ______________________________________________________________________
@@ -1023,76 +1139,103 @@ ______________________________________________________________________
 
 `std:agent` is written in Vortex, anchored on `d.stdlib` like every package
 ([vortex-hyperstructural-runtime.md](vortex-hyperstructural-runtime.md) §7.1). It reuses `std:logic`
-(Vlog clause storage and unification), `std:goal` (generators, scanning), `std:collections` (lists,
-maps) and `std:string` unchanged.
+(unification, and the clause database once Vlog §6 is built), `std:goal` (generators, scanning),
+`std:collections` and `std:string`.
 
-| Part         | Contents                                                                                                                                                                                                                     |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| genesis      | mints the ten dimensions of §5.1 on `d.dims`                                                                                                                                                                                 |
-| dispatcher   | handler matching and ordering (§6.5), belief event rounds, `consume`                                                                                                                                                         |
-| deliberation | `adopt`, plan selection, `continue`, maintain checks, intention ending                                                                                                                                                       |
-| relay        | the host's fan-out of emissions into hosted spaces                                                                                                                                                                           |
-| capacities   | `Behaviors` (`mount`, `unmount`), `Schedules` (`after`, `periodic`, `cancel`), `Clock` (`now`), `Accepts` (`accepts`), `Logging`                                                                                             |
-| functions    | `findall`, `intentions()` (a list of this agent's intentions), `members(s)`, `children()`, `text(x)`                                                                                                                         |
-| events       | `Initialize{args}`, `Destroy`, `GoalAchieved{intention, goal}`, `GoalFailed{intention, goal, cause}`, `GoalDropped{intention, goal}`, `PlanFailed{intention, plan, cause}`, `ChildDown{child, reason}`, `TurnAborted{cause}` |
+| Part         | Contents                                                                                                                                                                                                                                                                                                |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| genesis      | mints the eleven dimensions of §5.1                                                                                                                                                                                                                                                                     |
+| dispatcher   | handler order (§5.7), `d.pending` rounds, `consume`, await matching                                                                                                                                                                                                                                     |
+| deliberation | `adopt`, selection, `continue`, reconsideration, maintain back-off, `fail_step`                                                                                                                                                                                                                         |
+| beliefs      | set-with-sources assert and retract, clause walk, `findall`                                                                                                                                                                                                                                             |
+| relay        | the host's fan-out into hosted spaces                                                                                                                                                                                                                                                                   |
+| capacities   | `Behaviors` (`mount(b: Str, args: [Event])`, `unmount(b: Str)`); `Schedules` (`after(d: Duration, e: Event): Timer`, `periodic(d: Duration, e: Event): Timer`, `cancel(t: Timer)`); `Clock` (`now(): Time`); `Accepts` (`accepts(from: Agent, goal: Str)`); `Logging` (`info(m: Str)`, `debug(m: Str)`) |
+| functions    | `intentions(): [Intention]`, `members(s: Space): [Agent]`, `children(): [Agent]`, `text(x): Str`                                                                                                                                                                                                        |
+| events       | `Initialize`, `Destroy`, `GoalAchieved{intention, goal}`, `GoalFailed{intention, goal, cause}`, `GoalDropped{intention, goal}`, `PlanFailed{intention, plan, cause}`, `ChildDown{child}`, `ChildStopping{child}`, `SpawnFailed{child}`, `DeliveryFailed{to, kind, cause}`                               |
 
-`Clock.now()` reads the wall time the runtime passed to `pumpOne` for this turn; it does not read a
-clock during the turn, so a turn is a function of its message and that time. `Logging` writes
-through the `vortex.agent` category, which the logging migration (`design/logging-migration.md`)
-must register; it never logs event payloads.
+A timer is an entry in the `timers` field: id, due time, period, and a copied event. When it falls
+due, the adapter asks for a wake turn and the event is dispatched to the agent itself. `Clock.now()`
+returns the turn time written in step 2 of §4.2, so a turn is a function of its input and its state.
+`Logging` writes through the `vortex.agent` category, which the logging migration
+(`design/logging-migration.md`) must register; it never logs event payloads.
 
-Settings read from `system://settings` with their defaults: `vagent.max_actors` (128, the runtime
-default), `vagent.belief_event_depth` (16), `vagent.ask_default_deadline` (none: the deadline is
-written at the call), and the fuel figures passed to the grant. None is a constant in code.
+Settings, read from `system://settings` by the launcher and the adapter (the runtime's own options
+are constructor arguments, so the launcher is what reads them):
+
+| Setting                      | Default                | Bounds what                              |
+| ---------------------------- | ---------------------- | ---------------------------------------- |
+| `vagent.max_actors`          | 128 (`ActorOptions`)   | agents per runtime                       |
+| `vagent.max_mailbox`         | 128 (`ActorOptions`)   | queued messages per agent                |
+| `vagent.max_deliveries`      | 4096 (`ActorOptions`)  | outstanding sends per runtime            |
+| `vagent.value_operations`    | 65,536 (`ValueLimits`) | checkpoint size, once §11.3 (e) lands    |
+| `vagent.belief_event_depth`  | 16                     | internal event rounds per turn           |
+| `vagent.maintain_backoff`    | 30s                    | re-adoption after a failed restorer      |
+| `vagent.send_retries`        | 5                      | retries before a delivery is abandoned   |
+| `vagent.send_retry_interval` | 1s                     | spacing of retries                       |
+| `vagent.renew_fraction`      | 0.8                    | when lease renewal starts                |
+| `vagent.ready_per_message`   | 4                      | wake turns run between two message turns |
 
 ______________________________________________________________________
 
 ## 11. What the C++ core has to gain
 
-### 11.1 Nothing in the VM, the arena, or the store
+### 11.1 One opcode
 
-No opcode, no `ChoicePoint` field, no `ArenaManifold` method, no `CompactOpNode` change, no
-`SystemDimensions` field. The control model is vicon's and the database is Vlog's.
+`#ChoiceDepth` writes the VM's current `choiceStack_.size()` into its output cell. With it, a
+bounded statement records the depth at its start and cuts to it with the existing `#Cut`, which
+already takes a barrier from its input (`vortex_vm.cpp:974-981`). Without it, depth is only known
+statically, and a method called from inside a speculative expression starts at a depth the compiler
+cannot know. The opcode is about ten lines in `vortex_vm.{hpp,cpp}` and a test. It also removes
+vicon's recorded deviation, which names "a new opcode or a new `ChoicePoint` field" as the fix for
+bounded evaluation and `\` (`vicon/compiler.cpp:12-22`).
+
+No other VM change, no `ChoicePoint` field, no `ArenaManifold` method, no `CompactOpNode` change, no
+`SystemDimensions` field.
 
 ### 11.2 A front end and a mesh executor adapter
 
 ```text
 apps/common/xanadu/vagent/
-  token.hpp, lexer.{hpp,cpp}      // §8.1, including the newline rule
+  token.hpp, lexer.{hpp,cpp}      // §8.1, including the newline rule and contextual keywords
   ast.hpp, parser.{hpp,cpp}       // §8.9; precedence climbing over §8.4
-  checker.{hpp,cpp}               // types, static restrictions (§8.9 notes)
-  compiler.{hpp,cpp}              // lowering (§9) to Vortex opcode streams
-  agent_executor.{hpp,cpp}        // the MeshActorRuntime::Executor (below)
-apps/vagent/main.cpp              // `vagent run`, `vagent check`, a REPL that drives one agent
+  checker.{hpp,cpp}               // types and the static restrictions of §8.9
+  compiler.{hpp,cpp}              // §9, to Vortex opcode streams
+  agent_executor.{hpp,cpp}        // the MeshActorRuntime::Executor
+  host_bindings.{hpp,cpp}         // native skills and percept drivers registered by name
+apps/vagent/main.cpp              // `vagent run`, `vagent check`, a REPL driving one agent
 ```
 
-The compiler's surface follows `vprolog::Compiler` and returns `std::expected` with a named error,
-as vicon §8.2 sets out.
+The compiler returns `std::expected` with a named error, as `vprolog::Compiler` and vicon §8.2 do.
+For scale: `apps/common/xanadu/vprolog/` is 1,632 lines and `apps/common/xanadu/vicon/` is 3,176;
+the front end is expected to be nearer vicon's, and the adapter is new territory with no measured
+comparison.
 
-The adapter is the only part with run-time responsibilities. It is C++ because it holds a
-`MeshActorRuntime&`, which Vortex code cannot reach (§1). Per turn it:
+The adapter is C++ because it holds a `MeshActorRuntime&` and host bindings, which Vortex code
+cannot reach (§1). Its duties, all per turn unless stated:
 
-1. re-arms fuel with `setExecutionLimits` (§4.2);
-1. decodes the `ActorMessage` into an event cell or classifies it as reply, resume, timer or down;
-1. runs the dispatcher or `continue` on the agent's cursor under the turn mark, under a base choice
-   point (§6.7);
-1. drains `d.outbox`: `send` for envelopes, `spawn` and `monitor` for spawns;
-1. keeps a timer heap and enqueues timer messages to the agent through the runtime's `receive`;
-1. returns the turn result, which is the answer for an `ask` and empty otherwise.
-
-Estimated size: the adapter about 800 lines with tests; the front end about the size of vprolog's.
+1. the steps of §4.2, including fuel re-arm, turn time, base choice point, `clearChoicePoints`, and
+   recovery after a hard failure;
+1. draining `d.outbox`: spawn under an issued capability then fill the peer cell; `send`; start
+   effects through host bindings; update timers;
+1. delivery upkeep: `retry` and abandonment (§7.3);
+1. host deliveries: effect results and percepts, queued and fed to wake turns;
+1. a ready list and a timer heap derived from cells after each turn and after `resume`;
+1. lease renewal (§4.5);
+1. scheduling: at most `vagent.ready_per_message` wake turns between two message turns.
 
 ### 11.3 Changes in `mesh_actor.cpp`
 
-| Change | What                          | Why                                                                                                                                                                                 | Price                                                                                               |
-| ------ | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| (a)    | Reap completed deliveries     | `deliveries_` is never erased (no `erase` in the file) and `send` refuses at `maxOutstandingDeliveries` (`mesh_actor.cpp:521`), so a runtime can send 4096 messages in its lifetime | erase on completion; the de-duplication of re-sends must then key on a window of recent ids         |
-| (b)    | Window remembered request ids | `remembered` is never erased and `enqueue` refuses at `maxRememberedMessages` (`mesh_actor.cpp:344`), so an actor can receive 4096 messages in its lifetime                         | keep ids above a per-sender sequence watermark; checkpoints carry the watermark instead of every id |
-| (c)    | Capability-bearing senders    | `receive` admits `ActorSend` only from the actor's owner (`mesh_actor.cpp:402-405`)                                                                                                 | not needed for single-owner societies; needed for any space spanning identities. Deferred (U-A2)    |
+| Change | What                                                | Why                                                                                                                                                                                                                                                               | Price                                                                                                          |
+| ------ | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| (a)    | Reap completed deliveries; add `abandon(requestId)` | `deliveries_` is never erased (the file has no `erase`) and `send` refuses at `maxOutstandingDeliveries` (`mesh_actor.cpp:521`), so a runtime can send 4096 messages in its lifetime; an abandoned delivery blocks its sender's checkpoint for ever               | erase on completion or abandonment; de-duplication of resends keys on a window of recent ids                   |
+| (b)    | Window remembered request ids                       | `remembered` is never erased and `enqueue` refuses at `maxRememberedMessages` (`mesh_actor.cpp:344`), so an actor can receive 4096 messages in its lifetime                                                                                                       | keep ids above a per-sender watermark; checkpoints carry the watermark                                         |
+| (c)    | Capability-bearing senders                          | `receive` admits `ActorSend` only from the owner (`mesh_actor.cpp:402-405`)                                                                                                                                                                                       | not needed for single-owner societies. Deferred (U-A2)                                                         |
+| (d)    | Local wake                                          | the executor runs only for a mailbox message; an agent's own work (ready intentions, timers, host deliveries) is not a message, and a self-send collides with the actor's own `remembered` entry and is refused as `DuplicateMismatch` (`mesh_actor.cpp:333-337`) | `wake(pid)` runs the executor with no message: no `remembered` entry, no reply, no delivery. About forty lines |
+| (e)    | Value limits as options                             | `resume` builds `ValueLimits` locally (`mesh_actor.cpp:258-259`), so the 65,536-operation checkpoint bound cannot be raised                                                                                                                                       | carry `ValueLimits` in `ActorOptions`                                                                          |
 
-(a) and (b) are bugs for any long-lived actor, not only for vagent. The mesh was built for bounded
-jobs, and these limits suit those. Without (a) and (b), a vagent agent stops working after 4096
-messages, which is a ceiling users would have to work around, and so vagent depends on them.
+(a), (b) and (e) remove ceilings that would stop any long-lived actor, not only vagent's. The mesh
+was built for bounded jobs, for which these limits suit. vagent depends on all of (a), (b), (d) and
+(e).
 
 ______________________________________________________________________
 
@@ -1121,7 +1264,7 @@ agent Worker {
 
 agent SearchCoordinator(partitions: Int) {
   on Initialize {
-    for n in 1 to partitions do spawn Worker() in inner
+    for _ in 1 to partitions do spawn Worker() in inner
   }
 
   on SearchQuery as q [q.space == outer] {
@@ -1130,7 +1273,7 @@ agent SearchCoordinator(partitions: Int) {
       emit SubTask{query_id: q.query_id, partition: i, pattern: q.pattern} in inner
   }
 
-  // A duplicate delivery of one partition is ignored by the guard.
+  // A duplicate delivery of one partition fails the guard and changes nothing.
   on PartitionResult as r [r.space == inner & not believes reported(r.query_id, r.partition)] {
     believe reported(r.query_id, r.partition)
     for h in r.hits do believe hit(r.query_id, h)
@@ -1142,29 +1285,31 @@ agent SearchCoordinator(partitions: Int) {
 }
 ```
 
-The worker's default scope is `outer`, which for a child is its parent's `inner`, so its results
-reach only the coordinator and its siblings. The coordinator tells partitions apart by belief, not
-by counting hits. `*xs` is the list size (`std:collections`).
+The worker's default scope is `outer`, which for a child is its parent's `inner`, so results reach
+only the coordinator and the other workers. The `if` has no `else`, so it succeeds for every
+partition but the last, and the beliefs written before it stand (§8.2). Each `SubTask` send brings
+the coordinator a reply turn, so `partitions` must stay below half of `vagent.max_mailbox`, or the
+fan-out must be windowed.
 
 ### 12.2 Swapping a skill at run time
 
 ```vagent
-capacity Transport {
-  effect def send_payload(dest: Agent, data: Str)
-}
-skill Loopback implements Transport {
-  effect def send_payload(dest: Agent, data: Str) { emit Payload{data: data} for [dest] }
-}
-skill Sealed(key_id: Str) implements Transport {
-  effect def send_payload(dest: Agent, data: Str) {
-    emit SealedPayload{key_id: key_id, data: data} for [dest]
-  }
-}
-
 event Payload { data: Str }
 event SealedPayload { key_id: Str, data: Str }
 event SecurityAlert { level: Int }
 event OutgoingReport { recipient: Agent, content: Str }
+
+capacity Transport {
+  def send_payload(dest: Agent, data: Str)
+}
+skill Loopback implements Transport {
+  def send_payload(dest: Agent, data: Str) { emit Payload{data: data} for [dest] }
+}
+skill Sealed(key_id: Str) implements Transport {
+  def send_payload(dest: Agent, data: Str) {
+    emit SealedPayload{key_id: key_id, data: data} for [dest]
+  }
+}
 
 behavior Reporter {
   uses Transport
@@ -1183,20 +1328,23 @@ agent Adaptive(alert_level: Int, key_id: Str) {
 }
 ```
 
-Trace: an `OutgoingReport` before the alert dispatches `send_payload` to the `Loopback` instance.
-The alert's turn removes that instance from `d.skill` and appends a `Sealed` instance with its own
-view of `Transport`. The next `OutgoingReport` reaches `Sealed`, and `Reporter` is unchanged. The
-guard's `sealed == false` keeps a second alert from re-installing. The threshold and key are
-parameters, not constants.
+An `OutgoingReport` before the alert dispatches `send_payload` to the `Loopback` instance. The
+alert's turn uninstalls `Loopback` and installs `Sealed`, whose instance carries the capacity name
+`Transport`. The next `OutgoingReport` reaches `Sealed`, and `Reporter` is unchanged. Both skills
+emit into `outer`, of which `dest` must be a member. `send_payload` is not an `effect`: emitting is
+staged messaging, not a device action.
 
-### 12.3 A rover with goals, plans and a reversible choice
+### 12.3 A rover with goals, plans, effects and a reversible choice
 
 ```vagent
 module mars:exploration
 import std:agent
+import std:goal (tab, match, upto)
 import std:math (Point)
-import mars:hardware (Chassis, Spectrometer)
+import mars:hardware (Chassis, Spectrometer, TerrainPlanner)
 
+event Position { at: Point }
+event Battery { level: Float }
 event HazardDetected { kind: Str, severity: Int }
 event MissionCommand { target_id: Str, location: Point }
 event EmergencyHalted { kind: Str }
@@ -1205,32 +1353,36 @@ event SampleSecured { target_id: Str, total: Int }
 event SurveyFailed { target_id: Str, cause: Str }
 
 capacity Mobility {
-  effect def follow(route: [Point])      // fails if any leg loses traction
-  effect def halt()
-  def battery(): Float
-  def position(): Point
-  def cost(route: [Point]): Float
-  def direct_route(to_point: Point): [Point]
-  def ridge_route(to_point: Point): [Point]
+  effect def follow(route: [Point]) within 10min   // fails if a leg loses traction
+  effect def halt() within 5s
 }
 capacity Science {
-  def spectra(target_id: Str): Str
-  effect def drill_core(target_id: Str)
+  effect def spectra(target_id: Str): Str within 1min
+  effect def drill_core(target_id: Str) within 15min
+}
+capacity Routes {
+  def direct(from_point: Point, to_point: Point): [Point]
+  def ridge(from_point: Point, to_point: Point): [Point]
+  def cost(route: [Point]): Float
 }
 
 goal Survey(target_id: Str, location: Point) perform
 goal Reach(location: Point) achieve {
-  succeed when position() == location
+  succeed when believes position(location)
 }
 
 agent MarsSurveyor(hazard_limit: Int, reserve_floor: Float) {
-  uses Mobility, Science
+  uses Mobility, Science, Routes
   install Chassis()
   install Spectrometer()
+  install TerrainPlanner()
   var budget: Float := 0.0
   var samples: Int := 0
 
-  on HazardDetected as h [h.severity > hazard_limit] priority 100 {
+  on Position as p { forget position(_); believe position(p.at) }
+  on Battery as b { forget battery(_); believe battery(b.level) }
+
+  on HazardDetected as h [h.severity > hazard_limit] {
     halt()
     for i in intentions() do drop i
     emit EmergencyHalted{kind: h.kind}
@@ -1243,7 +1395,8 @@ agent MarsSurveyor(hazard_limit: Int, reserve_floor: Float) {
       emit SurveyFailed{target_id: target_id, cause: cause}
       fail
     }
-    let mineral := spectra(target_id) ? (tab(match("SPEC:")) & tab(upto(";")))
+    let reading := spectra(target_id)
+    let mineral := reading ? (tab(match("SPEC:")) & tab(upto(";")))
     emit ScienceLog{target_id: target_id, mineral: mineral}
     drill_core(target_id)
     samples := samples + 1
@@ -1251,53 +1404,64 @@ agent MarsSurveyor(hazard_limit: Int, reserve_floor: Float) {
   }
 
   // Choose a route inside one statement: a failed arm restores budget.
-  plan travel for Reach(location) {
-    let route := (budget <- battery() - cost(direct_route(location))
-                  & budget > reserve_floor & direct_route(location))
-               | (budget <- battery() - cost(ridge_route(location))
-                  & budget > reserve_floor & ridge_route(location))
+  plan travel for Reach(location) where believes position(?here) & believes battery(?level) {
+    let route := (budget <- level - cost(direct(here, location))
+                  & budget > reserve_floor & direct(here, location))
+               | (budget <- level - cost(ridge(here, location))
+                  & budget > reserve_floor & ridge(here, location))
     follow(route)
   }
 }
 ```
 
-What happens, step by step:
+`mars:hardware` provides `Chassis` and `Spectrometer` as native skills, whose drivers also post
+`Position` and `Battery` percepts, and `TerrainPlanner` as a vagent skill implementing `Routes`.
 
-1. `MissionCommand` adopts `Survey`. Its `Resume` arrives next turn; `survey` is the only plan.
-1. `achieve Reach(location)` adopts `Reach` as a subgoal and suspends `Survey` at step 0.
-1. `Reach`'s turn evaluates the route statement. The direct arm sets `budget`; if
-   `budget > reserve_floor` fails, the trail restores `budget` and the ridge arm runs. The statement
-   ends, its mark is discarded, and `budget` keeps the chosen arm's value. This is the only place
-   `<-` matters, and it is within one statement (V2).
-1. `follow(route)` is an effect at statement level (V6). If a leg loses traction, the plan fails.
-   `Reach` has no other plan, so it fails, and `Survey`'s `achieve … else` runs: it emits
-   `SurveyFailed` and fails `survey`. The rover stays where it stopped; nothing pretends to undo the
-   drive.
-1. A `HazardDetected` arriving between turns runs at the next turn boundary, halts, and drops every
-   intention. Queued `Resume` messages for them then find nothing.
+What happens:
 
-`Chassis` and `Spectrometer` come from `mars:hardware`, whose skills call native host functions.
-That binding is device code and is outside this document.
+1. `MissionCommand` adopts `Survey`, which becomes ready; its first wake turn selects `survey`.
+1. `achieve Reach(location)` creates a subgoal and suspends `Survey`.
+1. `Reach`'s wake turn selects `travel`, whose `where` binds `here` and `level` from beliefs. The
+   route statement tries the direct arm; if `budget > reserve_floor` fails, the trail restores
+   `budget` and the ridge arm runs. The statement's cut keeps the chosen arm's `budget`.
+1. `follow(route)` stages the effect and suspends `Reach`. The turn ends; the chassis drives. While
+   it drives, the agent handles percepts and other messages in their own turns.
+1. When the drive ends, `EffectDone` resumes `Reach`. Its plan body is complete, so the goal's
+   condition is tested from the latest `position` belief. If the rover is there, `Reach` succeeds
+   and `Survey` resumes.
+1. If a leg loses traction, `EffectFailed` fails `follow(route)`, hence `travel`. `Reach` has no
+   other plan, so it fails, and `Survey`'s `else` emits `SurveyFailed` and fails `survey`. The rover
+   is wherever it stopped, the `budget` written in the earlier turn stands, and nothing pretends
+   otherwise.
+1. A `HazardDetected` is handled in its own turn, between any two others, including during a drive:
+   `halt()` is staged without waiting, every intention is dropped, and the drive's later
+   `EffectFailed` or `EffectDone` finds no intention and is counted as late.
 
 ______________________________________________________________________
 
 ## 13. Refused alternatives
 
-| Alternative                                                   | Refused because                                                                                                                                   |
-| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Agents as cells in one shared arena (1.0's population rank)   | breaks share-nothing and the per-actor grant; one agent's fuel exhaustion would undo another's turn                                               |
-| Holon children as sub-structures of the parent's arena        | children would share the parent's failure domain and fuel; a holon could not be distributed                                                       |
-| Speculation across turns (1.0's shadow cells, `ArenaSlice`)   | needs a mark live across turns, which `checkpointView` refuses; marks are LIFO truncation and cannot be per-intention without new arena machinery |
-| Persisting a generator's choice point at a suspension point   | a choice point is a C++ frame and an arena mark; neither is portable (`mesh_actor.hpp:92-93`)                                                     |
-| Continuation-passing transform so suspension can sit anywhere | the compiler would have to reify generator state as cells; possible later (U-A7), not needed for the examples                                     |
-| Free-standing `commit` (Prolog cut over side effects)         | round 1 found it placed before the fallible action in every example; V5 and V6 make the safe order the only expressible one                       |
-| A priority mailbox                                            | needs a change to `enqueue` in C++ for an ordering handlers already get within a turn; preemption by dropping intentions covers the use case      |
-| Per-event `promote` to a `Store`                              | R8: agent working state is not hypertime; one promotion per event per agent would flood the spool                                                 |
-| vagent as a VQL extension (`vql-agent-experiment.md`)         | VQL's deferred-evaluation model has no intention that outlives a query; agent turns would need a second runtime under the query engine            |
-| A dimension per entity kind with no reuse                     | 1.0 declared seventeen; fields, frames and event payloads fit `d.vars`/`d.values`, choice and trail are the VM's and the arena's, so ten remain   |
-| `every e1 do e2` for loops that act                           | the arena trail undoes the body's writes on every resumption (V6a); `for` walks without a choice point                                            |
-| Positional event patterns                                     | silently rebind when an event's fields are reordered                                                                                              |
-| `&&`/\`                                                       |                                                                                                                                                   |
+| Alternative                                                   | Refused because                                                                                                                                               |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Agents as cells in one shared arena                           | breaks share-nothing and the per-actor grant; one agent's fuel exhaustion would undo another's turn                                                           |
+| Holon children inside the parent's arena                      | children would share the parent's failure domain and fuel, and a holon could not be distributed                                                               |
+| Speculation across turns (shadow cells, per-intention arenas) | needs a mark live across turns, which `checkpointView` refuses; marks are LIFO truncation                                                                     |
+| Persisting a generator's choice point at a suspension point   | a choice point is a C++ frame and an arena mark; neither is portable (`mesh_actor.hpp:92-93`)                                                                 |
+| Continuation-passing so suspension can sit anywhere           | the compiler would reify generator state as cells; possible later (U-A7), not needed by the examples                                                          |
+| Synchronous effects inside a turn                             | a long device action would block every other message, and a turn that failed after it would roll back the arena while the world kept the change               |
+| Free-standing `commit` (Prolog cut over side effects)         | it protects nothing when written before the fallible call, which is the order programmers write; staged effects and bounded statements leave only safe orders |
+| Self-sent messages for wake-ups                               | a self-send's reply collides with the actor's own `remembered` entry (`mesh_actor.cpp:333-337`) and never completes, blocking checkpoints for ever            |
+| A priority mailbox                                            | needs a change to `enqueue` for an ordering handlers already have within a turn; reaction latency is addressed by U-A11 instead                               |
+| Capacity identity by `CellRef` into the program               | every checkpoint would promote the program and `home` (V12), and refs change on `resume`                                                                      |
+| Sharing values by reference                                   | a second binding of a cell evicts the first; copying is the default and the skill frame is the one shared structure (V11)                                     |
+| Per-event `promote` to a user's store                         | R8: agent working state is not hypertime                                                                                                                      |
+| vagent as a VQL extension (`vql-agent-experiment.md`)         | VQL's deferred evaluation has no intention that outlives a query; agent turns would need a second runtime under the query engine                              |
+| `every e1 do e2` for loops that act                           | the arena trail undoes the body's writes on every resumption (V7)                                                                                             |
+| A failing `if` without `else`                                 | in a handler it undoes every write before it, silently                                                                                                        |
+| Icon's `=`/`==` and `\|\|` spellings                          | vagent is statically typed, so one typed `==` serves; `\|\|` reads as boolean or                                                                              |
+| `&&` and `\|\|` beside `&` and `\|`                           | two spellings of conjunction that differ in backtracking would be a trap                                                                                      |
+| Positional event patterns                                     | they silently rebind when an event's fields are reordered                                                                                                     |
+| A dimension per entity kind                                   | fields, frames and payloads fit `d.vars`/`d.values`; plans and handlers fit `d.clause`; choice and trail are the VM's and the arena's                         |
 
 ______________________________________________________________________
 
@@ -1305,113 +1469,132 @@ ______________________________________________________________________
 
 - **No data race between agents.** Each agent's arena is touched only by its own turns on the
   runtime's owner thread (`mesh_actor.hpp:107-109`). Within an agent, turns are sequential.
-- **An agent never blocks.** No vagent construct waits inside a turn. Waits end the turn (§6.6).
-- **Every wait is bounded.** `ask` and delegated `achieve` require a deadline; a subgoal ends or is
-  dropped. A cycle of agents waiting on each other ends when the first deadline elapses. Without
-  §11.2's timers, this property does not hold.
-- **A turn is atomic.** Its writes stand together or are undone together (`discard`/`release` of the
-  turn mark), and its messages leave only if it succeeds (V5). An effect is the exception: a
-  hardware action performed before a later hard failure in the same turn is not undone.
-- **A turn is a function of its message, its wall time and the agent's state.** `Clock.now()` reads
-  the turn's time, and nothing else in the language reads a clock or randomness. Replaying a turn
-  from a checkpoint with the same message and time reproduces it.
-- **Not claimed: lifetime replay.** The mesh does not log inbound messages, and agent state is not
-  in the spool (V8). Recording the inbound stream as a rank would make replay possible (U-A8).
+- **An agent never blocks.** No construct waits inside a turn; effects run outside turns (V6).
+- **Every wait on something outside the agent is bounded** by a deadline (§6.6), given the timers of
+  §11.2 and their reconstruction from cells after `resume`.
+- **A turn is atomic.** Its arena writes stand together or are undone together, and its messages,
+  spawns and effects happen only if it succeeds (V5).
+- **A turn is a function of its input and the agent's state.** Its input is the message or host
+  delivery and the turn time, all written into the arena; nothing else reads a clock or randomness.
+- **Reaction latency is not bounded by the language.** A handler runs when its message reaches the
+  head of the mailbox, behind queued messages and up to `vagent.ready_per_message` wake turns
+  between each.
+- **Not claimed: lifetime replay.** The mesh does not log inbound messages or host deliveries, and
+  agent state is not in a user's spool (V9). Recording inbound streams as a rank would allow it
+  (U-A8).
 
 ______________________________________________________________________
 
 ## 15. Breakages and costs
 
-- **Two turns per message.** Every `ActorSend` produces an `ActorDeliverValue` reply, which the
-  sender handles as a short turn. The cost is one decode and one mark per message sent.
-- **Relay doubles hops.** Emitting into a space hosted elsewhere is two sends, and the host is a
-  bottleneck and a single point of failure for its space.
-- **Reclamation needs quiescence.** A continuously busy agent never reaches a checkpoint, so it
-  never compacts, and its arena grows by every consumed event and finished intention (§4.4, U-A1).
-- **Maintain goals cost every turn.** Each `holds` condition runs at the end of every turn.
-- **Belief queries are linear** in the predicate's clause count until convergence U1 (Vlog §6.3).
-  vagent is a fourth consumer of U1, after VPL, Vlog and vicon.
-- **Suspension is restricted** to step paths (§6.6). A plan that must wait inside a loop over a
-  generator has to be split into a goal per element.
-- **Single-owner societies only** until §11.3 (c).
-- **Fuzzing.** The parser, the event decoder and the outbox drain are new input surfaces and get
-  `tests/fuzz/` targets alongside the existing three.
+- **Two turns per message sent.** Every `ActorSend` produces a reply turn for the sender.
+- **Mailbox bound.** 128 messages per agent by default; fan-out beyond half of it overflows on the
+  replies alone (§12.1). `MailboxFull` is handled by retries (§7.3).
+- **Relay doubles hops,** and a space's host is its bottleneck and single point of failure.
+- **Per-turn deliberation.** Every turn re-tests every live intention's `drop when` and
+  `succeed when`, every maintain goal's `holds`, and, per event, every waiting `await`. The cost is
+  linear in live intentions and their conditions.
+- **A turn per effect and per suspension.** A plan of n effects takes at least n + 1 turns.
+- **Checkpoint costs** (§4.4): an operation per live cell and link, the 65,536-operation bound until
+  §11.3 (e), and permascroll growth by the live strings at every checkpoint.
+- **Reclamation needs quiescence** (U-A1).
+- **Copy on store** (V11): O(size) per stored list or map.
+- **Belief queries are linear** until convergence U1. vagent is a fourth consumer of U1, after VPL,
+  Vlog and vicon.
+- **Restricted suspension** (§6.6): a plan that must wait inside a generator loop splits the work
+  into a goal per element.
+- **Child loss is slow** (§5.4): minutes, not milliseconds, unless the child announces its stop.
+- **Single-owner societies** until §11.3 (c).
+- **Fuzzing.** The parser, the event decoder, the outbox drain and host deliveries are new input
+  surfaces and get `tests/fuzz/` targets.
 
 ______________________________________________________________________
 
 ## 16. Reconciliation with the convergence
 
 - **R5 (`noCell == 0`).** The C++ adapter and compiler use `std::optional<CellRef>`, as
-  `ArenaManifold::link` returns. vagent's failure is the absence of a result, not a zero.
-- **R6 (scalars).** Fields, event fields, priorities and ordinals are scalar cells.
-- **R7 (a `SetLink`'s subject is its chain).** Not touched: vagent writes no Structure operations.
-- **R8 (two regimes).** Everything vagent builds is arena state (V8). The only way into a `Store` is
-  the explicit `StoreWriter` capacity and `zigzag::promote`, subject to `PromotionBudget`
-  (`arena_manifold.hpp:232-234`). Whether an agent acting for its owner counts as a user-generated
-  update under R8 is U-A9.
-- **R12 (a dimension is a cell).** The ten dimensions are minted as data by `std:agent` (V9).
+  `ArenaManifold::link` returns. A vagent failure is the absence of a result, not a zero.
+- **R6 (scalars).** Fields, event fields, priorities, ordinals, ids and deadlines are scalar cells.
+- **R7 (a `SetLink`'s subject is its chain).** vagent writes no Structure operations into a user's
+  store. A checkpoint writes them into the published value's own transient store, through `promote`,
+  which follows R7.
+- **R8 (two regimes).** Agent state is arena state (V9). The checkpoint promotion targets a value's
+  own store, which no user visits, so R8's "a visited store is not mutated" holds. Writing to a
+  user's store is the explicit `StoreWriter` capacity, under `PromotionBudget`. Whether an agent
+  acting for its owner counts as a user-generated update is U-A9.
+- **R12 (a dimension is a cell).** The eleven dimensions are minted as data by `std:agent` (V10).
 - **U1 (rank indexing).** A consumer, not a resolver (§15).
 
 ______________________________________________________________________
 
-## 17. Open questions
+## 17. Comparison
 
-- **U-A1. Reclaiming a busy agent's arena.** Options: a reachability sweep over the arena (new arena
-  machinery, O(live cells)), or a copy-to-fresh-arena step the adapter runs between turns, which
-  needs no quiescent mailbox, only a turn boundary.
-- **U-A2. Cross-owner spaces.** Change (c) in §11.3: what capability a non-owner presents, and who
-  issues it.
-- **U-A3. Large payloads.** Events over the frame limit as torrents named by `infoHash`, received
-  through `ActorDeliverWriteSet`.
-- **U-A4. Swarm spaces.** Binding a space to a `mesh_swarm` topic over BEP 46, so membership is the
-  topic's and no host relays.
-- **U-A5. Commitment strategies.** Blind and open-minded commitment as goal modifiers.
-- **U-A6. One module path spelling across the family.**
-- **U-A7. Suspension anywhere.** A continuation-passing compilation of generators into cells.
-- **U-A8. Recorded inbound streams** for lifetime replay and testing.
-- **U-A9. Agents and R8.** When an agent's beliefs or results may become hypertime in the owner's
-  store.
-- **U-A10. A test harness.** One agent on one arena with a manual clock, mock skills installed by
-  `install`, and assertions on emitted envelopes. The turn model makes this direct; the language for
-  it is not yet specified.
+| Property         | SARL / Janus                | Jason (AgentSpeak)            | GOAL                         | vagent                                            |
+| ---------------- | --------------------------- | ----------------------------- | ---------------------------- | ------------------------------------------------- |
+| beliefs          | none built in               | Prolog-like belief base       | Prolog knowledge and beliefs | a fact set with sources                           |
+| goals            | none built in               | achievement and test goals    | declarative achieve goals    | achieve, perform, maintain                        |
+| plan selection   | n/a                         | first applicable, overridable | rule order                   | first applicable untried; not overridable (U-A12) |
+| commitment       | n/a                         | single-minded                 | blind until achieved         | single-minded, reconsidered every turn            |
+| actions          | synchronous method calls    | synchronous, with suspension  | synchronous                  | asynchronous effects that suspend the plan        |
+| failure handling | exceptions                  | `-!g` failure plans           | goal remains                 | `PlanFailed`, reselection, `else`                 |
+| in-plan search   | none                        | none                          | none                         | goal-directed generators, reversible assignment   |
+| organisation     | contexts, spaces, holons    | via JaCaMo                    | none                         | contexts, spaces, holons (single owner)           |
+| protocols        | by hand                     | by hand                       | by hand                      | by hand; a `protocol` declaration is U-A13        |
+| distribution     | Janus network               | via JADE or JaCaMo            | none                         | Spool-Mesh actors                                 |
+| maturity         | production compiler and IDE | mature interpreter            | mature interpreter           | specification; no compiler exists                 |
+
+Where vagent is weaker: no implementation, two messages per send, single-owner spaces, a turn per
+effect, slow child-loss detection, checkpoint bounds, and reclamation that depends on quiescence.
+Where it differs: in-plan search with automatic undo of reversible writes, staged turns that either
+happen entirely or not at all, and agent state held as quotable cells.
 
 ______________________________________________________________________
 
-## 18. Comparison
+## 18. Open questions
 
-| Property         | SARL / Janus                | Jason (AgentSpeak)            | GOAL                         | vagent                                          |
-| ---------------- | --------------------------- | ----------------------------- | ---------------------------- | ----------------------------------------------- |
-| beliefs          | none built in               | Prolog-like belief base       | Prolog knowledge and beliefs | Vlog facts in the arena                         |
-| goals            | none built in               | achievement and test goals    | declarative achieve goals    | achieve, perform, maintain                      |
-| plan selection   | n/a                         | first applicable, overridable | rule order                   | first applicable untried, fixed                 |
-| commitment       | n/a                         | single-minded                 | blind until achieved         | single-minded                                   |
-| failure handling | exceptions                  | `-!g` failure plans           | goal remains                 | `PlanFailed`, reselection, `else`               |
-| in-plan search   | none                        | none                          | none                         | goal-directed generators, reversible assignment |
-| organisation     | contexts, spaces, holons    | via JaCaMo                    | none                         | contexts, spaces, holons (single owner)         |
-| distribution     | Janus network               | via JADE or JaCaMo            | none                         | Spool-Mesh actors                               |
-| maturity         | production compiler and IDE | mature interpreter            | mature interpreter           | specification; no compiler exists               |
-
-Where vagent is weaker: no implementation, no tooling, two messages per send, single-owner spaces,
-restricted suspension points, and reclamation that depends on quiescence. Where it is different:
-in-plan search with automatic undo of reversible writes, deterministic turns, and agent state held
-as quotable cells.
+- **U-A1. Reclaiming a busy agent's arena.** A reachability sweep (new arena machinery, O(live
+  cells)), or an adapter step that copies the reachable state to a fresh arena between turns, which
+  needs a turn boundary but no empty mailbox.
+- **U-A2. Cross-owner spaces.** What capability a non-owner presents, and who issues it.
+- **U-A3. Large payloads** as torrents named by `infoHash`, received through `ActorDeliverWriteSet`.
+- **U-A4. Swarm spaces** bound to a `mesh_swarm` topic over BEP 46, with no host relay.
+- **U-A5. Commitment strategies.** Blind and open-minded commitment as goal modifiers.
+- **U-A6. One module path spelling across the family.**
+- **U-A7. Suspension anywhere,** by compiling generators into cells.
+- **U-A8. Recorded inbound streams** for lifetime replay and testing.
+- **U-A9. Agents and R8.** When an agent's beliefs or results may become hypertime in its owner's
+  store.
+- **U-A10. Tests.** The unit is one turn on one arena, so a form such as
+  `test "name" { given A(args); deliver E{...}; expect emitted F{...} }` with a manual clock and
+  mock native skills can be specified now; its harness waits on the adapter.
+- **U-A11. A fast lane.** An adapter-side priority for events of declared types, ahead of ready
+  intentions and replies, with no runtime change.
+- **U-A12. Overridable selection functions,** as Vortex routines a program supplies.
+- **U-A13. Protocol declarations** for conversations such as Contract-Net.
 
 ______________________________________________________________________
 
 ## Appendix: Versioning and Change History
 
-**2.0 — Turn-bounded speculation, one actor per agent, BDI made explicit.** Rewritten after a
-five-perspective review (technical writing, agent-oriented programming, ZigZag structure, Vortex and
-Spool-Mesh, language ergonomics). Withdrawn from 1.0 as not built or not workable: `ArenaSlice`; the
-`#Abort` and `#Trap` opcodes; the Ingestion Gate and Grant Renewal protocols; shadow cells and the
-`d.trail`, `d.shadow`, `d.choice`, `d.source`-as-scan, `d.event` and `d.agent` dimensions;
-topological GC; per-event `promote`; lifetime replay; "asks the C++ core for nothing"; the
-`MeshLensChannel` as an event channel (it is a UI proxy-cell channel); fire-and-forget completion on
-`ActorAck`; free-standing `commit`. Added: the rulings (§3), the turn and persistence model (§4),
-fan-in-free structure through clone views (§5), beliefs, goal kinds, plans `for` goals, selection
-functions, commitment, suspension points and a failure taxonomy (§6), performatives and scopes (§7),
-a grammar that parses its examples with an explicit precedence table and newline rule (§8), the owed
-C++ including two `mesh_actor.cpp` retention fixes (§11), refused alternatives (§13), and
-conditional properties (§14).
+**3.0 — Staged effects, local wakes, data-only identity.** Effects became asynchronous suspension
+points run by native skills outside the turn, which gives forward failure its meaning and keeps
+agents from blocking (V6). Wake-ups moved from self-sent messages, which the runtime refuses, to a
+local wake (§11.3 d). Bounded statements now cut to a depth read by one owed opcode, because vicon's
+flag scheme cannot survive the trail (V13). Capacities are matched by name and no state links into
+the program (V12); values are copied (V11); skills have frames. The checkpoint is admitted to be a
+promotion with stated bounds (V9, §4.4). Beliefs became a set with sources and belief handlers bind
+arguments. Added: reconsideration of waiting intentions, maintain back-off, `await`, `cancel` and
+`refuse`, recovery after a hard failure, perception, leases, delivery retries and abandonment, spawn
+placeholders, the `d.pending` queue, program-side ranks on `d.clause`, a total `if`, contextual
+keywords, and corrected wire facts (32 KiB values, `sequence == 0`, no ordering). The status table
+now separates prerequisites from built mechanisms.
+
+**2.0 — Turn-bounded speculation, one actor per agent, BDI made explicit.** Rewritten after a review
+from five perspectives. Withdrew `ArenaSlice`, the `#Abort` and `#Trap` opcodes, the Ingestion Gate
+and Grant Renewal protocols, shadow cells and their dimensions, topological GC, per-event `promote`,
+lifetime replay, and free-standing `commit`. Added rulings, the turn and persistence model, clone
+views for many-to-one references, beliefs, goal kinds, plans `for` goals, selection functions,
+suspension points, performatives, a grammar with a precedence table, the owed C++, refused
+alternatives and conditional properties.
 
 **1.0 — The SARL metamodel on Vortex.** Initial draft.
