@@ -319,7 +319,7 @@ convenience (§5.5).
 Two honesty notes on this table: (a) attribute cells are minted as **text**
 (`arena.makeCell(std::string_view)` in `projection_session.cpp`), so `d.ordinal`/`d.wincount` lose
 R6 scalar fidelity until the framework grows scalar attribute cells — a display and comparison
-limitation, not an identity one; (b) ~15 bespoke `d.*` names sit in unresolved tension with plan
+limitation, not an identity one; (b) ~20 bespoke `d.*` names sit in unresolved tension with plan
 invariant A3 ("struct fields bastardize dimensions"), which the landed `FilesystemLens`
 (`d.size`/`d.mtime`/`d.perm`/`d.name`) and the parent lens doc's R13 ("metadata is cells on a
 dimension") already endorse — this spec follows the landed convention and records the tension rather
@@ -330,7 +330,8 @@ than resolving it.
 A `sql.row` cell's content is a **display key**: the human-readable form of its key subject — the pk
 rendering for `pk:`/`rid:` rows, a short hash prefix for `h:` rows. It exists so a row cell has
 visible text; the machine identity is always `d.extkey`. A sighting's content is the same display
-key plus its `d.ordinal`, so a page reads like the result it came from.
+key (its ordinal rides the `d.ordinal` attribute — the page renders the ordinal from the rank
+position, not the string), so a page reads like the result it came from.
 
 ### 3.4 NULL, empty string, and monostate
 
@@ -365,9 +366,12 @@ itself (§6.2) — the first moment they legitimately may (convergence R8).
 In **browse mode** (§5.1) the lens also projects the schema, because schema is what makes rows
 explainable: `conn` → `d.contains`/`d.seq` → a `sql.table` cell per table/view →
 `d.contains`/`d.seq` → a `sql.col` cell per column (content: name; attributes: `d.type`, `d.pk`,
-`d.notnull`, `d.ordinal`). The many-to-one relations become ranks whose members chain **posward
-toward the "one" side** — a uniform reading ("posward = toward the one") that matches
-`FilesystemLens`'s `d.ref` (symlink `+d.ref→` target). In the listings below, `→` is posward:
+`d.notnull`, `d.ordinal`). Queries and tables share `conn`'s single `d.seq` sibling rank — one rank
+is simpler than two membership ranks and `d.role` is already the disambiguator, the same trade-off
+that puts result columns on `d.colof` only because they *can't* share a containment slot. The
+many-to-one relations become ranks whose members chain **posward toward the "one" side** — a uniform
+reading ("posward = toward the one") that matches `FilesystemLens`'s `d.ref` (symlink `+d.ref→`
+target). In the listings below, `→` is posward:
 
 - **`d.subject`**: each sighting chains posward toward its subject —
   `sight₃ +d.subject→ sight₂ +d.subject→ sight₁ +d.subject→ subject`; a sighting reaches its row by
@@ -379,12 +383,13 @@ toward the "one" side** — a uniform reading ("posward = toward the one") that 
 - **`d.ofcol`**: `v₃ → v₂ → v₁ → column` — the same pattern, and its headcell is the **schema
   column** (`t:<stable>:c:<name>`) whenever the value is attributable — including in query mode,
   which mints the schema column cell for attributable result columns even though it projects no full
-  schema. Heading at the schema column is what lets one `v:`-keyed value join the ranks of several
-  queries: each query's own `sql.col` cells serve column order and display, while membership is
-  anchored at the shared, stable column. For an unattributable value the rank terminates at the
-  query's own result-column cell — and when two unattributable columns claim one value, the most
-  recent enumeration wins, mirroring the value-union rule (§3.1). `d.column` remains as the cheap
-  display attribute (and the only column identity when attribution fails).
+  schema. Heading at the schema column is what lets one `v:`-keyed value join the *single* rank —
+  headed at the shared schema column — that every query naming that column consults: each query's
+  own `sql.col` cells serve column order and display, while membership is anchored at the shared,
+  stable column. For an unattributable value the rank terminates at the query's own result-column
+  cell — and when two unattributable columns claim one value, the most recent enumeration wins,
+  mirroring the value-union rule (§3.1). `d.column` remains as the cheap display attribute (and the
+  only column identity when attribution fails).
 - **`d.ref`** (foreign keys): `fkval₃ → fkval₂ → fkval₁ → target row` — the referenced row
   terminates the rank of its referrers, where a referrer member is the FK *value* cell (annotating
   "this reference" is then annotating the member cell — an annotatable occurrence, the thing §8A
@@ -486,7 +491,10 @@ The typed renderings, all normative (they feed key *equality*):
                                                    -- conkey attnums (§7)
 rowhash input  ::= <sql-value>* in select order, joined by U+0000
                  (column names excluded: qhash already scopes the keyspace)
-<window-id>  ::= "k:" <sql-value> ("," <sql-value>)*  -- the bound the window
+<window-id>  ::= "k:start"       -- the first window: no exclusive bound yet
+                 (the tag alphabet {n,i,f,t,b} cannot collide with "start";
+                 d.winlo is absent on page-0 cells, like d.winhi on stubs)
+              |  "k:" <sql-value> ("," <sql-value>)*  -- the bound the window
                  was materialized against (the continuation sort key) --
                  known pre-fetch, so a stub's key IS its page's key
               |  "o:" <ordinal>      -- ordinal window: start offset
@@ -603,8 +611,12 @@ ______________________________________________________________________
 Key class is orthogonal — decided per §4.3 for *both* modes (`pk:`/`rid:` wherever eligible, `h:`
 otherwise). In browse mode the lens generates `SELECT <cols>, <sort key>` over one table, appending
 the sort columns **plus the PK** to `ORDER BY` so the sort key is unique, then paginates by keyset —
-row-value tuple comparison `(c1,…,ck) > (?,?,…)`, legal in SQLite ≥ 3.15 and in PG. Five details the
-generated SQL owns:
+row-value tuple comparison `(c1,…,ck) > (?,?,…)`, legal in SQLite ≥ 3.15 and in PG. The mechanism
+requires a **unique** sort key: browsing a *view* — no declared PK, no trustworthy rowid, possibly
+duplicated rows — falls to ordinal windows, because a boundary-tied row under a non-unique sort can
+land in both windows or neither (SQLite guarantees no tie order across re-executions); base tables
+always qualify, so the degradation is exactly "view → ordinal," independent of the `h:` key class
+the view's rows carry anyway. Four details the generated SQL owns:
 
 - **`NULLS FIRST|LAST` is always emitted explicitly** (SQLite defaults NULLs first, PG NULLs last —
   `d.winlo`/`d.winhi` must mean the same thing in both; the syntax needs SQLite ≥ 3.30, so the
@@ -618,8 +630,10 @@ generated SQL owns:
   replay (§5.3).
 - **Re-selected sort columns get reserved aliases** (`<col> AS __sql_sort_<i>`,
   `rowid AS __sql_rid`) — a sort column already in `<cols>` would otherwise appear twice in the
-  result and mint a phantom second `v:` cell; alias-prefixed columns are excluded from `v:`
-  derivation and serve only bound extraction.
+  result and mint a phantom second `v:` cell; alias-prefixed columns are backend-internal only —
+  consumed for bound extraction and `pk:`/`rid:` key material, never projected as
+  `sql.col`/`sql.val` cells. `replayWindow` regenerates browse SQL from the lens's own generation
+  spec (table, sort cols, PK) rather than re-parsing the stored text.
 - **An implicit rowid** is asked for by alias — the first of `rowid`/`oid`/`_rowid_` not shadowed by
   a declared column (`SELECT *` omits implicit rowids; `table_xinfo` detects the shadow, not the
   name).
@@ -629,7 +643,9 @@ preserves the query's own `ORDER BY` perfectly); a *replay* of an ordinal window
 `SELECT * FROM (<sql>) LIMIT :n OFFSET :m` — with the `;`-stripping, single-statement tail check,
 and the caveat that `ORDER BY` inside a FROM-subquery is not contractually guaranteed to order the
 outer result (in practice preserved when the outer query has no reordering operator; stated, not
-hidden).
+hidden). The wrapper is restricted to `SELECT`/`VALUES`/`WITH…SELECT` — `EXPLAIN` and `PRAGMA` can't
+nest inside `FROM (…)`, so replay of those accepted-but-non-tabular kinds reports the parse error
+honestly rather than wrapping them.
 
 ### 5.2 `ProjectionSession::refresh()` — the one new framework verb
 
@@ -647,13 +663,15 @@ session takes ownership, since `session.lens()` is const), then calls a new sess
 ///    whose non-key column changed must display the new value, or the
 ///    refresh-faithful claim lies;
 ///  - re-assert edges (link() overwrites in place), AND remove stale ones:
-///    for each re-enumerated cell, unlink() every link in its CURRENT run on
-///    the structural dims not re-emitted (snapshot the run first; link() may
-///    relocate it) -- the tombstone pass that empties a page's chain and
-///    severs a vanished tail row. Diffing the live run, not a recorded edge
-///    set, is deliberate: a recorded set mutates post-checkpoint and cannot
-///    be restored by mint-order truncation, so a trail-resurrected link
-///    would ghost forever;
+///    for each re-enumerated cell, unlink() every link in its CURRENT run
+///    not re-emitted, over every dim the lens manages -- structural,
+///    membership, AND attribute ranks (snapshot the run first; link() may
+///    relocate it) -- the tombstone pass that empties a page's chain,
+///    severs a vanished tail, and drops a retracted membership or attribute.
+///    Diffing the live run, not a recorded edge set, is deliberate: a
+///    recorded set mutates post-checkpoint and cannot be restored by
+///    mint-order truncation, so a trail-resurrected link would ghost
+///    forever;
 ///  - rewrite attribute cells whose re-emitted value changed (the old attr
 ///    cell is orphaned until the next rewind -- cells are reclaimed only by
 ///    release(), never by compact());
@@ -685,7 +703,13 @@ staleAttributes(const ExternalKey & /*key*/) const { return {}; }
 
 Union-on-identity is what makes replay safe: a subject seen in page 1 and re-fetched in page 5 keeps
 its cell — `keyToCell_` hits, no re-mint — so anything the session maps stays valid (and the
-`sightings` model means the second page's chain doesn't fight the first's — §3.7).
+`sightings` model means the second page's chain doesn't fight the first's — §3.7). Two scoping notes
+worth stating once: **staleness is discovered per-window at that window's replay** — a subject is
+`stale` only when absent from every live page's most recent fetch, not "deleted from the database"
+(it may sit unrefreshed in another window's buffer); and a stale member's own rank position
+persists, but since every chain is re-emitted at refresh, no *live* member points into it — stale
+members self-exclude from rank walks (`d.subjects`, `d.subject`, `d.ofcol` all enumerate "ever
+seen," filtered by `d.state` where the distinction matters).
 
 ### 5.3 A page is a cell that knows how to re-fetch itself
 
@@ -758,6 +782,9 @@ struct Checkpoint {
   ArenaManifold::Mark mark;
   std::size_t keyHighWater;
   std::size_t rootsHighWater;
+  /// The earliest node key the mint log records above this mark at rewind
+  /// time -- computed lazily, used to drive the lens-side discard below.
+  ExternalKey boundaryKey;
 };
 
 [[nodiscard]] Checkpoint checkpoint();
@@ -772,18 +799,23 @@ void unpin(const ExternalKey &key);
 /// tosses all cells minted after it, truncates the identity maps and roots_ to
 /// their high-waters, and reverses trail entries (a stub's d.state attr reverts
 /// to deferred; a link re-asserted since is restored; a stale-marked row
-/// un-stales). Then invokes the lens's windowed-side discard
-/// (WindowedLens::discardMaterializedAfter, with a no-op default): the lens's
-/// page buffer is off-arena state release() cannot touch, and without this the
-/// next refresh would re-emit the buffered rows and resurrect the tossed
-/// window -- a discard is the only thing that makes a toss a toss.
+/// un-stales). Then invokes the lens's windowed-side discard,
+/// WindowedLens::discardMaterializedAfter(cp.boundaryKey) -- the ExternalKey
+/// of the earliest node the mint log records above cp, which the lens maps to
+/// the owning materialization epoch and discards with all later epochs (a
+/// post-cp mint into a pre-cp window just moves the boundary earlier --
+/// conservative, safe on re-emit). The page buffer is off-arena state
+/// release() cannot touch, and without the discard the next refresh would
+/// re-emit buffered rows and resurrect the tossed window.
 /// Refuses -- naming the pinned key -- if anything pinned was minted after
 /// cp: there is no selective skip, because release() is contiguous
-/// truncation. Refuses naming the foreign mint if the mint delta above cp
-/// exceeds the session's logged mints -- i.e. something else minted into this
-/// arena (a solver's answer cells, another lens's attach(Space) mints): a
-/// checkpoint must not straddle writes it can't repair, so the caller
-/// quiesces such activity or accepts the refusal.
+/// truncation. Refuses -- reporting the offending dense index, not a key
+/// (foreign mints have no ExternalKey) -- if the mint delta above cp exceeds
+/// the session's logged mints, where the log counts ALL session mints
+/// including attribute cells (a solver's answer cells or another lens's
+/// attach(Space) mints are the foreign kind): a checkpoint must not straddle
+/// writes it can't repair, so the caller quiesces such activity or accepts
+/// the refusal.
 std::expected<void, std::string> rewind(const Checkpoint &cp);
 ```
 
@@ -877,10 +909,15 @@ Three rules make the two-arena story safe:
 - **The staging arena marks before each envelope and releases after `promote()`** — its own mark
   stack is independent of the projection arena's, so per-gesture rollback is O(1) and envelope
   debris never accumulates.
-- **The base is re-read after each promote.** The overlay's contract forbids mutating the base while
-  it's read through, and `promote()` writes ops into exactly the manifold the staging arena overlays
-  — the staging arena's base `Manifold` is advanced (or re-folded) after each gesture so the next
-  promote and the §6.3 rebuild walk current state, not a stale read.
+- **The gesture sequence is pinned.** The overlay's contract forbids mutating the base while it's
+  read through — and `baseDimensionNamed` only sees the *folded* base — so: declare the envelope's
+  dims in the store → **advance the base `Manifold`** (re-fold so the new dims resolve to
+  non-ephemeral refs — skipping this reintroduces the anonymous-dim bug on exactly the first
+  gesture) → `mark()` → build and link the envelope → `promote()` → `release()` → **advance the base
+  again** (promote itself wrote to it, so the next gesture and the §6.3 rebuild walk current state).
+  Declaring dims *before* constructing the staging `VortexCore` also avoids stale genesis shadows on
+  the base's `d.dims` tail; rebuilding the staging arena per session rather than per process is the
+  cheap alternative.
 
 The durable twin is a **frozen snapshot**: a new hypertime authority whose content does not track
 later source updates — its tie to the live subject is `d.extkey` provenance and the reconcile map
@@ -1087,9 +1124,10 @@ it kept (§5.2); the session reaches `discardMaterializedAfter` through the sub-
   mode to `h:` while browse keeps `pk:` (the lens knows its table). Column case comes from
   `sqlite_schema`.
 - **Snapshots:** WAL-only per §5.3 — a held `BEGIN DEFERRED` read txn pins a snapshot at first read
-  and never blocks writers (but pins the WAL file — a long-lived snapshot grows `-wal`, so snapshot
-  scope is bounded like a checkpoint); rollback-journal databases refuse `snapshot()`, and there a
-  held cursor of *any* kind denies writers — the §5.3 idle rule, not a new one.
+  and never blocks writers (but pins the WAL file — and the pinning applies to *any* held read
+  position: a `fetchNext` cursor stepped mid-window holds a wal-index read mark identically, so the
+  U-S1 idle policy bounds both); rollback-journal databases refuse `snapshot()`, and there a held
+  cursor of *any* kind denies writers — the §5.3 idle rule, not a new one.
 - **Blobs:** fetched into the `SqlValue::bytes` budget at fetch time (§3.5); over-budget re-fetch
   via `sqlite3_blob_open`/`SELECT … WHERE rowid` only for `pk:`/`rid:` rows.
 - **Concurrency:** one `sqlite3*`, one thread — the app owns threading; multiple prepared statements
@@ -1227,14 +1265,16 @@ Each phase is one commit; after each, `make -j$(nproc)` builds and `make -j$(npr
    `replayWindow`, the provenance probe, WAL-snapshot support. Unit tests over a temp `.db`:
    non-SELECT refused, `ATTACH` refused, user `BEGIN`/`ROLLBACK` refused, internal `BEGIN` allowed,
    ordinal and keyset windows deterministic, blobs budgeted.
-1. **`ProjectionSession::refresh()` + `checkpoint()`/`rewind()`/`pin()` + `staleAttributes`.** The
+1. **`ProjectionSession::refresh()` + `checkpoint()`/`rewind()`/`pin()` + the trait additions.** The
    union-identity re-projection with the live-run-diff tombstone pass, content restate,
    attr-rewrite, present-keys roots recompute, and internal-mark atomicity (§5.2); the
-   stack-disciplined rewind with high-water map/roots repair, pin-refusal, and foreign-mint refusal
-   (§5.5); the trait hook with `{}` default. Tested with an in-memory lens whose node set mutates:
-   same key → same CellRef, emptied rank severed, dropped key → stale attrs, rewind → keys forgotten
-   \+ roots trimmed + trail reverted, pinned key → refused. **Highest-risk item, deliberately
-   early.**
+   stack-disciplined rewind with high-water map/roots repair, pin-refusal, foreign-mint refusal, and
+   the lens-side `discardMaterializedAfter` call (§5.5); the trait hooks `staleAttributes` (default
+   `{}`), `forEachRoot`/`roots` (default structural, §3.7), and the `WindowedLens` sub-interface
+   (§7.1). Tested with an in-memory lens whose node set mutates: same key → same CellRef, emptied
+   rank severed, dropped key → stale attrs, rewind → keys forgotten + roots trimmed + trail reverted
+   \+ lens discard invoked (no buffer resurrection), pinned key → refused, declared roots don't
+   flood. **Highest-risk item, deliberately early.**
 1. **`SqlLens` browse mode.** Schema projection (tables/columns + membership ranks), the stub
    horizon, `materializePage`, sightings vs subjects (§3.7), `pk:`/`rid:`/`h:` keys with typed
    renderings, `d.extkey`/`d.keystab`/`d.null`/`d.ordinal` attributes. Gate: a known fixture `.db`
@@ -1246,8 +1286,8 @@ Each phase is one commit; after each, `make -j$(nproc)` builds and `make -j$(npr
    WAL-vs-rollback snapshot honesty.
 1. **Promotion + the reconcile map.** The overlay staging arena + `promoteSubject` envelope (§6.1),
    the `d.promoted`/`sql.promoted` anchor and `ExternalKey → (Store*, opIndex)` map rebuilt on open
-   (§6.3), blob import at promote time. Gate: annotate a `pk:` subject, close, re-project, re-derive
-   the same durable cell; `rid:`/`h:` subjects show their `d.keystab` caveat.
+   (§6.3), envelope-scratch blobs at promote time. Gate: annotate a `pk:` subject, close,
+   re-project, re-derive the same durable cell; `rid:`/`h:` subjects show their `d.keystab` caveat.
 1. **The interactive surface + query gates.** xuzz slice-view gestures (browse → page → rewind →
    promote → annotate → resume) and the same VQL/Prolog gates over `SqlLens` (lens doc §9A.4). UX
    journey per the repo's validation workflow.
@@ -1385,3 +1425,14 @@ ______________________________________________________________________
   sort columns out of `v:` keys, `d.winlo` unified as the exclusive bound on stubs and pages alike
   (the `<window-id>` `k:` bound is known pre-fetch, so a stub's key *is* its page's key),
   foreign-mint detection stated as a count delta.
+- **rev 5.** Fourth critique round — convergence. The last two encodability holes closed: `k:start`
+  encodes the boundless first window (the `k:` grammar couldn't express page 0), and browse-of-view
+  falls to ordinal windows (a non-unique sort key makes boundary ties ambiguous, not just unstable).
+  Precision fixes throughout: `boundaryKey` defined as the earliest mint-log key above the
+  checkpoint (the lens maps it to its materialization epoch); the promote gesture's full sequence
+  pinned — declare dims → advance the folded base (or `baseDimensionNamed` misses them) → mark →
+  build → promote → release → advance again; tombstone scope widened to every lens-managed dim
+  (structural, membership, attribute); staleness stated as per-window; stale members' rank semantics
+  recorded (ever-seen indexes, filtered by `d.state`); `replayWindow` regenerates browse SQL from
+  the generation spec; `__sql_sort_*` columns are backend-internal, never projected; foreign-mint
+  counting includes attribute cells and reports dense indices.
