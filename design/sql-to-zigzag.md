@@ -402,7 +402,9 @@ toward the "one" side** — a uniform reading ("posward = toward the one") that 
 - **`d.subjects`**: every materialized subject chains posward toward the `conn` cell — the subject
   index. Subjects float outside all page structure (§3.7), so this non-structural rank is what makes
   them enumerable without turning every one into a structural root (root election is lens-declared,
-  §3.7).
+  §3.7). The index keeps **stale** members too — it enumerates "every subject ever seen," and
+  consumers filter `d.state` (a vanished subject's membership is never retracted because nothing
+  re-enumerates it; the seen-history reading is the useful one anyway).
 
 In **query mode** the query node mints `sql.col` cells for the result's own column list (from cursor
 metadata, §7.1) on its `d.colof` rank in select order. A *row's* `d.conforms` membership is absent
@@ -458,7 +460,11 @@ ExternalKey (sql) ::= "sql:" <backend> ":" <dbid> ":" <subject>
   <row-subject> ::= the pk:/rid:/h:/ord: alternatives above
   <colname>   ::= the BASE column name when attributable (origin_name /
                   PQftablecol, §4.3), else the result-column name --
-                  alias-insensitive so one field is one key
+                  alias-insensitive so one field is one key; on a v:
+                  collision WITHIN one enumeration (an attributable
+                  'amount' and a computed '... AS amount' in the same
+                  result), the colliding unattributable cell falls back
+                  to positional keying 'v:@<n>'
   <stable>  ::= <schema-qualified, canonically-cased table name>   -- §4.4
   <qhash>   ::= sha256 over (raw statement text || typed bound params)
               -- raw text, NOT sqlite3_normalized_sql: that API folds literals
@@ -907,10 +913,11 @@ between "annotate the invoice" and "annotate a copy of the invoice."
 The map must be rebuildable on open, and "walk every cell looking for `d.extkey`" is O(store) — a
 generic attr rank other lenses mint too, so the walk can't even early-exit. Resolution: the
 annotation store holds a **`d.promoted` rank** (a dimension minted there, not in the projection —
-its absence from §3.2 is deliberate), headed by one `sql.promoted` cell per projected `<dbid>`,
-itself anchored under the annotation store's home root so the headcell is findable on open. Promoted
-envelopes join that rank as members; rebuild walks the rank — O(promoted subjects) — reading each
-twin's `d.extkey`.
+its absence from §3.2 is deliberate), headed by one `sql.promoted` cell per projected `<dbid>` —
+itself a `d.contains` child of the annotation store's home root, so the headcell is findable on open
+by name from a known anchor. Promoted envelopes join that rank as members — the membership link
+mints **in the same microversion as the promote** (a torn write would leave a promoted twin no
+rebuild could find); rebuild walks the rank — O(promoted subjects) — reading each twin's `d.extkey`.
 
 ### 6.4 What annotation may assume
 
