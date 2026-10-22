@@ -115,6 +115,29 @@ public:
   virtual void forEachEdge(
       gleditor::cpp26::function_ref<void(const SourceEdge &)> emit) const = 0;
 
+  // -- refresh-time hooks (opt-in; defaults keep one-shot lenses working) ----
+
+  /// Attributes to stamp on a cell whose key was absent from the latest
+  /// refresh() enumeration -- stale-marking is the lens's vocabulary, not the
+  /// framework's. Default: absent keys stay untouched.
+  [[nodiscard]] virtual std::vector<std::pair<std::string, std::string>>
+  staleAttributes(const ExternalKey & /*key*/) const {
+    return {};
+  }
+
+  /// Lens-declared roots. Emit every key that should appear in
+  /// ProjectionSession::roots() and return true to override the default
+  /// structural rule (a node that is no posward structural edge's target is
+  /// a root). Default returns false -> structural election. Lenses whose
+  /// subjects float outside the containment tree (SqlLens's shared row
+  /// subjects) declare their roots rather than flooding roots() with every
+  /// node ever seen.
+  virtual bool
+  forEachRoot(gleditor::cpp26::function_ref<void(const ExternalKey &)>
+              /*emit*/) const {
+    return false;
+  }
+
   // -- cells -> source (unproject); default = refuse -------------------------
 
   /// Apply a content change back to the source. Returns the (possibly
@@ -131,6 +154,31 @@ public:
                        std::string_view /*newValue*/) {
     return std::unexpected("this lens is read-only");
   }
+};
+
+/// A ProjectionLens over an unbounded source that materializes bounded pages.
+/// Orthogonal to the projection trait -- implement alongside it (SqlLens is
+/// the first); the session reaches discardMaterializedAfter through a
+/// dynamic_cast so it never needs the concrete type.
+class WindowedLens {
+public:
+  virtual ~WindowedLens() = default;
+
+  /// Materialize the window @p windowKey names -- the fetch behind a deferred
+  /// stub. Driven by the app (it keeps a non-owning pointer to the concrete
+  /// lens), not the session. Default refuses: a lens may be windowed only in
+  /// name.
+  [[nodiscard]] virtual std::expected<void, std::string>
+  materializePage(const ExternalKey & /*windowKey*/) {
+    return std::unexpected("no window materialization");
+  }
+
+  /// Drop every buffered window whose materialization epoch follows
+  /// @p boundaryKey's -- the lens-side half of ProjectionSession::rewind.
+  /// The page buffer is off-arena state the arena's release() cannot touch;
+  /// without this the next refresh would re-emit buffered rows and resurrect
+  /// the tossed window. Default no-op for lenses with no buffer.
+  virtual void discardMaterializedAfter(const ExternalKey & /*boundaryKey*/) {}
 };
 
 } // namespace zigzag
