@@ -38,6 +38,9 @@ struct SqlTable {         ///< for the schema projection (spec §3.6)
   std::string schemaName; ///< "" for sqlite "main"; pg schema
   std::string name;       ///< canonical case (spec §4.4)
   bool isView{false};
+  /// An implicit rowid exists (a plain rowid table -- false for WITHOUT
+  /// ROWID tables and views; probed at schema() time).
+  bool             hasRowid{false};
   std::vector<SqlColumn> columns;
 };
 

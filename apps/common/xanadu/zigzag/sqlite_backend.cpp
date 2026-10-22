@@ -124,6 +124,21 @@ bool isDualPragma(std::string_view name) {
   return name == "journal_mode" || name == "query_only";
 }
 
+/// Double-quote an SQL identifier, doubling embedded quotes.
+std::string quoteIdent(std::string_view id) {
+  std::string out;
+  out.reserve(id.size() + 2);
+  out.push_back('"');
+  for (const char c : id) {
+    if (c == '"') {
+      out.push_back('"');
+    }
+    out.push_back(c);
+  }
+  out.push_back('"');
+  return out;
+}
+
 /// Single-quote an SQL string literal, doubling embedded quotes.
 std::string quoteLiteral(std::string_view s) {
   std::string out;
@@ -368,6 +383,9 @@ public:
       if (!be_) {
         return std::unexpected("cursor moved-from");
       }
+      if (done_) {
+        return std::vector<std::vector<SqlValue>>{};
+      }
       be_->deadline_ = std::chrono::steady_clock::now() +
                        std::chrono::milliseconds(be_->opts_.progressSliceMs);
       std::vector<std::vector<SqlValue>> rows;
@@ -375,6 +393,7 @@ public:
       while (rows.size() < limit) {
         const int rc = sqlite3_step(st_);
         if (rc == SQLITE_DONE) {
+          done_ = true;
           break;
         }
         if (rc != SQLITE_ROW) {
@@ -394,6 +413,9 @@ public:
     SqliteBackend *be_;
     sqlite3_stmt *st_;
     std::vector<SqlColumn> cols_;
+    /// sqlite3_step() past SQLITE_DONE re-runs the statement rather than
+    /// erroring -- latch it or a paged reader loops forever.
+    bool done_{false};
   };
 
   // -- prepare
@@ -479,6 +501,12 @@ public:
       t.schemaName = "main";
       t.name       = r[0];
       t.isView     = (r[1] == "view");
+      if (!t.isView) {
+        // rowid probe: WITHOUT ROWID tables answer "no such column".
+        const auto rid = internalQuery("SELECT rowid FROM " +
+                                       quoteIdent(t.name) + " LIMIT 0");
+        t.hasRowid     = rid.has_value();
+      }
       const auto cols =
           internalQuery("PRAGMA table_xinfo(" + quoteLiteral(t.name) + ")");
       if (cols) {
