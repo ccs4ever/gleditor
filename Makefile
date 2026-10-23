@@ -622,6 +622,8 @@ VQUERY_SRCS     := $(shell find apps/vquery -name '*.cpp' 2>/dev/null)
 VQUERY_OBJS     := $(call obj,$(VQUERY_SRCS))
 VPROLOG_SRCS    := $(shell find apps/vprolog -name '*.cpp' 2>/dev/null)
 VPROLOG_OBJS    := $(call obj,$(VPROLOG_SRCS))
+VAGENT_SRCS     := $(shell find apps/vagent -name '*.cpp' 2>/dev/null)
+VAGENT_OBJS     := $(call obj,$(VAGENT_SRCS))
 VLACE_SRCS      := $(shell find apps/vlace -name '*.cpp' 2>/dev/null)
 VLACE_OBJS      := $(call obj,$(VLACE_SRCS))
 VLACEC_SRCS     := $(shell find apps/vlacec -name '*.cpp' 2>/dev/null)
@@ -699,7 +701,7 @@ endif
 ALL_OBJS := $(sort $(LIB_OBJS) $(GLEDITOR_OBJS) $(XUDU_CORE_OBJS) $(XUZZ_OBJS) \
 	$(ZIGZAG_CORE_OBJS) $(ZIGZAG_TEST_OBJS) $(COMMON_UI_OBJS) \
 	$(LIB_TEST_OBJS) $(XUDU_TEST_OBJS) $(XUZZ_TEST_OBJS) $(SWARM_PEER_OBJS) \
-	$(GENERATE_SAMPLE_XANADOCS_OBJS) $(VQUERYC_OBJS) $(VQUERY_OBJS) $(VPROLOG_OBJS) $(VPLC_OBJS) $(VPL_OBJS) $(VLACE_OBJS) $(VLACEC_OBJS) $(VICON_OBJS) $(VICONC_OBJS) \
+	$(GENERATE_SAMPLE_XANADOCS_OBJS) $(VQUERYC_OBJS) $(VQUERY_OBJS) $(VPROLOG_OBJS) $(VAGENT_OBJS) $(VPLC_OBJS) $(VPL_OBJS) $(VLACE_OBJS) $(VLACEC_OBJS) $(VICON_OBJS) $(VICONC_OBJS) \
 	$(UI_TEXT_BASELINE_OBJS) $(LINK_STRESS_OBJS) $(SPIKE_OBJS))
 ALL_OBJ_DIRS := $(sort $(OBJDIR)/ $(OBJDIR)/tmp/ $(dir $(ALL_OBJS)))
 DEPS := $(sort $(patsubst %.o,%.dep,$(ALL_OBJS)))
@@ -734,7 +736,7 @@ endif
 GLSL_SOURCES := $(wildcard assets/shaders/*.glsl)
 SPIRV := $(patsubst assets/shaders/%.glsl,assets/shaders/vulkan/%.spv,$(GLSL_SOURCES))
 
-all: lib gleditor xudu xuzz zigzag store-dump xudu-dump vqueryc vquery vprolog vplc vpl vlace vlacec vicon viconc gleditor_test xuzz_test xudu_test zigzag_test $(OBJDIR)/compile_commands.json
+all: lib gleditor xudu xuzz zigzag store-dump xudu-dump vqueryc vquery vprolog vagent vplc vpl vlace vlacec vicon viconc gleditor_test xuzz_test xudu_test zigzag_test $(OBJDIR)/compile_commands.json
 ifdef GLEDITOR_ENABLE_VULKAN
 all: shaders
 endif
@@ -1018,6 +1020,11 @@ vprolog: $(OBJDIR)/vprolog
 $(OBJDIR)/vprolog: $(VPROLOG_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
+.PHONY: vagent
+vagent: $(OBJDIR)/vagent
+$(OBJDIR)/vagent: $(VAGENT_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
+	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
+
 .PHONY: vplc
 vplc: $(OBJDIR)/vplc
 $(OBJDIR)/vplc: $(VPLC_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
@@ -1214,7 +1221,7 @@ TEST_FILTER ?= -$(SWARM_NETNS_TESTS)
 # under build/), so a fresh checkout's `make test` builds them rather than
 # failing with "binary not found".
 TEST_PROGRAMS := $(addprefix $(OBJDIR)/,gleditor xudu xuzz zigzag xudu-dump \
-	xudu-swarm-peer vquery vpl vplc vprolog vlace vlacec vicon viconc)
+	xudu-swarm-peer vquery vpl vplc vprolog vagent vlace vlacec vicon viconc)
 
 .PHONY: test test/all test/integration test/e2e-orchestration
 test: $(TEST_PROGRAMS) $(OBJDIR)/gleditor_test $(OBJDIR)/xuzz_test $(OBJDIR)/zigzag_test

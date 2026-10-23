@@ -11,6 +11,7 @@ pipeline.
 | `apps/vquery` / `vqueryc` | VQL query REPL/runner over one or many stores, and the standalone VQL-to-Vortex-bytecode compiler                                                                                 |
 | `apps/vpl` / `vplc`       | VPL array-language REPL/runner (APL/J syntax, lattice grids), and its compiler                                                                                                    |
 | `apps/vprolog`            | Prolog REPL over the Vortex/Vlog logic runtime                                                                                                                                    |
+| `apps/vagent`             | vagent agent-language checker (`vagent check`) and, from iteration 3, runner                                                                                                      |
 | `build/xudu-dump`         | reads a store directory or a single `ops.nodes` without the loader; the format-change diffing tool                                                                                |
 | `build/xudu-swarm-peer`   | the peer the network-namespace swarm tests drive                                                                                                                                  |
 
@@ -51,7 +52,7 @@ Always `make -j$(nproc)`.
 
 ```sh
 make -j$(nproc)              # lib, every program above, the three test binaries, shaders, compile_commands.json
-make -j$(nproc) lib|gleditor|xudu|xuzz|zigzag|xudu-dump|vquery|vqueryc|vpl|vplc|vprolog|xudu-swarm-peer
+make -j$(nproc) lib|gleditor|xudu|xuzz|zigzag|xudu-dump|vquery|vqueryc|vpl|vplc|vprolog|vagent|xudu-swarm-peer
 make -j$(nproc) shaders      # glslangValidator over every shader; SPIR-V when Vulkan is on
 make -j$(nproc) fuzz         # fuzz_binary_ops, fuzz_link_package, fuzz_identity_wire (sanitizer build of the engine)
 make profile                 # llvm-cov coverage report for gleditor_test
