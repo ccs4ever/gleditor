@@ -20,6 +20,10 @@ namespace zigzag {
 struct SqliteOpenOptions {
   std::size_t blobBytes{64 * 1024};
   unsigned progressSliceMs{5000};
+  /// Open READWRITE and let execWrite() through the authorizer's
+  /// UPDATE/INSERT/DELETE rungs. Off: the layered read-only
+  /// guarantee (spec section 7.2) is unchanged.
+  bool writable{false};
 };
 
 /// Open a database read-only. The path is percent-encoded into a file: URI

@@ -40,7 +40,7 @@ struct SqlTable {         ///< for the schema projection (spec §3.6)
   bool isView{false};
   /// An implicit rowid exists (a plain rowid table -- false for WITHOUT
   /// ROWID tables and views; probed at schema() time).
-  bool             hasRowid{false};
+  bool hasRowid{false};
   std::vector<SqlColumn> columns;
 };
 
@@ -107,6 +107,14 @@ public:
   /// (rollback-journal SQLite). Scopes any cursor prepared while it lives.
   [[nodiscard]] virtual std::expected<std::unique_ptr<SqlSnapshot>, std::string>
   snapshot() = 0;
+
+  /// One write statement back through the source -- the lens's
+  /// applyContentChange half. Params bind as prepare() does; returns
+  /// rows changed. Default: refuse (read-only backend).
+  [[nodiscard]] virtual std::expected<std::uint64_t, std::string>
+  execWrite(std::string_view /*sql*/, std::span<const SqlValue> /*params*/) {
+    return std::unexpected("backend is read-only");
+  }
 
   [[nodiscard]] virtual SqlCapabilities capabilities() const noexcept = 0;
 };

@@ -26,6 +26,7 @@
 #include "common/xanadu/zigzag/sql_keys.hpp"
 #include "common/xanadu/zigzag/sql_lens.hpp"
 #include "common/xanadu/zigzag/sql_promotion.hpp"
+#include "common/xanadu/zigzag/sqlite_backend.hpp"
 
 namespace {
 
@@ -771,6 +772,63 @@ TEST(SqlLensTest, VqlTraversesSqlProjection) {
       p.engine.execute("$q/d.contains/d.contains/d.subject/d.role");
   ASSERT_EQ(rowRoles.size(), 1u);
   EXPECT_EQ(p.core.arena().textOf(rowRoles[0]), "sql.row");
+}
+
+TEST(SqlLensTest, CommitWritesAValueCellBackToTheRow) {
+  FixtureDb db;
+  auto be = zigzag::openSqliteBackend(
+      db.path.string(), zigzag::SqliteOpenOptions{.writable = true});
+  ASSERT_TRUE(be.has_value()) << be.error();
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core{arena};
+  auto lens = std::make_unique<zigzag::SqlLens>(
+      std::move(*be), zigzag::dbidForPath(db.path.string()), "sqlite",
+      db.path.string());
+  zigzag::SqlLens *l = lens.get();
+  ASSERT_TRUE(l->browse("invoices").has_value());
+  ProjectionSession session(std::move(lens), core);
+  // The value cell's key is <row>:v:<col>; editContent -> commit writes
+  // UPDATE invoices SET amount=? WHERE id IS ? back through the backend.
+  const auto vkey = "sql:sqlite:" + l->dbid() + ":t:invoices:pk:i:1:v:amount";
+  ASSERT_TRUE(session.cellFor(vkey).has_value());
+  ASSERT_TRUE(session.editContent(vkey, "99.5").has_value());
+  const auto c = session.commit();
+  ASSERT_TRUE(c.has_value()) << c.error();
+  // Read the source directly to prove the write crossed, not just that
+  // the arena restated its own edit.
+  auto verify = zigzag::openSqliteBackend(db.path.string());
+  ASSERT_TRUE(verify.has_value()) << verify.error();
+  auto cur = (*verify)->prepare("SELECT amount FROM invoices WHERE id = 1", {});
+  ASSERT_TRUE(cur.has_value());
+  auto rows = (*cur)->fetchNext(4);
+  ASSERT_TRUE(rows.has_value());
+  ASSERT_EQ(rows->size(), 1u);
+  EXPECT_NEAR(std::get<double>((*rows)[0][0]), 99.5, 1e-9);
+}
+
+TEST(SqlLensTest, RowCellAndReadOnlyBackendRefuseWrites) {
+  FixtureDb db;
+  // Row cells (no :v: tail) refuse even on a writable backend.
+  auto be = zigzag::openSqliteBackend(
+      db.path.string(), zigzag::SqliteOpenOptions{.writable = true});
+  ASSERT_TRUE(be.has_value());
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core{arena};
+  auto lens = std::make_unique<zigzag::SqlLens>(
+      std::move(*be), zigzag::dbidForPath(db.path.string()), "sqlite",
+      db.path.string());
+  zigzag::SqlLens *l = lens.get();
+  ASSERT_TRUE(l->browse("invoices").has_value());
+  ProjectionSession session(std::move(lens), core);
+  const auto rowKey = "sql:sqlite:" + l->dbid() + ":t:invoices:pk:i:1";
+  ASSERT_TRUE(session.editContent(rowKey, "x").has_value());
+  EXPECT_FALSE(session.commit().has_value());
+  // And the read-only backend refuses at the port: execWrite declines.
+  auto ro = zigzag::openSqliteBackend(db.path.string());
+  ASSERT_TRUE(ro.has_value());
+  EXPECT_FALSE((*ro)
+                   ->execWrite("UPDATE invoices SET amount=0 WHERE id=1", {})
+                   .has_value());
 }
 
 } // namespace

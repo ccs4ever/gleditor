@@ -356,10 +356,11 @@ std::expected<void, std::string> SqlLens::fetchWindow(SqlQuery &q,
     page.rowKeys.push_back(rk);
     if (!subjects_.contains(rk)) {
       SqlSubject s;
-      s.key     = rk;
-      s.cls     = q.cls;
-      s.display = displaySqlValues(r);
-      s.values  = r;
+      s.key      = rk;
+      s.queryKey = q.key;
+      s.cls      = q.cls;
+      s.display  = displaySqlValues(r);
+      s.values   = r;
       subjects_.emplace(rk, std::move(s));
       produced_.emplace(rk, page.mintSeq);
       for (const auto &vn : q.vnames) {
@@ -965,6 +966,97 @@ bool SqlLens::forEachRoot(
     gleditor::cpp26::function_ref<void(const ExternalKey &)> emit) const {
   emit(connKey());
   return true;
+}
+
+std::expected<ExternalKey, std::string>
+SqlLens::applyContentChange(const ExternalKey &node,
+                            const std::string_view newContent) {
+  // A value cell's key is <rowKey>:v:<col>; the row cell itself is a
+  // display join, not a writable field.
+  const auto vpos = node.rfind(":v:");
+  if (vpos == std::string::npos || vpos + 3 == node.size()) {
+    return std::unexpected("not a value key: " + node);
+  }
+  const auto sit = subjects_.find(node.substr(0, vpos));
+  if (sit == subjects_.end()) {
+    return std::unexpected("row not materialized: " + node);
+  }
+  const SqlSubject &s = sit->second;
+  const SqlQuery *q   = nullptr;
+  for (const auto &cand : queries_) {
+    if (cand.key == s.queryKey) {
+      q = &cand;
+      break;
+    }
+  }
+  if (q == nullptr) {
+    return std::unexpected("the row's producing query is gone");
+  }
+  // The addressable set: browsed (t: scope) rows only -- a browsed
+  // query's colNames ARE base columns; a q: row's names are result
+  // labels, not provably writable columns. An h: row addresses
+  // nothing at all.
+  if (q->tableKey.empty() || q->cls == SqlKeyClass::Hash) {
+    return std::unexpected("only browsed pk/rid-addressed rows are writable");
+  }
+  std::string col;
+  std::string declType;
+  for (std::size_t i = 0; i < s.vnames.size(); ++i) {
+    if (sqlKeyEncode(s.vnames[i]) == node.substr(vpos + 3)) {
+      col      = i < s.colNames.size() ? s.colNames[i] : "";
+      declType = i < s.colTypes.size() ? s.colTypes[i] : "";
+      break;
+    }
+  }
+  if (col.empty()) {
+    return std::unexpected("unknown column in key: " + node);
+  }
+  // Type the write by the column's declared type; a failed parse still
+  // writes as text -- the column's affinity is the database's own rule.
+  SqlValue val = std::string{newContent};
+  if (newContent == "NULL") {
+    val = std::monostate{};
+  } else if (declType.find("INT") != std::string::npos) {
+    std::int64_t v     = 0;
+    const auto [p, ec] = std::from_chars(
+        newContent.data(), newContent.data() + newContent.size(), v);
+    if (ec == std::errc{} && p == newContent.data() + newContent.size()) {
+      val = v;
+    }
+  } else if (declType.find("REAL") != std::string::npos ||
+             declType.find("FLOA") != std::string::npos ||
+             declType.find("DOUB") != std::string::npos) {
+    double v           = 0;
+    const auto [p, ec] = std::from_chars(
+        newContent.data(), newContent.data() + newContent.size(), v);
+    if (ec == std::errc{} && p == newContent.data() + newContent.size()) {
+      val = v;
+    }
+  }
+  std::vector<SqlValue> params{val};
+  std::string sql = "UPDATE " + quotedIdent(q->stable) + " SET " +
+                    quotedIdent(col) + " = ? WHERE ";
+  if (q->cls == SqlKeyClass::Pk) {
+    for (std::size_t i = 0; i < q->pkCols.size(); ++i) {
+      const auto idx = static_cast<std::size_t>(q->pkCols[i]);
+      if (i > 0) {
+        sql += " AND ";
+      }
+      sql += quotedIdent(q->colNames[idx]) + " IS ?";
+      params.push_back(s.values[idx]);
+    }
+  } else {
+    sql += "rowid IS ?";
+    params.push_back(s.values[static_cast<std::size_t>(q->ridCol)]);
+  }
+  const auto n = backend_->execWrite(sql, params);
+  if (!n) {
+    return std::unexpected(n.error());
+  }
+  if (*n == 0) {
+    return std::unexpected("no row matched -- the row is gone");
+  }
+  return node;
 }
 
 // -- factory ------------------------------------------------------------------

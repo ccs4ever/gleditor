@@ -37,7 +37,8 @@ enum class SqlKeyClass : std::uint8_t { Pk, Rid, Hash };
 /// A row subject: identity + the union of observed column values. Rows float
 /// outside page structure; sightings carry the position (spec §3.7).
 struct SqlSubject {
-  ExternalKey key; ///< t:/q:-scoped row subject key
+  ExternalKey key;      ///< t:/q:-scoped row subject key
+  ExternalKey queryKey; ///< the producing query's q:<qhash>/t:<stable>
   SqlKeyClass cls;
   std::string display;               ///< display key (cell content)
   std::vector<SqlValue> values;      ///< select-order values (visible cols)
@@ -120,6 +121,14 @@ public:
 
   // -- promotion (spec section 6)
   // -------------------------------------------------
+
+  /// Value-cell writeback (the spec's write phase): a `<row>:v:<col>`
+  /// key -> `UPDATE <table> SET <col>=? WHERE <pk-address>` on
+  /// pk/rid-addressed rows. Row cells, h:-keyed rows, and q:-scoped
+  /// rows refuse.
+  [[nodiscard]] std::expected<ExternalKey, std::string>
+  applyContentChange(const ExternalKey &node,
+                     std::string_view newContent) override;
 
   /// The ranks a promote envelope writes -- declare these in the
   /// annotation store before the staging overlay is read, or the

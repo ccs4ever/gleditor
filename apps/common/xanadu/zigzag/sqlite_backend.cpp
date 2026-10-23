@@ -202,6 +202,13 @@ public:
       }
       return SQLITE_DENY;
     }
+    case SQLITE_UPDATE:
+    case SQLITE_INSERT:
+    case SQLITE_DELETE:
+      // The write half opens these only on a writable handle; the
+      // read-cursor path's own statement-kind gate still refuses user
+      // writes regardless.
+      return self->opts_.writable ? SQLITE_OK : SQLITE_DENY;
     case SQLITE_ATTACH:
     case SQLITE_DETACH:
     case SQLITE_ANALYZE:
@@ -618,6 +625,45 @@ public:
     return std::unique_ptr<SqlSnapshot>(new Snapshot(*this));
   }
 
+  /// The write half (spec's later phase): UPDATE/INSERT/DELETE through
+  /// the same authorizer, on a writable handle only. Single statement;
+  /// the tail check is sqlite3_prepare_v2's own.
+  [[nodiscard]] std::expected<std::uint64_t, std::string>
+  execWrite(std::string_view sql,
+            const std::span<const SqlValue> params) override {
+    if (!opts_.writable) {
+      return std::unexpected("backend is read-only");
+    }
+    const std::string text{sql};
+    sqlite3_stmt *st = nullptr;
+    const char *tail = nullptr;
+    const int rc     = sqlite3_prepare_v2(
+        db_, text.c_str(), static_cast<int>(text.size()), &st, &tail);
+    if (rc != SQLITE_OK || st == nullptr) {
+      return std::unexpected(sqlite3_errmsg(db_));
+    }
+    if (tail != nullptr && *tail != '\0') {
+      sqlite3_finalize(st);
+      return std::unexpected("multi-statement input refused");
+    }
+    for (int i = 0; i < static_cast<int>(params.size()); ++i) {
+      bindValue(st, i + 1, params[static_cast<std::size_t>(i)]);
+    }
+    const int step = sqlite3_step(st);
+    if (step != SQLITE_DONE && step != SQLITE_ROW) {
+      const std::string err = sqlite3_errmsg(db_);
+      sqlite3_finalize(st);
+      return std::unexpected(err);
+    }
+    // Rows a RETURNING clause produced are drained by the step loop;
+    // one step is enough for plain DML.
+    while (sqlite3_step(st) == SQLITE_ROW) {
+    }
+    const auto changed = static_cast<std::uint64_t>(sqlite3_changes64(db_));
+    sqlite3_finalize(st);
+    return changed;
+  }
+
   SqlCapabilities capabilities() const noexcept override {
     return SqlCapabilities{
         .keysetPaging = true,
@@ -660,10 +706,13 @@ namespace {
 
 /// Open-time pragma + probe sequence, run before the authorizer is
 /// installed. Returns the journal_mode value, or an error.
-std::expected<std::string, std::string> openPragmas(sqlite3 *db) {
+std::expected<std::string, std::string> openPragmas(sqlite3 *db,
+                                                    const bool writable) {
   char *err = nullptr;
-  if (sqlite3_exec(db, "PRAGMA query_only = ON", nullptr, nullptr, &err) !=
-      SQLITE_OK) {
+  // query_only is the belt of the read-only guarantee; a writable
+  // handle drops it but keeps the authorizer's statement gate.
+  if (!writable && sqlite3_exec(db, "PRAGMA query_only = ON", nullptr, nullptr,
+                                &err) != SQLITE_OK) {
     std::string out = err ? err : "query_only pragma failed";
     sqlite3_free(err);
     return std::unexpected(out);
@@ -699,7 +748,9 @@ openSqliteBackend(std::string_view path, const SqliteOpenOptions &opts) {
   sqlite3 *db     = nullptr;
   const int rc    = sqlite3_open_v2(
       uri.c_str(), &db,
-      SQLITE_OPEN_READONLY | SQLITE_OPEN_URI | SQLITE_OPEN_NOMUTEX, nullptr);
+      (opts.writable ? SQLITE_OPEN_READWRITE : SQLITE_OPEN_READONLY) |
+          SQLITE_OPEN_URI | SQLITE_OPEN_NOMUTEX,
+      nullptr);
   if (rc != SQLITE_OK) {
     std::string err = db ? sqlite3_errmsg(db) : "sqlite3_open_v2 failed";
     if (db) {
@@ -708,7 +759,7 @@ openSqliteBackend(std::string_view path, const SqliteOpenOptions &opts) {
     return std::unexpected(err);
   }
   sqlite3_busy_timeout(db, 250);
-  auto mode = openPragmas(db);
+  auto mode = openPragmas(db, opts.writable);
   if (!mode) {
     std::string err = mode.error();
     sqlite3_close_v2(db);
