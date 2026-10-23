@@ -153,6 +153,10 @@ public:
   [[nodiscard]] std::expected<void, std::string>
   materializePage(const ExternalKey &windowKey) override;
 
+  /// The next deferred page's key (the horizon's first stub) -- the
+  /// next-page gesture's target.
+  [[nodiscard]] std::optional<ExternalKey> nextStub() const override;
+
   /// Drop every page materialized at or after the epoch @p boundaryKey was
   /// minted in -- the lens-side half of ProjectionSession::rewind (spec
   /// §5.5): no buffered window survives a toss it was inside.

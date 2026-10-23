@@ -64,6 +64,11 @@ public:
   /// mtime+size against the last enumeration's stamp (seeded lenses
   /// never change). The evented hint -- an app funnel calls refresh().
   [[nodiscard]] bool pollChanged() const override;
+  /// The inotify fd where there is one (Linux) -- an app event loop can
+  /// wait on it rather than poll.
+  [[nodiscard]] int waitableFd() const noexcept override {
+    return watch_.waitableFd();
+  }
   /// Write a scalar edit back to the file at the key's JSON pointer --
   /// the unproject half. Container cells refuse (their content is a
   /// rendered label, not an editable member); the value's JSON type

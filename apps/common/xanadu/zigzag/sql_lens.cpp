@@ -589,6 +589,17 @@ SqlLens::buildEnvelope(ArenaManifold &staging, const ExternalKey &key) const {
   return env;
 }
 
+std::optional<ExternalKey> SqlLens::nextStub() const {
+  for (const auto &q : queries_) {
+    for (const auto &p : q.pages) {
+      if (p.stub) {
+        return p.key;
+      }
+    }
+  }
+  return std::nullopt;
+}
+
 std::expected<void, std::string>
 SqlLens::materializePage(const ExternalKey &windowKey) {
   for (auto &q : queries_) {

@@ -155,6 +155,14 @@ public:
   /// non-evented lens never reports.
   [[nodiscard]] virtual bool pollChanged() const { return false; }
 
+  /// A waitable descriptor for an event loop's epoll/poll/select --
+  /// the pushed half of the evented contract. A lens whose change
+  /// signal is a kernel-descriptor event (a FileWatch, a socket)
+  /// exposes it here; an app loop can wait on it (EPOLLET-compatible:
+  /// pollChanged() drains fully) instead of polling every quiescence.
+  /// -1 = no descriptor; the funnel polls as usual.
+  [[nodiscard]] virtual int waitableFd() const noexcept { return -1; }
+
   // -- cells -> source (unproject); default = refuse -------------------------
 
   /// Apply a content change back to the source. Returns the (possibly
@@ -196,6 +204,13 @@ public:
   /// without this the next refresh would re-emit buffered rows and resurrect
   /// the tossed window. Default no-op for lenses with no buffer.
   virtual void discardMaterializedAfter(const ExternalKey & /*boundaryKey*/) {}
+
+  /// The next deferred page's key, for a next-page gesture. Returns
+  /// nullopt when nothing is stubbed. The scan order is the lens's own
+  /// (for SqlLens, the horizon's page order; for LogLens, page order).
+  [[nodiscard]] virtual std::optional<ExternalKey> nextStub() const {
+    return std::nullopt;
+  }
 };
 
 } // namespace zigzag

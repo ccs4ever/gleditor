@@ -58,6 +58,10 @@ public:
   }
 
   [[nodiscard]] const ProjectionLens &lens() const noexcept { return *lens_; }
+  /// The lens for app-driven verbs (browse/materializePage/write
+  /// entry points) -- the documented non-owning-pointer path. The
+  /// session still owns it.
+  [[nodiscard]] ProjectionLens *lensMut() noexcept { return lens_.get(); }
 
   // -- refresh ---------------------------------------------------------------
 

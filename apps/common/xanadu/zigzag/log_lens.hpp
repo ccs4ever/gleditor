@@ -55,9 +55,16 @@ public:
   /// The pulled evented hint: the file's mtime+size against the last
   /// browse's stamp. The app's funnel calls refresh() when true.
   [[nodiscard]] bool pollChanged() const override;
+  /// The inotify fd where there is one (Linux) -- an app event loop can
+  /// wait on it rather than poll.
+  [[nodiscard]] int waitableFd() const noexcept override {
+    return watch_.waitableFd();
+  }
 
   [[nodiscard]] std::expected<void, std::string>
   materializePage(const ExternalKey &windowKey) override;
+  /// The first deferred page's key -- the next-page gesture's target.
+  [[nodiscard]] std::optional<ExternalKey> nextStub() const override;
   void discardMaterializedAfter(const ExternalKey &boundaryKey) override;
 
 private:

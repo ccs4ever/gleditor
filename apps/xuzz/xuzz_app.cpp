@@ -600,6 +600,43 @@ public:
   /// before the session wraps the lens; materialize/commit later).
   [[nodiscard]] zigzag::ProjectionSession &session() { return *session_; }
 
+  /// A waitable descriptor for an event loop's wait path -- the lens's
+  /// own change signal (inotify fd on Linux) or -1.
+  [[nodiscard]] int waitableFd() const noexcept {
+    return session_ ? session_->lens().waitableFd() : -1;
+  }
+
+  /// Materialize the next deferred window page -- the next-page
+  /// gesture. False when nothing is stubbed or the lens isn't windowed.
+  [[nodiscard]] bool materializeNextStub() {
+    auto *w = dynamic_cast<zigzag::WindowedLens *>(
+        session_ ? session_->lensMut() : nullptr);
+    if (w == nullptr) {
+      return false;
+    }
+    const auto stub = w->nextStub();
+    if (!stub.has_value()) {
+      return false;
+    }
+    const auto r = w->materializePage(*stub);
+    if (!r) {
+      return false;
+    }
+    (void)session_->refresh();
+    viz_.adoptDocument(zigzag::projectionToZz(label_, *session_, arena_),
+                       label_);
+    return true;
+  }
+
+  /// Commit dirty edits through the lens (the write gesture).
+  [[nodiscard]] bool commitDirty() {
+    if (!session_) {
+      return false;
+    }
+    const auto c = session_->commit();
+    return c.has_value();
+  }
+
 private:
   zigzag::ArenaManifold arena_;
   zigzag::vortex::VortexCore core_;
@@ -2601,6 +2638,24 @@ int XuzzApp::run(const int argc, char **argv) {
   app.commands().registerAction(std::string(xanadu::settings::kKeymapBack),
                                 "go to the previous state, losing nothing",
                                 [&views] { views.back(); });
+
+  if (lensSurface != nullptr) {
+    auto *surface = lensSurface.get();
+    app.commands().registerAction(
+        "lens.next-page", "materialize the lens's next deferred page",
+        [surface] {
+          if (surface->materializeNextStub()) {
+            GLEDITOR_LOG_INFO("xuzz.lens", "materialized next page");
+          }
+        });
+    app.commands().registerAction(
+        "lens.commit", "commit the lens's dirty edits to its source",
+        [surface] {
+          if (surface->commitDirty()) {
+            GLEDITOR_LOG_INFO("xuzz.lens", "committed dirty edits");
+          }
+        });
+  }
   app.commands().registerAction(std::string(xanadu::settings::kKeymapNewDoc),
                                 "create a new sovereign document quad",
                                 [&views] { views.newDocument(); });

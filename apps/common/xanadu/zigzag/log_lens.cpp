@@ -98,6 +98,15 @@ bool LogLens::pollChanged() const {
   return watch_.dirty() || fileStamp() != stamp_;
 }
 
+std::optional<ExternalKey> LogLens::nextStub() const {
+  for (const auto &p : pages_) {
+    if (p.stub) {
+      return p.key;
+    }
+  }
+  return std::nullopt;
+}
+
 std::expected<void, std::string> LogLens::browse() {
   const auto total = lineCount();
   if (!total) {

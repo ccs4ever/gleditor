@@ -45,6 +45,24 @@ public:
 
   /// Any pending kernel event? Drains the queue.
   [[nodiscard]] bool dirty() noexcept;
+
+  /// A waitable descriptor for an event loop's epoll/poll/select --
+  /// the inotify fd on Linux/Android (EPOLLET-safe: dirty() drains to
+  /// emptiness, the edge-triggered pattern the platform docs require),
+  /// the kqueue fd on BSD/macOS, -1 on Windows (WaitForMultipleObjects
+  /// would take the change handle, not an fd) and inert builds. The
+  /// fd is not owned by the caller and outlives as long as the watch.
+  [[nodiscard]] int waitableFd() const noexcept {
+#if defined(_WIN32)
+    return -1;
+#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) ||     \
+    defined(__OpenBSD__) || defined(__DragonFly__)
+    return kq_;
+#else
+    return fd_;
+#endif
+  }
+
   [[nodiscard]] bool active() const noexcept {
 #if defined(_WIN32)
     return handle_ != nullptr && handle_ != INVALID_HANDLE_VALUE;
