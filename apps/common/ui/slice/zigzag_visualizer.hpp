@@ -456,6 +456,26 @@ public:
   }
   bool saveStore(const std::string &filePath = {}) const;
 
+  /// The two id spaces an adopted document lives across: the document
+  /// names cells in the producer's space (a projection arena's refs, an
+  /// xanadu doc's pre-mint ids), and adoptDocument's slice mints them
+  /// into a store's op-index space. Focus, picking and visible_cells_
+  /// all speak the minted space; a surface that projects the document
+  /// needs both directions to translate a focused minted id back to
+  /// the projected id its session knows.
+  [[nodiscard]] std::optional<CellID> adoptedProjectedId(CellID minted) const {
+    const auto it = adoptedMintedToProjected_.find(minted);
+    return it == adoptedMintedToProjected_.end()
+               ? std::nullopt
+               : std::optional<CellID>{it->second};
+  }
+  [[nodiscard]] std::optional<CellID> adoptedMintedId(CellID projected) const {
+    const auto it = adoptedProjectedToMinted_.find(projected);
+    return it == adoptedProjectedToMinted_.end()
+               ? std::nullopt
+               : std::optional<CellID>{it->second};
+  }
+
   [[nodiscard]] bool isProtected(CellRef id) const;
 
   /// The cell that is dimension @p name, or noCell -- **without minting one.**
@@ -717,6 +737,10 @@ private:
       pickTargets_;
   std::string pickTargetVersion_;
   std::unordered_map<CellRef, XanaduProjectionProvenance> sourceOrigins_;
+  /// adoptDocument's slice map, both directions: the document's own
+  /// cell ids <-> the store ids they minted into. Rebuilt per adoption.
+  std::unordered_map<CellID, CellID> adoptedProjectedToMinted_;
+  std::unordered_map<CellID, CellID> adoptedMintedToProjected_;
 
   DimensionBundle dimension_bundle_{DimensionBundle::Custom};
   std::shared_ptr<vortex::VortexHost> vortex_host_{nullptr};

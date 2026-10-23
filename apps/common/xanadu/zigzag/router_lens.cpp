@@ -13,6 +13,7 @@
 #include "common/xanadu/zigzag/git_lens.hpp"
 #include "common/xanadu/zigzag/journal_lens.hpp"
 #include "common/xanadu/zigzag/log_lens.hpp"
+#include "common/xanadu/zigzag/sql_lens.hpp"
 
 namespace zigzag {
 
@@ -78,6 +79,23 @@ RouterLens::delegateFor(const std::filesystem::path &path) {
     // read failure as cell content, so there is nothing to refuse here.
     return std::unique_ptr<ProjectionLens>{
         std::make_unique<ConfigLens>(path.string())};
+  }
+  if (ext == ".db" || ext == ".sqlite" || ext == ".sqlite3") {
+    // A SQLite database mounts a browse of its first table (rows
+    // paged; the file's own stamp/watch drives pollChanged).
+    auto lens = openSqlUri(path.string());
+    if (!lens) {
+      return std::unexpected(lens.error());
+    }
+    const auto table = std::ranges::find_if(
+        (*lens)->tables(), [](const SqlTable &t) { return !t.isView; });
+    if (table == (*lens)->tables().end()) {
+      return std::unexpected("no base tables: " + path.string());
+    }
+    if (const auto r = (*lens)->browse(table->name); !r) {
+      return std::unexpected(r.error());
+    }
+    return std::unique_ptr<ProjectionLens>{std::move(*lens)};
   }
   // A systemd unit filename opens that unit's journal -- one hop to
   // the evented log source; the whole journal through a `journal`

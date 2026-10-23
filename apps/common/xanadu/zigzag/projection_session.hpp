@@ -107,6 +107,12 @@ public:
   /// rebinds (the cell follows the source item).
   [[nodiscard]] std::expected<void, std::string> commit();
 
+  /// Dirty edits waiting on commit() -- the number the write gesture
+  /// reports, so "committed" is honest about what it carried.
+  [[nodiscard]] std::size_t dirtyCount() const noexcept {
+    return dirty_.size();
+  }
+
   // -- rewind: a stack, with map repair
   // ----------------------------------------
 

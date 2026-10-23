@@ -111,6 +111,13 @@ public:
   /// The first mounted windowed lens's deferred page, if any.
   [[nodiscard]] std::optional<ExternalKey> nextStub() const override;
 
+  /// Classify @p path and construct its delegate (browsing it so a bad
+  /// mount refuses at open() time, not at the next refresh). Stateless
+  /// -- the file picker's "open this path" uses it for the same answer.
+  [[nodiscard]] static std::expected<std::unique_ptr<ProjectionLens>,
+                                     std::string>
+  delegateFor(const std::filesystem::path &path);
+
 private:
   /// One mounted delegate under its fs cell.
   struct Mount {
@@ -123,12 +130,6 @@ private:
     /// root or extend it with ':' segments (git:/log:/cfg: all do).
     [[nodiscard]] bool owns(const ExternalKey &key) const;
   };
-
-  /// Classify @p path and construct its delegate (browsing it so a bad
-  /// mount refuses at open() time, not at the next refresh).
-  [[nodiscard]] static std::expected<std::unique_ptr<ProjectionLens>,
-                                     std::string>
-  delegateFor(const std::filesystem::path &path);
 
   FilesystemLens base_;
   std::vector<Mount> mounts_;

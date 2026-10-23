@@ -78,9 +78,19 @@ openLensUri(const std::string_view uri) {
         std::make_unique<RouterLens>(std::string{uri.substr(4)})};
   }
   std::error_code ec;
-  if (std::filesystem::is_directory(std::filesystem::path{uri}, ec)) {
+  const std::filesystem::path path{uri};
+  if (std::filesystem::is_directory(path, ec)) {
     return std::unique_ptr<ProjectionLens>{
         std::make_unique<RouterLens>(std::string{uri})};
+  }
+  // A file the router would classify opens its own lens -- the
+  // picker's choice of a .json/.log/.db/.service opens the same
+  // projection the mount gesture would mount under it. Files with
+  // no delegate keep the single-cell FilesystemLens.
+  if (std::filesystem::exists(path, ec)) {
+    if (auto delegate = RouterLens::delegateFor(path); delegate) {
+      return std::unique_ptr<ProjectionLens>{std::move(*delegate)};
+    }
   }
   return std::unique_ptr<ProjectionLens>{
       std::make_unique<FilesystemLens>(std::string{uri})};

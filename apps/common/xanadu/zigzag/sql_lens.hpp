@@ -107,6 +107,11 @@ public:
 
   // -- app-driven entry points ------------------------------------------------
 
+  /// The enumerated schema -- browse() names tables from it.
+  [[nodiscard]] const std::vector<SqlTable> &tables() const noexcept {
+    return schema_;
+  }
+
   /// Start a browse of a schema table: emits a query node and materializes
   /// page 0 (keyset on a sortable table, ordinal on a view). The session's
   /// next refresh() projects the new materialization.

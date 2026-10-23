@@ -242,6 +242,12 @@ void ZigzagVisualizer::adoptDocument(
                           : std::make_unique<xanadu::Store>();
   store_            = ownedStore_.get();
   const auto sliced = sliceToStore(doc, *store_);
+  adoptedProjectedToMinted_.clear();
+  adoptedMintedToProjected_.clear();
+  for (const auto &[projected, minted] : sliced.cells) {
+    adoptedProjectedToMinted_.emplace(projected, minted);
+    adoptedMintedToProjected_.emplace(minted, projected);
+  }
   sourceOrigins_.clear();
   pickTargets_.clear();
   pickTargetVersion_.clear();
@@ -671,15 +677,14 @@ bool ZigzagVisualizer::deleteFocusCell() {
 
 ZigzagVisualizer *
 ZigzagVisualizer::updateFocusCellText(const std::string &text) {
-  // An adopted lens document has no engine_; the owning surface's
-  // hook routes the edit to the projection's editContent instead
-  // (dirtying the cell for lens.commit, not the store).
-  if ((!engine_ || accursed_cell_focus_ == 0) && onExternalCellEdit_) {
-    if (accursed_cell_focus_ != 0 &&
-        onExternalCellEdit_(accursed_cell_focus_, text)) {
-      rebuildActiveViewTopology();
-      invalidateAccessibility();
-    }
+  // A surface that owns the document's write path (a lens projection)
+  // gets first refusal: engine_ under an adopted doc is a throwaway
+  // store, so its updateCellText would write somewhere that dies with
+  // the view. A declined hook falls through to the store path.
+  if (onExternalCellEdit_ && accursed_cell_focus_ != 0 &&
+      onExternalCellEdit_(accursed_cell_focus_, text)) {
+    rebuildActiveViewTopology();
+    invalidateAccessibility();
     return this;
   }
   if (!engine_ || accursed_cell_focus_ == 0) {
