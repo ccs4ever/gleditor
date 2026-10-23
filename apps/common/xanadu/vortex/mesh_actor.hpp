@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common/xanadu/identity/identity_layout.hpp"
+#include "common/xanadu/vortex/mesh_value.hpp"
 #include "common/xanadu/vortex/worker_context.hpp"
 
 #include <chrono>
@@ -37,6 +38,8 @@ enum class ActorError {
   ExecutionFailed,
   TransportUnavailable,
   NotQuiescent,
+  /// The id lies below a floor the sender has already advanced past.
+  StaleRequest,
 };
 
 /// The verifier checks these against the signed capability, authenticated
@@ -53,7 +56,19 @@ struct ActorGrant {
   bool immutable{false};
 };
 
+/// A sender's promise that it will never again use an id in
+/// [prefix, floorId); the receiver may forget those ids and must refuse them.
+struct FloorMark {
+  std::string prefix;
+  std::string floorId;
+};
+
 struct ActorOptions {
+  /// Interprets a message that carries a floor; the runtime knows no wire
+  /// grammar for it, so the layer that defines request ids supplies this.
+  std::function<std::optional<FloorMark>(const ActorMessage &)> floorOf;
+  /// Bounds on rehydrating a checkpoint in resume(); clamped to the grant.
+  ValueLimits valueLimits{};
   std::size_t maxActors{128};
   std::size_t maxMailboxMessages{128};
   std::size_t maxRememberedMessages{4096};
@@ -78,7 +93,8 @@ struct ActorDiscoveryEvidence {
 struct ActorExecution {
   ActorPid pid;
   ActorGrant grant;
-  ActorMessage message;
+  /// Empty when the executor is woken by wake() rather than by a message.
+  std::optional<ActorMessage> message;
   CellRef cursor;
   std::optional<CellRef> stateRoot;
 };
@@ -160,11 +176,39 @@ public:
   [[nodiscard]] std::expected<bool, ActorError>
   pumpOne(std::chrono::system_clock::time_point wallNow);
 
+  /// Runs the executor for one actor with no message: no dedup entry, no
+  /// reply. Same lease check as pumpOne; an executor error stops the actor.
+  [[nodiscard]] std::expected<void, ActorError>
+  wake(const ActorPid &pid, std::chrono::system_clock::time_point wallNow);
+
+  /// Replaces the grant of a live (or lease-expired) actor under a fresh
+  /// capability for the same program; pid, arena and mailbox are kept.
+  [[nodiscard]] std::expected<void, ActorError>
+  renew(const ActorPid &pid, const xanadu::identity::Fingerprint &identity,
+        const ActorMessage &request,
+        std::chrono::system_clock::time_point wallNow);
+
+  /// Marks the actor stopped, tells its monitors, and erases it once its
+  /// outstanding deliveries have drained. Safe from inside its own executor.
+  [[nodiscard]] std::expected<void, ActorError> stop(const ActorPid &pid);
+
+  /// Erases the actor's remembered ids that start with prefix; returns how
+  /// many went immediately (the id being executed is erased afterwards).
+  [[nodiscard]] std::expected<std::size_t, ActorError>
+  forgetSender(const ActorPid &pid, std::string_view prefix);
+
   [[nodiscard]] std::expected<void, ActorError>
   send(std::string destinationNode, ActorMessage message);
   [[nodiscard]] std::expected<void, ActorError>
   retry(std::string_view requestId);
+  /// Emits the stored message again even if it was acknowledged.
+  [[nodiscard]] std::expected<void, ActorError>
+  redeliver(std::string_view requestId);
+  /// Forgets an incomplete delivery; a late reply to it is then ignored.
+  [[nodiscard]] std::expected<void, ActorError>
+  abandon(std::string_view requestId);
   [[nodiscard]] bool deliveryAcknowledged(std::string_view requestId) const;
+  [[nodiscard]] std::size_t deliveryCount() const noexcept;
 
   [[nodiscard]] std::expected<void, ActorError>
   monitor(const ActorPid &watcher, const ActorPid &target, ActorTime now);
@@ -200,6 +244,10 @@ private:
   std::expected<void, ActorError> enqueue(Actor &actor,
                                           const ActorMessage &message);
   bool emit(std::string_view node, const ActorMessage &message);
+  std::expected<std::string, ActorError>
+  execute(Actor &actor, const std::optional<ActorMessage> &message);
+  bool drained(const ActorPid &pid) const;
+  void reapStopped();
 
   std::string node_;
   std::uint64_t epoch_;
@@ -213,5 +261,6 @@ private:
   std::map<std::string, Monitor> monitors_;
   std::map<std::string, Delivery> deliveries_;
   std::map<std::string, xanadu::identity::Fingerprint> trustedNodes_;
+  std::string lastServed_;
 };
 } // namespace zigzag::vortex::mesh

@@ -313,5 +313,27 @@ TEST_F(MeshActorResumeTest, ForgedCheckpointAndReusedNodeEpochAreRefused) {
           .error(),
       ActorError::WrongEpoch);
 }
+
+TEST_F(MeshActorResumeTest, OptionsValueLimitsBoundRehydration) {
+  const auto seed = seal();
+  ASSERT_TRUE(seed) << seed.error();
+  ActorOptions tight;
+  tight.valueLimits.manifestBytes = 1;
+  MeshActorRuntime bounded("new-device-node", 11, tight);
+  configure(bounded, true);
+  auto checkpoint = load(*seed);
+  ASSERT_TRUE(checkpoint);
+  EXPECT_EQ(
+      bounded
+          .resume(owner, freshRequest(), std::move(*checkpoint), source, wall)
+          .error(),
+      ActorError::InvalidMessage);
+  MeshActorRuntime defaults("new-device-node", 11);
+  configure(defaults, true);
+  checkpoint = load(*seed);
+  ASSERT_TRUE(checkpoint);
+  EXPECT_TRUE(defaults.resume(owner, freshRequest(), std::move(*checkpoint),
+                              source, wall));
+}
 } // namespace
 } // namespace zigzag::vortex::mesh
