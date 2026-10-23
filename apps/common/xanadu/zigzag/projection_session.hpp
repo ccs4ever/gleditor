@@ -137,6 +137,10 @@ private:
   zigzag::vortex::VortexCore &core_;
   std::unordered_map<ExternalKey, CellRef> keyToCell_;
   std::unordered_map<CellRef, ExternalKey> cellToKey_;
+  /// Keys bound by reference (SourceNode::ref, U-L5): their cells are
+  /// the source's own, so no mint/restate/stale/tombstone write may
+  /// touch them. Once a key binds by ref it stays ref-pinned.
+  std::unordered_set<ExternalKey> refKeys_;
   std::vector<CellRef> roots_;
   /// Node keys in mint order: the map-repair log rewind() truncates by.
   std::vector<ExternalKey> mintOrder_;

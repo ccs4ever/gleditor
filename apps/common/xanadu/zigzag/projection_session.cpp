@@ -188,6 +188,17 @@ std::size_t ProjectionSession::refresh() {
   // 1. Nodes: mint unseen keys (union identity), restate surviving content.
   lens_->forEachNode([&](const SourceNode &node) {
     present.insert(node.key);
+    if (node.ref.has_value()) {
+      // Project-by-reference (U-L5): the key names an existing cell --
+      // bind it read-only; nothing below may write on the source's
+      // structure (no restate, no attrs, no stale, no tombstone).
+      if (keyToCell_.emplace(node.key, *node.ref).second) {
+        cellToKey_.emplace(*node.ref, node.key);
+        mintOrder_.push_back(node.key);
+      }
+      refKeys_.insert(node.key);
+      return;
+    }
     if (const auto it = keyToCell_.find(node.key); it != keyToCell_.end()) {
       restateContent(it->second, node.content);
     } else {
@@ -224,7 +235,7 @@ std::size_t ProjectionSession::refresh() {
   //    lens's staleAttributes() says (default {} -> untouched). Stale cells
   //    are NOT tombstoned -- nothing re-enumerates them.
   for (const auto &[key, cell] : keyToCell_) {
-    if (present.contains(key)) continue;
+    if (present.contains(key) || refKeys_.contains(key)) continue;
     for (const auto &[rank, value] : lens_->staleAttributes(key)) {
       writeAttribute(cell, rank, value);
     }
@@ -243,7 +254,7 @@ void ProjectionSession::tombstone(
   auto &arena = core_.arena();
   for (const auto &key : present) {
     const auto cell = cellFor(key);
-    if (!cell) continue;
+    if (!cell || refKeys_.contains(key)) continue;
     const auto keep = keepPos.find(*cell);
     // Snapshot the run: unlink() can relocate it mid-iteration.
     const auto run = arena.dimensionsOf(*cell);

@@ -79,6 +79,12 @@ struct SourceNode {
   NodeContent content;
   std::vector<std::pair<std::string, std::string>> attributes;
   std::uint64_t order{0}; ///< total order within siblings (determinism)
+  /// Project-by-reference (lens-candidates U-L5): when set, the key names
+  /// an existing cell rather than a mint request -- the session binds it
+  /// read-only: no mint, no content restatement, no attribute writes, no
+  /// tombstone. The session arena must overlay the cell's manifold for
+  /// the ref to resolve. content/attributes are ignored on a ref node.
+  std::optional<CellRef> ref;
 };
 
 /// One edge the lens asserts, in ExternalKey space, so the framework resolves
