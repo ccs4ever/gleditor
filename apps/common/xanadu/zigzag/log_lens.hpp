@@ -46,7 +46,13 @@ public:
   staleAttributes(const ExternalKey &key) const override;
 
   /// Read the file tail and stage page 0 plus the deferred horizon.
+  /// Already-live interior pages keep their lines across a rebrowse --
+  /// a tail append shifts the newest window, not the file's middle.
   [[nodiscard]] std::expected<void, std::string> browse();
+
+  /// The pulled evented hint: the file's mtime+size against the last
+  /// browse's stamp. The app's funnel calls refresh() when true.
+  [[nodiscard]] bool pollChanged() const override;
 
   [[nodiscard]] std::expected<void, std::string>
   materializePage(const ExternalKey &windowKey) override;
@@ -69,11 +75,16 @@ private:
   [[nodiscard]] std::expected<std::vector<std::string>, std::string>
   readLines(std::size_t first, std::size_t count) const;
 
+  /// mtime+size of the file at the last browse; different = moved.
+  [[nodiscard]] std::optional<std::pair<std::int64_t, std::uint64_t>>
+  fileStamp() const;
+
   std::string path_;
   std::size_t pageSize_;
   std::string connKey_;                ///< log:<path> the file node
   mutable std::vector<LogPage> pages_; ///< page 0 first, older after
   mutable std::uint64_t totalLines_{0};
+  mutable std::optional<std::pair<std::int64_t, std::uint64_t>> stamp_;
 };
 
 } // namespace zigzag

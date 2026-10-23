@@ -6,6 +6,7 @@
 
 #include "common/xanadu/zigzag/log_lens.hpp"
 
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 
@@ -73,12 +74,42 @@ LogLens::readLines(const std::size_t first, const std::size_t count) const {
   return out;
 }
 
+std::optional<std::pair<std::int64_t, std::uint64_t>>
+LogLens::fileStamp() const {
+  std::error_code ec;
+  const auto size = std::filesystem::file_size(path_, ec);
+  if (ec) {
+    return std::nullopt;
+  }
+  const auto wt = std::filesystem::last_write_time(path_, ec);
+  if (ec) {
+    return std::nullopt;
+  }
+  return std::pair{static_cast<std::int64_t>(wt.time_since_epoch().count()),
+                   size};
+}
+
+bool LogLens::pollChanged() const {
+  if (!stamp_.has_value()) {
+    return false; // never browsed: first projection does the read
+  }
+  return fileStamp() != stamp_;
+}
+
 std::expected<void, std::string> LogLens::browse() {
   const auto total = lineCount();
   if (!total) {
     return std::unexpected(total.error());
   }
   totalLines_ = *total;
+  // Carry over live interior pages: an append shifts the tail window's
+  // membership but a mid-file page's ordinal range is unchanged.
+  std::vector<LogPage> carried;
+  for (auto &p : pages_) {
+    if (!p.stub) {
+      carried.push_back(std::move(p));
+    }
+  }
   pages_.clear();
   // Page 0 is the tail -- the "most recent N" window. Older pages are
   // stubs keyed on their head ordinal; the file's head is the boundary.
@@ -88,13 +119,20 @@ std::expected<void, std::string> LogLens::browse() {
     p.key       = pageKey(connKey_, first);
     p.firstLine = first;
     p.count = totalLines_ - first > pageSize_ ? pageSize_ : totalLines_ - first;
-    p.stub  = true;
+    for (auto &old : carried) {
+      if (old.firstLine == p.firstLine && old.count == p.count) {
+        p.stub  = false;
+        p.lines = std::move(old.lines);
+        break;
+      }
+    }
     pages_.push_back(std::move(p));
     if (first == 0) {
       break;
     }
     first = first > pageSize_ ? first - pageSize_ : 0;
   }
+  stamp_ = fileStamp();
   if (!pages_.empty()) {
     return materializePage(pages_.front().key);
   }
@@ -135,7 +173,9 @@ void LogLens::discardMaterializedAfter(const ExternalKey &boundaryKey) {
 
 void LogLens::forEachNode(
     gleditor::cpp26::function_ref<void(const SourceNode &)> emit) const {
-  if (pages_.empty()) {
+  // Self-check: a refresh() without a preceding browse() still sees a
+  // moved file -- pollChanged's stat is one syscall.
+  if (pages_.empty() || pollChanged()) {
     (void)const_cast<LogLens *>(this)->browse();
   }
   emit({connKey_,

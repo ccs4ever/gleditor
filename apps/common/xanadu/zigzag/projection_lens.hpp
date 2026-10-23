@@ -144,6 +144,17 @@ public:
     return false;
   }
 
+  // -- evented hint (opt-in)
+  // ---------------------------------------------------
+
+  /// Whether the source moved since the lens last enumerated -- the
+  /// pulled half of the evented contract (lens -> app -> session). The
+  /// app polls at a marks-quiesced point and calls refresh() when this
+  /// returns true. Lenses may also self-check inside forEachNode so the
+  /// projection stays honest even without a driver. Default false: a
+  /// non-evented lens never reports.
+  [[nodiscard]] virtual bool pollChanged() const { return false; }
+
   // -- cells -> source (unproject); default = refuse -------------------------
 
   /// Apply a content change back to the source. Returns the (possibly

@@ -59,6 +59,9 @@ public:
                        emit) const override;
   [[nodiscard]] std::vector<std::pair<std::string, std::string>>
   staleAttributes(const ExternalKey &key) const override;
+  /// mtime+size against the last enumeration's stamp (seeded lenses
+  /// never change). The evented hint -- an app funnel calls refresh().
+  [[nodiscard]] bool pollChanged() const override;
 
 private:
   /// One buffered node; the tree is bounded so enumerate a snapshot.
@@ -75,6 +78,8 @@ private:
   std::string path_;
   std::string fileKey_;
   std::optional<JsonValue> seed_; ///< fromText documents
+  /// mtime+size of path_ at the last enumeration (null for seeded).
+  mutable std::optional<std::pair<std::int64_t, std::uint64_t>> stamp_;
   /// The epoch's snapshot, rebuilt at the head of each forEachNode --
   /// forEachEdge walks the same snapshot so one refresh is one tree.
   mutable std::vector<CfgNode> nodes_;

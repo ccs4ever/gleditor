@@ -9,6 +9,7 @@
 #include <charconv>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <limits>
 #include <sstream>
@@ -459,8 +460,15 @@ void ConfigLens::forEachNode(
   if (seed_.has_value()) {
     doc = *seed_;
   } else {
+    std::error_code ec;
     std::ifstream f(path_);
     if (f) {
+      const auto wt = std::filesystem::last_write_time(path_, ec);
+      const auto sz = std::filesystem::file_size(path_, ec);
+      if (!ec) {
+        stamp_ = std::pair{
+            static_cast<std::int64_t>(wt.time_since_epoch().count()), sz};
+      }
       std::ostringstream ss;
       ss << f.rdbuf();
       auto parsed = parseJson(ss.str());
@@ -507,6 +515,20 @@ bool ConfigLens::forEachRoot(
 std::vector<std::pair<std::string, std::string>>
 ConfigLens::staleAttributes(const ExternalKey & /*key*/) const {
   return {{"d.stale", "1"}};
+}
+
+bool ConfigLens::pollChanged() const {
+  if (seed_.has_value() || !stamp_.has_value()) {
+    return false;
+  }
+  std::error_code ec;
+  const auto wt = std::filesystem::last_write_time(path_, ec);
+  const auto sz = std::filesystem::file_size(path_, ec);
+  if (ec) {
+    return false;
+  }
+  return std::pair{static_cast<std::int64_t>(wt.time_since_epoch().count()),
+                   sz} != stamp_;
 }
 
 } // namespace zigzag

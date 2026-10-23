@@ -133,4 +133,22 @@ TEST(LogLensTest, LineOrdinalsSurviveAppends) {
   EXPECT_EQ(p.arena.textOf(*again), "line-3");
 }
 
+TEST(LogLensTest, PollChangedSeesAnAppendAndRefreshReprojects) {
+  ProjectedLog p{5, 3};
+  EXPECT_FALSE(p.lens->pollChanged());
+  {
+    std::ofstream f(p.path, std::ios::app);
+    f << "line-5\nline-6\n";
+  }
+  // The evented hint fires: the file's stamp moved since browse.
+  EXPECT_TRUE(p.lens->pollChanged());
+  // And refresh() self-checks: forEachNode re-browses a moved file even
+  // without the app's funnel calling browse() first.
+  (void)p.session->refresh();
+  const auto line5 = p.session->cellFor("log:" + p.path.string() + ":l:5");
+  ASSERT_TRUE(line5.has_value());
+  EXPECT_EQ(p.arena.textOf(*line5), "line-5");
+  EXPECT_FALSE(p.lens->pollChanged()); // stamp re-taken at re-browse
+}
+
 } // namespace
