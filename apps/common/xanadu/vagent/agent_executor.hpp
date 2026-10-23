@@ -56,6 +56,11 @@ struct AgentSettings {
   std::string spawnStamp{"vagent-local-spawn"};
 };
 
+/// The agent type rides beside the `kWireSpawn*` keys of `runtime_abi.hpp`,
+/// which have no slot for it; a remote or resumed child cannot otherwise know
+/// which compiled agent to instantiate.
+inline constexpr std::string_view kWireSpawnAgent = "agent";
+
 /// What the issuer signs for one child. `parameters` is the bencoded
 /// dictionary of `kWireSpawn*` (name, parent, args); the issuer embeds it in
 /// the capability it returns and debits the parent's budget (§4.1).
@@ -82,6 +87,11 @@ public:
   [[nodiscard]] virtual std::expected<IssuedCapability,
                                       zigzag::vortex::mesh::ActorError>
   issue(const SpawnTicket &ticket) = 0;
+  /// The `SpawnTicket::parameters` dictionary inside a capability this issuer
+  /// (or a peer's) signed; nullopt if the capability is not one it can read.
+  /// The adapter cannot parse a signed capability itself.
+  [[nodiscard]] virtual std::optional<std::string>
+  parametersOf(std::string_view capability) const = 0;
 };
 
 /// A compiled program, or a stand-in for one. The adapter calls `instantiate`
@@ -182,6 +192,7 @@ private:
     std::chrono::system_clock::time_point lastSent;
     std::size_t redeliveries{0};
   };
+  /// What a spawn request's capability carries (§4.1).
   struct SpawnInfo {
     std::string agentType;
     std::string name;
@@ -193,6 +204,8 @@ private:
   struct TurnOutcome;
   struct OutboxItem;
 
+  [[nodiscard]] std::optional<SpawnInfo>
+  readSpawn(const zigzag::vortex::mesh::ActorMessage &request) const;
   [[nodiscard]] static std::string pidKey(const identity::ActorPid &pid);
 
   std::expected<std::string, zigzag::vortex::mesh::ActorError>
@@ -200,7 +213,8 @@ private:
           zigzag::vortex::WorkerContext &context);
   State &stateFor(const identity::ActorPid &pid);
   [[nodiscard]] bool prepare(State &state,
-                             zigzag::vortex::WorkerContext &context);
+                             zigzag::vortex::WorkerContext &context,
+                             const zigzag::vortex::mesh::ActorMessage &spawn);
   std::expected<std::string, zigzag::vortex::mesh::ActorError>
   handleMessage(State &state,
                 const zigzag::vortex::mesh::ActorExecution &execution,
@@ -267,7 +281,6 @@ private:
   identity::ActorPid hostPid_;
   std::uint64_t launches_{0};
   std::map<std::string, std::unique_ptr<State>> states_;
-  std::map<std::string, SpawnInfo> spawnInfo_;
   std::map<std::string, Outstanding> outstanding_;
   std::vector<identity::ActorPid> needsFirstTurn_;
 };

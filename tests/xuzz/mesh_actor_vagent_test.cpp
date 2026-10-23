@@ -507,5 +507,28 @@ TEST_F(MeshActorVagent, AFloorArrivingDuringExecutionSparesTheRunningEntry) {
   ASSERT_EQ(runtime.pumpOne(wall), true);
 }
 
+TEST_F(MeshActorVagent, TheExecutorSeesTheSpawnRequestOnMessageAndWakeTurns) {
+  MeshActorRuntime runtime("worker", 1);
+  configure(runtime);
+  const auto pid = spawnOne(runtime);
+  std::vector<ActorMessage> seen;
+  runtime.setExecutor(
+      [&](const ActorExecution &execution,
+          WorkerContext &) -> std::expected<std::string, ActorError> {
+        seen.push_back(execution.spawnRequest);
+        return "ok";
+      });
+  ASSERT_TRUE(runtime.receive(identity, sendTo(pid, "m"), ActorTime{}, wall));
+  ASSERT_EQ(runtime.pumpOne(wall), true);
+  ASSERT_TRUE(runtime.wake(pid, wall));
+  ASSERT_EQ(seen.size(), 2U);
+  for (const auto &request : seen) {
+    EXPECT_EQ(request.type, MessageType::ActorSpawn);
+    EXPECT_EQ(request.requestId, "spawn-1");
+    EXPECT_EQ(request.capability, "signed-grant");
+    EXPECT_EQ(request.programRef, "sha256:immutable-program");
+  }
+}
+
 } // namespace
 } // namespace zigzag::vortex::mesh

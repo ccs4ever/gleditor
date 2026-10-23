@@ -272,14 +272,41 @@ std::uint64_t AgentExecutor::stat(const identity::ActorPid &pid,
 // -- Setting an agent up
 // ------------------------------------------------------
 
-bool AgentExecutor::prepare(State &state, WorkerContext &context) {
-  auto &arena = context.arena;
-  std::optional<SpawnInfo> info;
-  const auto key = pidKey(state.pid);
-  if (const auto found = spawnInfo_.find(key); found != spawnInfo_.end()) {
-    info = std::move(found->second);
-    spawnInfo_.erase(found);
+std::optional<AgentExecutor::SpawnInfo> AgentExecutor::readSpawn(
+    const zigzag::vortex::mesh::ActorMessage &request) const {
+  const auto bytes = issuer_.parametersOf(request.capability);
+  if (!bytes) return std::nullopt;
+  const auto decoded = decodeValue(*bytes);
+  if (!decoded) return std::nullopt;
+  const auto *dictionary = std::get_if<WireRecord>(&decoded->data);
+  if (!dictionary) return std::nullopt;
+  const auto textField =
+      [&](std::string_view key) -> std::optional<std::string> {
+    if (const auto *v = dictionary->find(key)) {
+      if (const auto *t = std::get_if<std::string>(&v->data)) return *t;
+    }
+    return std::nullopt;
+  };
+  const auto name = textField(kWireSpawnName);
+  if (!name) return std::nullopt;
+  SpawnInfo info;
+  info.name       = *name;
+  info.agentType  = textField(kWireSpawnAgent).value_or(std::string{});
+  info.parentName = textField(kWireSpawnParent).value_or(std::string{});
+  // A top-level agent's request comes from the host, which is no parent.
+  if (!info.parentName.empty()) info.parent = request.source;
+  if (const auto *args = dictionary->find(kWireSpawnArgs)) {
+    if (const auto *record = std::get_if<WireRecord>(&args->data)) {
+      info.args = *record;
+    }
   }
+  return info;
+}
+
+bool AgentExecutor::prepare(State &state, WorkerContext &context,
+                            const ActorMessage &spawn) {
+  auto &arena     = context.arena;
+  const auto info = readSpawn(spawn);
   state.context   = &context;
   state.agentType = info ? info->agentType : std::string{};
   // A pid the host did not launch through this adapter still gets a name,
@@ -422,7 +449,7 @@ AgentExecutor::execute(const ActorExecution &execution,
   State &state  = stateFor(execution.pid);
   state.context = &context;
   liftLimits(context);
-  if (!state.prepared && !prepare(state, context)) {
+  if (!state.prepared && !prepare(state, context, execution.spawnRequest)) {
     return fatal(state, kCauseInit);
   }
   flushStats(state);
@@ -846,6 +873,7 @@ void AgentExecutor::spawnChild(State &state, WorkerContext &context,
   params.set(std::string(kWireSpawnName), WireValue::text(item.childName));
   params.set(std::string(kWireSpawnParent), WireValue::text(state.name));
   params.set(std::string(kWireSpawnArgs), WireValue::record(item.args));
+  params.set(std::string(kWireSpawnAgent), WireValue::text(item.agentType));
   auto parameters = encodeValue(WireValue::record(std::move(params)));
   if (!parameters || position > kMaxRequestPosition) {
     bumpStat(state, kStatSpawnFailed);
@@ -876,8 +904,6 @@ void AgentExecutor::spawnChild(State &state, WorkerContext &context,
     bumpStat(state, kStatSpawnFailed);
     return;
   }
-  spawnInfo_[pidKey(*pid)] = SpawnInfo{item.agentType, item.childName,
-                                       state.name, state.pid, item.args};
   needsFirstTurn_.push_back(*pid);
   (void)runtime_.monitor(state.pid, *pid, clock_.steady());
 
@@ -1015,7 +1041,9 @@ AgentExecutor::launch(std::string_view agentType, std::string_view name,
   WireRecord params;
   params.set(std::string(kWireSpawnName), WireValue::text(std::string(name)));
   params.set(std::string(kWireSpawnParent), WireValue::text(std::string{}));
-  params.set(std::string(kWireSpawnArgs), WireValue::record(args));
+  params.set(std::string(kWireSpawnArgs), WireValue::record(std::move(args)));
+  params.set(std::string(kWireSpawnAgent),
+             WireValue::text(std::string(agentType)));
   auto parameters = encodeValue(WireValue::record(std::move(params)));
   if (!parameters) return std::unexpected(ActorError::InvalidMessage);
   SpawnTicket ticket{.programRef = std::string(program_.programRef()),
@@ -1036,11 +1064,6 @@ AgentExecutor::launch(std::string_view agentType, std::string_view name,
   request.capability    = std::move(issued->capability);
   const auto pid        = runtime_.spawn(owner_, request, wallNow());
   if (!pid) return std::unexpected(pid.error());
-  spawnInfo_[pidKey(*pid)] = SpawnInfo{std::string(agentType),
-                                       std::string(name),
-                                       {},
-                                       std::nullopt,
-                                       std::move(args)};
   needsFirstTurn_.push_back(*pid);
   return pid;
 }

@@ -267,6 +267,15 @@ public:
     return IssuedCapability{"cap:" + ticket.childName + ":" + ticket.parameters,
                             ""};
   }
+  [[nodiscard]] std::optional<std::string>
+  parametersOf(std::string_view capability) const override {
+    // "cap:<name>:<bencode>"; a name holds no colon.
+    constexpr std::string_view prefix = "cap:";
+    if (!capability.starts_with(prefix)) return std::nullopt;
+    const auto colon = capability.find(':', prefix.size());
+    if (colon == std::string_view::npos) return std::nullopt;
+    return std::string(capability.substr(colon + 1));
+  }
 };
 
 const auto wallStart = std::chrono::system_clock::time_point(1000s);
@@ -640,6 +649,31 @@ TEST_F(VagentExecutor, ACompletedDeliveryIsForgottenNotRetried) {
   exec->tick(now + 10s);
   EXPECT_EQ(sends, before);
   EXPECT_EQ(exec->outstanding(), 0U);
+}
+
+TEST_F(VagentExecutor, ChildParametersSurviveAFreshAdapterOverTheSameRuntime) {
+  build();
+  WireRecord args;
+  args.set("k", WireValue::integer(7));
+  const auto pid = exec->launch("Counter", "p/Counter#9", args);
+  ASSERT_TRUE(pid);
+  // A per-pid table in the first adapter would be lost here, as it is for a
+  // child a remote parent spawned or one rebuilt by resume.
+  AgentClock clock{.wall   = [this] { return now; },
+                   .steady = [] { return ActorTime{}; }};
+  exec = std::make_unique<AgentExecutor>(*runtime, issuer, program, owner,
+                                         "node", 1, AgentSettings{}, clock);
+  exec->install();
+  ASSERT_TRUE(runtime->wake(*pid, now));
+  EXPECT_EQ(intField(*pid, "k"), 7);
+  EXPECT_EQ(intField(*pid, "inits"), 1);
+  auto *ctx        = exec->context(*pid);
+  const auto agent = exec->agentCell(*pid);
+  ASSERT_TRUE(ctx && agent);
+  const auto name =
+      fieldValue(ctx->arena, valueDims(ctx->core), *agent, kFieldName);
+  ASSERT_TRUE(name);
+  EXPECT_EQ(ctx->arena.textOf(*name), "p/Counter#9");
 }
 
 } // namespace

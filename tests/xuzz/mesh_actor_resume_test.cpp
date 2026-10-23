@@ -46,6 +46,7 @@ protected:
   std::string checkpointHash;
   WorkerContext *previousContext{};
   std::size_t resumedExecutions{};
+  std::string lastSpawnCapability;
   std::vector<ActorMessage> replies;
 
   ~MeshActorResumeTest() override { std::filesystem::remove_all(directory); }
@@ -83,6 +84,7 @@ protected:
         [&, resuming, runtimePointer](
             const ActorExecution &execution,
             WorkerContext &context) -> std::expected<std::string, ActorError> {
+          lastSpawnCapability = execution.spawnRequest.capability;
           if (resuming)
             ++resumedExecutions;
           else
@@ -184,6 +186,8 @@ TEST_F(MeshActorResumeTest, ReactivationPreservesStateDedupAndChangesPid) {
                               ActorTime{}, wall));
   ASSERT_EQ(resumed.pumpOne(wall), true);
   EXPECT_EQ(resumedExecutions, 1);
+  // The executor of a resumed actor sees the request it was resumed under.
+  EXPECT_EQ(lastSpawnCapability, "fresh-capability");
   const auto advanced = resumed.checkpointView(*pid, *resumed.stateRoot(*pid));
   ASSERT_TRUE(advanced);
   EXPECT_EQ(advanced->arena.asInt64(advanced->root), 2);
