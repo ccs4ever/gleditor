@@ -2,12 +2,12 @@
 
 | field         | value                                                                                                                                                                                                                       |
 | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| version       | 3.3 (see [Appendix](#appendix-versioning-and-change-history))                                                                                                                                                               |
+| version       | 3.4 (see [Appendix](#appendix-versioning-and-change-history))                                                                                                                                                               |
 | status        | Specification only. Nothing here is built or wired into the gleditor build.                                                                                                                                                 |
 | compiles to   | Vortex opcode streams over an `ArenaManifold`, run one turn at a time by a Spool-Mesh actor executor                                                                                                                        |
 | rests on      | Vortex ([runtime](vortex-hyperstructural-runtime.md)), Vlog ([logic](vlog-logic-extension.md)), vicon ([goals](vicon-goal-directed-language.md)), the Spool-Mesh actor runtime (`apps/common/xanadu/vortex/mesh_actor.hpp`) |
 | prerequisites | Vlog §6 clause database (specified, unbuilt); vicon §6's scanning functions `tab`, `move`, `find`, `many`, `upto`, `match`, `any`, `bal` (specified; `std:goal` registers only `scan`, `subject` and `pos` today)           |
-| changes       | new code (front end, loader, adapter) and eleven changes to existing code, each approved by the owner ([§11](#11-what-the-c-core-has-to-gain))                                                                              |
+| changes       | new code (front end, loader, adapter) and fourteen changes to existing code: P1–P11 approved by the owner, P12–P14 pending ([§11](#11-what-the-c-core-has-to-gain))                                                         |
 
 `vagent` is a front end for agent-oriented programs. It takes SARL's metamodel (agents, events,
 capacities, skills, behaviors, spaces, contexts, holons) and adds the parts of the BDI model SARL
@@ -58,10 +58,10 @@ ______________________________________________________________________
 "Built" means present in the tree at the cited place. "Prerequisite" means specified by a sibling
 document and not yet built. "Owed" means this document asks for it and
 [§11](#11-what-the-c-core-has-to-gain) prices it; an owed change to existing code is a proposal
-(P1–P11), each approved separately by the owner (2026-10-22). vicon's lexer, parser, compiler and
-driver exist under `apps/common/xanadu/vicon/`; vagent reuses vicon's design, not its compiler,
-because that compiler records what it cannot yet do (`vicon/compiler.cpp:12-22`). Code paths below
-are under `apps/common/xanadu/` unless stated.
+(P1–P14); P1–P11 were approved by the owner on 2026-10-22, and P12–P14 await approval. vicon's
+lexer, parser, compiler and driver exist under `apps/common/xanadu/vicon/`; vagent reuses vicon's
+design, not its compiler, because that compiler records what it cannot yet do
+(`vicon/compiler.cpp:12-22`). Code paths below are under `apps/common/xanadu/` unless stated.
 
 | Concept                    | Mechanism                                                                                                 | State                                                         |
 | -------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
@@ -90,12 +90,14 @@ are under `apps/common/xanadu/` unless stated.
 | Long-lived agents          | Reaping deliveries and slots, sender floors, configurable value limits, fair pumping                      | **approved**, P2, P3, P5, P7, P8                              |
 | Swarm-wide spaces          | `mesh_swarm` topics bound to a space                                                                      | not proposed ([§18](#18-open-questions), U-A4)                |
 
-vagent asks for **one opcode and no other change to the VM, no change to `ArenaManifold`, no change
-to `CompactOpNode`, and no new `SystemDimensions` field**. Everything else it owes is at the
-boundary between the VM and the mesh runtime, which Vortex code cannot cross: `OpcodeKind` has no
-send, spawn or host-call opcode (`vortex/vortex_vm.hpp`), and the `WorkerContext` an executor
-receives has no handle to the runtime (`MeshActorRuntime::Executor`). AGENTS.md admits C++ for
-driver and OS-event interfacing, which is what that boundary is.
+In the VM vagent asks for **one opcode** (P1) and nothing else: no `ArenaManifold` method, no
+`CompactOpNode` change, no new `SystemDimensions` field. The other approved changes (P2–P11) are in
+the mesh runtime, the settings xanadoc, the logging plan and the build, and P12–P14 await approval
+with fallbacks the design already works with. Most of what vagent owes is at the boundary between
+the VM and the mesh runtime, which Vortex code cannot cross: `OpcodeKind` has no send, spawn or
+host-call opcode (`vortex/vortex_vm.hpp`), and the `WorkerContext` an executor receives has no
+handle to the runtime (`MeshActorRuntime::Executor`). AGENTS.md admits C++ for driver and OS-event
+interfacing, which is what that boundary is.
 
 ______________________________________________________________________
 
@@ -269,16 +271,18 @@ own grant across many children.
 **Parameters ride in the capability.** `ActorSpawn` must carry an empty `value`
 (`identity/actor_wire.cpp`, `ActorMessage::isValid`), but its `capability` may hold 16 KiB. The
 issuer signs the child's name and parameter values into the capability. The child's adapter reads
-them from the spawn request, which `ActorContinuation` keeps, so they survive `resume`, and raises
-`Initialize` as a local event in the agent's first wake turn. No message can overtake it, because
-nothing reaches a handler before that turn. A capability is at most 16 KiB, shared with the
-signature and the name; a child whose parameters do not fit takes the rest from its parent by `tell`
-or `ask` after it starts.
+them from the spawn request, which `ActorContinuation` keeps, so they survive `resume`, The
+executor's first turn of any kind, a message turn included, runs genesis and `Initialize` before it
+dispatches anything, then sets the reserved field `$initialized`; a turn on an agent with
+`$initialized` set never runs them again. `resume` restores the field with the rest of the state, so
+a migrated or restored agent does not run `Initialize` twice and does not spawn its children again.
+A capability is at most 16 KiB, shared with the signature and the name; a child whose parameters do
+not fit takes the rest from its parent by `tell` or `ask` after it starts.
 
 Facts about the runtime that shape what follows:
 
 - **Only the actor's owner may send to it.** `receive` refuses an `ActorSend` from any identity but
-  the owner. vagent v3.2 specifies single-owner societies.
+  the owner. vagent specifies single-owner societies.
 - **A failed executor stops the actor.** `pumpOne` sets `stopped` when the executor returns an
   error. The adapter reports success for every language-level outcome and returns an error only for
   its own faults.
@@ -309,8 +313,9 @@ the local wake of P4. Both kinds run the same steps:
    passes `maxInstructions` as `run`'s `maxCycles`.
 1. **Turn cell.** Write the reserved field `$turn`: the turn time, read once, and for a message turn
    or host delivery the decoded event cell. `Clock.now()` reads it.
-1. **Base.** Push a base choice point (`VortexVM::pushChoicePoint`) whose alternative is
-   `std:agent`'s step-failure routine.
+1. **Base.** Reset the VM's Dewey path (`VortexVM::setCurrentDeweyPath({})`), which
+   `pushChoicePoint` extends on every choice point and `cut` never shortens, then push a base choice
+   point whose alternative is `std:agent`'s step-failure routine.
 1. **Dispatch.** Run the dispatcher (§6.5) for an event, or continue the ready intention.
 1. **Settle.** Repeat until nothing changes, at most `vagent.belief_event_depth` rounds in total:
    drain `d.pending`, then reconsider live intentions and maintain goals (§6.4). Each condition runs
@@ -319,7 +324,9 @@ the local wake of P4. Both kinds run the same steps:
    hard failure: `clearChoicePoints()`, `release(m0)`, reset the cursor's opcode, and run the
    recovery below.
 1. **Scope.** Unlink the cursor's `+d.vars` and `+d.stack` ranks. They hold only this turn's
-   activation frames (§5.8); without this the cursor's scope would grow for the agent's life.
+   activation frames (§5.8); without this the cursor's scope would grow for the agent's life. Every
+   `vagent.compact_every` turns, with no mark outstanding, call `ArenaManifold::compact()` to drop
+   dead link runs.
 1. **Drain** `d.outbox` in this order: local spawns through `spawn()`; messages (remote spawns
    travel as messages); effect cancels; effects declared `preempts`; other effects; timer changes.
    Unlink `$turn`'s event cell and each entry.
@@ -330,7 +337,9 @@ kinds of trouble. An exception from the arena's limits (cells, work, scratch byt
 result with `contractViolation` set is a contract violation: the adapter calls
 `VortexVM::backtrack(cursor)`, which lands in the statement's failure path, and runs on, so the
 violation becomes an ordinary plan or handler failure with cause `contract`. A result whose cursor
-has not reached its halt opcode after `maxCycles` steps is cycle exhaustion. The first and last, and
+has not reached its halt opcode after `maxCycles` steps is cycle exhaustion. `run` also reports
+`Assertion failed` and `no remaining choice points` with no contract violation set; the first is a
+statement failure, and the base choice point makes the second unreachable. The first and last, and
 exceeding `vagent.belief_event_depth`, are hard failures.
 
 **Recovery after a hard failure.** The arena is back where it was, but the message or wake that
@@ -345,11 +354,12 @@ runtime from within `pumpOne`; P2, P3 and P7 therefore defer every erasure that 
 actor until `pumpOne` returns. The adapter also resets the cursor's opcode after a hard failure;
 vagent never sets an oracle path, so the VM's Dewey path is unused.
 
-At the end of step 10 no mark or choice point is live. The agent is quiescent, and `checkpointView`
-accepts it, when in addition it is not stopped, its mailbox is empty, no message it sent is
-incomplete, the adapter holds no undelivered host delivery for it, and no effect it started is still
-running. Ready intentions and pending timers do not prevent a checkpoint: they are cells and travel
-with it.
+The adapter checkpoints between `pumpOne` calls, never inside the executor, because `checkpointView`
+refuses a running actor. At the end of step 10 no mark or choice point is live. The agent is
+quiescent, and `checkpointView` accepts it, when in addition it is not stopped, its mailbox is
+empty, no message it sent is incomplete, the adapter holds no undelivered host delivery for it, and
+no effect it started is still running. Ready intentions and pending timers do not prevent a
+checkpoint: they are cells and travel with it.
 
 ### 4.3 What persists
 
@@ -390,9 +400,17 @@ vagent reclaims them by **checkpoint and resume**. `checkpointView` hands the ar
 - **Permascroll growth.** Promotion spools constructed bytes (strings) into the author's append-only
   permascroll (the comment above `zigzag::promote`), so every checkpoint re-appends the live
   strings.
-- **Program per agent.** Each agent's arena loads its own copy of the compiled program, because
-  opcodes write their output cells (V12). A shared base `Manifold` with copy-on-write shadowing
-  would avoid that; it is U-A14.
+- **Program and library per agent.** Each agent's arena loads its own copy of the compiled program,
+  because opcodes write their output cells (V12), and `VortexStdLib::bootstrap` builds every
+  standard module in it, after spawn and again after every `resume`; neither cost is measured yet. A
+  shared base `Manifold` with copy-on-write shadowing would avoid both; it is U-A14.
+- **The trail.** `discard` keeps trail entries for an enclosing choice point
+  (`ArenaManifold::discard`), and when the turn's last mark is discarded nothing needs them, yet
+  they stay. The trail therefore grows with every committed turn until reclamation, unless P13
+  lands.
+- **Dewey paths.** Within one turn the VM's Dewey path grows by one entry per choice point and is
+  copied into each, so a turn with k choice points copies O(k²) small integers; the reset in step 4
+  bounds it to a turn, and fuel bounds k. P12 removes it.
 - **Quiescence.** A continuously busy agent may never reach the conditions of §4.2 (U-A1).
 
 ### 4.5 Leases, renewal and migration
@@ -421,7 +439,7 @@ ______________________________________________________________________
 
 ### 5.1 Dimensions
 
-Found or minted by `std:agent` at load (V10):
+Registered by the adapter and handed to `std:agent` (V10):
 
 | Dimension     | From → to                                         | Shape | Why not an existing dimension                                                                       |
 | ------------- | ------------------------------------------------- | ----- | --------------------------------------------------------------------------------------------------- |
@@ -571,10 +589,10 @@ timer heap is the deadlines in `waiting` and `$timers`. Both are functions of ce
 after every turn and after `resume`, so a resumed agent runs the same schedule.
 
 Reserved agent fields begin with `$`, which user identifiers cannot: `$name`, `$parent`, `$outer`,
-`$peers` (name to pid), `$next_id`, `$spawn_count`, `$turn_count`, `$timers`, `$turn`,
-`$terminating`, `$cancelled` (correlation ids cancelled before their `achieve` arrived, with an
-expiry), and `$stats` (counts per event type of dropped, unhandled and late deliveries, and of
-condition faults).
+`$initialized`, `$peers` (name to pid), `$next_id`, `$spawn_count`, `$turn_count`, `$timers`,
+`$turn`, `$terminating`, `$cancelled` (correlation ids cancelled before their `achieve` arrived,
+with an expiry), and `$stats` (counts per event type of dropped, unhandled and late deliveries, and
+of condition faults).
 
 ### 5.7 Program-side structure
 
@@ -729,9 +747,9 @@ once the beliefs it watches are present (§12.3).
 
 ### 6.4 Commitment and reconsideration
 
-vagent v3.2 implements **single-minded commitment**. An intention keeps its goal until the goal
-succeeds, its `drop when` holds, or no applicable plan remains. These conditions are checked when
-the intention resumes and in the settle loop of every turn (§4.2 step 6) for every live intention,
+vagent implements **single-minded commitment**. An intention keeps its goal until the goal succeeds,
+its `drop when` holds, or no applicable plan remains. These conditions are checked when the
+intention resumes and in the settle loop of every turn (§4.2 step 6) for every live intention,
 including those waiting on a subgoal, a message or an `await`.
 
 Three rules keep reconsideration safe:
@@ -755,7 +773,7 @@ offered (U-A5).
 
 ### 6.5 The deliberation cycle
 
-The selection functions are fixed in v3.2:
+The selection functions are fixed:
 
 - **Event selection** is mailbox order, then host deliveries in arrival order. There is no priority
   mailbox (§13).
@@ -1027,6 +1045,10 @@ An expression succeeds with a value or fails (vicon §4.1).
   So `[timer]` is a presence test and `not charging` succeeds when there is none. Assigning a `T` to
   an `Opt<T>` place stores the value.
 - `fail` and `return` have no value; they may stand wherever any type is expected.
+- `x := e` and `x <- e` succeed with `()`, so chained assignment is a type error. `for` and `while`
+  succeed with `()`. The arms of `if c then a else b` have a common type, with `fail` and `return`
+  matching any; an `if` in statement position may have arms of any type, whose values are discarded.
+  So `if not charging then charging := adopt …` is well typed.
 
 ### 8.3 Assignment and positions
 
@@ -1172,9 +1194,10 @@ terms against their predicates; locals are inferred.
 | `occurrence` | the event type | in a handler, the event being handled                                        |
 | `cause`      | `Str`          | in an `else` after `achieve`, `ask`, `await` or an effect, the failure cause |
 
-A program starts with `vagent run module:Agent(args)`, which starts the launcher and then the named
-agent, with those arguments, in the launcher's space. Agents the program depends on, such as §12.4's
-`Warehouse`, are started the same way and their names passed as arguments.
+A program starts with `vagent run module/Agent(args)`, which starts the launcher and then the named
+agent in the launcher's space. The `/` separates the module path from the agent's name, and the
+arguments are literals and durations only. Agent names cannot be typed, because they are minted at
+spawn, so an agent that needs a peer spawns it in its own `on Initialize` (§12.4).
 
 ### 8.9 Grammar
 
@@ -1440,6 +1463,7 @@ Settings, read from `system://settings` by the launcher and the adapter once P9 
 | `vagent.send_retry_interval` | 1s                     | spacing of redeliveries                        |
 | `vagent.renew_fraction`      | 0.8                    | when lease renewal starts                      |
 | `vagent.ready_per_message`   | 4                      | wake turns run between two message turns       |
+| `vagent.compact_every`       | 64                     | turns between `compact()` calls                |
 
 ______________________________________________________________________
 
@@ -1450,8 +1474,9 @@ runtime are allowed where vagent strictly needs them. Each is a **proposal**: it
 with the reason it cannot be done in vagent's own code, what vagent does without it, and a status. A
 proposal is incorporated into the design only after its own approval; until then the design depends
 on it only as stated in its "Without it" column, and every section that relies on one cites its
-number. New files under `apps/common/xanadu/vagent/` and `apps/vagent/` (§11.1) change no existing
-code and are not proposals.
+number. P1–P11 are approved; P12–P14 are not, and the design is written to work without them. New
+files under `apps/common/xanadu/vagent/` and `apps/vagent/` (§11.1) change no existing code and are
+not proposals.
 
 The test for "strictly needed" is the same for every row: the capability must be impossible, or
 possible only by a workaround that breaks a property of §14, from three places in order of
@@ -1502,24 +1527,27 @@ spawns the launcher with a source pid it mints for itself.
 
 ### 11.2 Proposed changes to existing code
 
-All eleven proposals were **approved** by the owner on 2026-10-22, individually, after this register
-was written. The design depends on them as approved changes; the "Without it" column remains as the
-record of what each buys.
+P1–P11 were **approved** by the owner on 2026-10-22, individually, after this register was written;
+P12–P14 were added afterwards and are **pending approval**. The design depends on them as approved
+changes; the "Without it" column remains as the record of what each buys.
 
-| No. | Change                                                                                                                                                                                                                         | Where                                                                                                                                                                                                                                            | Why it cannot live in `std:agent` or the adapter                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Without it                                                                                                                                                                                                                                                      | Used by                              |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
-| P1  | `#ChoiceDepth`: write `choiceStack_.size()` into the output cell, appended after `Cut` in `OpcodeKind`                                                                                                                         | `vortex_vm.{hpp,cpp}` (about ten lines), the opcode name tables in `vql/compiler.cpp` and `vpl/compiler.cpp`, a test. `mesh_evaluator.cpp`'s pure-job allowlist and its opcode range check are left alone: vagent artifacts are not loaded there | A statement must cut to the depth at its own start (V13). `#Cut` takes an absolute barrier and `#Choice` outputs only `true`, so the depth must be read at run time: a method's entry depth differs per call chain, so it is static for no method called from two sites or recursively. Vortex code reads no VM state but cells, and the adapter runs between turns, not statements. `std:goal`'s `if` and `while` bound evaluation with a second cursor and a host-side `cut()`, but they are host routines dispatched by `VortexStdLib::call` between runs, not callable from a running cursor, and a second cursor breaks V3. vicon's compiler names the same fix (`vicon/compiler.cpp:12-22`) | **Load-bearing.** Without it V13 cannot be implemented for methods at all, nor the dispatcher of §9.2. The only alternative is to inline every method at every call site, which forbids recursion and multiplies program size; vagent is not specified for that | V13, §6.7, §9.1, §9.2, every example |
-| P2  | Reap completed deliveries; `abandon(requestId)`; `redeliver(requestId)`; an `ActorSpawnAck` completes its spawn; erasure that touches the running actor is deferred until `pumpOne` returns                                    | `mesh_actor.cpp`                                                                                                                                                                                                                                 | `deliveries_` is private with no `erase`, so a runtime can send 4096 messages in its lifetime; `send` and `retry` return early once a delivery is acknowledged; a spawn ack only sets `acknowledged`. The adapter sees none of these tables                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Each node can send 4096 messages in total, and an incomplete delivery blocks its sender's checkpoint for ever                                                                                                                                                   | §7.3                                 |
-| P3  | `ActorOptions::floorOf`, an optional hook returning the sender's floor from a message; the runtime forgets that sender's remembered ids that compare below it and refuses a lower fresh id as stale; erasure deferred as in P2 | `mesh_actor.{hpp,cpp}`                                                                                                                                                                                                                           | `remembered` is private with no `erase`, and `enqueue` refuses at `maxRememberedMessages`. The floor travels in the opaque `value`, and `ActorSend` has no spare field (`sequence` must be zero), so the runtime cannot read it without either parsing vagent's encoding or changing the wire; a hook keeps the id layout in the adapter and the wire unchanged                                                                                                                                                                                                                                                                                                                                   | Each agent can receive 4096 messages in its lifetime                                                                                                                                                                                                            | §5.5, §7.3                           |
-| P4  | Local wake: `wake(pid)` runs the executor with `ActorExecution::message` absent (it becomes `std::optional`, touching the existing mesh executor and its tests), applies the lease check, sends no reply                       | `mesh_actor.{hpp,cpp}`                                                                                                                                                                                                                           | The executor runs only inside `pumpOne` for a mailbox message. A self-sent wake collides with the actor's own `remembered` entry and is refused as `DuplicateMismatch`. A wake sent from the adapter's host pid works with no change, but each costs a mailbox slot and a remembered entry, and under load a percept or effect result can be refused `MailboxFull`                                                                                                                                                                                                                                                                                                                                | Wakes travel as `ActorSend`s from the host pid: a mailbox slot and a remembered entry per wake, and host deliveries can be lost under load, contrary to §7.5                                                                                                    | §4.2, V6, §6.6, §7.5                 |
-| P5  | `ValueLimits` in `ActorOptions`                                                                                                                                                                                                | `mesh_actor.cpp`, `vortex/mesh_value.hpp`                                                                                                                                                                                                        | `resume` builds `ValueLimits` locally; nothing outside can set it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Live agent state is capped at 65,536 promotion operations for checkpoint, migration and reclamation                                                                                                                                                             | §4.4                                 |
-| P6  | `renew(pid, capability)`: replace a live actor's grant in place                                                                                                                                                                | `mesh_actor.cpp`                                                                                                                                                                                                                                 | `resume` refuses the same node and epoch and mints a new pid; the grant is private                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Agents end at lease expiry; the issuer must grant very long leases                                                                                                                                                                                              | §4.5                                 |
-| P7  | `stop(pid)`: mark stopped, notify monitors, and once deliveries drain erase the actor, its `spawns_` and `monitors_` entries and watcher-list memberships; erasure of a running actor deferred until `pumpOne` returns         | `mesh_actor.cpp`                                                                                                                                                                                                                                 | The three tables are private with no `erase`, and the only ways to stop an actor are an executor error or lease expiry                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | `maxActors` and `maxMonitors` are lifetime counts: a node can ever spawn 128 agents                                                                                                                                                                             | §4.5, §5.4                           |
-| P8  | Fair pumping: resume `pumpOne`'s scan after the last actor served                                                                                                                                                              | `mesh_actor.cpp`                                                                                                                                                                                                                                 | The scan order is inside `pumpOne`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Agents with low keys can starve the rest                                                                                                                                                                                                                        | §14                                  |
-| P9  | `defaultSettingSpecs()` entries for the `vagent.*` settings of §10                                                                                                                                                             | `system_docs.cpp`                                                                                                                                                                                                                                | AGENTS.md: configuration lives in system xanadocs, and adding a setting means a `defaultSettingSpecs()` entry; new code cannot add one                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | The launcher has nothing to read, and the defaults would be constants in the adapter, which the governance rules forbid; effectively required                                                                                                                   | §10                                  |
-| P10 | Register the `vortex.agent` logging category                                                                                                                                                                                   | `include/gleditor/logging.hpp` and `design/logging-migration.md`                                                                                                                                                                                 | Categories are named in the library's logging header                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | `Logging` writes under the existing `vortex.stdlib` category                                                                                                                                                                                                    | §10                                  |
-| P11 | Build rules for `apps/vagent`, its tests and its fuzz targets                                                                                                                                                                  | `Makefile`                                                                                                                                                                                                                                       | Program targets need explicit rules; `apps/common/xanadu/` is globbed, apps are not                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | The library code builds, but there is no `vagent` binary and no tests run                                                                                                                                                                                       | §11.1, §15                           |
-| —   | Capability-bearing senders (`receive` admits `ActorSend` only from the owner)                                                                                                                                                  | `mesh_actor.cpp`                                                                                                                                                                                                                                 | not proposed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | single-owner societies (U-A2)                                                                                                                                                                                                                                   | —                                    |
+| No. | Change                                                                                                                                                                                                                                                                                         | Where                                                                                                                                                                                                                                            | Why it cannot live in `std:agent` or the adapter                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Without it                                                                                                                                                                                                                                                      | Used by                              |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| P1  | `#ChoiceDepth`: write `choiceStack_.size()` into the output cell, appended after `Cut` in `OpcodeKind`                                                                                                                                                                                         | `vortex_vm.{hpp,cpp}` (about ten lines), the opcode name tables in `vql/compiler.cpp` and `vpl/compiler.cpp`, a test. `mesh_evaluator.cpp`'s pure-job allowlist and its opcode range check are left alone: vagent artifacts are not loaded there | A statement must cut to the depth at its own start (V13). `#Cut` takes an absolute barrier and `#Choice` outputs only `true`, so the depth must be read at run time: a method's entry depth differs per call chain, so it is static for no method called from two sites or recursively. Vortex code reads no VM state but cells, and the adapter runs between turns, not statements. `std:goal`'s `if` and `while` bound evaluation with a second cursor and a host-side `cut()`, but they are host routines dispatched by `VortexStdLib::call` between runs, not callable from a running cursor, and a second cursor breaks V3. vicon's compiler names the same fix (`vicon/compiler.cpp:12-22`) | **Load-bearing.** Without it V13 cannot be implemented for methods at all, nor the dispatcher of §9.2. The only alternative is to inline every method at every call site, which forbids recursion and multiplies program size; vagent is not specified for that | V13, §6.7, §9.1, §9.2, every example |
+| P2  | Reap completed deliveries; `abandon(requestId)`; `redeliver(requestId)`; an `ActorSpawnAck` completes its spawn; erasure that touches the running actor is deferred until `pumpOne` returns                                                                                                    | `mesh_actor.cpp`                                                                                                                                                                                                                                 | `deliveries_` is private with no `erase`, so a runtime can send 4096 messages in its lifetime; `send` and `retry` return early once a delivery is acknowledged; a spawn ack only sets `acknowledged`. The adapter sees none of these tables                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Each node can send 4096 messages in total, and an incomplete delivery blocks its sender's checkpoint for ever                                                                                                                                                   | §7.3                                 |
+| P3  | `ActorOptions::floorOf`, `std::function<std::optional<FloorMark>(const ActorMessage &)>` with `FloorMark{std::string prefix; std::string floorId;}`. The runtime erases the ordered range `[prefix, floorId)` of `remembered` and refuses a fresh id in it as stale; erasure deferred as in P2 | `mesh_actor.{hpp,cpp}`                                                                                                                                                                                                                           | `remembered` is private with no `erase`, and `enqueue` refuses at `maxRememberedMessages`. The floor travels in the opaque `value`, and `ActorSend` has no spare field (`sequence` must be zero), so the runtime cannot read it without parsing vagent's encoding or changing the wire. The hook returns a prefix and a bound, so the runtime needs only the ordering of fixed-width ids, not their layout                                                                                                                                                                                                                                                                                        | Each agent can receive 4096 messages in its lifetime                                                                                                                                                                                                            | §5.5, §7.3                           |
+| P4  | Local wake: `wake(pid)` runs the executor with `ActorExecution::message` absent (it becomes `std::optional`, touching the existing mesh executor and its tests), applies the lease check, sends no reply                                                                                       | `mesh_actor.{hpp,cpp}`                                                                                                                                                                                                                           | The executor runs only inside `pumpOne` for a mailbox message. A self-sent wake collides with the actor's own `remembered` entry and is refused as `DuplicateMismatch`. A wake sent from the adapter's host pid works with no change, but each costs a mailbox slot and a remembered entry, and under load a percept or effect result can be refused `MailboxFull`                                                                                                                                                                                                                                                                                                                                | Wakes travel as `ActorSend`s from the host pid: a mailbox slot and a remembered entry per wake, and host deliveries can be lost under load, contrary to §7.5                                                                                                    | §4.2, V6, §6.6, §7.5                 |
+| P5  | `ValueLimits` in `ActorOptions`                                                                                                                                                                                                                                                                | `mesh_actor.cpp`, `vortex/mesh_value.hpp`                                                                                                                                                                                                        | `resume` builds `ValueLimits` locally; nothing outside can set it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Live agent state is capped at 65,536 promotion operations for checkpoint, migration and reclamation                                                                                                                                                             | §4.4                                 |
+| P6  | `renew(pid, capability)`: replace a live actor's grant in place                                                                                                                                                                                                                                | `mesh_actor.cpp`                                                                                                                                                                                                                                 | `resume` refuses the same node and epoch and mints a new pid; the grant is private                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Agents end at lease expiry; the issuer must grant very long leases                                                                                                                                                                                              | §4.5                                 |
+| P7  | `stop(pid)`: mark stopped, notify monitors, and once deliveries drain erase the actor, its `spawns_` and `monitors_` entries and watcher-list memberships; erasure of a running actor deferred until `pumpOne` returns                                                                         | `mesh_actor.cpp`                                                                                                                                                                                                                                 | The three tables are private with no `erase`, and the only ways to stop an actor are an executor error or lease expiry                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | `maxActors` and `maxMonitors` are lifetime counts: a node can ever spawn 128 agents                                                                                                                                                                             | §4.5, §5.4                           |
+| P8  | Fair pumping: resume `pumpOne`'s scan after the last actor served                                                                                                                                                                                                                              | `mesh_actor.cpp`                                                                                                                                                                                                                                 | The scan order is inside `pumpOne`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Agents with low keys can starve the rest                                                                                                                                                                                                                        | §14                                  |
+| P9  | `defaultSettingSpecs()` entries for the `vagent.*` settings of §10, with their schema-page and notes-page entries                                                                                                                                                                              | `system_docs.cpp`                                                                                                                                                                                                                                | AGENTS.md: configuration lives in system xanadocs, adding a setting means a `defaultSettingSpecs()` entry, and every system xanadoc carries a schema page and a notes page; new code cannot add them                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | The launcher has nothing to read, and the defaults would be constants in the adapter, which the governance rules forbid; effectively required                                                                                                                   | §10                                  |
+| P10 | Record the `vortex.agent` logging category                                                                                                                                                                                                                                                     | `design/logging-migration.md`                                                                                                                                                                                                                    | Categories are free strings passed to `gleditor::logging::category`, so no code changes; the migration plan is where categories are named                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | `Logging` writes under an unrecorded category                                                                                                                                                                                                                   | §10                                  |
+| P11 | Build rules for `apps/vagent`, its tests and its fuzz targets                                                                                                                                                                                                                                  | `Makefile`                                                                                                                                                                                                                                       | Program targets need explicit rules; `apps/common/xanadu/` is globbed, apps are not                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | The library code builds, but there is no `vagent` binary and no tests run                                                                                                                                                                                       | §11.1, §15                           |
+| P12 | Maintain the VM's Dewey path only when an oracle path or a cut callback is set — **pending approval**                                                                                                                                                                                          | `vortex_vm.cpp` (`pushChoicePoint`, `backtrack`)                                                                                                                                                                                                 | The path serves the oracle and cut-callback machinery, which vagent never sets; it is private VM state, and `setCurrentDeweyPath` can only reset it between turns, not between statements                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | O(k²) copying per turn for k choice points, bounded by fuel (§4.4)                                                                                                                                                                                              | §4.2, §4.4                           |
+| P13 | When `discard` releases the last outstanding mark, clear the trail — **pending approval**                                                                                                                                                                                                      | `zigzag/arena_manifold.cpp` (`ArenaManifold::discard`)                                                                                                                                                                                           | With no mark outstanding no choice point can replay the trail, but the trail is private and no public call clears it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | The trail grows with every committed turn until checkpoint and resume reclaim it (§4.4)                                                                                                                                                                         | §4.2, §4.4                           |
+| P14 | `forgetSender(prefix)`: erase every remembered id of one sender, called by the adapter on `ChildStopping`, `ChildDown` or removal from `$peers` — **pending approval**; an amendment to P3                                                                                                     | `mesh_actor.{hpp,cpp}`                                                                                                                                                                                                                           | A floor arrives only on a later envelope from the same sender, so a sender that stops sending leaves its last few ids remembered for ever; only the runtime can erase them                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Each sender that stops leaves a handful of entries, so a receiver can outlive roughly a thousand stopped senders before `maxRememberedMessages`; a late duplicate from a forgotten sender would run once more                                                   | §7.3, §15                            |
+| —   | Capability-bearing senders (`receive` admits `ActorSend` only from the owner)                                                                                                                                                                                                                  | `mesh_actor.cpp`                                                                                                                                                                                                                                 | not proposed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | single-owner societies (U-A2)                                                                                                                                                                                                                                   | —                                    |
 
 P2, P3, P5, P7 and P8 remove ceilings and unfairness that would affect any long-lived actor, not
 only vagent's; the mesh was built for bounded jobs. The prerequisites in the header are changes
@@ -1813,10 +1841,14 @@ agent Courier {
   }
 }
 
-agent Dispatcher(warehouse: Agent, deadline: Duration) {
+agent Dispatcher(units: Int, deadline: Duration) {
+  var warehouse: Opt<Agent> := none
   var courier: Opt<Agent> := none
 
-  on Initialize { courier := spawn Courier() in inner }
+  on Initialize {
+    warehouse := spawn Warehouse(units) in inner
+    courier := spawn Courier() in inner
+  }
   on Order as o { adopt Handle(o.order_id, o.item, o.count) }
 
   plan handle for Handle {
@@ -1834,19 +1866,19 @@ agent Dispatcher(warehouse: Agent, deadline: Duration) {
 }
 ```
 
-`vagent run demo:depot:Warehouse(units)` starts the warehouse, and its name is passed to the
-dispatcher's `warehouse` parameter (§8.8). `ask` suspends `handle` until the warehouse's turn
-returns its answer, checked against `question stock`, or substitutes `0` at the deadline. The
-comparison `available < count` fails when stock suffices, so the total `if` does nothing.
-`achieve … by courier` sends the `achieve` performative; the courier's default `accepts` takes
-delegation from its parent and adopts `Fetch` with the dispatcher as delegator. When `fetch` ends,
-the courier stages the `tell` and then the `outcome`. Delivery is unordered, so the dispatcher may
-learn of the outcome before the fact: the final `await` finds the fact already believed, or waits
-for it. The fact names the order, so a delivery for an earlier order cannot satisfy a later one. The
-courier's name is known as soon as the spawn is staged, so `courier` holds it from `Initialize` on;
-if the spawn is refused, `SpawnFailed` is raised and every delivery to that name fails, so the
-`achieve` fails with that cause. `courier` is `Opt<Agent>` only so that an `Order` handled before
-`Initialize` would fail cleanly rather than read an unset field.
+`vagent run demo:depot/Dispatcher(40, 5s)` starts the dispatcher, which spawns its warehouse and
+courier (§8.8). `ask` suspends `handle` until the warehouse's turn returns its answer, checked
+against `question stock`, or substitutes `0` at the deadline. The comparison `available < count`
+fails when stock suffices, so the total `if` does nothing. `achieve … by courier` sends the
+`achieve` performative; the courier's default `accepts` takes delegation from its parent and adopts
+`Fetch` with the dispatcher as delegator. When `fetch` ends, the courier stages the `tell` and then
+the `outcome`. Delivery is unordered, so the dispatcher may learn of the outcome before the fact:
+the final `await` finds the fact already believed, or waits for it. The fact names the order, so a
+delivery for an earlier order cannot satisfy a later one. The courier's name is known as soon as the
+spawn is staged, so `courier` holds it from `Initialize` on; if the spawn is refused, `SpawnFailed`
+is raised and every delivery to that name fails, so the `achieve` fails with that cause. `warehouse`
+and `courier` are `Opt<Agent>` because a field needs an initial value and no name exists before
+`Initialize` runs, which is always before the first `Order` is dispatched (§4.1).
 
 ______________________________________________________________________
 
@@ -1950,6 +1982,9 @@ ______________________________________________________________________
 - **A maintain goal retries for ever.** The back-off is a constant, so a restorer that can never
   succeed (a broken dock) runs every `vagent.maintain_backoff`; a program bounds it with `drop when`
   on the goal.
+- **Stopped senders** leave remembered ids behind until P14 (§11.2).
+- **32 KiB of strings per turn.** The scratch budget per turn is the grant's `maxOutputBytes`, at
+  most 32 KiB; a turn that builds more is a hard failure with cause `fuel`.
 - **Single-owner societies** until U-A2.
 - **Fuzzing.** The parser, the program loader, the event decoder, the outbox drain and host
   deliveries are new input surfaces and get `tests/fuzz/` targets.
@@ -2026,6 +2061,14 @@ ______________________________________________________________________
 ______________________________________________________________________
 
 ## Appendix: Versioning and Change History
+
+**3.4 — Focused round 6.** After the owner approved P1–P11: dimensions are registered through
+`ensureDimension`; effects may be declared `preempts`, and the drain sends cancels and preempting
+effects first; `Initialize` runs before the first dispatch of any kind and never again after
+`resume`; the turn resets the Dewey path and compacts periodically; the costs of the trail, the
+Dewey path, the per-arena library and stopped senders are stated, with P12–P14 proposed (pending) to
+remove them; P3's hook has a signature; assignments and loops have type `()`; `vagent run` separates
+module and agent with `/`, and §12.4's dispatcher spawns its warehouse.
 
 **3.3 — Final review round; the proposal register made honest.** This revision addresses every
 blocking and major finding of the fifth and last review round, and most minor ones; it was not
