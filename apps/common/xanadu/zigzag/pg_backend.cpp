@@ -80,25 +80,28 @@ SqlValue textToValue(const char *s, const bool isNull, const Oid type) {
 
 } // namespace
 
+class PgBackend;
+
 /// One statement's streamed rows: PQsendQueryParams + single-row mode
 /// gives a server-side pull without hand-quoting literals -- $n binds
 /// through the extended protocol, rows arrive one PQgetResult at a
 /// time, and the open READ ONLY transaction scopes them (spec 7.3:
-/// portals bound to their transaction).
+/// portals bound to their transaction). One live cursor per connection:
+/// single-row mode is the connection's, so a cursor that stops early
+/// drains its tail and releases the txn before anything else prepares.
 class PgCursor final : public SqlCursor {
 public:
-  PgCursor(PGconn *conn, PGresult *desc, std::vector<SqlColumn> cols)
-      : conn_(conn), desc_(desc), cols_(std::move(cols)) {}
-  ~PgCursor() override {
-    if (desc_ != nullptr) {
-      PQclear(desc_);
-    }
-  }
+  PgCursor(PgBackend *be, PGconn *conn, PGresult *head,
+           std::vector<SqlColumn> cols, const bool ownsTxn)
+      : be_(be), conn_(conn), head_(head), cols_(std::move(cols)),
+        ownsTxn_(ownsTxn) {}
+  ~PgCursor() override { finish(); }
   PgCursor(PgCursor &&o) noexcept
-      : conn_(o.conn_), desc_(o.desc_), cols_(std::move(o.cols_)),
-        done_(o.done_) {
-    o.desc_ = nullptr;
-    o.done_ = true;
+      : be_(o.be_), conn_(o.conn_), head_(o.head_), cols_(std::move(o.cols_)),
+        ownsTxn_(o.ownsTxn_), done_(o.done_) {
+    o.head_    = nullptr;
+    o.done_    = true;
+    o.ownsTxn_ = false;
   }
   PgCursor &operator=(PgCursor &&) = delete;
 
@@ -115,10 +118,17 @@ public:
       return rows;
     }
     while (rows.size() < limit) {
-      PGresult *r = PQgetResult(conn_);
+      // The prepare-time head may itself hold a row (the first
+      // SINGLE_TUPLE); serve it before pulling further results.
+      PGresult *r = head_;
+      if (r != nullptr) {
+        head_ = nullptr;
+      } else {
+        r = PQgetResult(conn_);
+      }
       if (r == nullptr) {
-        done_ = true;
-        break;
+        finish();
+        return rows;
       }
       if (PQresultStatus(r) == PGRES_SINGLE_TUPLE) {
         std::vector<SqlValue> row;
@@ -138,16 +148,36 @@ public:
       }
       std::string msg = PQresultErrorMessage(r);
       PQclear(r);
-      done_ = true;
+      finish();
       return std::unexpected(msg);
     }
     return rows;
   }
 
 private:
+  /// Drain any unread tail and hand the txn back -- the connection is
+  /// free again only when every queued result has been consumed.
+  void finish() {
+    if (done_) {
+      return;
+    }
+    done_ = true;
+    if (head_ != nullptr) {
+      PQclear(head_);
+      head_ = nullptr;
+    }
+    while (PGresult *r = PQgetResult(conn_)) {
+      PQclear(r);
+    }
+    release(); // backend's cursorClosed
+  }
+  void release();
+
+  PgBackend *be_;
   PGconn *conn_;
-  PGresult *desc_; ///< the Describe result (column meta)
+  PGresult *head_{nullptr}; ///< unserved first result
   std::vector<SqlColumn> cols_;
+  bool ownsTxn_{false};
   bool done_{false};
 };
 
@@ -155,22 +185,29 @@ private:
 /// snapshot guard (or cursor teardown) COMMITs.
 class PgSnapshot final : public SqlSnapshot {
 public:
-  explicit PgSnapshot(PGconn *conn) : conn_(conn) {}
-  ~PgSnapshot() override {
-    if (conn_ != nullptr) {
-      PQclear(PQexec(conn_, "COMMIT"));
-    }
-  }
-  PgSnapshot(PgSnapshot &&o) noexcept : conn_(o.conn_) { o.conn_ = nullptr; }
+  explicit PgSnapshot(PgBackend *be) : be_(be) {}
+  ~PgSnapshot() override;
+  PgSnapshot(PgSnapshot &&o) noexcept : be_(o.be_) { o.be_ = nullptr; }
 
 private:
-  PGconn *conn_;
+  PgBackend *be_; ///< owns the txn flag; defined after PgBackend
 };
 
 class PgBackend final : public SqlBackend {
+  // The cursor and snapshot drive its txn/cursor bookkeeping.
+  friend class PgCursor;
+  friend class PgSnapshot;
+
 public:
   explicit PgBackend(PGconn *conn) : conn_(conn) {}
-  ~PgBackend() override { PQfinish(conn_); }
+  ~PgBackend() override {
+    // A cursor/snapshot teardown that never ran leaves a live txn --
+    // commit it only when one's actually open.
+    if (inTxn_) {
+      (void)execOk("COMMIT");
+    }
+    PQfinish(conn_);
+  }
 
   [[nodiscard]] std::expected<std::vector<SqlTable>, std::string>
   schema() override {
@@ -257,55 +294,72 @@ public:
     if (auto chk = readOnlyCheck(sql); !chk) {
       return std::unexpected(chk.error());
     }
+    if (liveCursor_) {
+      return std::unexpected(
+          "a cursor is still live -- drain it first (one live cursor "
+          "per connection under single-row mode)");
+    }
+    bool ownsTxn = false;
     if (!inTxn_) {
       if (auto r = execOk("BEGIN READ ONLY"); !r) {
         return std::unexpected(r.error());
       }
-      inTxn_ = true; // the cursor's txn; a live snapshot's scope joins
+      inTxn_  = true; // the cursor's txn; a live snapshot's scope joins
+      ownsTxn = true;
     }
     const std::string text{sql};
     if (PQsendQueryParams(conn_, text.c_str(), static_cast<int>(params.size()),
                           nullptr, paramTexts(params).data(), nullptr, nullptr,
                           0) != 1) {
+      if (ownsTxn) {
+        endTxn();
+      }
       return std::unexpected(PQerrorMessage(conn_));
     }
     PQsetSingleRowMode(conn_);
-    // Single-row mode's first result is the zero-row PGRES_TUPLES_OK
-    // carrying the column descriptor; rows follow as SINGLE_TUPLE.
-    PGresult *desc = nullptr;
+    // Single-row mode: every result carries its own field metadata, and
+    // the first PGRES_SINGLE_TUPLE may arrive immediately -- there's no
+    // separate describe result. Take the first row-bearing result (or
+    // the TUPLES_OK tail of an empty set) and hand it to the cursor.
+    PGresult *head = nullptr;
     std::vector<SqlColumn> cols;
     for (;;) {
       PGresult *r = PQgetResult(conn_);
       if (r == nullptr) {
-        endTxn();
-        return std::unexpected("no describe result");
+        if (ownsTxn) {
+          endTxn();
+        }
+        return std::unexpected("no results returned");
       }
       const auto st = PQresultStatus(r);
-      if (st == PGRES_TUPLES_OK) {
-        desc = r; // the empty head result -- column metadata
+      if (st == PGRES_SINGLE_TUPLE || st == PGRES_TUPLES_OK) {
+        head = r;
         break;
       }
       if (st == PGRES_FATAL_ERROR) {
         std::string msg = PQresultErrorMessage(r);
         PQclear(r);
-        endTxn();
+        if (ownsTxn) {
+          endTxn();
+        }
         return std::unexpected(msg);
       }
       PQclear(r);
     }
-    for (int c = 0; c < PQnfields(desc); ++c) {
+    for (int c = 0; c < PQnfields(head); ++c) {
       SqlColumn col;
-      col.name     = PQfname(desc, c);
-      col.declType = typeName(PQftype(desc, c));
+      col.name     = PQfname(head, c);
+      col.declType = typeName(PQftype(head, c));
       // PQftable/PQftablecol attribute the column to its base table
       // (spec 7.3 provenance); 0 means "not attributable".
-      if (const auto t = PQftable(desc, c); t != 0) {
+      if (const auto t = PQftable(head, c); t != 0) {
         col.baseTable = std::to_string(t); // oid; schema() resolves
       }
       cols.push_back(std::move(col));
     }
+    liveCursor_ = true;
     return std::unique_ptr<SqlCursor>{
-        new PgCursor(conn_, desc, std::move(cols))};
+        new PgCursor(this, conn_, head, std::move(cols), ownsTxn)};
   }
 
   [[nodiscard]] std::expected<std::unique_ptr<SqlCursor>, std::string>
@@ -334,7 +388,7 @@ public:
       return std::unexpected(r.error());
     }
     inTxn_ = true;
-    return std::unique_ptr<SqlSnapshot>{new PgSnapshot(conn_)};
+    return std::unique_ptr<SqlSnapshot>{new PgSnapshot(this)};
   }
 
   [[nodiscard]] SqlCapabilities capabilities() const noexcept override {
@@ -359,6 +413,14 @@ private:
     if (inTxn_) {
       (void)execOk("COMMIT");
       inTxn_ = false;
+    }
+  }
+  /// A cursor's tail is drained; release the live flag, and the txn it
+  /// owned (a snapshot's txn stays the snapshot's).
+  void cursorClosed(const bool ownedTxn) {
+    liveCursor_ = false;
+    if (ownedTxn) {
+      endTxn();
     }
   }
   /// $n parameters render as text; single-row mode reads them back the
@@ -430,9 +492,17 @@ private:
 
   PGconn *conn_;
   bool inTxn_{false};
+  bool liveCursor_{false};
   std::vector<std::string> texts_;
   std::vector<const char *> ptrs_;
 };
+
+void PgCursor::release() { be_->cursorClosed(ownsTxn_); }
+PgSnapshot::~PgSnapshot() {
+  if (be_ != nullptr) {
+    be_->endTxn();
+  }
+}
 
 std::expected<std::unique_ptr<SqlBackend>, std::string>
 openPgBackend(const std::string_view conninfo) {
