@@ -2,7 +2,7 @@
 
 | field         | value                                                                                                                                                                                                                       |
 | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| version       | 3.4 (see [Appendix](#appendix-versioning-and-change-history))                                                                                                                                                               |
+| version       | 3.5 (see [Appendix](#appendix-versioning-and-change-history))                                                                                                                                                               |
 | status        | Specification only. Nothing here is built or wired into the gleditor build.                                                                                                                                                 |
 | compiles to   | Vortex opcode streams over an `ArenaManifold`, run one turn at a time by a Spool-Mesh actor executor                                                                                                                        |
 | rests on      | Vortex ([runtime](vortex-hyperstructural-runtime.md)), Vlog ([logic](vlog-logic-extension.md)), vicon ([goals](vicon-goal-directed-language.md)), the Spool-Mesh actor runtime (`apps/common/xanadu/vortex/mesh_actor.hpp`) |
@@ -347,12 +347,16 @@ caused the turn is consumed. If the turn was running an intention, the adapter r
 `std:agent`'s `fail_step(id, cause)`, which records a plan failure with cause `fuel`, `cycles` or
 `depth`; no user code runs in it. If the turn was handling an `ask` or a delegated `achieve`, the
 turn result is a typed fault, so the sender's statement fails at once with cause `remote_fault`. Any
-other event is dropped and counted in `$stats`.
+other event is dropped and counted in `$stats`, written by the adapter after the undo so the count
+survives it. A hard failure in a turn that runs genesis or `Initialize` cannot be recovered that
+way: `$initialized` is still unset, so every later turn would run the failing initialisation again.
+It is fatal instead. The adapter stages `ChildStopping{cause: "init"}` to the parent and returns an
+error from the executor, which stops the actor (`pumpOne` sets `stopped`); it does not retry.
 
 Step 9 runs inside the executor, so its `send`, `spawn`, `monitor` and `stop` calls re-enter the
 runtime from within `pumpOne`; P2, P3 and P7 therefore defer every erasure that touches the running
 actor until `pumpOne` returns. The adapter also resets the cursor's opcode after a hard failure;
-vagent never sets an oracle path, so the VM's Dewey path is unused.
+vagent never sets an oracle path, so the VM's Dewey path matters only for its cost (step 4, P12).
 
 The adapter checkpoints between `pumpOne` calls, never inside the executor, because `checkpointView`
 refuses a running actor. At the end of step 10 no mark or choice point is live. The agent is
@@ -1307,12 +1311,14 @@ Notes the grammar cannot carry:
   identifier is `PascalCase` (§8.1); a `snake_case` identifier followed by `{` is never one. In a
   `where`, a contract or a goal clause a record literal must also be parenthesised, as Rust does in
   `if` headers.
+- **`for` after an action.** After `emit`'s operands, `for` introduces the recipients; a `for` loop
+  begins only at the start of an expression, so the two never meet.
 - **Action operands are postfix expressions**, so `emit E{...} & next()` is
   `(emit E{...}) & next()`, and an `in`, `for`, `by`, `within`, `from` or `else` after an action
   belongs to it.
-- **`else` binds to the nearest `if`, `achieve`, `ask` or `await`.** A `then` body that contains an
-  `achieve`, `ask` or `await` without its own `else` must be braced when the `if` has an `else`; the
-  checker reports the ambiguity otherwise.
+- **`else` binds to the nearest unmatched `if`, `achieve`, `ask` or `await`,** as in C. A `then`
+  body that contains an `achieve`, `ask` or `await` without its own `else` must be braced when the
+  `if` has an `else`; the checker reports the ambiguity otherwise.
 - **Terms.** A term argument that begins with `?` is a logic variable; a scan inside a term needs
   parentheses. After `believe`, `forget`, `revise`, `believes`, `findall`, `tell`, `untell` and
   `await`, and in a trigger, `name(args)` is a term. Variables bound in an `if` condition, a
@@ -1472,11 +1478,10 @@ ______________________________________________________________________
 Nothing is in production, so changes to the Vortex core, the Vortex standard library and the mesh
 runtime are allowed where vagent strictly needs them. Each is a **proposal**: it is listed in §11.2
 with the reason it cannot be done in vagent's own code, what vagent does without it, and a status. A
-proposal is incorporated into the design only after its own approval; until then the design depends
-on it only as stated in its "Without it" column, and every section that relies on one cites its
-number. P1–P11 are approved; P12–P14 are not, and the design is written to work without them. New
-files under `apps/common/xanadu/vagent/` and `apps/vagent/` (§11.1) change no existing code and are
-not proposals.
+proposal becomes part of the design only once approved; until then the design works without it, as
+its "Without it" column states. Every section that relies on a proposal cites its number. P1–P11 are
+approved; P12–P14 are not. New files under `apps/common/xanadu/vagent/` and `apps/vagent/` (§11.1)
+change no existing code and are not proposals.
 
 The test for "strictly needed" is the same for every row: the capability must be impossible, or
 possible only by a workaround that breaks a property of §14, from three places in order of
@@ -1527,9 +1532,10 @@ spawns the launcher with a source pid it mints for itself.
 
 ### 11.2 Proposed changes to existing code
 
-P1–P11 were **approved** by the owner on 2026-10-22, individually, after this register was written;
-P12–P14 were added afterwards and are **pending approval**. The design depends on them as approved
-changes; the "Without it" column remains as the record of what each buys.
+P1–P11 were **approved** by the owner on 2026-10-22, individually, after this register was written,
+and the design depends on them. P12–P14 were added afterwards and are **pending approval**; the
+design does not depend on them, and their "Without it" cells give the cost the design carries until
+they land. For P1–P11 the "Without it" column remains as the record of what each buys.
 
 | No. | Change                                                                                                                                                                                                                                                                                         | Where                                                                                                                                                                                                                                            | Why it cannot live in `std:agent` or the adapter                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Without it                                                                                                                                                                                                                                                      | Used by                              |
 | --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
@@ -2061,6 +2067,10 @@ ______________________________________________________________________
 ______________________________________________________________________
 
 ## Appendix: Versioning and Change History
+
+**3.5 — Focused round 7.** A hard failure during initialisation is fatal, so an agent cannot retry a
+failing `Initialize` for ever; the register says plainly that the design depends on P1–P11 and not
+on the pending P12–P14; `else` and `for` binding are stated.
 
 **3.4 — Focused round 6.** After the owner approved P1–P11: dimensions are registered through
 `ensureDimension`; effects may be declared `preempts`, and the drain sends cancels and preempting
