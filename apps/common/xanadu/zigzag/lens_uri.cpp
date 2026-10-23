@@ -10,6 +10,7 @@
 #include "common/xanadu/zigzag/config_lens.hpp"
 #include "common/xanadu/zigzag/filesystem_lens.hpp"
 #include "common/xanadu/zigzag/git_lens.hpp"
+#include "common/xanadu/zigzag/journal_lens.hpp"
 #include "common/xanadu/zigzag/log_lens.hpp"
 #include "common/xanadu/zigzag/router_lens.hpp"
 #include "common/xanadu/zigzag/sql_lens.hpp"
@@ -57,6 +58,13 @@ openLensUri(const std::string_view uri) {
   if (uri.starts_with("log:")) {
     return std::unique_ptr<ProjectionLens>{
         std::make_unique<LogLens>(std::string{uri.substr(4)})};
+  }
+  // journal: is the whole local journal; journal:<unit> matches one
+  // _SYSTEMD_UNIT. A refused open still yields a lens (the root cell
+  // projects; browse() carries the error), like the sql:pg: stub.
+  if (uri.starts_with("journal:")) {
+    return std::unique_ptr<ProjectionLens>{
+        std::make_unique<JournalLens>(uri.substr(8))};
   }
   if (uri.starts_with("git:")) {
     return std::unique_ptr<ProjectionLens>{

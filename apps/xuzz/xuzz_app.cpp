@@ -832,9 +832,10 @@ int XuzzApp::executeLensRaster(const std::string &lensPath,
     return 1;
   }
   // The scheme'd lenses dispatch through openLensUri (cfg:/log:/git:/
-  // dir:); a bare path stays the FilesystemLens it always was.
+  // journal:/dir:); a bare path stays the FilesystemLens it always was.
   if (lensPath.starts_with("cfg:") || lensPath.starts_with("log:") ||
-      lensPath.starts_with("git:") || lensPath.starts_with("dir:")) {
+      lensPath.starts_with("git:") || lensPath.starts_with("journal:") ||
+      lensPath.starts_with("dir:")) {
     auto lens = zigzag::openLensUri(lensPath);
     if (!lens) {
       std::cerr << "Error: " << lens.error() << "\n";

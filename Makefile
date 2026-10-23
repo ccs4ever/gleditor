@@ -542,11 +542,30 @@ ifdef GLEDITOR_HAVE_PG
 override CXXFLAGS += -DGLEDITOR_HAVE_PG=1 $(PG_CFLAGS)
 endif
 
-XUDU_LIBS := $(shell pkg-config $(STATIC) --libs $(XUDU_PKGS)) $(PG_LIBS)
+# The journal lens' libsystemd backend (design/lens-candidates.md section
+# 3.4): GLEDITOR_JOURNAL_SD=1 requires libsystemd, =0 disables, unset probes
+# pkg-config -- the same probe shape as GLEDITOR_SQL_PG. The flag picks the
+# real half of journal_lens.cpp; without it a refusing stub compiles so
+# journal: URIs still parse.
+ifneq ($(GLEDITOR_JOURNAL_SD),0)
+ifeq ($(shell pkg-config --exists libsystemd && echo 1),1)
+GLEDITOR_HAVE_SYSTEMD := 1
+SYSTEMD_CFLAGS := $(shell pkg-config --cflags libsystemd)
+SYSTEMD_LIBS   := $(shell pkg-config --libs libsystemd)
+else ifeq ($(GLEDITOR_JOURNAL_SD),1)
+$(error GLEDITOR_JOURNAL_SD=1 was asked for but libsystemd was not found. \
+Install it (libsystemd-dev / systemd-devel) or build GLEDITOR_JOURNAL_SD=0.)
+endif
+endif
+ifdef GLEDITOR_HAVE_SYSTEMD
+override CXXFLAGS += -DGLEDITOR_HAVE_SYSTEMD=1 $(SYSTEMD_CFLAGS)
+endif
+
+XUDU_LIBS := $(shell pkg-config $(STATIC) --libs $(XUDU_PKGS)) $(PG_LIBS) $(SYSTEMD_LIBS)
 # Matches XUDU_PKGS because ZIGZAG_SHARED_CORE_OBJS is XUDU_CORE_OBJS: zigzag
 # links the whole xanalogical engine, so it needs whatever that engine needs.
 ZIGZAG_PKGS := $(XUDU_PKGS)
-ZIGZAG_LIBS := $(shell pkg-config $(STATIC) --libs $(ZIGZAG_PKGS)) $(PG_LIBS)
+ZIGZAG_LIBS := $(shell pkg-config $(STATIC) --libs $(ZIGZAG_PKGS)) $(PG_LIBS) $(SYSTEMD_LIBS)
 
 # glslangValidator is the traditional name and glslang the current one; which
 # of the two a distribution installs varies, so both are tried.
