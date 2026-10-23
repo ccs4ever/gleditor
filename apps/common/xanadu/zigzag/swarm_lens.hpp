@@ -22,17 +22,23 @@
 
 namespace xanadu {
 class MerkleLedger;
-}
+class SystemTorrentManager;
+} // namespace xanadu
 
 namespace zigzag {
 
-/// A MerkleLedger's entries as a bounded enumeration projection.
+/// A MerkleLedger's entries as a bounded enumeration projection; with
+/// a @ref xanadu::SystemTorrentManager the same slice also lists the
+/// managed torrents -- the live half of the swarm surface (peers,
+/// state, progress per infohash, re-read per epoch).
 class SwarmLens final : public ProjectionLens {
 public:
   /// @p label names the key space (swarm:<label>:...); @p ledger is the
   /// append-only source -- re-read per refresh() so appended entries
-  /// appear on the next epoch.
-  SwarmLens(std::string label, const xanadu::MerkleLedger &ledger);
+  /// appear on the next epoch. @p manager, when set, adds the managed
+  /// torrents rank under swarm:<label>:t:<infohash>.
+  SwarmLens(std::string label, const xanadu::MerkleLedger &ledger,
+            const xanadu::SystemTorrentManager *manager = nullptr);
 
   [[nodiscard]] std::vector<std::pair<std::string, std::optional<GenericDim>>>
   dimensions() const override;
@@ -46,6 +52,7 @@ public:
 private:
   std::string connKey_; ///< swarm:<label>
   const xanadu::MerkleLedger *ledger_;
+  const xanadu::SystemTorrentManager *manager_{nullptr};
 };
 
 } // namespace zigzag

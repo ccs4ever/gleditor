@@ -3,11 +3,13 @@
  * @brief SwarmLens: the Merkle identity ledger as a projection
  *        (design/lens-candidates.md section 3.6).
  */
+#include <filesystem>
 #include <memory>
 #include <string>
 
 #include <gtest/gtest.h>
 
+#include "common/xanadu/managed_torrent.hpp"
 #include "common/xanadu/merkle_ledger.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
@@ -16,6 +18,7 @@
 
 namespace {
 
+namespace fs = std::filesystem;
 using xanadu::IdentityKeyLink;
 using xanadu::MerkleLedger;
 using zigzag::CellRef;
@@ -89,6 +92,40 @@ TEST(SwarmLensTest, AppendsAppearOnRefreshWithStableKeys) {
   const auto e1 = p.session->cellFor("swarm:test:e:1");
   ASSERT_TRUE(e1.has_value());
   EXPECT_EQ(p.arena.textOf(*e1), "bob");
+}
+
+TEST(SwarmLensTest, ManagedTorrentsProjectTheLiveHalf) {
+  const auto dir = std::filesystem::temp_directory_path() /
+                   ("swarm-lens-" + std::to_string(::getpid()));
+  // A closed swarm: no DHT/LSD/trackers -- the manager registers and
+  // seeds on this host only.
+  xanadu::SystemTorrentManager::Options opts;
+  opts.cacheRoot                      = dir.string();
+  opts.enableDht                      = false;
+  opts.enableLsd                      = false;
+  opts.enableTrackers                 = false;
+  opts.restrictDhtToDistinctNetworks  = false;
+  opts.allowManyConnectionsPerAddress = true;
+  xanadu::SystemTorrentManager manager(opts);
+
+  ProjectedSwarm p;
+  (void)p.ledger.appendKey(entry("alice", "1111aaaa", 1000));
+  std::string err;
+  const auto hash =
+      manager.registerLedger(p.ledger, std::nullopt, "identity", &err);
+  ASSERT_FALSE(hash.isZero()) << err;
+
+  auto l          = std::make_unique<SwarmLens>("test", p.ledger, &manager);
+  p.session       = std::make_unique<ProjectionSession>(std::move(l), p.core);
+  const auto tkey = "swarm:test:t:" + hash.hex();
+  const auto t    = p.session->cellFor(tkey);
+  ASSERT_TRUE(t.has_value());
+  EXPECT_EQ(p.attr(*t, "d.role"), "sw.torrent");
+  EXPECT_EQ(p.attr(*t, "d.name"), "identity");
+  EXPECT_EQ(p.attr(*t, "d.state"), "seeding");
+  EXPECT_EQ(p.attr(*t, "d.keystab"), "pk");
+  EXPECT_EQ(*p.session->keyFor(*t), tkey);
+  fs::remove_all(dir);
 }
 
 } // namespace
