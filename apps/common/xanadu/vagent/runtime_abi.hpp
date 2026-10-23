@@ -176,10 +176,13 @@ inline constexpr std::string_view kWireCorrelation = "corr";
 /// name and the `for` list, so the host's relay fans it out (§5.4).
 inline constexpr std::string_view kWireRelaySpace = "relay";
 inline constexpr std::string_view kWireRelayFor   = "relay_for";
-/// The spawn capability's parameter dictionary: name, parent, args.
+/// The spawn capability's parameter dictionary: name, parent, args, agent type.
 inline constexpr std::string_view kWireSpawnName   = "name";
 inline constexpr std::string_view kWireSpawnParent = "parent";
 inline constexpr std::string_view kWireSpawnArgs   = "args";
+/// The agent type, so a remote or resumed child knows which compiled agent
+/// to instantiate.
+inline constexpr std::string_view kWireSpawnAgent = "agent";
 
 inline constexpr std::string_view kWireTagFloat  = "f";
 inline constexpr std::string_view kWireTagBool   = "b";
