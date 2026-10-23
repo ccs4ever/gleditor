@@ -2,7 +2,7 @@
 
 | field         | value                                                                                                                                                                                                                       |
 | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| version       | 3.6 (see [Appendix](#appendix-versioning-and-change-history))                                                                                                                                                               |
+| version       | 3.7 (see [Appendix](#appendix-versioning-and-change-history))                                                                                                                                                               |
 | status        | Specification only. Nothing here is built or wired into the gleditor build.                                                                                                                                                 |
 | compiles to   | Vortex opcode streams over an `ArenaManifold`, run one turn at a time by a Spool-Mesh actor executor                                                                                                                        |
 | rests on      | Vortex ([runtime](vortex-hyperstructural-runtime.md)), Vlog ([logic](vlog-logic-extension.md)), vicon ([goals](vicon-goal-directed-language.md)), the Spool-Mesh actor runtime (`apps/common/xanadu/vortex/mesh_actor.hpp`) |
@@ -432,8 +432,9 @@ update. Intentions waiting on an effect cannot follow the device: `resume` fails
 `migrated`.
 
 An orderly stop (`stop`, `terminate`, or lease end without renewal) runs `on Destroy`, stages
-`ChildStopping` to the parent, and asks the runtime to stop and reap the actor (P7). The parent
-reports one `ChildStopping` even when the runtime's `ActorDown` follows it.
+`ChildStopping{child, cause}` to the parent, with `cause` one of `"stop"`, `"terminate"`, `"lease"`
+or `"init"` (§4.2), and asks the runtime to stop and reap the actor (P7). The parent reports one
+`ChildStopping` even when the runtime's `ActorDown` follows it.
 
 ______________________________________________________________________
 
@@ -996,8 +997,8 @@ ______________________________________________________________________
   statement. A line that begins with `-`, `*`, `!`, `(`, `[` or `{` begins a new one, because those
   can start an expression. Newlines inside `( )`, `[ ]`, a record literal's `{ }` or a guard's `[ ]`
   are whitespace; inside a block nested in those, they are significant again. `;` separates
-  statements on one line. Top-level and member declarations need no separator; a declaration ends
-  where the next begins.
+  statements on one line. Outside blocks, newlines are whitespace: declaration headers may span
+  lines, and top-level and member declarations need no separator, each ending where the next begins.
 
 - Keywords. Reserved everywhere:
 
@@ -1475,11 +1476,11 @@ ______________________________________________________________________
 
 Nothing is in production, so changes to the Vortex core, the Vortex standard library and the mesh
 runtime are allowed where vagent strictly needs them. Each is a **proposal**: it is listed in §11.2
-with the reason it cannot be done in vagent's own code, what vagent does without it, and a status. A
-proposal becomes part of the design only once approved; until then the design works without it, as
-its "Without it" column states. Every section that relies on a proposal cites its number. All of
-P1–P14 are approved. New files under `apps/common/xanadu/vagent/` and `apps/vagent/` (§11.1) change
-no existing code and are not proposals.
+with the reason it cannot be done in vagent's own code, what vagent would carry without it, and a
+status. Each proposal was approved individually before the design came to depend on it, and every
+section that relies on one cites its number. All of P1–P14 are approved. New files under
+`apps/common/xanadu/vagent/` and `apps/vagent/` (§11.1) change no existing code and are not
+proposals.
 
 The test for "strictly needed" is the same for every row: the capability must be impossible, or
 possible only by a workaround that breaks a property of §14, from three places in order of
@@ -1547,9 +1548,9 @@ every row, the "Without it" column records what the change buys.
 | P9  | `defaultSettingSpecs()` entries for the `vagent.*` settings of §10, with their schema-page and notes-page entries                                                                                                                                                                              | `system_docs.cpp`                                                                                                                                                                                                                                | AGENTS.md: configuration lives in system xanadocs, adding a setting means a `defaultSettingSpecs()` entry, and every system xanadoc carries a schema page and a notes page; new code cannot add them                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | The launcher has nothing to read, and the defaults would be constants in the adapter, which the governance rules forbid; effectively required                                                                                                                   | §10                                  |
 | P10 | Record the `vortex.agent` logging category                                                                                                                                                                                                                                                     | `design/logging-migration.md`                                                                                                                                                                                                                    | Categories are free strings passed to `gleditor::logging::category`, so no code changes; the migration plan is where categories are named                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | `Logging` writes under an unrecorded category                                                                                                                                                                                                                   | §10                                  |
 | P11 | Build rules for `apps/vagent`, its tests and its fuzz targets                                                                                                                                                                                                                                  | `Makefile`                                                                                                                                                                                                                                       | Program targets need explicit rules; `apps/common/xanadu/` is globbed, apps are not                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | The library code builds, but there is no `vagent` binary and no tests run                                                                                                                                                                                       | §11.1, §15                           |
-| P12 | Maintain the VM's Dewey path only when an oracle path or a cut callback is set                                                                                                                                                                                                                 | `vortex_vm.cpp` (`pushChoicePoint`, `backtrack`)                                                                                                                                                                                                 | The path serves the oracle and cut-callback machinery, which vagent never sets; it is private VM state, and `setCurrentDeweyPath` can only reset it between turns, not between statements                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | O(k²) copying per turn for k choice points, bounded by fuel (§4.4)                                                                                                                                                                                              | §4.2, §4.4                           |
-| P13 | When `discard` releases the last outstanding mark, clear the trail                                                                                                                                                                                                                             | `zigzag/arena_manifold.cpp` (`ArenaManifold::discard`)                                                                                                                                                                                           | With no mark outstanding no choice point can replay the trail, but the trail is private and no public call clears it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | The trail grows with every committed turn until checkpoint and resume reclaim it (§4.4)                                                                                                                                                                         | §4.2, §4.4                           |
-| P14 | `forgetSender(prefix)`: erase every remembered id of one sender, called by the adapter on `ChildStopping`, `ChildDown` or removal from `$peers`; an amendment to P3                                                                                                                            | `mesh_actor.{hpp,cpp}`                                                                                                                                                                                                                           | A floor arrives only on a later envelope from the same sender, so a sender that stops sending leaves its last few ids remembered for ever; only the runtime can erase them                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Each sender that stops leaves a handful of entries, so a receiver can outlive roughly a thousand stopped senders before `maxRememberedMessages`; a late duplicate from a forgotten sender would run once more                                                   | §7.3, §15                            |
+| P12 | Maintain the VM's Dewey path only when an oracle path or a cut callback is set                                                                                                                                                                                                                 | `vortex_vm.cpp` (`pushChoicePoint`, `backtrack`)                                                                                                                                                                                                 | The path serves the oracle and cut-callback machinery, which vagent never sets; it is private VM state, and `setCurrentDeweyPath` can only reset it between turns, not between statements                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Each turn would copy O(k²) small integers for k choice points, bounded only by fuel                                                                                                                                                                             | §4.2, §4.4                           |
+| P13 | When `discard` releases the last outstanding mark, clear the trail                                                                                                                                                                                                                             | `zigzag/arena_manifold.cpp` (`ArenaManifold::discard`)                                                                                                                                                                                           | With no mark outstanding no choice point can replay the trail, but the trail is private and no public call clears it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | The trail would grow with every committed turn until checkpoint and resume reclaimed it                                                                                                                                                                         | §4.2, §4.4                           |
+| P14 | `forgetSender(prefix)`: erase every remembered id of one sender, called by the adapter on `ChildStopping`, `ChildDown` or removal from `$peers`; an amendment to P3                                                                                                                            | `mesh_actor.{hpp,cpp}`                                                                                                                                                                                                                           | A floor arrives only on a later envelope from the same sender, so a sender that stops sending leaves its last few ids remembered for ever; only the runtime can erase them                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Each stopped sender would leave a handful of remembered ids for ever, so a receiver could outlive only about a thousand stopped senders                                                                                                                         | §7.3, §15                            |
 | —   | Capability-bearing senders (`receive` admits `ActorSend` only from the owner)                                                                                                                                                                                                                  | `mesh_actor.cpp`                                                                                                                                                                                                                                 | not proposed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | single-owner societies (U-A2)                                                                                                                                                                                                                                   | —                                    |
 
 P2, P3, P5, P7 and P8 remove ceilings and unfairness that would affect any long-lived actor, not
@@ -1721,6 +1722,8 @@ event EmergencyHalted { kind: Str }
 event ScienceLog { target_id: Str, mineral: Str }
 event SampleSecured { target_id: Str, total: Int }
 event SurveyFailed { target_id: Str, cause: Str }
+event Heartbeat
+event Alive { samples: Int }
 
 goal Survey(target_id: Str, location: Point) perform
 goal Reach(location: Point) achieve {
@@ -1730,7 +1733,8 @@ goal KeepCharged(floor: Float) maintain {
   holds believes battery(?level) from self & level > floor
 }
 
-agent MarsSurveyor(hazard_limit: Int, reserve_floor: Float, leg_cost: Float, settle: Duration) {
+agent MarsSurveyor(hazard_limit: Int, reserve_floor: Float, leg_cost: Float, settle: Duration,
+                   heartbeat: Duration) {
   uses Mobility, Science, Routes
   install Chassis()
   install Spectrometer()
@@ -1738,6 +1742,10 @@ agent MarsSurveyor(hazard_limit: Int, reserve_floor: Float, leg_cost: Float, set
   var budget: Float := 0.0
   var samples: Int := 0
   var charging: Opt<Intention> := none
+  var beat: Opt<Timer> := none
+
+  on Initialize { beat := Schedules.periodic(heartbeat, Heartbeat{}) }
+  on Heartbeat { emit Alive{samples: samples} }
 
   on Position as p { revise position(p.at) }
   on Battery as b {
@@ -1786,6 +1794,9 @@ agent MarsSurveyor(hazard_limit: Int, reserve_floor: Float, leg_cost: Float, set
 
 What happens:
 
+1. `Initialize` starts a periodic timer. Every `heartbeat` the adapter asks for a wake turn and
+   delivers `Heartbeat{}` to the rover itself, which reports its sample count; the timer is an entry
+   in `$timers`, so it survives checkpoint and resume, and `Schedules.cancel(beat)` would stop it.
 1. The first `Battery` percept believes the level and adopts `KeepCharged`, a goal intention that
    watches `battery`. Adopting it only once a level is believed keeps the closed-world base from
    sending the rover to dock at start-up (§6.3).
@@ -2066,20 +2077,24 @@ ______________________________________________________________________
 
 ## Appendix: Versioning and Change History
 
+**3.7 — Round-9 minors.** Change-history pointers to the 3.6 approval; the P12–P14 "Without it"
+cells say what each change buys; `ChildStopping` causes form a closed set; newlines outside blocks
+are stated; the rover gains a periodic timer.
+
 **3.6 — P12–P14 approved.** The owner approved the three proposals added in round 6; the register,
 the header and §1 now record all fourteen changes as approved.
 
 **3.5 — Focused round 7.** A hard failure during initialisation is fatal, so an agent cannot retry a
 failing `Initialize` for ever; the register says plainly that the design depends on P1–P11 and not
-on the pending P12–P14; `else` and `for` binding are stated.
+on P12–P14, then pending (approved in 3.6); `else` and `for` binding are stated.
 
 **3.4 — Focused round 6.** After the owner approved P1–P11: dimensions are registered through
 `ensureDimension`; effects may be declared `preempts`, and the drain sends cancels and preempting
 effects first; `Initialize` runs before the first dispatch of any kind and never again after
 `resume`; the turn resets the Dewey path and compacts periodically; the costs of the trail, the
-Dewey path, the per-arena library and stopped senders are stated, with P12–P14 proposed (pending) to
-remove them; P3's hook has a signature; assignments and loops have type `()`; `vagent run` separates
-module and agent with `/`, and §12.4's dispatcher spawns its warehouse.
+Dewey path, the per-arena library and stopped senders are stated, with P12–P14 proposed to remove
+them (approved in 3.6); P3's hook has a signature; assignments and loops have type `()`;
+`vagent run` separates module and agent with `/`, and §12.4's dispatcher spawns its warehouse.
 
 **3.3 — Final review round; the proposal register made honest.** This revision addresses every
 blocking and major finding of the fifth and last review round, and most minor ones; it was not
