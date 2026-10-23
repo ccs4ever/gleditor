@@ -53,6 +53,7 @@
 #include "common/xanadu/zigzag/lens_uri.hpp"
 #include "common/xanadu/zigzag/projection_lens.hpp"
 #include "common/xanadu/zigzag/projection_session.hpp"
+#include "common/xanadu/zigzag/projection_to_zz.hpp"
 #include "common/xanadu/zigzag/sql_lens.hpp"
 #include "common/xanadu/zigzag/xanadu_projector.hpp"
 #include "common/xanadu/zigzag/zzcore.hpp"
@@ -572,6 +573,42 @@ void XuzzApp::printProjectionTree(const std::string &label,
   }
 }
 
+/// The interactive half of --lens: a live projection session whose
+/// refreshIfChanged() runs at each frame's quiesced point, re-adopting
+/// the arena into the visualizer when the source moved (the funnel's
+/// app side).
+class LensSurfaceContributor : public gleditor::FrameContributor {
+public:
+  LensSurfaceContributor(std::unique_ptr<zigzag::ProjectionLens> lens,
+                         zigzag::ZigzagVisualizer &viz, std::string label)
+      : core_(arena_), label_(std::move(label)), viz_(viz) {
+    session_ =
+        std::make_unique<zigzag::ProjectionSession>(std::move(lens), core_);
+  }
+  void drawFrame(gleditor::FrameContext & /*ctx*/) override {
+    if (session_ && (std::exchange(adopted_, true) == false ||
+                     session_->refreshIfChanged())) {
+      viz_.adoptDocument(zigzag::projectionToZz(label_, *session_, arena_),
+                         label_);
+      GLEDITOR_LOG_INFO("xuzz.lens", "{} -> {} cells adopted", label_,
+                        session_->cellCount());
+    }
+  }
+  [[nodiscard]] bool busy() const override { return false; }
+
+  /// The session, for callers driving lens verbs (browse/query happen
+  /// before the session wraps the lens; materialize/commit later).
+  [[nodiscard]] zigzag::ProjectionSession &session() { return *session_; }
+
+private:
+  zigzag::ArenaManifold arena_;
+  zigzag::vortex::VortexCore core_;
+  std::unique_ptr<zigzag::ProjectionSession> session_;
+  std::string label_;
+  zigzag::ZigzagVisualizer &viz_;
+  bool adopted_{false};
+};
+
 int XuzzApp::executeLensRaster(const std::string &lensPath,
                                const std::string &sqlBrowse,
                                const std::string &sqlQuery) {
@@ -651,7 +688,9 @@ int XuzzApp::run(const int argc, char **argv) {
     return executeCheckAuthorship(opts.checkAuthorshipPath);
   }
 
-  if (!opts.lensPath.empty()) {
+  // --lens rasters when the run is a raster; an interactive open flows
+  // on and the projected source becomes the slice view below.
+  if (!opts.lensPath.empty() && (opts.headless || opts.rasterMode)) {
     return executeLensRaster(opts.lensPath, opts.sqlBrowse, opts.sqlQuery);
   }
 
@@ -1301,6 +1340,36 @@ int XuzzApp::run(const int argc, char **argv) {
   zigzagPresentation->setPresentationTransformResolver(
       [&views] { return views.presentationTransform(); });
 
+  // A projected source becomes the slice view: the contributor owns the
+  // session and re-adopts it into the visualizer whenever the source
+  // moves (refreshIfChanged at the frame's quiesced point).
+  std::unique_ptr<LensSurfaceContributor> lensSurface;
+  if (!opts.lensPath.empty()) {
+    auto lens = zigzag::openLensUri(opts.lensPath);
+    if (!lens) {
+      std::cerr << "Error: " << lens.error() << "\n";
+      return 1;
+    }
+    // sql: browse/query args drive the lens before the session wraps it.
+    if (auto *sqlLens = dynamic_cast<zigzag::SqlLens *>(lens->get());
+        sqlLens != nullptr) {
+      if (!opts.sqlBrowse.empty()) {
+        if (const auto r = sqlLens->browse(opts.sqlBrowse); !r) {
+          std::cerr << "Error: browse: " << r.error() << "\n";
+          return 1;
+        }
+      }
+      if (!opts.sqlQuery.empty()) {
+        if (const auto r = sqlLens->query(opts.sqlQuery, {}); !r) {
+          std::cerr << "Error: query: " << r.error() << "\n";
+          return 1;
+        }
+      }
+    }
+    lensSurface = std::make_unique<LensSurfaceContributor>(
+        std::move(*lens), *zigzagPresentation, opts.lensPath);
+  }
+
   xanadu::BridgeCoordinator bridgeCoordinator(links, renderer,
                                               *state->accessibility);
   bridgeCoordinator.connectSatelloidNavigation(satelloidOverlay);
@@ -1683,6 +1752,9 @@ int XuzzApp::run(const int argc, char **argv) {
   renderer->addFrameContributor(&convergenceOverlay);
   renderer->addPickObserver(&convergenceOverlay);
   renderer->addSpanDecorator(&convergenceOverlay);
+  if (lensSurface) {
+    renderer->addFrameContributor(lensSurface.get());
+  }
 
   state->accessibility->addSource(docSwitcher.get());
   state->accessibility->addSource(&links);
