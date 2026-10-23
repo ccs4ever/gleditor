@@ -23,6 +23,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "common/xanadu/zigzag/file_watch.hpp"
 #include "common/xanadu/zigzag/projection_lens.hpp"
 #include "common/xanadu/zigzag/sql_backend.hpp"
 
@@ -130,6 +131,13 @@ public:
   applyContentChange(const ExternalKey &node,
                      std::string_view newContent) override;
 
+  /// Source-moved hint: for file-backed backends (SQLite) the file's
+  /// stamp + its kernel-watch events; for a socket backend (pg) a
+  /// cheap probe. The funnel's refresh() is where a moved DB lands.
+  [[nodiscard]] bool pollChanged() const override;
+  /// The file watch's descriptor where one exists (sqlite on Linux).
+  [[nodiscard]] int waitableFd() const noexcept override;
+
   /// The ranks a promote envelope writes -- declare these in the
   /// annotation store before the staging overlay is read, or the
   /// envelope's dims land as anonymous cells (spec section 6.1).
@@ -215,6 +223,16 @@ private:
   std::string dbid_;
   std::string backendName_;
   std::string displayPath_;
+  /// File-backed only: watches + last-enumeration stamps on the db
+  /// and its -wal sibling (writes land in the wal until a checkpoint
+  /// -- watching only the main file misses the WAL's whole life).
+  /// Inert for socket backends (pg).
+  mutable FileWatch watch_;
+  mutable FileWatch walWatch_;
+  mutable std::optional<std::pair<std::int64_t, std::uint64_t>> stamp_;
+  mutable std::optional<std::pair<std::int64_t, std::uint64_t>> walStamp_;
+  /// First pollChanged call seeds the stamps -- it reports nothing.
+  mutable bool seen_{false};
   std::size_t pageSize_;
   std::vector<SqlTable> schema_;
   std::vector<SqlQuery> queries_;

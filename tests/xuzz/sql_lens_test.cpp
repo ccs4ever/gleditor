@@ -806,6 +806,20 @@ TEST(SqlLensTest, CommitWritesAValueCellBackToTheRow) {
   EXPECT_NEAR(std::get<double>((*rows)[0][0]), 99.5, 1e-9);
 }
 
+TEST(SqlLensTest, PollChangedSeesAnExternalWrite) {
+  ProjectedDb p;
+  ASSERT_NE(p.lens, nullptr);
+  // The file lens's pollChanged is seeded by the first projection.
+  EXPECT_FALSE(p.lens->pollChanged());
+  // An external writer touches the file -- the watch and the stamp
+  // both see it (FixtureDb::write opens a fresh RW connection; the
+  // lens's own handle stays read-only).
+  p.db.write("INSERT INTO invoices VALUES (9,'z',0,'x')");
+  EXPECT_TRUE(p.lens->pollChanged());
+  // Once drained, it settles -- refreshIfChanged only fires on a move.
+  EXPECT_FALSE(p.lens->pollChanged());
+}
+
 TEST(SqlLensTest, WriteFlagOpensThroughTheUri) {
   FixtureDb db;
   // sql:sqlite:///path?write=1 opens the writable half; the bare URI

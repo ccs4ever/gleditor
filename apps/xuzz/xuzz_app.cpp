@@ -55,6 +55,7 @@
 #include "common/xanadu/zigzag/projection_session.hpp"
 #include "common/xanadu/zigzag/projection_to_zz.hpp"
 #include "common/xanadu/zigzag/sql_lens.hpp"
+#include "common/xanadu/zigzag/sql_promotion.hpp"
 #include "common/xanadu/zigzag/xanadu_projector.hpp"
 #include "common/xanadu/zigzag/zzcore.hpp"
 
@@ -580,16 +581,24 @@ void XuzzApp::printProjectionTree(const std::string &label,
 class LensSurfaceContributor : public gleditor::FrameContributor {
 public:
   LensSurfaceContributor(std::unique_ptr<zigzag::ProjectionLens> lens,
-                         zigzag::ZigzagVisualizer &viz, std::string label)
-      : core_(arena_), label_(std::move(label)), viz_(viz) {
+                         zigzag::ZigzagVisualizer &viz, std::string label,
+                         xanadu::Store &annotationStore)
+      : core_(arena_), annotationStore_(annotationStore),
+        label_(std::move(label)), viz_(viz) {
     session_ =
         std::make_unique<zigzag::ProjectionSession>(std::move(lens), core_);
   }
   void drawFrame(gleditor::FrameContext & /*ctx*/) override {
     if (session_ && (std::exchange(adopted_, true) == false ||
                      session_->refreshIfChanged())) {
+      // Keep the reader's cell: refs are stable across refreshes, so a
+      // still-present focus survives the re-adoption.
+      const auto focus = adopted_ ? viz_.focusCellId() : 0;
       viz_.adoptDocument(zigzag::projectionToZz(label_, *session_, arena_),
                          label_);
+      if (focus != 0 && arena_.contains(static_cast<zigzag::CellRef>(focus))) {
+        viz_.focusCell(static_cast<zigzag::CellRef>(focus));
+      }
       GLEDITOR_LOG_INFO("xuzz.lens", "{} -> {} cells adopted", label_,
                         session_->cellCount());
     }
@@ -623,8 +632,12 @@ public:
       return false;
     }
     (void)session_->refresh();
+    const auto focus = viz_.focusCellId();
     viz_.adoptDocument(zigzag::projectionToZz(label_, *session_, arena_),
                        label_);
+    if (focus != 0 && arena_.contains(static_cast<zigzag::CellRef>(focus))) {
+      viz_.focusCell(static_cast<zigzag::CellRef>(focus));
+    }
     return true;
   }
 
@@ -637,10 +650,49 @@ public:
     return c.has_value();
   }
 
+  /// Promote the focused subject (row) or page into the annotation
+  /// store -- the U-L5 crossing's user half.
+  [[nodiscard]] bool promoteFocused() {
+    if (!session_) {
+      return false;
+    }
+    const auto key =
+        session_->keyFor(static_cast<zigzag::CellRef>(viz_.focusCellId()));
+    if (!key.has_value()) {
+      return false;
+    }
+    auto *sql = sqlLens();
+    if (sql == nullptr) {
+      return false;
+    }
+    if (!promotion_) {
+      promotion_ =
+          std::make_unique<zigzag::SqlPromotion>(*sql, annotationStore_);
+    }
+    if (const auto r = promotion_->ensureReady(); !r) {
+      return false;
+    }
+    // Subject first, then page -- the same gesture with the envelope
+    // built for the key's own shape.
+    if (const auto s = promotion_->promoteSubject(*key); s.has_value()) {
+      return true;
+    }
+    const auto p = promotion_->promotePage(*key);
+    return p.has_value();
+  }
+
+private:
+  [[nodiscard]] zigzag::SqlLens *sqlLens() {
+    return dynamic_cast<zigzag::SqlLens *>(session_ ? session_->lensMut()
+                                                    : nullptr);
+  }
+
 private:
   zigzag::ArenaManifold arena_;
   zigzag::vortex::VortexCore core_;
   std::unique_ptr<zigzag::ProjectionSession> session_;
+  std::unique_ptr<zigzag::SqlPromotion> promotion_;
+  xanadu::Store &annotationStore_;
   std::string label_;
   zigzag::ZigzagVisualizer &viz_;
   bool adopted_{false};
@@ -1404,7 +1456,8 @@ int XuzzApp::run(const int argc, char **argv) {
       }
     }
     lensSurface = std::make_unique<LensSurfaceContributor>(
-        std::move(*lens), *zigzagPresentation, opts.lensPath);
+        std::move(*lens), *zigzagPresentation, opts.lensPath,
+        session->store(0));
   }
 
   xanadu::BridgeCoordinator bridgeCoordinator(links, renderer,
@@ -2653,6 +2706,13 @@ int XuzzApp::run(const int argc, char **argv) {
         [surface] {
           if (surface->commitDirty()) {
             GLEDITOR_LOG_INFO("xuzz.lens", "committed dirty edits");
+          }
+        });
+    app.commands().registerAction(
+        "lens.promote",
+        "promote the focused row or page into the annotation store", [surface] {
+          if (surface->promoteFocused()) {
+            GLEDITOR_LOG_INFO("xuzz.lens", "promoted the focused cell");
           }
         });
   }

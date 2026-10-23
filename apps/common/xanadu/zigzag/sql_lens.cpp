@@ -8,7 +8,9 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <filesystem>
 #include <ranges>
+#include <system_error>
 #include <utility>
 
 #include "common/xanadu/zigzag/arena_manifold.hpp"
@@ -87,7 +89,10 @@ SqlLens::SqlLens(std::unique_ptr<SqlBackend> backend, std::string dbid,
                  std::size_t pageSize)
     : backend_(std::move(backend)), dbid_(std::move(dbid)),
       backendName_(std::move(backendName)),
-      displayPath_(std::move(displayPath)), pageSize_(pageSize) {
+      displayPath_(std::move(displayPath)),
+      watch_(backendName_ == "sqlite" ? displayPath_ : ""),
+      walWatch_(backendName_ == "sqlite" ? displayPath_ + "-wal" : ""),
+      pageSize_(pageSize) {
   if (auto s = backend_->schema(); s) {
     schema_ = std::move(*s);
   }
@@ -978,6 +983,36 @@ bool SqlLens::forEachRoot(
   emit(connKey());
   return true;
 }
+
+bool SqlLens::pollChanged() const {
+  if (backendName_ != "sqlite") {
+    return false; // socket backends have no file stamp to watch
+  }
+  const auto stampOf = [](const std::string &path)
+      -> std::optional<std::pair<std::int64_t, std::uint64_t>> {
+    std::error_code ec;
+    const auto wt = std::filesystem::last_write_time(path, ec);
+    const auto sz = std::filesystem::file_size(path, ec);
+    if (ec) {
+      return std::nullopt; // absent file is itself a stamp (wal-less
+                           // db, or a checkpoint removed the wal)
+    }
+    return std::pair{wt.time_since_epoch().count(),
+                     static_cast<std::uint64_t>(sz)};
+  };
+  // A WAL-mode write lands in <db>-wal; the main file only moves at a
+  // checkpoint -- stamp and watch both siblings.
+  const auto mainNow = stampOf(displayPath_);
+  const auto walNow  = stampOf(displayPath_ + "-wal");
+  const bool moved   = (mainNow != stamp_) || (walNow != walStamp_);
+  stamp_             = mainNow;
+  walStamp_          = walNow;
+  const bool seeded  = seen_; // first call only seeds
+  seen_              = true;
+  return seeded && (watch_.dirty() || walWatch_.dirty() || moved);
+}
+
+int SqlLens::waitableFd() const noexcept { return watch_.waitableFd(); }
 
 std::expected<ExternalKey, std::string>
 SqlLens::applyContentChange(const ExternalKey &node,
