@@ -8,7 +8,10 @@
 
 #include <array>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
 #include <sstream>
+#include <system_error>
 #include <unordered_set>
 
 namespace zigzag {
@@ -36,7 +39,8 @@ std::string commitKey(const std::string &conn, const std::string &sha) {
 
 GitLens::GitLens(std::string repoPath, const std::size_t pageSize)
     : repo_(std::move(repoPath)), pageSize_(pageSize == 0 ? 1 : pageSize),
-      connKey_("git:" + repo_) {}
+      connKey_("git:" + repo_), headWatch_(repo_ + "/.git/HEAD"),
+      packedWatch_(repo_ + "/.git/packed-refs") {}
 
 std::vector<std::pair<std::string, std::optional<GenericDim>>>
 GitLens::dimensions() const {
@@ -109,6 +113,69 @@ GitLens::logPage(const std::size_t skip, const std::size_t count) const {
     }
   }
   return commits;
+}
+
+namespace {
+
+/// HEAD's target: "ref: refs/heads/main" -> <repo>/.git/refs/heads/main;
+/// a detached sha keeps the literal file path (its own watch target).
+std::string resolvedRefFile(const std::string &repo) {
+  std::ifstream head(repo + "/.git/HEAD");
+  std::string line;
+  if (!std::getline(head, line)) {
+    return {};
+  }
+  if (line.starts_with("ref: ")) {
+    return repo + "/.git/" + line.substr(5);
+  }
+  return repo + "/.git/HEAD"; // detached: HEAD's sha is the stamp
+}
+
+std::optional<std::pair<std::int64_t, std::uint64_t>>
+fileStamp(const std::string &path) {
+  std::error_code ec;
+  const auto wt = std::filesystem::last_write_time(path, ec);
+  const auto sz = std::filesystem::file_size(path, ec);
+  if (ec) {
+    return std::nullopt;
+  }
+  return std::pair{wt.time_since_epoch().count(),
+                   static_cast<std::uint64_t>(sz)};
+}
+
+} // namespace
+
+bool GitLens::pollChanged() const {
+  // The resolved branch ref is watched where it exists; a commit
+  // rewrites the ref file, a checkout rewrites HEAD (and re-points
+  // the ref watch). packed-refs covers `git pack-refs`.
+  const std::string refFile = resolvedRefFile(repo_);
+  if (!refFile.empty() && refFile != refPath_) {
+    refPath_  = refFile;
+    refWatch_ = std::make_unique<FileWatch>(refFile);
+  }
+  const auto refNow  = refFile.empty() ? std::nullopt : fileStamp(refFile);
+  const auto headNow = fileStamp(repo_ + "/.git/HEAD");
+  // First call seeds the stamps -- nothing moved yet.
+  if (!seeded_) {
+    seeded_    = true;
+    stamp_     = refNow;
+    headStamp_ = headNow;
+    return false;
+  }
+  const bool moved   = (refNow != stamp_) || (headNow != headStamp_);
+  stamp_             = refNow;
+  headStamp_         = headNow;
+  const bool watched = headWatch_.dirty() || packedWatch_.dirty() ||
+                       (refWatch_ && refWatch_->dirty());
+  return moved || watched;
+}
+
+std::optional<int> GitLens::waitableFd() const noexcept {
+  if (refWatch_ && refWatch_->waitableFd().has_value()) {
+    return refWatch_->waitableFd();
+  }
+  return headWatch_.waitableFd();
 }
 
 std::expected<void, std::string> GitLens::browse() {

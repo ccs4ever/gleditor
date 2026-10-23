@@ -23,6 +23,7 @@
 #include <string_view>
 #include <vector>
 
+#include "common/xanadu/zigzag/file_watch.hpp"
 #include "common/xanadu/zigzag/projection_lens.hpp"
 
 namespace zigzag {
@@ -58,6 +59,23 @@ public:
   /// newest commits). The browse entry, SqlLens-style.
   [[nodiscard]] std::expected<void, std::string> browse();
 
+  /// The first deferred log page's key -- the next-page gesture's target.
+  [[nodiscard]] std::optional<ExternalKey> nextStub() const override {
+    for (const auto &p : pages_) {
+      if (p.stub) {
+        return p.key;
+      }
+    }
+    return std::nullopt;
+  }
+
+  /// HEAD + the resolved branch ref + packed-refs, watched and stamped
+  /// -- a commit or checkout is a kernel event, not a git invocation.
+  /// The stamp is the ground truth when the watch is inert.
+  [[nodiscard]] bool pollChanged() const override;
+  /// The resolved branch ref's watch fd where there is one.
+  [[nodiscard]] std::optional<int> waitableFd() const noexcept override;
+
   [[nodiscard]] std::expected<void, std::string>
   materializePage(const ExternalKey &windowKey) override;
   void discardMaterializedAfter(const ExternalKey &boundaryKey) override;
@@ -85,6 +103,17 @@ private:
   std::string repo_;
   std::size_t pageSize_;
   std::string connKey_; ///< git:<repo>
+  /// HEAD (checkout), the resolved branch ref (commits), and
+  /// packed-refs (packs) -- the watch set; refWatch_ lazily follows
+  /// the ref HEAD names so a checkout re-targets it.
+  mutable FileWatch headWatch_;
+  mutable FileWatch packedWatch_;
+  mutable std::unique_ptr<FileWatch> refWatch_;
+  mutable std::string refPath_;
+  /// The last poll's ref + HEAD stamps; first call only seeds.
+  mutable std::optional<std::pair<std::int64_t, std::uint64_t>> stamp_;
+  mutable std::optional<std::pair<std::int64_t, std::uint64_t>> headStamp_;
+  mutable bool seeded_{false};
   mutable std::vector<LogPage> pages_;
   mutable std::vector<GitRef> refs_;
   mutable std::vector<GitCommit> commits_; ///< materialized, keyed by sha

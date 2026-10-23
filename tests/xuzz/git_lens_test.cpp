@@ -147,3 +147,19 @@ TEST(GitLensTest, StubPageMaterializesOlderCommits) {
 }
 
 } // namespace
+
+TEST(GitLensTest, PollChangedSeesACommitAndACheckout) {
+  GitFixture repo(2);
+  auto lens = GitLens{repo.repo.string()};
+  ASSERT_TRUE(lens.browse().has_value());
+  // Seed the stamps, then a commit rewrites refs/heads/main.
+  EXPECT_FALSE(lens.pollChanged());
+  GitFixture::run("git -C " + repo.repo.string() +
+                  " commit -q --allow-empty -m c3");
+  EXPECT_TRUE(lens.pollChanged());
+  // Drained. A checkout touches .git/HEAD itself.
+  EXPECT_FALSE(lens.pollChanged());
+  GitFixture::run("git -C " + repo.repo.string() +
+                  " checkout -q --detach HEAD~1");
+  EXPECT_TRUE(lens.pollChanged());
+}

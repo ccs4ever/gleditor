@@ -11,6 +11,7 @@
 
 #include "common/xanadu/zigzag/config_lens.hpp"
 #include "common/xanadu/zigzag/git_lens.hpp"
+#include "common/xanadu/zigzag/journal_lens.hpp"
 #include "common/xanadu/zigzag/log_lens.hpp"
 
 namespace zigzag {
@@ -77,6 +78,19 @@ RouterLens::delegateFor(const std::filesystem::path &path) {
     // read failure as cell content, so there is nothing to refuse here.
     return std::unique_ptr<ProjectionLens>{
         std::make_unique<ConfigLens>(path.string())};
+  }
+  // A systemd unit filename opens that unit's journal -- one hop to
+  // the evented log source; the whole journal through a `journal`
+  // entry (file or dir).
+  if (const std::string name = path.filename().string();
+      name == "journal" || ext == ".service" || ext == ".socket" ||
+      ext == ".timer" || ext == ".target" || ext == ".mount" ||
+      ext == ".scope" || ext == ".slice") {
+    auto lens = std::make_unique<JournalLens>(name == "journal" ? "" : name);
+    if (const auto r = lens->browse(); !r) {
+      return std::unexpected(r.error());
+    }
+    return lens;
   }
   return std::unexpected("no delegate lens classifies " + path.string());
 }
