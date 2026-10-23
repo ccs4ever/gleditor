@@ -203,12 +203,16 @@ state, and lifetime replay from a spool is not on offer (§14).
 
 **V10. Thirteen dimensions, minted as data.** `std:agent` finds or mints `d.behavior`, `d.skill`,
 `d.capacity`, `d.space`, `d.member`, `d.holon`, `d.intention`, `d.subgoal`, `d.outbox`, `d.belief`,
-`d.pending`, `d.source` and `d.extends` on the `d.dims` rank when it loads, as R12 requires. Its
-genesis routine, in Vortex, walks the `d.dims` rank for each name and mints a cell only when the
-name is absent, which is what `ArenaManifold::ensureDimension` does in C++, so loading `std:agent`
-into a resumed arena reuses the restored dimensions. `VortexCore::initGenesis` mints neither
-`d.source` nor `d.extends`, which is why they are on the list. *Price:* thirteen cells per arena and
-a lookup per dimension per load.
+`d.pending`, `d.source` and `d.extends` on the `d.dims` rank, as R12 requires. The adapter does the
+minting, not Vortex code: before a turn first runs in an arena (after spawn and after `resume`), it
+calls `ArenaManifold::ensureDimension` for each of the thirteen names and binds the resulting
+`DimRef`s as constants for `std:agent`. `ensureDimension` finds the name before minting and also
+records it in the arena's name table, which `dimensionNamed`, `dimensions()` and marks read, so C++
+and Vortex always name the same cells. A dimension minted from Vortex alone would be missing from
+that table, and a later `ensureDimension` would mint a second dimension of the same name. A test
+checkpoints and resumes an agent and asserts exactly one cell per name. `VortexCore::initGenesis`
+mints neither `d.source` nor `d.extends`, which is why they are on the list. *Price:* thirteen cells
+per arena and a lookup per dimension per load.
 
 **V11. Values are copied; identities are names.** A link is reciprocal, so a cell has one negward
 neighbour per dimension. Storing a value copies its cells (§5.9). The types that denote something
@@ -316,8 +320,9 @@ the local wake of P4. Both kinds run the same steps:
    recovery below.
 1. **Scope.** Unlink the cursor's `+d.vars` and `+d.stack` ranks. They hold only this turn's
    activation frames (§5.8); without this the cursor's scope would grow for the agent's life.
-1. **Drain** `d.outbox`: local spawns through `spawn()`, then messages (remote spawns travel as
-   messages), then effects, then timer changes. Unlink `$turn`'s event cell and each entry.
+1. **Drain** `d.outbox` in this order: local spawns through `spawn()`; messages (remote spawns
+   travel as messages); effect cancels; effects declared `preempts`; other effects; timer changes.
+   Unlink `$turn`'s event cell and each entry.
 1. **Derive** the adapter's ready list and timer heap from cells only (§5.6).
 
 **Hard failures and how the adapter tells them apart.** `run` reports, and does not backtrack, three
@@ -494,7 +499,11 @@ start-up. Its methods are effects (V6), and it is the only kind of skill that ma
 `effect` method. The host contract: starting an effect returns at once (the runtime is single
 threaded per node, so a binding that blocks stalls every agent on the node); a binding may offer
 `cancel`, which is best effort and idempotent; and a device shared by several intentions is
-serialised or refused (`EffectFailed{cause: "busy"}`) by its binding.
+serialised or refused (`EffectFailed{cause: "busy"}`) by its binding, except for a method declared
+`effect preempts`. A preempting effect is started at once even when another effect of the same
+capacity is in flight; the binding ends the one in flight, which reports
+`EffectFailed{cause: "preempted"}`. The modifier is on the capacity's method, so a native skill,
+which has no body, needs no declaration of its own.
 
 ### 5.4 Spaces, contexts and holons
 
@@ -614,9 +623,10 @@ the position rules of §8.3 are what make `:=` stand.
 | `Opt<T>`                   | a value cell with or without its one value on `+d.grab`                                                                                                                                                           | O(1) plus the value              |
 | names and ids              | one scalar or text cell (V11)                                                                                                                                                                                     | O(1)                             |
 
-Because a list value is laid out as a term, `#Unify` works on list-valued belief arguments, and
-`std:collections` functions apply from its first element. A `for x in xs` over a list keeps the list
-and the walk position as an index in the frame, and resumes by walking to it.
+Because a list value is laid out as a term, `#Unify` works on list-valued belief arguments, element
+by element and only for lists of equal length (there is no `[H|T]` pattern), and `std:collections`
+functions apply from its first element. A `for x in xs` over a list keeps the list and the walk
+position as an index in the frame, and resumes by walking to it.
 
 ______________________________________________________________________
 
@@ -665,7 +675,7 @@ goal Reach(location: Point) achieve {
   succeed when believes position(location)
 }
 goal KeepCharged(floor: Float) maintain {
-  holds believes battery(?level) & level > floor
+  holds believes battery(?level) from self & level > floor
 }
 goal Survey(target_id: Str, location: Point) perform
 ```
@@ -979,9 +989,9 @@ ______________________________________________________________________
   ```
 
   Contextual, reserved only in the position that uses them: `as`, `ensures`, `from`, `holds`,
-  `inner`, `maintain`, `module`, `occurrence`, `outer`, `parent`, `perform`, `priority`, `requires`,
-  `succeed`, `when`. After `.`, in a field declaration and as a record-literal key, any word is
-  accepted, so `f.goal` and an event field named `to` work, and `import std:agent` parses.
+  `inner`, `maintain`, `module`, `occurrence`, `outer`, `parent`, `perform`, `preempts`, `priority`,
+  `requires`, `succeed`, `when`. After `.`, in a field declaration and as a record-literal key, any
+  word is accepted, so `f.goal` and an event field named `to` work, and `import std:agent` parses.
   Parameters and locals must be identifiers, because a parameter named with a keyword could never be
   read.
 
@@ -1189,7 +1199,7 @@ FieldList     ::= Field { ',' Field } [ ',' ] ;
 Field         ::= Word ':' Type ;
 
 CapacityDecl  ::= 'capacity' Ident [ 'extends' IdentList ] '{' { MethodSig } '}' ;
-MethodSig     ::= [ 'effect' ] 'def' Ident '(' [ ParamList ] ')' [ ':' Type ]
+MethodSig     ::= [ 'effect' [ 'preempts' ] ] 'def' Ident '(' [ ParamList ] ')' [ ':' Type ]
                   [ 'within' Duration ] { Contract } ;
 Contract      ::= ( 'requires' | 'ensures' ) Expr ;
 MethodDef     ::= MethodSig Block ;
@@ -1402,7 +1412,7 @@ built), `std:goal` (scanning, once it registers vicon §6's functions), `std:col
 
 | Part         | Contents                                                                                                                                                                                                                                                                                                                                                              |
 | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| genesis      | finds or mints the thirteen dimensions of §5.1; creates the reserved fields                                                                                                                                                                                                                                                                                           |
+| genesis      | receives the thirteen dimensions of §5.1 from the adapter (V10); creates the reserved fields                                                                                                                                                                                                                                                                          |
 | dispatcher   | handler merge (§5.7), the settle loop, `consume`, await matching and capture                                                                                                                                                                                                                                                                                          |
 | deliberation | `adopt`, selection, `continue`, isolated reconsideration, maintain intentions, restorers and back-off, `fail_step`                                                                                                                                                                                                                                                    |
 | beliefs      | set-with-sources assert, retract and keyed revise; clause walk; `findall`                                                                                                                                                                                                                                                                                             |
@@ -1635,7 +1645,7 @@ event Battery { level: Float }
 
 capacity Mobility {
   effect def follow(route: [Point]) within 10min   // fails if a leg loses traction
-  effect def halt() within 5s
+  effect preempts def halt() within 5s
   effect def dock() within 30min
 }
 capacity Science {
@@ -1648,7 +1658,7 @@ capacity Routes {
   def cost(route: [Point]): Float
 }
 
-// Its driver posts Position and Battery. halt preempts any Mobility effect in flight.
+// Its driver posts Position and Battery.
 native skill Chassis implements Mobility
 native skill Spectrometer implements Science
 skill TerrainPlanner(leg_cost: Float) implements Routes {
@@ -1686,7 +1696,7 @@ goal Reach(location: Point) achieve {
   succeed when believes position(location)
 }
 goal KeepCharged(floor: Float) maintain {
-  holds believes battery(?level) & level > floor
+  holds believes battery(?level) from self & level > floor
 }
 
 agent MarsSurveyor(hazard_limit: Int, reserve_floor: Float, leg_cost: Float, settle: Duration) {
@@ -1727,7 +1737,7 @@ agent MarsSurveyor(hazard_limit: Int, reserve_floor: Float, leg_cost: Float, set
   }
 
   // Choose a route inside one statement: a failed arm restores budget.
-  plan travel for Reach where believes position(?here) & believes battery(?level) {
+  plan travel for Reach where believes position(?here) from self & believes battery(?level) from self {
     let route := (budget <- level - cost(direct(here, location))
                   & budget > reserve_floor & direct(here, location))
                | (budget <- level - cost(ridge(here, location))
@@ -1769,9 +1779,11 @@ What happens:
    intention but the maintain goal is dropped, and a docking restorer with them, which also sets
    `KeepCharged`'s back-off so the rover does not start docking again at once. Dropping `Survey`
    drops `Reach` with it and stages the chassis's `cancel` for `follow`; `Survey`'s `else` does not
-   run, because `Survey` itself ended. The drain performs cancels before new effects, and `halt` is
-   declared by `Chassis` to preempt any Mobility effect in flight, so the stop does not wait behind
-   the drive. The drive's later result is counted as late.
+   run, because `Survey` itself ended. The drain sends that cancel before new effects, and `halt` is
+   declared `effect preempts` on `Mobility`, so the chassis starts it at once and ends the drive
+   whatever the cancel achieves. A restorer the settle loop might adopt in the same turn runs no
+   plan until a later wake turn, and the back-off set by dropping the docking restorer stops one
+   being adopted at all. The drive's later result is counted as late.
 1. The method calls in `travel` (`cost(direct(…))` inside `&` and `|`) are calls from speculative
    positions, which only P1 makes possible.
 
@@ -1935,6 +1947,9 @@ ______________________________________________________________________
 - **Child loss is slow and remote-only** (§5.4); local children are known only through orderly
   stops.
 - **Migration** makes messages to the old pid fail until senders learn the new one (§4.5).
+- **A maintain goal retries for ever.** The back-off is a constant, so a restorer that can never
+  succeed (a broken dock) runs every `vagent.maintain_backoff`; a program bounds it with `drop when`
+  on the goal.
 - **Single-owner societies** until U-A2.
 - **Fuzzing.** The parser, the program loader, the event decoder, the outbox drain and host
   deliveries are new input surfaces and get `tests/fuzz/` targets.
