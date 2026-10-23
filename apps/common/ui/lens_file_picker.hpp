@@ -34,6 +34,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -127,7 +128,8 @@ public:
     return pickedPath_;
   }
 
-  // -- inspection (the test seam) ----------------------------------------------
+  // -- inspection (the test seam)
+  // ----------------------------------------------
   /// Absolute path under the cursor, if the cursor is on an entry.
   [[nodiscard]] std::optional<std::filesystem::path> cursorPath() const;
   /// The cursor's cell, for hosts that would rather navigateFocusTo() than
@@ -155,14 +157,10 @@ private:
 
   void project();
   void rebuildItems();
-  void walkEntry(zigzag::CellRef cell, const std::filesystem::path &path);
 
-  [[nodiscard]] zigzag::OptionalCell
-  nextSibling(zigzag::CellRef cell) const;
-  [[nodiscard]] zigzag::OptionalCell
-  prevSibling(zigzag::CellRef cell) const;
-  [[nodiscard]] zigzag::OptionalCell
-  firstChild(zigzag::CellRef cell) const;
+  [[nodiscard]] zigzag::OptionalCell nextSibling(zigzag::CellRef cell) const;
+  [[nodiscard]] zigzag::OptionalCell prevSibling(zigzag::CellRef cell) const;
+  [[nodiscard]] zigzag::OptionalCell firstChild(zigzag::CellRef cell) const;
   /// A non-first sibling has no d.contains edge of its own: its parent is the
   /// contains-negward neighbour of the sibling chain's head.
   [[nodiscard]] zigzag::OptionalCell parentOf(zigzag::CellRef cell) const;
@@ -176,6 +174,8 @@ private:
   void doCancel();
   void markDirty();
   void emitDocument();
+  /// Caller holds emitMutex_.
+  [[nodiscard]] zigzag::ZzStructureDocument buildDocument();
 
   std::filesystem::path root_;
   Filter filter_;
@@ -191,13 +191,16 @@ private:
   zigzag::DimRef dSeq_{};
   zigzag::DimRef dRole_{};
   std::unordered_map<zigzag::CellRef, Item> items_;
-  /// DFS order_ index: visible_[i] corresponds to the i-th entry walked.
+  /// Listed paths in depth-first display order, filled by rebuildItems().
   std::vector<std::filesystem::path> visible_;
   std::atomic<zigzag::CellRef> cursor_{};
   std::atomic<bool> finished_{false};
   std::atomic<bool> cancelled_{false};
   std::atomic<bool> docDirty_{false};
   std::optional<std::filesystem::path> pickedPath_;
+  /// Serializes snapshot builds: keyPressed runs on the event thread,
+  /// drawFrame on the render thread.
+  std::mutex emitMutex_;
 };
 
 } // namespace xanadu::ui

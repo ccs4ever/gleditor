@@ -942,7 +942,10 @@ $(OBJDIR)/xanadu_test: $(OBJDIR)/xuzz_test
 	ln -sf xuzz_test $@
 
 xuzz_test: $(OBJDIR)/xuzz_test
-$(OBJDIR)/xuzz_test: $(XUZZ_TEST_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
+# lens_file_picker.o sits with the UI sources (it is a FocusScope), but it is
+# deliberately engine-only at link time -- no renderer, no Canvas -- so the
+# headless xuzz_test can drive it.
+$(OBJDIR)/xuzz_test: $(XUZZ_TEST_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o $(OBJDIR)/apps/common/ui/lens_file_picker.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
 
 xudu_test: $(OBJDIR)/xudu_test
