@@ -16,7 +16,9 @@
  * a gleditor::ui::FocusScope, so a FocusManager (or a direct caller) feeds it
  * KeyEvents. Up/Down walk siblings on d.seq (Up off the first sibling lands
  * on the parent), Right/Return descend into a directory, Left/Backspace climb
- * to the parent, Return on a file fires onPick(path), Escape fires onCancel.
+ * to the parent, Return on a file fires onPick(path), Ctrl+Return picks the
+ * entry under the cursor even when it is a directory (the "open this
+ * directory" gesture a lens host needs), Escape fires onCancel.
  *
  * A Filter predicate set at construction (or via setFilter before open())
  * decides which files appear and are pickable -- e.g. an extension check for

@@ -5,6 +5,7 @@
 #include "xuzz_app.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
@@ -13,6 +14,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <sstream>
@@ -37,6 +39,7 @@
 #include "cli.hpp"
 #include "view_coordinator.hpp"
 
+#include "common/ui/lens_file_picker.hpp"
 #include "common/ui/quotation_builder_overlay.hpp"
 #include "common/ui/store_object_manager.hpp"
 #include "common/ui/walks.hpp"
@@ -53,6 +56,7 @@
 #include "common/xanadu/zigzag/lens_uri.hpp"
 #include "common/xanadu/zigzag/projection_lens.hpp"
 #include "common/xanadu/zigzag/projection_session.hpp"
+#include "common/xanadu/zigzag/projection_surface.hpp"
 #include "common/xanadu/zigzag/projection_to_zz.hpp"
 #include "common/xanadu/zigzag/router_lens.hpp"
 #include "common/xanadu/zigzag/sql_lens.hpp"
@@ -584,45 +588,89 @@ public:
   LensSurfaceContributor(std::unique_ptr<zigzag::ProjectionLens> lens,
                          zigzag::ZigzagVisualizer &viz, std::string label,
                          xanadu::Store &annotationStore)
-      : core_(arena_), annotationStore_(annotationStore),
-        label_(std::move(label)), viz_(viz) {
-    session_ =
-        std::make_unique<zigzag::ProjectionSession>(std::move(lens), core_);
-  }
+      : surface_(std::move(lens)), annotationStore_(annotationStore),
+        label_(std::move(label)), viz_(viz) {}
   void drawFrame(gleditor::FrameContext & /*ctx*/) override {
-    if (session_ && (std::exchange(adopted_, true) == false ||
-                     session_->refreshIfChanged())) {
-      // Keep the reader's cell: refs are stable across refreshes, so a
-      // still-present focus survives the re-adoption. contains() is
-      // the honest membership answer -- no "no cell" comparison here.
-      const auto focus =
-          static_cast<zigzag::CellRef>(adopted_ ? viz_.focusCellId() : 0);
-      viz_.adoptDocument(zigzag::projectionToZz(label_, *session_, arena_),
-                         label_);
-      if (arena_.contains(focus)) {
+    // swapLens releases the old session on the event thread; without the
+    // lock a frame could dereference it mid-teardown.
+    const std::lock_guard lock(surfaceMutex_);
+    const bool wasAdopted = adopted_.exchange(true);
+    if (!wasAdopted || surface_.session().refreshIfChanged()) {
+      if (viewSuspended_.load()) {
+        // A transient document (the file picker's tree) owns the slice
+        // view; the refresh above still ran, only the adoption waits.
+        return;
+      }
+      // Keep the reader's cell: a live re-adopt restores whatever is
+      // focused now, a resume (post-picker) the cell suspendView captured,
+      // a swap nothing -- the reader lands on the new source's root.
+      // contains() is the honest membership answer -- no "no cell"
+      // comparison here.
+      const auto focus = static_cast<zigzag::CellRef>(
+          wasAdopted ? viz_.focusCellId() : resumeFocus_.load());
+      viz_.adoptDocument(
+          zigzag::projectionToZz(label_, surface_.session(), surface_.arena()),
+          label_);
+      if (surface_.arena().contains(focus)) {
         viz_.focusCell(focus);
       }
       GLEDITOR_LOG_INFO("xuzz.lens", "{} -> {} cells adopted", label_,
-                        session_->cellCount());
+                        surface_.session().cellCount());
     }
   }
   [[nodiscard]] bool busy() const override { return false; }
 
   /// The session, for callers driving lens verbs (browse/query happen
   /// before the session wraps the lens; materialize/commit later).
-  [[nodiscard]] zigzag::ProjectionSession &session() { return *session_; }
+  [[nodiscard]] zigzag::ProjectionSession &session() {
+    return surface_.session();
+  }
+
+  /// Swap the projected source: arena, core and session are rebuilt in
+  /// one ProjectionSurface::reset (a CellRef from the old surface would
+  /// be a wild address in the new arena). The fresh projection is adopted
+  /// by the next drawFrame -- adopting here would race a queued document
+  /// emission landing on the render thread, and every adoption of this
+  /// view must serialize there. Throws what the projection throws; the
+  /// old surface survives a failed one.
+  LensSurfaceContributor *swapLens(std::unique_ptr<zigzag::ProjectionLens> lens,
+                                   std::string newLabel) {
+    const std::lock_guard lock(surfaceMutex_);
+    surface_.reset(std::move(lens));
+    promotion_.reset(); // it borrows the old surface's SqlLens
+    label_ = std::move(newLabel);
+    resumeFocus_.store(0); // a new source lands on its own root
+    adopted_.store(false);
+    viewSuspended_.store(false);
+    return this;
+  }
+
+  /// Pause adoption while a transient document owns the slice view,
+  /// remembering the reader's cell so resumeView() can land them back on
+  /// it; resumeView() then marks the surface for a fresh adopt next frame.
+  void suspendView() {
+    resumeFocus_.store(static_cast<zigzag::CellRef>(viz_.focusCellId()));
+    viewSuspended_.store(true);
+  }
+  void resumeView() {
+    if (viewSuspended_.exchange(false)) {
+      adopted_.store(false);
+    }
+  }
 
   /// A waitable descriptor for an event loop's wait path -- the lens's
   /// own change signal (inotify fd on Linux).
   [[nodiscard]] std::optional<int> waitableFd() const noexcept {
-    return session_ ? session_->lens().waitableFd() : std::nullopt;
+    const std::lock_guard lock(surfaceMutex_);
+    return surface_.session().lens().waitableFd();
   }
 
   /// Materialize the next deferred window page -- the next-page
   /// gesture. False when nothing is stubbed or the lens isn't windowed.
   [[nodiscard]] bool materializeNextStub() {
-    auto *w = dynamic_cast<zigzag::WindowedLens *>(
-        session_ ? session_->lensMut() : nullptr);
+    const std::lock_guard lock(surfaceMutex_);
+    auto *w =
+        dynamic_cast<zigzag::WindowedLens *>(surface_.session().lensMut());
     if (w == nullptr) {
       return false;
     }
@@ -634,7 +682,7 @@ public:
     if (!r) {
       return false;
     }
-    (void)session_->refresh();
+    (void)surface_.session().refresh();
     readoptKeepingFocus();
     return true;
   }
@@ -643,16 +691,17 @@ public:
   /// delegate lens (GitLens/LogLens/ConfigLens) under it -- a
   /// RouterLens hop in. Focus stays on the cell it was on.
   [[nodiscard]] bool openFocusedDelegate() {
+    const std::lock_guard lock(surfaceMutex_);
     auto *router = routerLens();
-    if (router == nullptr || !session_) {
+    if (router == nullptr) {
       return false;
     }
-    const auto key =
-        session_->keyFor(static_cast<zigzag::CellRef>(viz_.focusCellId()));
+    const auto key = surface_.session().keyFor(
+        static_cast<zigzag::CellRef>(viz_.focusCellId()));
     if (!key.has_value() || !router->open(*key).has_value()) {
       return false;
     }
-    (void)session_->refresh();
+    (void)surface_.session().refresh();
     readoptKeepingFocus();
     return true;
   }
@@ -660,12 +709,13 @@ public:
   /// The cross-lens "back" gesture: unmount the delegate at or above
   /// the focus and land the reader on the mount cell it came through.
   [[nodiscard]] bool backOutOfMount() {
+    const std::lock_guard lock(surfaceMutex_);
     auto *router = routerLens();
-    if (router == nullptr || !session_) {
+    if (router == nullptr) {
       return false;
     }
-    const auto key =
-        session_->keyFor(static_cast<zigzag::CellRef>(viz_.focusCellId()));
+    const auto key = surface_.session().keyFor(
+        static_cast<zigzag::CellRef>(viz_.focusCellId()));
     if (!key.has_value()) {
       return false;
     }
@@ -673,11 +723,12 @@ public:
     if (!mount.has_value() || !router->unmount(*mount).has_value()) {
       return false;
     }
-    (void)session_->refresh();
+    (void)surface_.session().refresh();
     readoptKeepingFocus();
     // One hop out lands on the mount cell -- the delegate's own cells
     // just stale-marked, so staying on them would strand the reader.
-    if (const auto cell = session_->cellFor(*mount); cell.has_value()) {
+    if (const auto cell = surface_.session().cellFor(*mount);
+        cell.has_value()) {
       viz_.focusCell(*cell);
     }
     return true;
@@ -685,21 +736,17 @@ public:
 
   /// Commit dirty edits through the lens (the write gesture).
   [[nodiscard]] bool commitDirty() {
-    if (!session_) {
-      return false;
-    }
-    const auto c = session_->commit();
+    const std::lock_guard lock(surfaceMutex_);
+    const auto c = surface_.session().commit();
     return c.has_value();
   }
 
   /// Promote the focused subject (row) or page into the annotation
   /// store -- the U-L5 crossing's user half.
   [[nodiscard]] bool promoteFocused() {
-    if (!session_) {
-      return false;
-    }
-    const auto key =
-        session_->keyFor(static_cast<zigzag::CellRef>(viz_.focusCellId()));
+    const std::lock_guard lock(surfaceMutex_);
+    const auto key = surface_.session().keyFor(
+        static_cast<zigzag::CellRef>(viz_.focusCellId()));
     if (!key.has_value()) {
       return false;
     }
@@ -725,37 +772,39 @@ public:
 
 private:
   [[nodiscard]] zigzag::SqlLens *sqlLens() {
-    return dynamic_cast<zigzag::SqlLens *>(session_ ? session_->lensMut()
-                                                    : nullptr);
+    return dynamic_cast<zigzag::SqlLens *>(surface_.session().lensMut());
   }
 
   /// The lens as a RouterLens when --lens named a directory -- the
   /// cross-lens mount/unmount gestures are its verbs.
   [[nodiscard]] zigzag::RouterLens *routerLens() {
-    return dynamic_cast<zigzag::RouterLens *>(session_ ? session_->lensMut()
-                                                       : nullptr);
+    return dynamic_cast<zigzag::RouterLens *>(surface_.session().lensMut());
   }
 
   /// Re-adopt the projection and restore the reader's cell: refs are
   /// stable across refreshes, so a still-present focus survives.
   void readoptKeepingFocus() {
     const auto focus = static_cast<zigzag::CellRef>(viz_.focusCellId());
-    viz_.adoptDocument(zigzag::projectionToZz(label_, *session_, arena_),
-                       label_);
-    if (arena_.contains(focus)) {
+    viz_.adoptDocument(
+        zigzag::projectionToZz(label_, surface_.session(), surface_.arena()),
+        label_);
+    if (surface_.arena().contains(focus)) {
       viz_.focusCell(focus);
     }
   }
 
 private:
-  zigzag::ArenaManifold arena_;
-  zigzag::vortex::VortexCore core_;
-  std::unique_ptr<zigzag::ProjectionSession> session_;
+  zigzag::ProjectionSurface surface_;
+  /// Serializes surface_/viz_ access: drawFrame is render-thread, the
+  /// verb gestures and swapLens run on the event thread.
+  mutable std::mutex surfaceMutex_;
   std::unique_ptr<zigzag::SqlPromotion> promotion_;
   xanadu::Store &annotationStore_;
   std::string label_;
   zigzag::ZigzagVisualizer &viz_;
-  bool adopted_{false};
+  std::atomic<bool> adopted_{false};
+  std::atomic<bool> viewSuspended_{false};
+  std::atomic<zigzag::CellRef> resumeFocus_{0};
 };
 
 int XuzzApp::executeLensRaster(const std::string &lensPath,
@@ -1519,6 +1568,17 @@ int XuzzApp::run(const int argc, char **argv) {
         std::move(*lens), *zigzagPresentation, opts.lensPath,
         session->store(0));
   }
+
+  // The browse-to-open picker (lens.open-source): a modal FocusScope that
+  // projects a directory into the same slice view the lens surface adopts
+  // into. The object lingers after it finishes -- its pick/cancel handlers
+  // run inside its own keyPressed, so destroying it there is deleting
+  // `this`; the next gesture replaces it, and its scope registration is
+  // what actually comes down on finish.
+  std::unique_ptr<xanadu::ui::LensFilePicker> lensPicker;
+  gleditor::ui::FocusManager::ScopeHandle lensPickerScope;
+  /// Where the picker opens: the last pick's parent, else the cwd.
+  std::optional<fs::path> lensPickerDir;
 
   xanadu::BridgeCoordinator bridgeCoordinator(links, renderer,
                                               *state->accessibility);
@@ -2752,45 +2812,131 @@ int XuzzApp::run(const int argc, char **argv) {
                                 "go to the previous state, losing nothing",
                                 [&views] { views.back(); });
 
-  if (lensSurface != nullptr) {
-    auto *surface = lensSurface.get();
-    app.commands().registerAction(
-        "lens.next-page", "materialize the lens's next deferred page",
-        [surface] {
-          if (surface->materializeNextStub()) {
-            GLEDITOR_LOG_INFO("xuzz.lens", "materialized next page");
-          }
+  // The lens verbs stay registered even without --lens: a picker pick
+  // creates the surface lazily, and its RouterLens needs open/back.
+  app.commands().registerAction(
+      "lens.next-page", "materialize the lens's next deferred page",
+      [&lensSurface] {
+        if (lensSurface != nullptr && lensSurface->materializeNextStub()) {
+          GLEDITOR_LOG_INFO("xuzz.lens", "materialized next page");
+        }
+      });
+  app.commands().registerAction(
+      "lens.commit", "commit the lens's dirty edits to its source",
+      [&lensSurface] {
+        if (lensSurface != nullptr && lensSurface->commitDirty()) {
+          GLEDITOR_LOG_INFO("xuzz.lens", "committed dirty edits");
+        }
+      });
+  app.commands().registerAction(
+      "lens.promote",
+      "promote the focused row or page into the annotation store",
+      [&lensSurface] {
+        if (lensSurface != nullptr && lensSurface->promoteFocused()) {
+          GLEDITOR_LOG_INFO("xuzz.lens", "promoted the focused cell");
+        }
+      });
+  app.commands().registerAction(
+      "lens.open", "mount the focused file cell's delegate lens (RouterLens)",
+      [&lensSurface] {
+        if (lensSurface != nullptr && lensSurface->openFocusedDelegate()) {
+          GLEDITOR_LOG_INFO("xuzz.lens",
+                            "mounted the focused cell's delegate lens");
+        }
+      });
+  app.commands().registerAction(
+      "lens.back", "unmount the delegate lens at or above the focus",
+      [&lensSurface] {
+        if (lensSurface != nullptr && lensSurface->backOutOfMount()) {
+          GLEDITOR_LOG_INFO("xuzz.lens", "unmounted the delegate lens");
+        }
+      });
+
+  // Browse-to-open: the picker projects a directory tree into the same
+  // slice view the lens surface adopts into, so finding a source and
+  // opening it are two halves of one gesture. Registered without
+  // --lens too -- the pick creates the LensSurfaceContributor lazily.
+  const auto openLensSource = [&] {
+    if (lensPicker != nullptr && !lensPicker->finished()) {
+      return; // already up
+    }
+    const fs::path root = lensPickerDir.value_or(fs::current_path());
+    auto picker         = std::make_unique<xanadu::ui::LensFilePicker>(root);
+    auto *const raw     = picker.get();
+    raw->setLabel("lens source: " + root.string());
+    // The sink hops to the render thread: adoptDocument rewrites the
+    // visualizer's store/engine, which the render loop reads every frame.
+    raw->setDocumentSink(
+        [renderer, zigzagPresentation](zigzag::ZzStructureDocument &&doc) {
+          const auto sourcePath = doc.meta.name;
+          renderer->runWithState([zigzagPresentation, doc = std::move(doc),
+                                  sourcePath](RenderState &) mutable {
+            zigzagPresentation->adoptDocument(std::move(doc), sourcePath);
+          });
         });
-    app.commands().registerAction(
-        "lens.commit", "commit the lens's dirty edits to its source",
-        [surface] {
-          if (surface->commitDirty()) {
-            GLEDITOR_LOG_INFO("xuzz.lens", "committed dirty edits");
-          }
+    // root is a local: the handler outlives this frame, so it takes a copy.
+    raw->setOnPick([&, root](const fs::path &path) {
+      lensPickerDir = path.has_parent_path() ? path.parent_path() : root;
+      auto lens     = zigzag::openLensUri(path.string());
+      if (!lens) {
+        GLEDITOR_LOG_WARN("xuzz.lens", "cannot open {} as a lens: {}",
+                          path.string(), lens.error());
+        lensPickerScope.reset();
+        return;
+      }
+      const auto label = path.string();
+      try {
+        if (lensSurface != nullptr) {
+          lensSurface->swapLens(std::move(*lens), label);
+        } else {
+          lensSurface = std::make_unique<LensSurfaceContributor>(
+              std::move(*lens), *zigzagPresentation, label, session->store(0));
+          auto *const surface = lensSurface.get();
+          renderer->runWithState([renderer, surface](RenderState &) {
+            renderer->addFrameContributor(surface);
+          });
+        }
+        GLEDITOR_LOG_INFO("xuzz.lens", "opened {} as a lens", label);
+      } catch (const std::exception &err) {
+        GLEDITOR_LOG_WARN("xuzz.lens", "cannot project {}: {}", label,
+                          err.what());
+        if (lensSurface != nullptr) {
+          lensSurface->resumeView(); // the old surface outlives a failed swap
+        }
+      }
+      lensPickerScope.reset();
+    });
+    raw->setOnCancel([&] {
+      lensPickerScope.reset();
+      // Hand the slice view back to what was showing: the live lens's
+      // projection, or the bound xanadu store.
+      if (lensSurface != nullptr) {
+        lensSurface->resumeView();
+      } else {
+        renderer->runWithState([&bindZigzag, &session, &zigzagStoreIndex,
+                                &sliceHeads](RenderState &rState) {
+          const auto it = sliceHeads.find(zigzagStoreIndex);
+          bindZigzag(
+              rState, zigzagStoreIndex,
+              it != sliceHeads.end()
+                  ? it->second
+                  : session->store(zigzagStoreIndex).primaryCurrentVersion());
         });
-    app.commands().registerAction(
-        "lens.promote",
-        "promote the focused row or page into the annotation store", [surface] {
-          if (surface->promoteFocused()) {
-            GLEDITOR_LOG_INFO("xuzz.lens", "promoted the focused cell");
-          }
-        });
-    app.commands().registerAction(
-        "lens.open", "mount the focused file cell's delegate lens (RouterLens)",
-        [surface] {
-          if (surface->openFocusedDelegate()) {
-            GLEDITOR_LOG_INFO("xuzz.lens",
-                              "mounted the focused cell's delegate lens");
-          }
-        });
-    app.commands().registerAction(
-        "lens.back", "unmount the delegate lens at or above the focus",
-        [surface] {
-          if (surface->backOutOfMount()) {
-            GLEDITOR_LOG_INFO("xuzz.lens", "unmounted the delegate lens");
-          }
-        });
-  }
+      }
+    });
+    if (lensSurface != nullptr) {
+      lensSurface->suspendView();
+    }
+    lensPicker      = std::move(picker);
+    lensPickerScope = state->focusManager.registerScope(
+        *raw, {.allowedCommands = {"quit", "std:xuzz/quit"}});
+    raw->open();
+  };
+  app.commands().registerAction(
+      "lens.open-source",
+      "browse for a local file or directory and open it as a lens",
+      openLensSource);
+
   app.commands().registerAction(std::string(xanadu::settings::kKeymapNewDoc),
                                 "create a new sovereign document quad",
                                 [&views] { views.newDocument(); });

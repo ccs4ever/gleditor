@@ -419,7 +419,7 @@ std::optional<std::filesystem::path> LensFilePicker::cursorPath() const {
 }
 
 bool LensFilePicker::keyPressed(const gleditor::Key key,
-                                const gleditor::KeyMods /*mods*/) {
+                                const gleditor::KeyMods mods) {
   if (!active() || finished_.load() || session_ == nullptr) {
     return false;
   }
@@ -447,7 +447,15 @@ bool LensFilePicker::keyPressed(const gleditor::Key key,
     ascend();
     return true;
   case gleditor::Key::Return:
-    activateCursor();
+    // Ctrl+Return picks even a directory: the one gesture for "open this
+    // directory itself" (a lens host opens a dir as a RouterLens).
+    if (gleditor::held(mods, gleditor::KeyMods::Ctrl)) {
+      if (const Item *cur = item(cursor_.load()); cur != nullptr) {
+        finishPick(cur->path);
+      }
+    } else {
+      activateCursor();
+    }
     return true;
   default:
     return false;

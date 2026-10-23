@@ -68,6 +68,36 @@ bool press(LensFilePicker &picker, const gleditor::Key key) {
   return picker.keyPressed(key, gleditor::KeyMods::None);
 }
 
+TEST(LensFilePickerTest, CtrlReturnPicksADirectory) {
+  Fixture fix;
+  std::optional<fs::path> picked;
+  LensFilePicker picker(fix.root, Fixture::wanted);
+  picker.setOnPick([&](const fs::path &p) { picked = p; });
+  picker.open();
+
+  // The cursor opens on the root directory itself.
+  EXPECT_TRUE(
+      picker.keyPressed(gleditor::Key::Return, gleditor::KeyMods::Ctrl));
+  ASSERT_TRUE(picked.has_value());
+  EXPECT_EQ(*picked, fix.root);
+}
+
+TEST(LensFilePickerTest, CtrlReturnOnNestedDirPicksIt) {
+  Fixture fix;
+  std::optional<fs::path> picked;
+  LensFilePicker picker(fix.root, Fixture::wanted);
+  picker.setOnPick([&](const fs::path &p) { picked = p; });
+  picker.open();
+
+  EXPECT_TRUE(press(picker, gleditor::Key::Right)); // -> config.json
+  EXPECT_TRUE(press(picker, gleditor::Key::Down));  // -> keep.sqlite
+  EXPECT_TRUE(press(picker, gleditor::Key::Down));  // -> logs/
+  EXPECT_TRUE(
+      picker.keyPressed(gleditor::Key::Return, gleditor::KeyMods::Ctrl));
+  ASSERT_TRUE(picked.has_value());
+  EXPECT_EQ(*picked, fix.root / "logs");
+}
+
 TEST(LensFilePickerTest, FilterLeavesDirsAndMatchingFiles) {
   Fixture fix;
   LensFilePicker picker(fix.root, Fixture::wanted);
