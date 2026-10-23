@@ -131,6 +131,12 @@ jobs:
           sudo cp -n ~/apt-archives/*.deb /var/cache/apt/archives/ 2>/dev/null || true
         fi
 
+        # The XUDU_PKGS set (libtorrent engine deps) is covered as far as
+        # the archive reaches: libblake3 and ngtcp2_crypto_ossl have no
+        # noble package -- the link step fails on them without a
+        # source-build step or a nix job carrying them. libpq-dev /
+        # libsystemd-dev activate the PG and journald lens backends
+        # (Makefile probes), so the real halves compile in CI.
         sudo apt-get install -y \
           ${{ matrix.sdl == 3 && 'libsdl3-dev' || 'libsdl2-dev' }} \
           libglm-dev libfreetype-dev libharfbuzz-dev \
@@ -138,6 +144,9 @@ jobs:
           libgl-dev libgl1-mesa-dev libglu1-mesa-dev \
           libvulkan-dev glslang-tools \
           mesa-vulkan-drivers vulkan-validationlayers \
+          libpoppler-dev libpoppler-cpp-dev libmagic-dev libvlc-dev \
+          libsqlite3-dev libzstd-dev libzmq3-dev libngtcp2-dev \
+          libpq-dev libsystemd-dev \
           libgmock-dev libgtest-dev \
           libtorrent-rasterbar-dev libssl-dev liblmdb-dev libspdlog-dev gnupg \
           xvfb \
