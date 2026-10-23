@@ -230,6 +230,9 @@ bool pureOpcode(OpcodeKind opcode) {
   case OpcodeKind::Fail:
   case OpcodeKind::Cut:
     return true;
+  // Reads the host's choice stack, which a pure remote job does not have.
+  case OpcodeKind::ChoiceDepth:
+    return false;
   }
   return false;
 }

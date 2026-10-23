@@ -84,6 +84,8 @@ enum class OpcodeKind : std::uint8_t {
   Choice,
   Fail,
   Cut,
+  // Appended last so artifacts minted before it keep their opcode numbers.
+  ChoiceDepth,
 };
 
 struct ChoicePoint {
@@ -131,6 +133,14 @@ public:
   // -- Distributed / Intra-Node OR-Parallelism Extensions ---------------------
   VortexVM *setOraclePath(std::span<const std::uint16_t> path);
   VortexVM *setCurrentDeweyPath(std::span<const std::uint16_t> path);
+  // The path is read by OR-parallel stealing as well as by the oracle and the
+  // cut callback, so it stays on by default; a host that uses neither (the
+  // vagent adapter) turns it off to stop copying it into every choice point.
+  VortexVM *setDeweyTracking(bool enabled) noexcept {
+    deweyTracking_ = enabled;
+    return this;
+  }
+  [[nodiscard]] bool deweyTracking() const noexcept { return deweyTracking_; }
   [[nodiscard]] std::span<const std::uint16_t>
   currentDeweyPath() const noexcept {
     return currentDeweyPath_;
@@ -180,6 +190,7 @@ private:
   std::vector<std::uint16_t> currentDeweyPath_;
   std::vector<std::uint16_t> oraclePath_;
   std::size_t oracleCursor_{0};
+  bool deweyTracking_{true};
   std::uint64_t totalCycles_{0};
   std::function<void(std::string_view deweyPrefix)> cutCallback_;
 };

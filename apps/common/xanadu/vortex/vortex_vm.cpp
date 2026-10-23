@@ -180,9 +180,12 @@ void VortexVM::pushChoicePoint(CellRef cursor, CellRef altOp) {
   if (cursor != noCell && core_.arena().contains(cursor)) {
     stackFrame = core_.arena().linked(cursor, core_.dims().stack, false);
   }
-  std::vector<std::uint16_t> altDewey = currentDeweyPath_;
-  altDewey.push_back(1);
-  currentDeweyPath_.push_back(0);
+  std::vector<std::uint16_t> altDewey;
+  if (deweyTracking_) {
+    altDewey = currentDeweyPath_;
+    altDewey.push_back(1);
+    currentDeweyPath_.push_back(0);
+  }
   choiceStack_.push_back(ChoicePoint{
       .cursor          = cursor,
       .altOp           = altOp,
@@ -201,7 +204,9 @@ bool VortexVM::backtrack(CellRef cursor) {
     choiceStack_.pop_back();
     if (cursor == noCell || cp.cursor == cursor || cp.cursor == noCell) {
       core_.arena().release(cp.mark);
-      currentDeweyPath_ = cp.deweyPath;
+      if (deweyTracking_) {
+        currentDeweyPath_ = cp.deweyPath;
+      }
       if (cursor != noCell) {
         setCursorOpcode(cursor, cp.altOp);
         if (cp.stackFrame != noCell && core_.arena().contains(cursor)) {
@@ -948,7 +953,9 @@ ExecutionResult VortexVM::executeOpcodeBody(
     }
     if (oracleCursor_ < oraclePath_.size()) {
       const std::uint16_t directive = oraclePath_[oracleCursor_++];
-      currentDeweyPath_.push_back(directive);
+      if (deweyTracking_) {
+        currentDeweyPath_.push_back(directive);
+      }
       if (directive > 0 && cursor != noCell && altOp != noCell) {
         setCursorOpcode(cursor, altOp);
         jumped = true;
@@ -979,6 +986,10 @@ ExecutionResult VortexVM::executeOpcodeBody(
     }
     cut(barrier);
     outputs.emplace_back(true);
+    break;
+  }
+  case OpcodeKind::ChoiceDepth: {
+    outputs.emplace_back(static_cast<std::int64_t>(choiceStack_.size()));
     break;
   }
   case OpcodeKind::Halt:
@@ -1172,8 +1183,8 @@ std::size_t VortexVM::stepScheduler(std::stop_token stopToken) {
   // category is disabled, so an instrumented build pays nothing by default.
   static const auto schedLogger = gleditor::logging::category("vortex.sched");
   const bool trace              = schedLogger->should_log(spdlog::level::trace);
-  const auto tickStart = trace ? std::chrono::steady_clock::now()
-                               : std::chrono::steady_clock::time_point{};
+  const auto tickStart          = trace ? std::chrono::steady_clock::now()
+                                        : std::chrono::steady_clock::time_point{};
 
   for (CellRef cursor : cursors) {
     if (stopToken.stop_requested()) {
