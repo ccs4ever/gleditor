@@ -320,6 +320,8 @@ VPLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "FAIL";
   case OpcodeKind::Cut:
     return "CUT";
+  case OpcodeKind::ChoiceDepth:
+    return "CHOICE_DEPTH";
   default:
     return "UNKNOWN";
   }

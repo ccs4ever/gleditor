@@ -1602,6 +1602,12 @@ ArenaManifold *ArenaManifold::discard(const Mark &m) noexcept {
   // The trail entries stay. They were recorded for whatever choice point
   // encloses this one, which still needs them -- this is why cut can throw
   // away a choice point without undoing the bindings made under it (§5.4).
+  // With the last mark gone nothing can replay them: trail() records nothing
+  // and release() needs a mark, so keeping them only grows memory for the life
+  // of a long-running statement loop.
+  if (0 == outstandingMarks_) {
+    trail_.clear();
+  }
   return this;
 }
 
