@@ -238,6 +238,9 @@ std::size_t ProjectionSession::refresh() {
     if (present.contains(key) || refKeys_.contains(key)) continue;
     for (const auto &[rank, value] : lens_->staleAttributes(key)) {
       writeAttribute(cell, rank, value);
+      // A just-written attr is asserted this epoch -- keep it out of
+      // the absent-cell link dissolve below.
+      keepPos[cell].insert(dimFor(rank));
     }
   }
 
@@ -318,6 +321,24 @@ void ProjectionSession::tombstone(
       const bool kept = keep != keepPos.end() && keep->second.contains(dl.dim);
       if (!kept) {
         zigzag::expectWritten(arena.unlink(*cell, dl.dim, DimVector::POS));
+      }
+    }
+  }
+  // An absent cell's posward links are stale by definition: the source
+  // emitted nothing from it this epoch, so anything it still links to
+  // (a negward ghost on a live cell) comes down. The cell itself keeps
+  // its staleAttributes -- those joined keepPos when they were written.
+  for (const auto &[key, cell] : keyToCell_) {
+    if (present.contains(key) || refKeys_.contains(key)) {
+      continue;
+    }
+    const auto keep = keepPos.find(cell);
+    const auto run  = arena.dimensionsOf(cell);
+    const std::vector<DimLink> snapshot(run.begin(), run.end());
+    for (const DimLink &dl : snapshot) {
+      if (dl.pos != noCell && managedDims_.contains(dl.dim) &&
+          !(keep != keepPos.end() && keep->second.contains(dl.dim))) {
+        zigzag::expectWritten(arena.unlink(cell, dl.dim, DimVector::POS));
       }
     }
   }

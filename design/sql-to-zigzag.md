@@ -1456,3 +1456,22 @@ ______________________________________________________________________
   identifiers can carry the reserved bytes); `v:@<n>` pinned as the result-column position with the
   `ord:` caveat; `k:start` emits no lower predicate on replay; mode table shows the views→ordinal
   exception; `d.state` scope covers sightings.
+
+- **rev 7.** As implemented on `design/sql-to-zigzag`. All six phases landed (the `SqlBackend`
+  port + read-only SQLite backend; `refresh()`/`checkpoint()`/`rewind()`/`pin()` + `WindowedLens`;
+  browse mode; query mode + `sql:` URI + typed params + ordinal replay; the promote envelope +
+  `SqlPromotion` driver + `d.promoted` reconcile; the xuzz surface + the vprolog gate). The write
+  phase followed: `SqlBackend::execWrite` + the dialect surface (`paramPlaceholder`/`nullSafeEq` —
+  `?`/`IS ?` on SQLite, `$n`/`IS NOT DISTINCT FROM $n` on Postgres), `SqliteOpenOptions::writable`,
+  `applyContentChange` for `pk:`/`rid:` value cells, `?write=1` on the URI, and `PgBackend`'s real
+  libpq half (single-row streaming, read-only GUC pins, `execWrite` behind `PgOpenOptions::writable`,
+  `LISTEN`/`PQnotifies` as a pushed change source with `PQsocket` the waitable fd — tested live
+  against PostgreSQL 18.6). The evented seam is `pollChanged()` → `refreshIfChanged()` with
+  `FileWatch` (inotify/kqueue/`FindFirstChangeNotification`/inert) + a `waitableFd` trait verb;
+  `SqlLens` watches the db *and* its `-wal` (a WAL write lands there until checkpoint). xuzz:
+  `LensSurfaceContributor` adopts the session into the slice view each quiesced frame;
+  `lens.next-page`/`commit`/`promote`/`open`/`back`/`open-source` actions; `RouterLens` mounts a
+  delegate lens under a filesystem cell (`lens.open` on a `.git` dir, a `.log`, a `.json` — one hop
+  in, `lens.back` out); `union:a|b` composes lenses in one URI; `LensFilePicker` is the reusable
+  picker's FilesystemLens projection; `ZigzagVisualizer`'s `setOnExternalCellEdit` routes a cell
+  edit into the session's dirty set for `lens.commit`.

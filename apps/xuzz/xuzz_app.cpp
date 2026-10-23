@@ -589,7 +589,18 @@ public:
                          zigzag::ZigzagVisualizer &viz, std::string label,
                          xanadu::Store &annotationStore)
       : surface_(std::move(lens)), annotationStore_(annotationStore),
-        label_(std::move(label)), viz_(viz) {}
+        label_(std::move(label)), viz_(viz) {
+    // A lens slice has no engine_; its cell edits route here and dirty
+    // the projection's cell -- lens.commit flushes them to the source.
+    viz_.setOnExternalCellEdit(
+        [this](zigzag::CellID id, std::string_view text) {
+          const std::lock_guard lock(surfaceMutex_);
+          const auto key =
+              surface_.session().keyFor(static_cast<zigzag::CellRef>(id));
+          return key.has_value() &&
+                 surface_.session().editContent(*key, text).has_value();
+        });
+  }
   void drawFrame(gleditor::FrameContext & /*ctx*/) override {
     // swapLens releases the old session on the event thread; without the
     // lock a frame could dereference it mid-teardown.
@@ -840,17 +851,17 @@ int XuzzApp::executeLensRaster(const std::string &lensPath,
       return 1;
     }
   }
-  // Project a filesystem path through the FilesystemLens into an arena and
-  // print its cells, proving a projected non-Xanadu source is visible in xuzz.
-  if (lensPath.empty() || !fs::exists(lensPath)) {
-    std::cerr << "Error: --lens path does not exist: " << lensPath << "\n";
+  // A bare path (or a union:/dir: URI) opens through the same dispatch
+  // as the interactive surface.
+  auto lens = zigzag::openLensUri(lensPath);
+  if (!lens) {
+    std::cerr << "Error: " << lens.error() << "\n";
     return 1;
   }
   try {
     zigzag::ArenaManifold arena;
     zigzag::vortex::VortexCore core(arena);
-    zigzag::ProjectionSession session(
-        std::make_unique<zigzag::FilesystemLens>(lensPath), core);
+    zigzag::ProjectionSession session(std::move(*lens), core);
     printProjectionTree(lensPath, session, core);
     return 0;
   } catch (const std::exception &err) {

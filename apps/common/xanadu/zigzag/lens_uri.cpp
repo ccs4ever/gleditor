@@ -13,11 +13,33 @@
 #include "common/xanadu/zigzag/log_lens.hpp"
 #include "common/xanadu/zigzag/router_lens.hpp"
 #include "common/xanadu/zigzag/sql_lens.hpp"
+#include "common/xanadu/zigzag/union_lens.hpp"
 
 namespace zigzag {
 
 std::expected<std::unique_ptr<ProjectionLens>, std::string>
 openLensUri(const std::string_view uri) {
+  // union:a|b|c -- multi-lens composition over the same epoch; '|' is
+  // the delimiter (URIs/paths that legitimately carry one would
+  // percent-encode it anyway).
+  if (uri.starts_with("union:")) {
+    auto u   = std::make_unique<UnionLens>();
+    auto rem = uri.substr(6);
+    while (!rem.empty()) {
+      const auto bar  = rem.find('|');
+      const auto part = rem.substr(0, bar);
+      rem = bar == std::string_view::npos ? "" : rem.substr(bar + 1);
+      if (part.empty()) {
+        continue;
+      }
+      auto child = openLensUri(part);
+      if (!child) {
+        return std::unexpected(child.error());
+      }
+      u->add(std::move(*child));
+    }
+    return std::unique_ptr<ProjectionLens>{std::move(u)};
+  }
   if (uri.starts_with("sql:") ||
       (!uri.starts_with('/') && uri.find(':') == std::string_view::npos &&
        (uri.ends_with(".db") || uri.ends_with(".sqlite") ||

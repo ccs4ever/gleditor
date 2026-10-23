@@ -17,9 +17,11 @@
  */
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cstdlib>
 #include <memory>
 #include <string>
+#include <thread>
 
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
@@ -238,6 +240,34 @@ TEST(PgBackendTest, CommitWritesAValueCellBackToTheRow) {
   // read tests assert the seed value.
   ASSERT_TRUE(session.editContent(vkey, "10.5").has_value());
   ASSERT_TRUE(session.commit().has_value());
+}
+
+TEST(PgBackendTest, ListenNotifyIsAChangeEvent) {
+  if (pgConninfo().empty()) {
+    GTEST_SKIP() << "GLEDITOR_PG_TEST_CONNINFO unset";
+  }
+  auto be = zigzag::openPgBackend(pgConninfo());
+  ASSERT_TRUE(be.has_value()) << be.error();
+  EXPECT_TRUE((*be)->waitableFd().has_value());
+  // LISTEN on a channel; NOTIFY drains through pollChanged.
+  ASSERT_TRUE((*be)->listenChannel("lenstest").has_value());
+  EXPECT_FALSE((*be)->pollChanged()); // the LISTEN itself notifies nothing
+  // NOTIFY isn't a read statement -- through the writable write path.
+  auto writer = zigzag::openPgBackend(pgConninfo(),
+                                      zigzag::PgOpenOptions{.writable = true});
+  ASSERT_TRUE(writer.has_value());
+  const auto w = (*writer)->execWrite("NOTIFY lenstest", {});
+  ASSERT_TRUE(w.has_value()) << w.error();
+  // The notification lands asynchronously -- poll until it arrives.
+  bool saw = false;
+  for (int i = 0; i < 200 && !saw; ++i) {
+    saw = (*be)->pollChanged();
+    if (!saw) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+  }
+  EXPECT_TRUE(saw);
+  EXPECT_FALSE((*be)->pollChanged()); // drained
 }
 
 TEST(PgBackendTest, ReadOnlyBackendRefusesExecWrite) {

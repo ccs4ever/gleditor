@@ -426,7 +426,10 @@ public:
       return std::unexpected(msg);
     }
     const auto changed =
-        static_cast<std::uint64_t>(std::stoull(PQcmdTuples(r)));
+        // Non-DML commands (NOTIFY, SET) carry no tuple count.
+        PQcmdTuples(r)[0] == '\0'
+            ? 0u
+            : static_cast<std::uint64_t>(std::stoull(PQcmdTuples(r)));
     PQclear(r);
     return changed;
   }
@@ -438,6 +441,46 @@ public:
   [[nodiscard]] std::string nullSafeEq(std::string_view colSql,
                                        const std::size_t n) const override {
     return std::string{colSql} + " IS NOT DISTINCT FROM " + paramPlaceholder(n);
+  }
+
+  /// A pushed source where there is one: libpq's async NOTIFY lands
+  /// without a round-trip -- consume input (moves the socket's buffer
+  /// in), then drain the notification queue. Any pending NOTIFY is a
+  /// change hint; the schema/data diff on refresh() is what confirms it.
+  bool pollChanged() override {
+    if (!conn_ || !PQconsumeInput(conn_)) {
+      return false;
+    }
+    bool dirty = false;
+    while (PGnotify *n = PQnotifies(conn_)) {
+      dirty = true;
+      PQfreemem(n);
+    }
+    return dirty;
+  }
+
+  /// The connection's socket -- an event loop can wait on it; the
+  /// drain in pollChanged() then runs.
+  [[nodiscard]] std::optional<int> waitableFd() noexcept override {
+    const int s = PQsocket(conn_);
+    return s >= 0 ? std::optional<int>{s} : std::nullopt;
+  }
+
+  /// LISTEN is a subscription, not a cursor -- execOk'd, not prepared.
+  /// Channel names are identifier-quoted; the same sanitization as
+  /// column names applies.
+  [[nodiscard]] std::expected<void, std::string>
+  listenChannel(const std::string_view channel) override {
+    std::string name;
+    name.reserve(channel.size());
+    for (const char c : channel) {
+      if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_' &&
+          c != '-' && c != '.') {
+        return std::unexpected("unsafe channel name");
+      }
+      name += c;
+    }
+    return execOk(("LISTEN \"" + name + "\"").c_str());
   }
 
 private:

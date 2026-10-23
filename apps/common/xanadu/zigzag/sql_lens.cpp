@@ -985,6 +985,11 @@ bool SqlLens::forEachRoot(
 }
 
 bool SqlLens::pollChanged() const {
+  // The transport's own hint first (pg's NOTIFY drain is a real pushed
+  // signal); a file backend defers to the stamp + watch below.
+  if (backend_->pollChanged()) {
+    return true;
+  }
   if (backendName_ != "sqlite") {
     return false; // socket backends have no file stamp to watch
   }
@@ -1013,6 +1018,10 @@ bool SqlLens::pollChanged() const {
 }
 
 std::optional<int> SqlLens::waitableFd() const noexcept {
+  // The transport's socket where it has one (pg), else the file's watch.
+  if (const auto fd = backend_->waitableFd(); fd.has_value()) {
+    return fd;
+  }
   return watch_.waitableFd();
 }
 

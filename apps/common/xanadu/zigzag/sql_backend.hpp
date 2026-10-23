@@ -79,6 +79,26 @@ public:
 
 class SqlBackend {
 public:
+  /// A transport-level change hint: libpq's async NOTIFY on a socket
+  /// backend, nothing on a file backend (the lens's own stamp is the
+  /// signal there). Drains the transport's event queue -- nonblocking.
+  virtual bool pollChanged() { return false; }
+
+  /// Subscribe to the source's change channel -- pg's `LISTEN`. A
+  /// source that publishes change events on a channel reports through
+  /// pollChanged()'s drain. Default refuses: a file backend has no
+  /// channel to subscribe to.
+  [[nodiscard]] virtual std::expected<void, std::string>
+  listenChannel(std::string_view /*channel*/) {
+    return std::unexpected("no notify channel on this backend");
+  }
+
+  /// The transport's waitable descriptor where one exists (PQsocket
+  /// on pg) -- an app event loop can epoll it rather than poll.
+  [[nodiscard]] virtual std::optional<int> waitableFd() noexcept {
+    return std::nullopt;
+  }
+
   virtual ~SqlBackend() = default;
 
   [[nodiscard]] virtual std::expected<std::vector<SqlTable>, std::string>

@@ -671,6 +671,17 @@ bool ZigzagVisualizer::deleteFocusCell() {
 
 ZigzagVisualizer *
 ZigzagVisualizer::updateFocusCellText(const std::string &text) {
+  // An adopted lens document has no engine_; the owning surface's
+  // hook routes the edit to the projection's editContent instead
+  // (dirtying the cell for lens.commit, not the store).
+  if ((!engine_ || accursed_cell_focus_ == 0) && onExternalCellEdit_) {
+    if (accursed_cell_focus_ != 0 &&
+        onExternalCellEdit_(accursed_cell_focus_, text)) {
+      rebuildActiveViewTopology();
+      invalidateAccessibility();
+    }
+    return this;
+  }
   if (!engine_ || accursed_cell_focus_ == 0) {
     return this;
   }
@@ -3451,6 +3462,18 @@ ZigzagVisualizer *ZigzagVisualizer::setKeyHints(std::string here,
 }
 
 ZigzagVisualizer *ZigzagVisualizer::beginCellEdit() {
+  // The lens-surface path: no engine_, but the hook owns the write --
+  // the initial text is the adopted cell's rendered content.
+  if ((!engine_ || accursed_cell_focus_ == 0) && onExternalCellEdit_) {
+    if (const auto it = visible_cells_.find(accursed_cell_focus_);
+        accursed_cell_focus_ != 0 && it != visible_cells_.end()) {
+      cellEditText_ = it->second.text;
+      cellEditing_  = true;
+      activate();
+      cellEditWhole_ = !cellEditText_.empty();
+    }
+    return this;
+  }
   if (!engine_ || 0 == accursed_cell_focus_ ||
       !engine_->findCell(static_cast<CellRef>(accursed_cell_focus_))) {
     return this;
