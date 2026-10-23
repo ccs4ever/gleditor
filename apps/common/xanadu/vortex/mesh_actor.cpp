@@ -535,9 +535,10 @@ MeshActorRuntime::execute(Actor &actor,
   actor.running = true;
   if (message) actor.executingId = message->requestId;
   try {
-    result = executor_(ActorExecution{actor.pid, actor.grant, message,
-                                      actor.cursor, actor.stateRoot},
-                       *actor.context);
+    result =
+        executor_(ActorExecution{actor.pid, actor.grant, actor.spawnRequest,
+                                 message, actor.cursor, actor.stateRoot},
+                  *actor.context);
   } catch (const std::exception &) {
     result = std::unexpected(ActorError::ExecutionFailed);
   }

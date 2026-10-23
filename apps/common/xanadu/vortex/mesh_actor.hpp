@@ -93,6 +93,10 @@ struct ActorDiscoveryEvidence {
 struct ActorExecution {
   ActorPid pid;
   ActorGrant grant;
+  /// The `ActorSpawn` this actor was created or resumed from, so an executor
+  /// recovers spawn parameters without a side table. A reference into the
+  /// actor record, which the runtime keeps alive until the executor returns.
+  const ActorMessage &spawnRequest;
   /// Empty when the executor is woken by wake() rather than by a message.
   std::optional<ActorMessage> message;
   CellRef cursor;
