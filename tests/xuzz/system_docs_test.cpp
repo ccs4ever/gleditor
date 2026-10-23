@@ -126,6 +126,39 @@ TEST(SystemDocsTest, DefaultKeymapGivesEachChordOneActionPerScope) {
   }
 }
 
+TEST(SystemDocsTest, VagentSettingsSeedWithDesignDefaults) {
+  using xanadu::settings::kVagentCompactEvery;
+  const auto specs = xanadu::defaultSettingSpecs(SystemDocKind::Settings);
+  const auto find  = [&](const std::string_view name) {
+    return std::ranges::find_if(
+        specs, [&](const auto &spec) { return spec.name == name; });
+  };
+  const std::vector<std::pair<std::string_view, xanadu::CellValue>> expected{
+      {"vagent.max_actors", std::int64_t{128}},
+      {"vagent.max_mailbox", std::int64_t{128}},
+      {"vagent.max_deliveries", std::int64_t{4096}},
+      {"vagent.value_operations", std::int64_t{65536}},
+      {"vagent.belief_event_depth", std::int64_t{16}},
+      {"vagent.condition_fuel", std::int64_t{1000}},
+      {"vagent.maintain_backoff", 30.0},
+      {"vagent.send_retries", std::int64_t{5}},
+      {"vagent.send_retry_interval", 1.0},
+      {"vagent.renew_fraction", 0.8},
+      {"vagent.ready_per_message", std::int64_t{4}},
+      {kVagentCompactEvery, std::int64_t{64}},
+  };
+  for (const auto &[name, value] : expected) {
+    const auto it = find(name);
+    ASSERT_NE(it, specs.end()) << name;
+    ASSERT_EQ(it->schemas.size(), 1U) << name;
+    ASSERT_EQ(it->schemas.front().defaultValues.size(), 1U) << name;
+    EXPECT_EQ(it->schemas.front().defaultValues.front(), value) << name;
+  }
+  EXPECT_NE(xanadu::defaultSystemDocSchema(SystemDocKind::Settings)
+                .find("vagent.renew_fraction"),
+            std::string::npos);
+}
+
 TEST(SystemDocsTest, KeymapScopesFollowTheActionFamily) {
   EXPECT_EQ(xanadu::keymapScope("std:nav/step_x_pos"), "zigzag");
   EXPECT_EQ(xanadu::keymapScope("std:zigzag/insert_cell_x_pos"), "zigzag");

@@ -93,7 +93,29 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "autoSaveSeconds: Inactivity interval in seconds before changes are "
            "committed. Default is 5.\n"
            "theme: Color scheme palette identifier (system, light, dark). "
-           "Default is system.\n";
+           "Default is system.\n"
+           "vagent.max_actors: Agents per runtime. Default is 128.\n"
+           "vagent.max_mailbox: Queued messages per agent. Default is 128.\n"
+           "vagent.max_deliveries: Outstanding sends per runtime. Default is "
+           "4096.\n"
+           "vagent.value_operations: Operations in one value checkpoint. "
+           "Default is 65536.\n"
+           "vagent.belief_event_depth: Settle rounds per turn. Default is 16.\n"
+           "vagent.condition_fuel: VM steps per where or await-guard "
+           "condition. Default is 1000.\n"
+           "vagent.maintain_backoff: Seconds before a maintain intention is "
+           "re-adopted after its restorer failed or was dropped. Default is "
+           "30.\n"
+           "vagent.send_retries: Redeliveries before an unanswered send is "
+           "abandoned. Default is 5.\n"
+           "vagent.send_retry_interval: Seconds between redeliveries. Default "
+           "is 1.\n"
+           "vagent.renew_fraction: Fraction of a lease elapsed before renewal "
+           "starts, in (0, 1). Default is 0.8.\n"
+           "vagent.ready_per_message: Wake turns run between two message "
+           "turns. Default is 4.\n"
+           "vagent.compact_every: Turns between arena compactions. Default is "
+           "64.\n";
   case SystemDocKind::Layout:
     return "Schema and Purpose\n\n"
            "Purpose:\n"
@@ -834,6 +856,56 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
                   "contexts (independent goals on private arenas, merged by "
                   "submission index). Default off; serial search is unchanged",
          .schemas = {{.expectedTypes = {"boolean"}, .defaultValues = {false}}}},
+        {.name    = std::string(settings::kVagentMaxActors),
+         .notes   = "vagent: agents per runtime; positive",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{128}}}}},
+        {.name    = std::string(settings::kVagentMaxMailbox),
+         .notes   = "vagent: queued messages per agent; positive",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{128}}}}},
+        {.name    = std::string(settings::kVagentMaxDeliveries),
+         .notes   = "vagent: outstanding sends per runtime; positive",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{4096}}}}},
+        {.name = std::string(settings::kVagentValueOperations),
+         .notes =
+             "vagent: operations allowed in one value checkpoint; positive",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{65536}}}}},
+        {.name    = std::string(settings::kVagentBeliefEventDepth),
+         .notes   = "vagent: settle rounds per turn; positive",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{16}}}}},
+        {.name    = std::string(settings::kVagentConditionFuel),
+         .notes   = "vagent: VM steps granted to each where or await-guard "
+                    "condition; positive",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{1000}}}}},
+        {.name    = std::string(settings::kVagentMaintainBackoff),
+         .notes   = "vagent: seconds before a maintain intention is re-adopted "
+                    "after its restorer failed or was dropped",
+         .schemas = {{.expectedTypes = {"float"}, .defaultValues = {30.0}}}},
+        {.name    = std::string(settings::kVagentSendRetries),
+         .notes   = "vagent: redeliveries before an unanswered send is "
+                    "abandoned; zero disables retry",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{5}}}}},
+        {.name  = std::string(settings::kVagentSendRetryInterval),
+         .notes = "vagent: seconds between redeliveries of an unanswered send",
+         .schemas = {{.expectedTypes = {"float"}, .defaultValues = {1.0}}}},
+        {.name    = std::string(settings::kVagentRenewFraction),
+         .notes   = "vagent: fraction of a lease that elapses before renewal "
+                    "starts; range 0 to 1 exclusive",
+         .schemas = {{.expectedTypes = {"float"}, .defaultValues = {0.8}}}},
+        {.name  = std::string(settings::kVagentReadyPerMessage),
+         .notes = "vagent: wake turns run between two message turns; positive",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{4}}}}},
+        {.name    = std::string(settings::kVagentCompactEvery),
+         .notes   = "vagent: turns between arena compact calls; positive",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{64}}}}},
     };
     break;
 
@@ -1070,9 +1142,9 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
         {.name    = std::string(settings::kRadialMenuInnerRadius),
          .notes   = "Inner deadzone radius of radial menu in pixels",
          .schemas = {{.expectedTypes = {"float"}, .defaultValues = {42.0}}}},
-        {.name  = std::string(settings::kLinkPanelFont),
-         .notes = "Typography role name (caption, label, body, title, mono); "
-                  "empty follows label; legacy font descriptions are accepted",
+        {.name    = std::string(settings::kLinkPanelFont),
+         .notes   = "Typography role name (caption, label, body, title, mono); "
+                    "empty follows label; legacy font descriptions are accepted",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {panel.font}}}},
         {.name    = std::string(settings::kLinkPanelMaxLines),
@@ -1982,9 +2054,9 @@ MicroversionId initializeSystemStoreGenesis(Store &store,
     const std::string storeNoteText = "Sovereign system store managing " +
                                       std::string(systemDocName(kind)) +
                                       " configuration.";
-    cur                             = store.makeCell(cur, storeNoteText);
-    const auto noteRef              = store.cellRefOf(cur);
-    manifold                        = store.rebuildManifold(cur);
+    cur                = store.makeCell(cur, storeNoteText);
+    const auto noteRef = store.cellRefOf(cur);
+    manifold           = store.rebuildManifold(cur);
     cur = store.setLink(cur, store.homeCell(), notesDim, zigzag::DimVector::POS,
                         noteRef);
     manifold = store.rebuildManifold(cur);
@@ -1997,9 +2069,9 @@ MicroversionId initializeSystemStoreGenesis(Store &store,
     cur                      = store.makeCell(cur, "");
     const auto emptyGroupRef = store.cellRefOf(cur);
     manifold                 = store.rebuildManifold(cur);
-    cur      = store.setLink(cur, store.homeCell(), groupsDim,
-                             zigzag::DimVector::POS, emptyGroupRef);
-    manifold = store.rebuildManifold(cur);
+    cur                      = store.setLink(cur, store.homeCell(), groupsDim,
+                                             zigzag::DimVector::POS, emptyGroupRef);
+    manifold                 = store.rebuildManifold(cur);
   }
 
   // Mint prototype type cells along d.schemas off d.schemas dimension cell
@@ -2501,9 +2573,9 @@ SystemStoreModel SystemStoreModel::fromManifold(const ManifoldT &manifold,
     // Active values along d.values
     entry.value.valueCells = zigzag::rankAfter(manifold, setCell, valuesDim) |
                              std::ranges::to<std::vector>();
-    entry.value.elements   = entry.value.valueCells |
-                             std::views::transform(valueOf) |
-                             std::ranges::to<std::vector>();
+    entry.value.elements = entry.value.valueCells |
+                           std::views::transform(valueOf) |
+                           std::ranges::to<std::vector>();
 
     // Validate
     std::string err;
@@ -3187,7 +3259,7 @@ LayoutConfig LayoutConfig::fromStore(const Store &store) {
       settings::kPhysicsMaxForce, static_cast<double>(cfg.physics.maxForce)));
   cfg.physics.maxVelocity             = static_cast<float>(
       model.getDouble(settings::kPhysicsMaxVelocity,
-                      static_cast<double>(cfg.physics.maxVelocity)));
+                                  static_cast<double>(cfg.physics.maxVelocity)));
   cfg.physics.timeStep = static_cast<float>(model.getDouble(
       settings::kPhysicsTimeStep, static_cast<double>(cfg.physics.timeStep)));
 

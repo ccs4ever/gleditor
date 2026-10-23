@@ -14,8 +14,9 @@ The default spdlog level is `info`, so debug and trace calls remain compiled in 
 enabled. The `GLEDITOR_LOG_*` macros check the category level before evaluating formatting
 arguments. They do not use spdlog's compile-time debug macros, which would remove calls from the
 default build. Warnings and errors remain visible by default. Categories already used are
-`text.layout`, `render.scene`, `xudu.edit`, `xudu.links`, `zigzag.action`, `zigzag.edit`, and
-`vortex.edit`.
+`text.layout`, `render.scene`, `xudu.edit`, `xudu.links`, `zigzag.action`, `zigzag.edit`,
+`vortex.edit`, and `vortex.agent` (the vagent adapter and `std:agent`; it never logs event
+payloads).
 
 ## Conversion order
 
