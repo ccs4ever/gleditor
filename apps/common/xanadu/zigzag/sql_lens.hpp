@@ -136,7 +136,7 @@ public:
   /// cheap probe. The funnel's refresh() is where a moved DB lands.
   [[nodiscard]] bool pollChanged() const override;
   /// The file watch's descriptor where one exists (sqlite on Linux).
-  [[nodiscard]] int waitableFd() const noexcept override;
+  [[nodiscard]] std::optional<int> waitableFd() const noexcept override;
 
   /// The ranks a promote envelope writes -- declare these in the
   /// annotation store before the staging overlay is read, or the

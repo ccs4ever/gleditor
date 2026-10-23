@@ -97,7 +97,7 @@ public:
   /// base's (never) OR every mount's -- a moved delegate source refreshes.
   [[nodiscard]] bool pollChanged() const override;
   /// The first mount's waitable descriptor, else -1.
-  [[nodiscard]] int waitableFd() const noexcept override;
+  [[nodiscard]] std::optional<int> waitableFd() const noexcept override;
   /// Routed by ownership: a delegate's cell edits through its own lens.
   [[nodiscard]] std::expected<ExternalKey, std::string>
   applyContentChange(const ExternalKey &node,

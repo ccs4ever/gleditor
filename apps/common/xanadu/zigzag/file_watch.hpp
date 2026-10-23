@@ -26,6 +26,7 @@
 #define COMMON_XANADU_ZIGZAG_FILE_WATCH_HPP
 
 #include <filesystem>
+#include <optional>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -49,17 +50,17 @@ public:
   /// A waitable descriptor for an event loop's epoll/poll/select --
   /// the inotify fd on Linux/Android (EPOLLET-safe: dirty() drains to
   /// emptiness, the edge-triggered pattern the platform docs require),
-  /// the kqueue fd on BSD/macOS, -1 on Windows (WaitForMultipleObjects
+  /// the kqueue fd on BSD/macOS. Nullopt on Windows (WaitForMultipleObjects
   /// would take the change handle, not an fd) and inert builds. The
   /// fd is not owned by the caller and outlives as long as the watch.
-  [[nodiscard]] int waitableFd() const noexcept {
+  [[nodiscard]] std::optional<int> waitableFd() const noexcept {
 #if defined(_WIN32)
-    return -1;
+    return std::nullopt;
 #elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) ||     \
     defined(__OpenBSD__) || defined(__DragonFly__)
-    return kq_;
+    return kq_ >= 0 ? std::optional<int>{kq_} : std::nullopt;
 #else
-    return fd_;
+    return fd_ >= 0 ? std::optional<int>{fd_} : std::nullopt;
 #endif
   }
 

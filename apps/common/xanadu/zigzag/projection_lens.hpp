@@ -160,8 +160,10 @@ public:
   /// signal is a kernel-descriptor event (a FileWatch, a socket)
   /// exposes it here; an app loop can wait on it (EPOLLET-compatible:
   /// pollChanged() drains fully) instead of polling every quiescence.
-  /// -1 = no descriptor; the funnel polls as usual.
-  [[nodiscard]] virtual int waitableFd() const noexcept { return -1; }
+  /// Nullopt = no descriptor; the funnel polls as usual.
+  [[nodiscard]] virtual std::optional<int> waitableFd() const noexcept {
+    return std::nullopt;
+  }
 
   // -- cells -> source (unproject); default = refuse -------------------------
 

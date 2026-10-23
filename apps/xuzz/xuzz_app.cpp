@@ -593,12 +593,14 @@ public:
     if (session_ && (std::exchange(adopted_, true) == false ||
                      session_->refreshIfChanged())) {
       // Keep the reader's cell: refs are stable across refreshes, so a
-      // still-present focus survives the re-adoption.
-      const auto focus = adopted_ ? viz_.focusCellId() : 0;
+      // still-present focus survives the re-adoption. contains() is
+      // the honest membership answer -- no "no cell" comparison here.
+      const auto focus =
+          static_cast<zigzag::CellRef>(adopted_ ? viz_.focusCellId() : 0);
       viz_.adoptDocument(zigzag::projectionToZz(label_, *session_, arena_),
                          label_);
-      if (focus != 0 && arena_.contains(static_cast<zigzag::CellRef>(focus))) {
-        viz_.focusCell(static_cast<zigzag::CellRef>(focus));
+      if (arena_.contains(focus)) {
+        viz_.focusCell(focus);
       }
       GLEDITOR_LOG_INFO("xuzz.lens", "{} -> {} cells adopted", label_,
                         session_->cellCount());
@@ -611,9 +613,9 @@ public:
   [[nodiscard]] zigzag::ProjectionSession &session() { return *session_; }
 
   /// A waitable descriptor for an event loop's wait path -- the lens's
-  /// own change signal (inotify fd on Linux) or -1.
-  [[nodiscard]] int waitableFd() const noexcept {
-    return session_ ? session_->lens().waitableFd() : -1;
+  /// own change signal (inotify fd on Linux).
+  [[nodiscard]] std::optional<int> waitableFd() const noexcept {
+    return session_ ? session_->lens().waitableFd() : std::nullopt;
   }
 
   /// Materialize the next deferred window page -- the next-page
@@ -737,11 +739,11 @@ private:
   /// Re-adopt the projection and restore the reader's cell: refs are
   /// stable across refreshes, so a still-present focus survives.
   void readoptKeepingFocus() {
-    const auto focus = viz_.focusCellId();
+    const auto focus = static_cast<zigzag::CellRef>(viz_.focusCellId());
     viz_.adoptDocument(zigzag::projectionToZz(label_, *session_, arena_),
                        label_);
-    if (focus != 0 && arena_.contains(static_cast<zigzag::CellRef>(focus))) {
-      viz_.focusCell(static_cast<zigzag::CellRef>(focus));
+    if (arena_.contains(focus)) {
+      viz_.focusCell(focus);
     }
   }
 

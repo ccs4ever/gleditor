@@ -1012,7 +1012,9 @@ bool SqlLens::pollChanged() const {
   return seeded && (watch_.dirty() || walWatch_.dirty() || moved);
 }
 
-int SqlLens::waitableFd() const noexcept { return watch_.waitableFd(); }
+std::optional<int> SqlLens::waitableFd() const noexcept {
+  return watch_.waitableFd();
+}
 
 std::expected<ExternalKey, std::string>
 SqlLens::applyContentChange(const ExternalKey &node,

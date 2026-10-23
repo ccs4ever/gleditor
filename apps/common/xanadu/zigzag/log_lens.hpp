@@ -57,7 +57,7 @@ public:
   [[nodiscard]] bool pollChanged() const override;
   /// The inotify fd where there is one (Linux) -- an app event loop can
   /// wait on it rather than poll.
-  [[nodiscard]] int waitableFd() const noexcept override {
+  [[nodiscard]] std::optional<int> waitableFd() const noexcept override {
     return watch_.waitableFd();
   }
 

@@ -251,16 +251,16 @@ bool RouterLens::pollChanged() const {
   return false;
 }
 
-int RouterLens::waitableFd() const noexcept {
-  if (const int fd = base_.waitableFd(); fd >= 0) {
+std::optional<int> RouterLens::waitableFd() const noexcept {
+  if (const auto fd = base_.waitableFd(); fd.has_value()) {
     return fd;
   }
   for (const auto &m : mounts_) {
-    if (const int fd = m.lens->waitableFd(); fd >= 0) {
+    if (const auto fd = m.lens->waitableFd(); fd.has_value()) {
       return fd;
     }
   }
-  return -1;
+  return std::nullopt;
 }
 
 std::expected<ExternalKey, std::string>
