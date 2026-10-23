@@ -1,0 +1,46 @@
+/**
+ * @file lens_uri.cpp
+ * @brief openLensUri: one URI scheme -> its lens.
+ */
+
+#include "common/xanadu/zigzag/lens_uri.hpp"
+
+#include <filesystem>
+
+#include "common/xanadu/zigzag/config_lens.hpp"
+#include "common/xanadu/zigzag/filesystem_lens.hpp"
+#include "common/xanadu/zigzag/git_lens.hpp"
+#include "common/xanadu/zigzag/log_lens.hpp"
+#include "common/xanadu/zigzag/sql_lens.hpp"
+
+namespace zigzag {
+
+std::expected<std::unique_ptr<ProjectionLens>, std::string>
+openLensUri(const std::string_view uri) {
+  if (uri.starts_with("sql:") ||
+      (!uri.starts_with('/') && uri.find(':') == std::string_view::npos &&
+       (uri.ends_with(".db") || uri.ends_with(".sqlite") ||
+        uri.ends_with(".sqlite3")))) {
+    auto lens = openSqlUri(uri);
+    if (!lens) {
+      return std::unexpected(lens.error());
+    }
+    return std::unique_ptr<ProjectionLens>{std::move(*lens)};
+  }
+  if (uri.starts_with("cfg:")) {
+    return std::unique_ptr<ProjectionLens>{
+        std::make_unique<ConfigLens>(std::string{uri.substr(4)})};
+  }
+  if (uri.starts_with("log:")) {
+    return std::unique_ptr<ProjectionLens>{
+        std::make_unique<LogLens>(std::string{uri.substr(4)})};
+  }
+  if (uri.starts_with("git:")) {
+    return std::unique_ptr<ProjectionLens>{
+        std::make_unique<GitLens>(std::string{uri.substr(4)})};
+  }
+  return std::unique_ptr<ProjectionLens>{
+      std::make_unique<FilesystemLens>(std::string{uri})};
+}
+
+} // namespace zigzag

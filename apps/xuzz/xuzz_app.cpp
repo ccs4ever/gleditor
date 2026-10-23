@@ -50,6 +50,7 @@
 #include "common/xanadu/vortex/vortex_host.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 #include "common/xanadu/zigzag/filesystem_lens.hpp"
+#include "common/xanadu/zigzag/lens_uri.hpp"
 #include "common/xanadu/zigzag/projection_lens.hpp"
 #include "common/xanadu/zigzag/projection_session.hpp"
 #include "common/xanadu/zigzag/sql_lens.hpp"
@@ -583,6 +584,26 @@ int XuzzApp::executeLensRaster(const std::string &lensPath,
   if (!sqlBrowse.empty() || !sqlQuery.empty()) {
     std::cerr << "Error: --sql-browse/--sql-query need a sql: lens\n";
     return 1;
+  }
+  // The scheme'd lenses dispatch through openLensUri (cfg:/log:/git:);
+  // a bare path stays the FilesystemLens it always was.
+  if (lensPath.starts_with("cfg:") || lensPath.starts_with("log:") ||
+      lensPath.starts_with("git:")) {
+    auto lens = zigzag::openLensUri(lensPath);
+    if (!lens) {
+      std::cerr << "Error: " << lens.error() << "\n";
+      return 1;
+    }
+    try {
+      zigzag::ArenaManifold arena;
+      zigzag::vortex::VortexCore core(arena);
+      zigzag::ProjectionSession session(std::move(*lens), core);
+      printProjectionTree(lensPath, session, core);
+      return 0;
+    } catch (const std::exception &err) {
+      std::cerr << "Error projecting lens: " << err.what() << "\n";
+      return 1;
+    }
   }
   // Project a filesystem path through the FilesystemLens into an arena and
   // print its cells, proving a projected non-Xanadu source is visible in xuzz.
