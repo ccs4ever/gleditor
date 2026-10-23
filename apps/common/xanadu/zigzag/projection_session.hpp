@@ -81,6 +81,22 @@ public:
   /// Returns the count of newly minted node cells.
   [[nodiscard]] std::size_t refresh();
 
+  // -- the write path: dirty set + commit
+  // ------------------------------------------
+
+  /// Set a projected cell's text content and mark its key dirty. The
+  /// arena write is local -- commit() is what crosses back through the
+  /// lens's unproject half. Ref-cells (U-L5, the source's own) refuse:
+  /// writing them would mutate a store the session does not own.
+  [[nodiscard]] std::expected<void, std::string>
+  editContent(const ExternalKey &key, std::string_view text);
+
+  /// Push every dirty cell's text through applyContentChange and
+  /// refresh() so the session restates what the source reports back.
+  /// A refusing lens surfaces its error; a key the source relocated
+  /// rebinds (the cell follows the source item).
+  [[nodiscard]] std::expected<void, std::string> commit();
+
   // -- rewind: a stack, with map repair
   // ----------------------------------------
 
@@ -141,6 +157,9 @@ private:
   /// the source's own, so no mint/restate/stale/tombstone write may
   /// touch them. Once a key binds by ref it stays ref-pinned.
   std::unordered_set<ExternalKey> refKeys_;
+  /// Keys whose arena cells the app edited since the last commit() --
+  /// the write path's diff set.
+  std::unordered_set<ExternalKey> dirty_;
   std::vector<CellRef> roots_;
   /// Node keys in mint order: the map-repair log rewind() truncates by.
   std::vector<ExternalKey> mintOrder_;

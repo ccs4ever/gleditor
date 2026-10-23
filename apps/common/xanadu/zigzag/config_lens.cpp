@@ -531,4 +531,238 @@ bool ConfigLens::pollChanged() const {
                    sz} != stamp_;
 }
 
+// -- the unproject half: write a scalar edit back --------------------------
+
+namespace {
+
+/// RFC 8259 serialization, 2-space pretty -- configs are human files.
+void writeJson(const JsonValue &v, std::string &out, const int depth) {
+  const auto indent = std::string(static_cast<std::size_t>(depth) * 2, ' ');
+  std::visit(
+      [&](const auto &x) {
+        using T = std::remove_cvref_t<decltype(x)>;
+        if constexpr (std::is_same_v<T, std::monostate>) {
+          out += "null";
+        } else if constexpr (std::is_same_v<T, bool>) {
+          out += x ? "true" : "false";
+        } else if constexpr (std::is_same_v<T, std::int64_t>) {
+          out += std::to_string(x);
+        } else if constexpr (std::is_same_v<T, double>) {
+          std::ostringstream ss;
+          ss << x;
+          out += ss.str();
+        } else if constexpr (std::is_same_v<T, std::string>) {
+          out += '"';
+          for (const char c : x) {
+            switch (c) {
+            case '"':
+              out += "\\\"";
+              break;
+            case '\\':
+              out += "\\\\";
+              break;
+            case '\b':
+              out += "\\b";
+              break;
+            case '\f':
+              out += "\\f";
+              break;
+            case '\n':
+              out += "\\n";
+              break;
+            case '\r':
+              out += "\\r";
+              break;
+            case '\t':
+              out += "\\t";
+              break;
+            default:
+              if (static_cast<unsigned char>(c) < 0x20) {
+                char buf[8];
+                (void)std::snprintf(buf, sizeof buf, "\\u%04x", c);
+                out += buf;
+              } else {
+                out += c;
+              }
+            }
+          }
+          out += '"';
+        } else if constexpr (std::is_same_v<T, JsonValue::Array>) {
+          if (x.empty()) {
+            out += "[]";
+          } else {
+            out += "[\n";
+            for (std::size_t i = 0; i < x.size(); ++i) {
+              out += indent + "  ";
+              writeJson(x[i], out, depth + 1);
+              out += i + 1 == x.size() ? "\n" : ",\n";
+            }
+            out += indent + "]";
+          }
+        } else {
+          if (x.empty()) {
+            out += "{}";
+          } else {
+            out += "{\n";
+            for (std::size_t i = 0; i < x.size(); ++i) {
+              JsonValue name;
+              name.v = x[i].first;
+              out += indent + "  ";
+              writeJson(name, out, depth + 1);
+              out += ": ";
+              writeJson(x[i].second, out, depth + 1);
+              out += i + 1 == x.size() ? "\n" : ",\n";
+            }
+            out += indent + "}";
+          }
+        }
+      },
+      v.v);
+}
+
+/// Pointer un-escape: ~0 -> ~, ~1 -> /.
+std::string ptrUnescape(const std::string_view seg) {
+  std::string out;
+  for (std::size_t i = 0; i < seg.size(); ++i) {
+    if (seg[i] == '~' && i + 1 < seg.size() &&
+        (seg[i + 1] == '0' || seg[i + 1] == '1')) {
+      out += seg[i + 1] == '0' ? '~' : '/';
+      ++i;
+    } else {
+      out += seg[i];
+    }
+  }
+  return out;
+}
+
+/// Walk a JSON pointer to the value it names, or nullptr.
+JsonValue *walkPtr(JsonValue &root, const std::string_view ptr) {
+  JsonValue *at = &root;
+  std::string_view rest{ptr};
+  while (!rest.empty() && rest.front() == '/') {
+    rest.remove_prefix(1);
+    const auto slash = rest.find('/');
+    const auto seg   = ptrUnescape(rest.substr(0, slash));
+    JsonValue *next  = nullptr;
+    if (auto *arr = std::get_if<JsonValue::Array>(&at->v)) {
+      if (!seg.empty() &&
+          seg.find_first_not_of("0123456789") == std::string::npos) {
+        const auto idx = std::stoull(seg);
+        if (idx < arr->size()) {
+          next = &(*arr)[idx];
+        }
+      }
+    } else if (auto *obj = std::get_if<JsonValue::Object>(&at->v)) {
+      for (auto &[name, value] : *obj) {
+        if (name == seg) {
+          next = &value;
+          break;
+        }
+      }
+    }
+    if (next == nullptr) {
+      return nullptr;
+    }
+    at   = next;
+    rest = slash == std::string_view::npos ? std::string_view{}
+                                           : rest.substr(slash);
+  }
+  return at;
+}
+
+/// Set @p newText on @p v keeping its JSON type; refuse a container
+/// (its displayed content is a label, not a member to rewrite).
+std::expected<void, std::string> coerceScalar(JsonValue &v,
+                                              std::string_view newText) {
+  if (auto *s = std::get_if<std::string>(&v.v)) {
+    *s = newText;
+    return {};
+  }
+  if (auto *b = std::get_if<bool>(&v.v)) {
+    if (newText == "true" || newText == "false") {
+      *b = newText == "true";
+      return {};
+    }
+    return std::unexpected("not a JSON boolean");
+  }
+  if (std::get_if<std::monostate>(&v.v)) {
+    if (newText == "null") {
+      return {};
+    }
+    return std::unexpected("null stays null; edit its type explicitly");
+  }
+  if (auto *n = std::get_if<std::int64_t>(&v.v)) {
+    std::int64_t val = 0;
+    const auto [p, ec] =
+        std::from_chars(newText.data(), newText.data() + newText.size(), val);
+    if (ec != std::errc{} || p != newText.data() + newText.size()) {
+      return std::unexpected("not a JSON integer");
+    }
+    *n = val;
+    return {};
+  }
+  if (auto *d = std::get_if<double>(&v.v)) {
+    double val = 0;
+    const auto [p, ec] =
+        std::from_chars(newText.data(), newText.data() + newText.size(), val);
+    if (ec != std::errc{} || p != newText.data() + newText.size() ||
+        !std::isfinite(val)) {
+      return std::unexpected("not a JSON number");
+    }
+    *d = val;
+    return {};
+  }
+  return std::unexpected("container cells are not scalar-editable");
+}
+
+} // namespace
+
+std::expected<ExternalKey, std::string>
+ConfigLens::applyContentChange(const ExternalKey &node,
+                               const std::string_view newContent) {
+  if (seed_.has_value()) {
+    return std::unexpected("a seeded document has no file to write");
+  }
+  if (!node.starts_with(fileKey_)) {
+    return std::unexpected("not a member key: " + node);
+  }
+  // Re-read the file fresh: the session's snapshot may lag an external
+  // edit, and a write from a stale parse would clobber it.
+  std::ifstream in{path_};
+  if (!in) {
+    return std::unexpected("cannot read " + path_);
+  }
+  std::ostringstream ss;
+  ss << in.rdbuf();
+  auto doc = parseJson(ss.str());
+  if (!doc) {
+    return std::unexpected("source no longer parses: " + doc.error());
+  }
+  auto *v = walkPtr(*doc, node.substr(fileKey_.size()));
+  if (v == nullptr) {
+    return std::unexpected("pointer gone: " + node);
+  }
+  if (auto r = coerceScalar(*v, newContent); !r) {
+    return std::unexpected(r.error());
+  }
+  // tmp + rename: a crash mid-write leaves the old file, not a half.
+  const auto tmp = path_ + ".tmp";
+  {
+    std::ofstream out{tmp, std::ios::trunc};
+    if (!out) {
+      return std::unexpected("cannot write " + tmp);
+    }
+    std::string text;
+    writeJson(*doc, text, 0);
+    out << text << '\n';
+  }
+  std::error_code ec;
+  std::filesystem::rename(tmp, path_, ec);
+  if (ec) {
+    return std::unexpected("rename failed: " + ec.message());
+  }
+  stamp_ = std::nullopt; // the next pollChanged sees our own write
+  return node;           // the pointer key does not relocate
+}
+
 } // namespace zigzag

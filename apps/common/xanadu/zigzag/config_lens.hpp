@@ -62,6 +62,13 @@ public:
   /// mtime+size against the last enumeration's stamp (seeded lenses
   /// never change). The evented hint -- an app funnel calls refresh().
   [[nodiscard]] bool pollChanged() const override;
+  /// Write a scalar edit back to the file at the key's JSON pointer --
+  /// the unproject half. Container cells refuse (their content is a
+  /// rendered label, not an editable member); the value's JSON type
+  /// survives the edit ("9" on a number writes a number).
+  [[nodiscard]] std::expected<ExternalKey, std::string>
+  applyContentChange(const ExternalKey &node,
+                     std::string_view newContent) override;
 
 private:
   /// One buffered node; the tree is bounded so enumerate a snapshot.

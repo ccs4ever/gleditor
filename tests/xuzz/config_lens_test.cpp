@@ -169,15 +169,57 @@ TEST(ConfigLensTest, PathKeysAreStableAcrossRefresh) {
   fs::remove(path);
 }
 
-TEST(ConfigLensTest, ReadOnlyByDefault) {
-  const auto p = project(kDoc);
-  const auto backend =
-      p->member(*p->member(p->session->roots().front(), "render"), "backend");
-  ASSERT_TRUE(backend.has_value());
-  // The unproject half is the trait's refusing default -- write paths
-  // are the phase-0 commit()/dirty-diff work, not this round.
-  // (asserted at the trait level: the session exposes no write verb
-  // yet, so there is nothing to call -- the refusal is structural.)
+TEST(ConfigLensTest, CommitWritesAScalarBackToTheFile) {
+  const auto path = fs::temp_directory_path() /
+                    ("cfg-write-" + std::to_string(::getpid()) + ".json");
+  {
+    std::ofstream f{path};
+    f << kDoc;
+  }
+  zigzag::ArenaManifold arena;
+  VortexCore core{arena};
+  auto session = std::make_unique<ProjectionSession>(
+      std::make_unique<ConfigLens>(path.string()), core);
+  const auto widthKey = "cfg:" + path.string() + ":/ui/fontSize";
+  ASSERT_TRUE(session->cellFor(widthKey).has_value());
+  // The write path: editContent records the diff, commit() crosses it
+  // back through applyContentChange, and refresh() restates.
+  ASSERT_TRUE(session->editContent(widthKey, "24").has_value());
+  ASSERT_TRUE(session->commit().has_value());
+  std::ifstream after{path};
+  std::string disk{std::istreambuf_iterator<char>{after}, {}};
+  EXPECT_NE(disk.find("\"fontSize\": 24"), std::string::npos);
+  // And the projection restated the source's truth (JSON typed the
+  // edit a number -- d.type reflects it).
+  const auto w = session->cellFor(widthKey);
+  ASSERT_TRUE(w.has_value());
+  const auto t = core.arena().linked(*w, core.findOrMintDimension("d.type"),
+                                     zigzag::Posward);
+  ASSERT_TRUE(t.has_value());
+  EXPECT_EQ(core.arena().textOf(*t), "int");
+  fs::remove(path);
+}
+
+TEST(ConfigLensTest, CommitRefusesContainerAndBadScalars) {
+  const auto path = fs::temp_directory_path() /
+                    ("cfg-wrefuse-" + std::to_string(::getpid()) + ".json");
+  {
+    std::ofstream f{path};
+    f << kDoc;
+  }
+  zigzag::ArenaManifold arena;
+  VortexCore core{arena};
+  auto session = std::make_unique<ProjectionSession>(
+      std::make_unique<ConfigLens>(path.string()), core);
+  const auto objKey   = "cfg:" + path.string() + ":/render";
+  const auto widthKey = "cfg:" + path.string() + ":/ui/fontSize";
+  // A container cell's content is a rendered label -- not writable.
+  ASSERT_TRUE(session->editContent(objKey, "{}").has_value());
+  EXPECT_FALSE(session->commit().has_value());
+  // A non-integer on an int field refuses too.
+  ASSERT_TRUE(session->editContent(widthKey, "abc").has_value());
+  EXPECT_FALSE(session->commit().has_value());
+  fs::remove(path);
 }
 
 TEST(ConfigLensTest, ParseRejectsMalformedJson) {

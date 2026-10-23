@@ -248,6 +248,52 @@ std::size_t ProjectionSession::refresh() {
   return minted;
 }
 
+std::expected<void, std::string>
+ProjectionSession::editContent(const ExternalKey &key,
+                               const std::string_view text) {
+  if (refKeys_.contains(key)) {
+    return std::unexpected("ref cells are read-only in the session (U-L5)");
+  }
+  const auto cell = cellFor(key);
+  if (!cell) {
+    return std::unexpected("unknown projected key: " + key);
+  }
+  auto &arena                     = core_.arena();
+  const xanadu::PrimediaSpan span = arena.intern(text);
+  const std::span<const xanadu::PrimediaSpan> spans{&span, 1};
+  zigzag::expectWritten(arena.setContent(*cell, spans));
+  dirty_.insert(key);
+  return {};
+}
+
+std::expected<void, std::string> ProjectionSession::commit() {
+  const auto dirty = std::move(dirty_);
+  dirty_.clear();
+  for (const auto &key : dirty) {
+    const auto cell = cellFor(key);
+    if (!cell) {
+      continue; // unwound or removed between edit and commit
+    }
+    auto applied = lens_->applyContentChange(key, core_.arena().textOf(*cell));
+    if (!applied) {
+      dirty_.insert(key); // unapplied keys stay dirty -- a retry sees
+                          // them; the caller decides what to drop.
+      return std::unexpected(key + ": " + applied.error());
+    }
+    // A relocated key rebinds the same cell: union identity keeps the
+    // cell, the source item's new name points at it.
+    if (*applied != key) {
+      const auto it = keyToCell_.find(key);
+      keyToCell_.erase(it);
+      keyToCell_.emplace(*applied, *cell);
+      cellToKey_.erase(*cell);
+      cellToKey_.emplace(*cell, *applied);
+    }
+  }
+  (void)refresh();
+  return {};
+}
+
 void ProjectionSession::tombstone(
     const std::unordered_set<ExternalKey> &present,
     const std::unordered_map<CellRef, std::unordered_set<DimRef>> &keepPos) {
