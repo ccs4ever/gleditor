@@ -264,6 +264,26 @@ inline constexpr std::string_view kVortexParallelThreshold =
     "vortex.parallel_threshold";
 inline constexpr std::string_view kVortexOrParallelSearch =
     "vortex.or_parallel_search";
+inline constexpr std::string_view kVagentMaxActors  = "vagent.max_actors";
+inline constexpr std::string_view kVagentMaxMailbox = "vagent.max_mailbox";
+inline constexpr std::string_view kVagentMaxDeliveries =
+    "vagent.max_deliveries";
+inline constexpr std::string_view kVagentValueOperations =
+    "vagent.value_operations";
+inline constexpr std::string_view kVagentBeliefEventDepth =
+    "vagent.belief_event_depth";
+inline constexpr std::string_view kVagentConditionFuel =
+    "vagent.condition_fuel";
+inline constexpr std::string_view kVagentMaintainBackoff =
+    "vagent.maintain_backoff";
+inline constexpr std::string_view kVagentSendRetries = "vagent.send_retries";
+inline constexpr std::string_view kVagentSendRetryInterval =
+    "vagent.send_retry_interval";
+inline constexpr std::string_view kVagentRenewFraction =
+    "vagent.renew_fraction";
+inline constexpr std::string_view kVagentReadyPerMessage =
+    "vagent.ready_per_message";
+inline constexpr std::string_view kVagentCompactEvery = "vagent.compact_every";
 
 // UI
 inline constexpr std::string_view kTabBarVisible       = "tabBarVisible";
