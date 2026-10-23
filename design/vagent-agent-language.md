@@ -2,12 +2,12 @@
 
 | field         | value                                                                                                                                                                                                                       |
 | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| version       | 3.7 (see [Appendix](#appendix-versioning-and-change-history))                                                                                                                                                               |
+| version       | 3.8 (see [Appendix](#appendix-versioning-and-change-history))                                                                                                                                                               |
 | status        | Specification only. Nothing here is built or wired into the gleditor build.                                                                                                                                                 |
 | compiles to   | Vortex opcode streams over an `ArenaManifold`, run one turn at a time by a Spool-Mesh actor executor                                                                                                                        |
 | rests on      | Vortex ([runtime](vortex-hyperstructural-runtime.md)), Vlog ([logic](vlog-logic-extension.md)), vicon ([goals](vicon-goal-directed-language.md)), the Spool-Mesh actor runtime (`apps/common/xanadu/vortex/mesh_actor.hpp`) |
 | prerequisites | Vlog §6 clause database (specified, unbuilt); vicon §6's scanning functions `tab`, `move`, `find`, `many`, `upto`, `match`, `any`, `bal` (specified; `std:goal` registers only `scan`, `subject` and `pos` today)           |
-| changes       | new code (front end, loader, adapter) and fourteen changes to existing code, P1–P14, all approved by the owner ([§11](#11-what-the-c-core-has-to-gain))                                                                     |
+| changes       | new code (front end, loader, adapter) and fifteen changes to existing code, P1–P15, all approved by the owner ([§11](#11-what-the-c-core-has-to-gain))                                                                      |
 
 `vagent` is a front end for agent-oriented programs. It takes SARL's metamodel (agents, events,
 capacities, skills, behaviors, spaces, contexts, holons) and adds the parts of the BDI model SARL
@@ -58,10 +58,10 @@ ______________________________________________________________________
 "Built" means present in the tree at the cited place. "Prerequisite" means specified by a sibling
 document and not yet built. "Owed" means this document asks for it and
 [§11](#11-what-the-c-core-has-to-gain) prices it; an owed change to existing code is a proposal
-(P1–P14), each approved by the owner on 2026-10-22. vicon's lexer, parser, compiler and driver exist
-under `apps/common/xanadu/vicon/`; vagent reuses vicon's design, not its compiler, because that
-compiler records what it cannot yet do (`vicon/compiler.cpp:12-22`). Code paths below are under
-`apps/common/xanadu/` unless stated.
+(P1–P15), each approved by the owner (P1–P14 on 2026-10-22, P15 on 2026-10-23). vicon's lexer,
+parser, compiler and driver exist under `apps/common/xanadu/vicon/`; vagent reuses vicon's design,
+not its compiler, because that compiler records what it cannot yet do (`vicon/compiler.cpp:12-22`).
+Code paths below are under `apps/common/xanadu/` unless stated.
 
 | Concept                    | Mechanism                                                                                                 | State                                                         |
 | -------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
@@ -93,9 +93,9 @@ compiler records what it cannot yet do (`vicon/compiler.cpp:12-22`). Code paths 
 In the VM vagent adds **one opcode** (P1) and changes one internal behaviour (P12, the Dewey path is
 kept only when used); in the arena it changes one behaviour of `discard` (P13) and adds no method;
 there is no `CompactOpNode` change and no new `SystemDimensions` field. The other approved changes
-(P2–P11, P14) are in the mesh runtime, the settings xanadoc, the logging plan and the build. Most of
-what vagent owes is at the boundary between the VM and the mesh runtime, which Vortex code cannot
-cross: `OpcodeKind` has no send, spawn or host-call opcode (`vortex/vortex_vm.hpp`), and the
+(P2–P11, P14, P15) are in the mesh runtime, the settings xanadoc, the logging plan and the build.
+Most of what vagent owes is at the boundary between the VM and the mesh runtime, which Vortex code
+cannot cross: `OpcodeKind` has no send, spawn or host-call opcode (`vortex/vortex_vm.hpp`), and the
 `WorkerContext` an executor receives has no handle to the runtime (`MeshActorRuntime::Executor`).
 AGENTS.md admits C++ for driver and OS-event interfacing, which is what that boundary is.
 
@@ -559,13 +559,13 @@ limited to 32 KiB, and `sequence` must be zero for `ActorSend` (`ActorMessage::i
 
 The runtime keys `deliveries_` and every actor's `remembered` by `requestId` alone, so an id must be
 unique across senders. vagent's id is three fixed-width hex fields: 16 digits of a hash of the
-sender's name, 16 of its turn counter, and 4 of the entry's position in the outbox, 38 characters in
-all, within the 128 the wire allows. A hash, not the name, because names grow by one component per
-level of a holon tree. A re-drained turn produces the same ids, so the runtime's de-duplication
-treats a resend as a resend. On `resume`, `$turn_count` is raised to at least the turn time in
-milliseconds, so an agent restored from an older checkpoint does not reuse an id with different
-content, and ids from one sender increase, which §7.3 and P3 use. Spawn requests use the same
-scheme.
+sender's name, 16 of its turn counter, and 4 of the message's position among the turn's sends, 36
+characters in all, within the 128 the wire allows. A hash, not the name, because names grow by one
+component per level of a holon tree. A re-drained turn produces the same ids, so the runtime's
+de-duplication treats a resend as a resend. On `resume`, `$turn_count` is raised to at least the
+turn time in milliseconds, so an agent restored from an older checkpoint does not reuse an id with
+different content, and ids from one sender increase, which §7.3 and P3 use. Spawn requests use the
+same scheme.
 
 An event type that `extends` another matches handlers for both. The wire carries only the type name;
 the receiver reads the flattened supertype names on the type's `d.extends` rank in its own program.
@@ -1478,7 +1478,7 @@ Nothing is in production, so changes to the Vortex core, the Vortex standard lib
 runtime are allowed where vagent strictly needs them. Each is a **proposal**: it is listed in §11.2
 with the reason it cannot be done in vagent's own code, what vagent would carry without it, and a
 status. Each proposal was approved individually before the design came to depend on it, and every
-section that relies on one cites its number. All of P1–P14 are approved. New files under
+section that relies on one cites its number. All of P1–P15 are approved. New files under
 `apps/common/xanadu/vagent/` and `apps/vagent/` (§11.1) change no existing code and are not
 proposals.
 
@@ -1532,8 +1532,9 @@ spawns the launcher with a source pid it mints for itself.
 ### 11.2 Proposed changes to existing code
 
 P1–P11 were **approved** by the owner on 2026-10-22, individually, after this register was written;
-P12–P14 were added afterwards and **approved** the same day. The design depends on all fourteen. For
-every row, the "Without it" column records what the change buys.
+P12–P14 were added afterwards and **approved** the same day; P15, found while building the adapter,
+was **approved** on 2026-10-23. The design depends on all fifteen. For every row, the "Without it"
+column records what the change buys.
 
 | No. | Change                                                                                                                                                                                                                                                                                         | Where                                                                                                                                                                                                                                            | Why it cannot live in `std:agent` or the adapter                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Without it                                                                                                                                                                                                                                                      | Used by                              |
 | --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
@@ -1551,6 +1552,7 @@ every row, the "Without it" column records what the change buys.
 | P12 | Maintain the VM's Dewey path only when an oracle path or a cut callback is set                                                                                                                                                                                                                 | `vortex_vm.cpp` (`pushChoicePoint`, `backtrack`)                                                                                                                                                                                                 | The path serves the oracle and cut-callback machinery, which vagent never sets; it is private VM state, and `setCurrentDeweyPath` can only reset it between turns, not between statements                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Each turn would copy O(k²) small integers for k choice points, bounded only by fuel                                                                                                                                                                             | §4.2, §4.4                           |
 | P13 | When `discard` releases the last outstanding mark, clear the trail                                                                                                                                                                                                                             | `zigzag/arena_manifold.cpp` (`ArenaManifold::discard`)                                                                                                                                                                                           | With no mark outstanding no choice point can replay the trail, but the trail is private and no public call clears it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | The trail would grow with every committed turn until checkpoint and resume reclaimed it                                                                                                                                                                         | §4.2, §4.4                           |
 | P14 | `forgetSender(prefix)`: erase every remembered id of one sender, called by the adapter on `ChildStopping`, `ChildDown` or removal from `$peers`; an amendment to P3                                                                                                                            | `mesh_actor.{hpp,cpp}`                                                                                                                                                                                                                           | A floor arrives only on a later envelope from the same sender, so a sender that stops sending leaves its last few ids remembered for ever; only the runtime can erase them                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Each stopped sender would leave a handful of remembered ids for ever, so a receiver could outlive only about a thousand stopped senders                                                                                                                         | §7.3, §15                            |
+| P15 | `ActorExecution` carries the actor's spawn request (`spawnRequest`, the `ActorSpawn` the actor was created or resumed from)                                                                                                                                                                    | `mesh_actor.{hpp,cpp}`                                                                                                                                                                                                                           | §4.1 has the child read its name and parameters from the spawn capability, which `ActorContinuation` keeps, but the executor is handed only the pid, grant, message and cursor; the request lives in the runtime's private actor record. The adapter could keep its own table filled when it calls `spawn`, but that table is empty for a child spawned by a remote parent through `receive` and for an agent rebuilt by `resume` on another node, which are exactly the cases where parameters must survive                                                                                                                                                                                      | Parameters reach only children spawned on the same node in the same process; migration and remote spawns lose them                                                                                                                                              | §4.1, §4.5                           |
 | —   | Capability-bearing senders (`receive` admits `ActorSend` only from the owner)                                                                                                                                                                                                                  | `mesh_actor.cpp`                                                                                                                                                                                                                                 | not proposed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | single-owner societies (U-A2)                                                                                                                                                                                                                                   | —                                    |
 
 P2, P3, P5, P7 and P8 remove ceilings and unfairness that would affect any long-lived actor, not
@@ -2076,6 +2078,10 @@ ______________________________________________________________________
 ______________________________________________________________________
 
 ## Appendix: Versioning and Change History
+
+**3.8 — Implementation findings.** P15 (the executor sees the spawn request) is added and approved;
+a request id is 36 characters, its last field counting the turn's sends rather than outbox entries,
+because one emission into a space fans out to several messages.
 
 **3.7 — Round-9 minors.** Change-history pointers to the 3.6 approval; the P12–P14 "Without it"
 cells say what each change buys; `ChildStopping` causes form a closed set; newlines outside blocks
