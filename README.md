@@ -18,6 +18,7 @@ decisions; [AGENTS.md](AGENTS.md) is the contributor runbook.
 | `build/vquery`, `build/vqueryc` | VQL query runner/REPL and standalone compiler.                                 |
 | `build/vpl`, `build/vplc`       | VPL array-language runner/REPL and compiler.                                   |
 | `build/vprolog`                 | Prolog REPL over the Vortex/Vlog logic runtime.                                |
+| `build/vagent`                  | vagent agent-language checker; `run` lands in iteration 3.                     |
 | `build/store-dump`              | Inspect a store or `ops.nodes` directly, including one the loader refuses.     |
 | `build/xudu-swarm-peer`         | Peer used by the network-namespace swarm tests.                                |
 
@@ -54,7 +55,7 @@ dependency set.
 make -j$(nproc) lib       # shared library
 make -j$(nproc) gleditor  # plain editor
 make -j$(nproc) xuzz      # xanadocs and ZigZag; `xudu` and `zigzag` make its symlinks
-make -j$(nproc) vquery vqueryc vpl vplc vprolog
+make -j$(nproc) vquery vqueryc vpl vplc vprolog vagent
 make -j$(nproc) shaders   # GLSL validation and SPIR-V when Vulkan is enabled
 ```
 
