@@ -53,6 +53,7 @@ void FilesystemLens::walk() {
     if (!statOf(p, st)) return std::nullopt;
     Entry e;
     e.key    = keyForStat(st);
+    e.path   = p;
     e.name   = p.filename().empty() ? p.string() : p.filename().string();
     e.parent = std::move(parent);
     e.order  = order;
@@ -191,6 +192,41 @@ void FilesystemLens::forEachEdge(
                       .dir = Posward});
     }
   }
+}
+
+std::optional<std::filesystem::path>
+FilesystemLens::pathFor(const ExternalKey &key) const {
+  for (const auto &e : entries_) {
+    if (e.key == key) {
+      return e.path;
+    }
+  }
+  return std::nullopt;
+}
+
+std::vector<ExternalKey>
+FilesystemLens::childKeys(const ExternalKey &parent) const {
+  std::vector<const Entry *> kids;
+  for (const auto &e : entries_) {
+    if (e.parent.has_value() && *e.parent == parent) {
+      kids.push_back(&e);
+    }
+  }
+  std::ranges::sort(
+      kids, [](const Entry *a, const Entry *b) { return a->order < b->order; });
+  std::vector<ExternalKey> out;
+  out.reserve(kids.size());
+  for (const Entry *e : kids) {
+    out.push_back(e->key);
+  }
+  return out;
+}
+
+std::optional<ExternalKey> FilesystemLens::rootKey() const {
+  if (entries_.empty()) {
+    return std::nullopt;
+  }
+  return entries_.front().key;
 }
 
 } // namespace zigzag

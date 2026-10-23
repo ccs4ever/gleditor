@@ -54,6 +54,7 @@
 #include "common/xanadu/zigzag/projection_lens.hpp"
 #include "common/xanadu/zigzag/projection_session.hpp"
 #include "common/xanadu/zigzag/projection_to_zz.hpp"
+#include "common/xanadu/zigzag/router_lens.hpp"
 #include "common/xanadu/zigzag/sql_lens.hpp"
 #include "common/xanadu/zigzag/sql_promotion.hpp"
 #include "common/xanadu/zigzag/xanadu_projector.hpp"
@@ -632,11 +633,50 @@ public:
       return false;
     }
     (void)session_->refresh();
-    const auto focus = viz_.focusCellId();
-    viz_.adoptDocument(zigzag::projectionToZz(label_, *session_, arena_),
-                       label_);
-    if (focus != 0 && arena_.contains(static_cast<zigzag::CellRef>(focus))) {
-      viz_.focusCell(static_cast<zigzag::CellRef>(focus));
+    readoptKeepingFocus();
+    return true;
+  }
+
+  /// The cross-lens "open" gesture: mount the focused filesystem cell's
+  /// delegate lens (GitLens/LogLens/ConfigLens) under it -- a
+  /// RouterLens hop in. Focus stays on the cell it was on.
+  [[nodiscard]] bool openFocusedDelegate() {
+    auto *router = routerLens();
+    if (router == nullptr || !session_) {
+      return false;
+    }
+    const auto key =
+        session_->keyFor(static_cast<zigzag::CellRef>(viz_.focusCellId()));
+    if (!key.has_value() || !router->open(*key).has_value()) {
+      return false;
+    }
+    (void)session_->refresh();
+    readoptKeepingFocus();
+    return true;
+  }
+
+  /// The cross-lens "back" gesture: unmount the delegate at or above
+  /// the focus and land the reader on the mount cell it came through.
+  [[nodiscard]] bool backOutOfMount() {
+    auto *router = routerLens();
+    if (router == nullptr || !session_) {
+      return false;
+    }
+    const auto key =
+        session_->keyFor(static_cast<zigzag::CellRef>(viz_.focusCellId()));
+    if (!key.has_value()) {
+      return false;
+    }
+    const auto mount = router->mountBoundary(*key);
+    if (!mount.has_value() || !router->unmount(*mount).has_value()) {
+      return false;
+    }
+    (void)session_->refresh();
+    readoptKeepingFocus();
+    // One hop out lands on the mount cell -- the delegate's own cells
+    // just stale-marked, so staying on them would strand the reader.
+    if (const auto cell = session_->cellFor(*mount); cell.has_value()) {
+      viz_.focusCell(*cell);
     }
     return true;
   }
@@ -687,6 +727,24 @@ private:
                                                     : nullptr);
   }
 
+  /// The lens as a RouterLens when --lens named a directory -- the
+  /// cross-lens mount/unmount gestures are its verbs.
+  [[nodiscard]] zigzag::RouterLens *routerLens() {
+    return dynamic_cast<zigzag::RouterLens *>(session_ ? session_->lensMut()
+                                                       : nullptr);
+  }
+
+  /// Re-adopt the projection and restore the reader's cell: refs are
+  /// stable across refreshes, so a still-present focus survives.
+  void readoptKeepingFocus() {
+    const auto focus = viz_.focusCellId();
+    viz_.adoptDocument(zigzag::projectionToZz(label_, *session_, arena_),
+                       label_);
+    if (focus != 0 && arena_.contains(static_cast<zigzag::CellRef>(focus))) {
+      viz_.focusCell(static_cast<zigzag::CellRef>(focus));
+    }
+  }
+
 private:
   zigzag::ArenaManifold arena_;
   zigzag::vortex::VortexCore core_;
@@ -711,10 +769,10 @@ int XuzzApp::executeLensRaster(const std::string &lensPath,
     std::cerr << "Error: --sql-browse/--sql-query need a sql: lens\n";
     return 1;
   }
-  // The scheme'd lenses dispatch through openLensUri (cfg:/log:/git:);
-  // a bare path stays the FilesystemLens it always was.
+  // The scheme'd lenses dispatch through openLensUri (cfg:/log:/git:/
+  // dir:); a bare path stays the FilesystemLens it always was.
   if (lensPath.starts_with("cfg:") || lensPath.starts_with("log:") ||
-      lensPath.starts_with("git:")) {
+      lensPath.starts_with("git:") || lensPath.starts_with("dir:")) {
     auto lens = zigzag::openLensUri(lensPath);
     if (!lens) {
       std::cerr << "Error: " << lens.error() << "\n";
@@ -2713,6 +2771,21 @@ int XuzzApp::run(const int argc, char **argv) {
         "promote the focused row or page into the annotation store", [surface] {
           if (surface->promoteFocused()) {
             GLEDITOR_LOG_INFO("xuzz.lens", "promoted the focused cell");
+          }
+        });
+    app.commands().registerAction(
+        "lens.open", "mount the focused file cell's delegate lens (RouterLens)",
+        [surface] {
+          if (surface->openFocusedDelegate()) {
+            GLEDITOR_LOG_INFO("xuzz.lens",
+                              "mounted the focused cell's delegate lens");
+          }
+        });
+    app.commands().registerAction(
+        "lens.back", "unmount the delegate lens at or above the focus",
+        [surface] {
+          if (surface->backOutOfMount()) {
+            GLEDITOR_LOG_INFO("xuzz.lens", "unmounted the delegate lens");
           }
         });
   }

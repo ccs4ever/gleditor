@@ -7,7 +7,9 @@
  *   cfg:<path>              ConfigLens (JSON config)
  *   log:<path>              LogLens    (line-ordinal windows)
  *   git:<path>              GitLens    (refs + commit DAG)
- *   <bare path>             FilesystemLens
+ *   dir:<path>, or a bare   RouterLens (filesystem view that mounts
+ *   directory path          delegate lenses under its cells)
+ *   <bare file path>        FilesystemLens
  *
  * Meta/VqlResult/Swarm lenses need in-process handles (a manifold, an
  * engine, a manager) rather than paths -- they open in code, not via

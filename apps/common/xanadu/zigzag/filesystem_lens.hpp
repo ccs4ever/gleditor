@@ -40,10 +40,28 @@ public:
   void forEachEdge(gleditor::cpp26::function_ref<void(const SourceEdge &)> emit)
       const override;
 
+  // -- cell -> source lookups (the RouterLens's hops) -------------------------
+
+  /// The on-disk path a projected key names. The fs:<dev>:<ino> key
+  /// carries no path, so a router that mounts delegate lenses by file
+  /// type needs the walk's own record. nullopt for a foreign key.
+  [[nodiscard]] std::optional<std::filesystem::path>
+  pathFor(const ExternalKey &key) const;
+
+  /// @p parent's children in sibling order -- the child run a router
+  /// splices a mounted delegate's roots into. Empty for a file or a
+  /// childless dir.
+  [[nodiscard]] std::vector<ExternalKey>
+  childKeys(const ExternalKey &parent) const;
+
+  /// The walked root's key; nullopt when the root was unreadable.
+  [[nodiscard]] std::optional<ExternalKey> rootKey() const;
+
 private:
   // One walked entry, captured once so forEachNode and forEachEdge agree.
   struct Entry {
     ExternalKey key;
+    std::filesystem::path path; ///< kept for pathFor -- keys carry no path
     std::string name;
     std::string role; ///< "dir" | "file" | "symlink"
     std::string mime;

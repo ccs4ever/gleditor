@@ -11,6 +11,7 @@
 #include "common/xanadu/zigzag/filesystem_lens.hpp"
 #include "common/xanadu/zigzag/git_lens.hpp"
 #include "common/xanadu/zigzag/log_lens.hpp"
+#include "common/xanadu/zigzag/router_lens.hpp"
 #include "common/xanadu/zigzag/sql_lens.hpp"
 
 namespace zigzag {
@@ -38,6 +39,18 @@ openLensUri(const std::string_view uri) {
   if (uri.starts_with("git:")) {
     return std::unique_ptr<ProjectionLens>{
         std::make_unique<GitLens>(std::string{uri.substr(4)})};
+  }
+  // A directory opens through RouterLens so the open/back gestures can
+  // mount delegate lenses under its cells; a bare file path keeps the
+  // plain FilesystemLens it always was.
+  if (uri.starts_with("dir:")) {
+    return std::unique_ptr<ProjectionLens>{
+        std::make_unique<RouterLens>(std::string{uri.substr(4)})};
+  }
+  std::error_code ec;
+  if (std::filesystem::is_directory(std::filesystem::path{uri}, ec)) {
+    return std::unique_ptr<ProjectionLens>{
+        std::make_unique<RouterLens>(std::string{uri})};
   }
   return std::unique_ptr<ProjectionLens>{
       std::make_unique<FilesystemLens>(std::string{uri})};
