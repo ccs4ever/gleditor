@@ -23,6 +23,7 @@
 namespace xanadu {
 class MerkleLedger;
 class SystemTorrentManager;
+struct InfoHash;
 } // namespace xanadu
 
 namespace zigzag {
@@ -50,6 +51,11 @@ public:
                        emit) const override;
 
 private:
+  /// Peers under one torrent key: sw:<label>:t:<ih>:p:<addr>.
+  void emitPeers(gleditor::cpp26::function_ref<void(const SourceNode &)> emit,
+                 const xanadu::InfoHash &hash,
+                 const std::string &torrentKey) const;
+
   std::string connKey_; ///< swarm:<label>
   const xanadu::MerkleLedger *ledger_;
   const xanadu::SystemTorrentManager *manager_{nullptr};

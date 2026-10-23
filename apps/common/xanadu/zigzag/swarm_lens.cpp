@@ -54,6 +54,7 @@ SwarmLens::dimensions() const {
           {"d.revoked", std::nullopt},
           {"d.name", std::nullopt},
           {"d.state", std::nullopt},
+          {"d.client", std::nullopt},
           {"d.peers", std::nullopt},
           {"d.seeds", std::nullopt},
           {"d.progress", std::nullopt},
@@ -99,7 +100,27 @@ void SwarmLens::forEachNode(
              {"d.savepath", t.savePath},
              {"d.keystab", "pk"}},
             0});
+      emitPeers(emit, t.infoHash, connKey_ + ":t:" + t.infoHash.hex());
     }
+  }
+}
+
+void SwarmLens::emitPeers(
+    const gleditor::cpp26::function_ref<void(const SourceNode &)> emit,
+    const xanadu::InfoHash &hash, const std::string &torrentKey) const {
+  // Peer identity is the endpoint (addr:port) -- what the swarm itself
+  // would call a peer, and stable for a connection's life. Churn is
+  // union identity's problem, and it handles it.
+  for (const auto &p : manager_->listPeers(hash)) {
+    emit({torrentKey + ":p:" + p.address,
+          p.address,
+          {{"d.role", "sw.peer"},
+           {"d.client", p.client},
+           {"d.progress", std::to_string(p.progress)},
+           {"d.down", std::to_string(p.downSpeed)},
+           {"d.up", std::to_string(p.upSpeed)},
+           {"d.keystab", "ord"}},
+          0});
   }
 }
 
@@ -124,6 +145,16 @@ void SwarmLens::forEachEdge(
         emit({prev, key, "d.seq", Posward});
       }
       prev = key;
+      std::string peerPrev;
+      for (const auto &p : manager_->listPeers(t.infoHash)) {
+        const auto pk = key + ":p:" + p.address;
+        if (peerPrev.empty()) {
+          emit({key, pk, "d.contains", Posward});
+        } else {
+          emit({peerPrev, pk, "d.seq", Posward});
+        }
+        peerPrev = pk;
+      }
     }
   }
 }

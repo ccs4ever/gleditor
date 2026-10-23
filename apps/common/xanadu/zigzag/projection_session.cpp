@@ -248,6 +248,14 @@ std::size_t ProjectionSession::refresh() {
   return minted;
 }
 
+bool ProjectionSession::refreshIfChanged() {
+  if (!lens_->pollChanged()) {
+    return false;
+  }
+  (void)refresh();
+  return true;
+}
+
 std::expected<void, std::string>
 ProjectionSession::editContent(const ExternalKey &key,
                                const std::string_view text) {

@@ -81,6 +81,12 @@ public:
   /// Returns the count of newly minted node cells.
   [[nodiscard]] std::size_t refresh();
 
+  /// The evented funnel's marks-quiesced entry: refresh() iff the lens
+  /// reports its source moved (pollChanged). Returns whether a refresh
+  /// ran. This is where an app's pull loop funnels -- the event flows
+  /// lens -> app -> session, and this is the app's side of the seam.
+  [[nodiscard]] bool refreshIfChanged();
+
   // -- the write path: dirty set + commit
   // ------------------------------------------
 

@@ -13,6 +13,7 @@
 #include <libtorrent/entry.hpp>
 #include <libtorrent/error_code.hpp>
 #include <libtorrent/magnet_uri.hpp>
+#include <libtorrent/peer_info.hpp>
 #include <libtorrent/session.hpp>
 #include <libtorrent/settings_pack.hpp>
 #include <libtorrent/span.hpp>
@@ -517,6 +518,29 @@ SystemTorrentManager::getStatus(const InfoHash &hash) const {
     return std::nullopt;
   }
   return it->second.status;
+}
+
+std::vector<SystemTorrentManager::PeerInfo>
+SystemTorrentManager::listPeers(const InfoHash &hash) const {
+  const auto it = impl_->items.find(hash);
+  if (it == impl_->items.end() || !it->second.handle.is_valid()) {
+    return {};
+  }
+  std::vector<lt::peer_info> peers;
+  it->second.handle.get_peer_info(peers);
+  std::vector<PeerInfo> out;
+  out.reserve(peers.size());
+  for (const auto &p : peers) {
+    PeerInfo info;
+    info.address =
+        p.ip.address().to_string() + ":" + std::to_string(p.ip.port());
+    info.client    = p.client.empty() ? "?" : std::string{p.client};
+    info.progress  = p.progress;
+    info.downSpeed = static_cast<std::int64_t>(p.down_speed);
+    info.upSpeed   = static_cast<std::int64_t>(p.up_speed);
+    out.push_back(std::move(info));
+  }
+  return out;
 }
 
 void SystemTorrentManager::connectPeer(const InfoHash &hash,

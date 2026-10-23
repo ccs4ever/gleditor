@@ -151,4 +151,19 @@ TEST(LogLensTest, PollChangedSeesAnAppendAndRefreshReprojects) {
   EXPECT_FALSE(p.lens->pollChanged()); // stamp re-taken at re-browse
 }
 
+TEST(LogLensTest, RefreshIfChangedIsTheFunnel) {
+  ProjectedLog p{5, 3};
+  // The app's pull loop calls refreshIfChanged() -- it refreshes iff
+  // the lens reports a moved source.
+  EXPECT_FALSE(p.session->refreshIfChanged());
+  {
+    std::ofstream f(p.path, std::ios::app);
+    f << "line-5\n";
+  }
+  EXPECT_TRUE(p.session->refreshIfChanged());
+  EXPECT_TRUE(
+      p.session->cellFor("log:" + p.path.string() + ":l:5").has_value());
+  EXPECT_FALSE(p.session->refreshIfChanged()); // settled: no second run
+}
+
 } // namespace
