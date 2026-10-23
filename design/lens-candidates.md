@@ -122,6 +122,14 @@ windowed lens — the cheapest possible proof that `WindowedLens` generalizes. *
 (ordinal, or keyset on timestamp+sequence); evented variant = tail via the §4 path. **Keys:**
 journald's own cursor is pk-strength. **Cost:** small.
 
+> **As implemented (this branch).** Two lenses: `LogLens` over a file (tail-as-window,
+> `mtime+size` stamp + a `FileWatch` kernel event), and `JournalLens` over `sd-journal`
+> (`journal:` URI, whole journal or `journal:<unit>`) — entries are cursor-keyed
+> (`journal:l:<cursor>`), pages walk back from the tail in `pageSize` windows, `pollChanged()`
+> is `sd_journal_process()` and `waitableFd()` is `sd_journal_get_fd` — the journal notifies at
+> the kernel surface, no file stat needed. `lens.open` on a systemd-unit-named file
+> (`.service`/`.socket`/`.timer`/…) mounts that unit's journal one hop down.
+
 ### 3.5 `VQLResultLens` — a query's answer set as a slice
 
 **Why:** closes the loop — query the docuverse, get a slice, annotate it, promote the annotation.
