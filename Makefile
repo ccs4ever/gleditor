@@ -523,11 +523,30 @@ LIBS += -lgif
 endif
 endif
 GLEDITOR_LIBS :=
-XUDU_LIBS := $(shell pkg-config $(STATIC) --libs $(XUDU_PKGS))
+
+# The sql lens' PostgreSQL backend (design/sql-to-zigzag.md section 7.3):
+# GLEDITOR_SQL_PG=1 requires libpq, =0 disables, unset probes pkg-config.
+# The compile flag picks the real half of pg_backend.cpp; without it the
+# same file compiles a refusing stub so sql:pg: URIs always parse.
+ifneq ($(GLEDITOR_SQL_PG),0)
+ifeq ($(shell pkg-config --exists libpq && echo 1),1)
+GLEDITOR_HAVE_PG := 1
+PG_CFLAGS := $(shell pkg-config --cflags libpq)
+PG_LIBS   := $(shell pkg-config --libs libpq)
+else ifeq ($(GLEDITOR_SQL_PG),1)
+$(error GLEDITOR_SQL_PG=1 was asked for but libpq was not found. \
+Install it (libpq-dev / postgresql-libs) or build GLEDITOR_SQL_PG=0.)
+endif
+endif
+ifdef GLEDITOR_HAVE_PG
+override CXXFLAGS += -DGLEDITOR_HAVE_PG=1 $(PG_CFLAGS)
+endif
+
+XUDU_LIBS := $(shell pkg-config $(STATIC) --libs $(XUDU_PKGS)) $(PG_LIBS)
 # Matches XUDU_PKGS because ZIGZAG_SHARED_CORE_OBJS is XUDU_CORE_OBJS: zigzag
 # links the whole xanalogical engine, so it needs whatever that engine needs.
 ZIGZAG_PKGS := $(XUDU_PKGS)
-ZIGZAG_LIBS := $(shell pkg-config $(STATIC) --libs $(ZIGZAG_PKGS))
+ZIGZAG_LIBS := $(shell pkg-config $(STATIC) --libs $(ZIGZAG_PKGS)) $(PG_LIBS)
 
 # glslangValidator is the traditional name and glslang the current one; which
 # of the two a distribution installs varies, so both are tried.

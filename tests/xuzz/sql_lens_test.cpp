@@ -536,10 +536,15 @@ TEST(SqlLensTest, SqlUriOpensBackends) {
     auto l = openSqlUri(db.path.string());
     EXPECT_TRUE(l.has_value()) << l.error();
   }
-  // pg: is recognized as a backend but unimplemented this round.
+  // sql:pg:// always parses; without libpq the stub refuses with an
+  // actionable message (the GLEDITOR_SQL_PG probe, spec section 7.3).
   const auto pg = openSqlUri("sql:pg://localhost/db");
+#ifdef GLEDITOR_HAVE_PG
+  EXPECT_TRUE(pg.has_value() || !pg.error().empty());
+#else
   EXPECT_FALSE(pg.has_value());
-  EXPECT_TRUE(pg.error().find("pg") != std::string::npos);
+  EXPECT_NE(pg.error().find("GLEDITOR_SQL_PG"), std::string::npos);
+#endif
   const auto unk = openSqlUri("sql:oracle://x");
   EXPECT_FALSE(unk.has_value());
 }

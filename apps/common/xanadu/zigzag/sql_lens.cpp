@@ -12,6 +12,7 @@
 #include <utility>
 
 #include "common/xanadu/zigzag/arena_manifold.hpp"
+#include "common/xanadu/zigzag/pg_backend.hpp"
 #include "common/xanadu/zigzag/sql_keys.hpp"
 #include "common/xanadu/zigzag/sqlite_backend.hpp"
 
@@ -1001,8 +1002,17 @@ openSqlUri(std::string_view uri, std::size_t pageSize) {
     return openSqliteLens("/" + std::string(path), pageSize);
   }
   if (backend == "pg") {
-    return std::unexpected(
-        "sql:pg:// is reserved; the libpq backend lands in a later phase");
+    // sql:pg://host:port/dbname?schema=public -> libpq's URI form. The
+    // refusing stub answers when the build lacks libpq (GLEDITOR_SQL_PG).
+    // dbid is the conninfo hash -- the URI names the service, the key
+    // names the hash (spec section 4.1).
+    const auto uriPart = "postgresql:" + std::string{rest.substr(sep + 1)};
+    auto be            = openPgBackend(uriPart);
+    if (!be) {
+      return std::unexpected(be.error());
+    }
+    return std::unique_ptr<SqlLens>(new SqlLens(
+        std::move(*be), sqlHashHex(uriPart), "pg", uriPart, pageSize));
   }
   return std::unexpected("unknown sql: backend: " + std::string(backend));
 }
