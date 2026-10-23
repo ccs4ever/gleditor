@@ -20,6 +20,8 @@
 #include <expected>
 #include <memory>
 #include <string>
+
+#include "common/xanadu/zigzag/file_watch.hpp"
 #include <string_view>
 #include <vector>
 
@@ -82,6 +84,7 @@ private:
   std::string path_;
   std::size_t pageSize_;
   std::string connKey_;                ///< log:<path> the file node
+  mutable FileWatch watch_;            ///< kernel events, inert off-linux
   mutable std::vector<LogPage> pages_; ///< page 0 first, older after
   mutable std::uint64_t totalLines_{0};
   mutable std::optional<std::pair<std::int64_t, std::uint64_t>> stamp_;

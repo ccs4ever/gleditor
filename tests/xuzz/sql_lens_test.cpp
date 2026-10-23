@@ -806,6 +806,17 @@ TEST(SqlLensTest, CommitWritesAValueCellBackToTheRow) {
   EXPECT_NEAR(std::get<double>((*rows)[0][0]), 99.5, 1e-9);
 }
 
+TEST(SqlLensTest, WriteFlagOpensThroughTheUri) {
+  FixtureDb db;
+  // sql:sqlite:///path?write=1 opens the writable half; the bare URI
+  // stays read-only.
+  auto rw = zigzag::openSqlUri("sql:sqlite://" + db.path.string() + "?write=1");
+  ASSERT_TRUE(rw.has_value()) << rw.error();
+  ASSERT_TRUE((*rw)->browse("invoices").has_value());
+  auto ro = zigzag::openSqlUri("sql:sqlite://" + db.path.string());
+  ASSERT_TRUE(ro.has_value());
+}
+
 TEST(SqlLensTest, RowCellAndReadOnlyBackendRefuseWrites) {
   FixtureDb db;
   // Row cells (no :v: tail) refuse even on a writable backend.

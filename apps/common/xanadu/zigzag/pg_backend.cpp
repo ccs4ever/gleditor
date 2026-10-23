@@ -199,7 +199,8 @@ class PgBackend final : public SqlBackend {
   friend class PgSnapshot;
 
 public:
-  explicit PgBackend(PGconn *conn) : conn_(conn) {}
+  explicit PgBackend(PGconn *conn, const bool writable = false)
+      : conn_(conn), writable_(writable) {}
   ~PgBackend() override {
     // A cursor/snapshot teardown that never ran leaves a live txn --
     // commit it only when one's actually open.
@@ -301,7 +302,7 @@ public:
     }
     bool ownsTxn = false;
     if (!inTxn_) {
-      if (auto r = execOk("BEGIN READ ONLY"); !r) {
+      if (auto r = execOk(writable_ ? "BEGIN" : "BEGIN READ ONLY"); !r) {
         return std::unexpected(r.error());
       }
       inTxn_  = true; // the cursor's txn; a live snapshot's scope joins
@@ -383,7 +384,9 @@ public:
     if (inTxn_) {
       return std::unexpected("a transaction scope is already open");
     }
-    if (auto r = execOk("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    if (auto r = execOk(writable_ ? "BEGIN ISOLATION LEVEL REPEATABLE READ"
+                                  : "BEGIN ISOLATION LEVEL REPEATABLE READ "
+                                    "READ ONLY");
         !r) {
       return std::unexpected(r.error());
     }
@@ -396,6 +399,45 @@ public:
             .columnProvenance = true,
             .snapshots        = true,
             .blobReopen       = false}; // large objects are OID refs
+  }
+
+  /// DML through PQexecParams: $n binds as prepare()'s read path does;
+  /// UPDATE/INSERT/DELETE come back as COMMAND_OK + cmdTuples.
+  [[nodiscard]] std::expected<std::uint64_t, std::string>
+  execWrite(std::string_view sql,
+            const std::span<const SqlValue> params) override {
+    if (!writable_) {
+      return std::unexpected("backend is read-only");
+    }
+    if (liveCursor_) {
+      return std::unexpected("a cursor is still live -- drain it first");
+    }
+    const std::string text{sql};
+    PGresult *r =
+        PQexecParams(conn_, text.c_str(), static_cast<int>(params.size()),
+                     nullptr, paramTexts(params).data(), nullptr, nullptr, 0);
+    if (r == nullptr) {
+      return std::unexpected(PQerrorMessage(conn_));
+    }
+    const auto status = PQresultStatus(r);
+    if (status != PGRES_COMMAND_OK) {
+      std::string msg = PQresultErrorMessage(r);
+      PQclear(r);
+      return std::unexpected(msg);
+    }
+    const auto changed =
+        static_cast<std::uint64_t>(std::stoull(PQcmdTuples(r)));
+    PQclear(r);
+    return changed;
+  }
+
+  [[nodiscard]] std::string
+  paramPlaceholder(const std::size_t n) const override {
+    return "$" + std::to_string(n);
+  }
+  [[nodiscard]] std::string nullSafeEq(std::string_view colSql,
+                                       const std::size_t n) const override {
+    return std::string{colSql} + " IS NOT DISTINCT FROM " + paramPlaceholder(n);
   }
 
 private:
@@ -491,6 +533,7 @@ private:
   }
 
   PGconn *conn_;
+  bool writable_{false};
   bool inTxn_{false};
   bool liveCursor_{false};
   std::vector<std::string> texts_;
@@ -505,7 +548,7 @@ PgSnapshot::~PgSnapshot() {
 }
 
 std::expected<std::unique_ptr<SqlBackend>, std::string>
-openPgBackend(const std::string_view conninfo) {
+openPgBackend(const std::string_view conninfo, const PgOpenOptions &opts) {
   const std::string ci{conninfo};
   PGconn *conn = PQconnectdb(ci.c_str());
   if (conn == nullptr) {
@@ -517,12 +560,16 @@ openPgBackend(const std::string_view conninfo) {
     return std::unexpected(msg);
   }
   // Value rendering is text; these pins make the text stable (spec 7.3).
-  for (const char *guc :
-       {"SET default_transaction_read_only = on",
-        "SET statement_timeout = '30s'", "SET DateStyle = ISO",
-        "SET extra_float_digits = 3", "SET bytea_output = hex",
-        "SET IntervalStyle = iso_8601"}) {
-    PGresult *r = PQexec(conn, guc);
+  // A writable handle drops only the read-only pin.
+  std::vector<std::string_view> gucs{
+      "SET statement_timeout = '30s'", "SET DateStyle = ISO",
+      "SET extra_float_digits = 3", "SET bytea_output = hex",
+      "SET IntervalStyle = iso_8601"};
+  if (!opts.writable) {
+    gucs.insert(gucs.begin(), "SET default_transaction_read_only = on");
+  }
+  for (const auto guc : gucs) {
+    PGresult *r = PQexec(conn, std::string{guc}.c_str());
     if (r == nullptr || PQresultStatus(r) != PGRES_COMMAND_OK) {
       PQclear(r);
       PQfinish(conn);
@@ -530,7 +577,7 @@ openPgBackend(const std::string_view conninfo) {
     }
     PQclear(r);
   }
-  return std::unique_ptr<SqlBackend>{new PgBackend(conn)};
+  return std::unique_ptr<SqlBackend>{new PgBackend(conn, opts.writable)};
 }
 
 } // namespace zigzag
@@ -540,7 +587,8 @@ openPgBackend(const std::string_view conninfo) {
 namespace zigzag {
 
 std::expected<std::unique_ptr<SqlBackend>, std::string>
-openPgBackend(const std::string_view /*conninfo*/) {
+openPgBackend(const std::string_view /*conninfo*/,
+              const PgOpenOptions & /*opts*/) {
   return std::unexpected(
       "sql:pg: this build has no libpq -- rebuild with "
       "GLEDITOR_SQL_PG=1 (the Makefile probes pkg-config libpq)");

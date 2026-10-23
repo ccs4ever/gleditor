@@ -18,13 +18,22 @@
 
 namespace zigzag {
 
+/// Open-time knobs. `writable` drops the read-only belt (no
+/// `default_transaction_read_only`, `BEGIN` instead of `BEGIN READ
+/// ONLY`) and opens `execWrite()` -- applyContentChange's path back
+/// to the server. Writes still bind through the extended protocol;
+/// the statement-kind gate on prepare() stays put.
+struct PgOpenOptions {
+  bool writable{false};
+};
+
 /// Open a PostgreSQL connection string (`postgresql://...` or a libpq
-/// keyword list). Read-only: the session sets
+/// keyword list). Read-only by default: the session sets
 /// `default_transaction_read_only` and every unit of work opens inside
 /// `BEGIN READ ONLY` -- the hard guarantee still needs a read-only
 /// role server-side (spec section 7.3).
 [[nodiscard]] std::expected<std::unique_ptr<SqlBackend>, std::string>
-openPgBackend(std::string_view conninfo);
+openPgBackend(std::string_view conninfo, const PgOpenOptions &opts = {});
 
 } // namespace zigzag
 

@@ -116,6 +116,19 @@ public:
     return std::unexpected("backend is read-only");
   }
 
+  /// Dialect surface for lens-built DML. @p n is the 1-based parameter
+  /// ordinal in statement order; backends override the placeholder and
+  /// the null-safe equality operator (SQLite: "IS ?", Postgres:
+  /// "IS NOT DISTINCT FROM $n").
+  [[nodiscard]] virtual std::string paramPlaceholder(std::size_t n) const {
+    (void)n;
+    return "?";
+  }
+  [[nodiscard]] virtual std::string nullSafeEq(std::string_view colSql,
+                                               std::size_t n) const {
+    return std::string{colSql} + " IS " + paramPlaceholder(n);
+  }
+
   [[nodiscard]] virtual SqlCapabilities capabilities() const noexcept = 0;
 };
 

@@ -204,4 +204,52 @@ TEST(PgBackendTest, ReplayUnderSnapshot) {
   EXPECT_EQ(std::get<std::int64_t>((*rows)[0][0]), 2);
 }
 
+TEST(PgBackendTest, CommitWritesAValueCellBackToTheRow) {
+  if (pgConninfo().empty()) {
+    GTEST_SKIP() << "GLEDITOR_PG_TEST_CONNINFO unset";
+  }
+  auto be = zigzag::openPgBackend(pgConninfo(),
+                                  zigzag::PgOpenOptions{.writable = true});
+  ASSERT_TRUE(be.has_value()) << be.error();
+  ArenaManifold arena;
+  VortexCore core{arena};
+  auto lens = std::make_unique<SqlLens>(std::move(*be), "pgt", "pg", "testdb");
+  zigzag::SqlLens *l = lens.get();
+  ASSERT_TRUE(l->browse("invoices").has_value());
+  ProjectionSession session(std::move(lens), core);
+  // pg keys carry the same t:/pk: shape; the WHERE is
+  // "col" IS NOT DISTINCT FROM $n against the declared PK.
+  const auto vkey = "sql:pg:pgt:t:invoices:pk:i:1:v:amount";
+  ASSERT_TRUE(session.cellFor(vkey).has_value())
+      << "pk-addressed value cell must project";
+  ASSERT_TRUE(session.editContent(vkey, "77.25").has_value());
+  const auto c = session.commit();
+  ASSERT_TRUE(c.has_value()) << c.error();
+  // Proof from a fresh, read-only connection -- not the arena's echo.
+  auto ro = zigzag::openPgBackend(pgConninfo());
+  ASSERT_TRUE(ro.has_value()) << ro.error();
+  auto cur = (*ro)->prepare("SELECT amount FROM invoices WHERE id = 1", {});
+  ASSERT_TRUE(cur.has_value()) << cur.error();
+  const auto rows = (*cur)->fetchNext(4);
+  ASSERT_TRUE(rows.has_value());
+  ASSERT_EQ(rows->size(), 1u);
+  EXPECT_NEAR(std::get<double>((*rows)[0][0]), 77.25, 1e-9);
+  // Restore the seeded row -- the suite shares the cluster, and the
+  // read tests assert the seed value.
+  ASSERT_TRUE(session.editContent(vkey, "10.5").has_value());
+  ASSERT_TRUE(session.commit().has_value());
+}
+
+TEST(PgBackendTest, ReadOnlyBackendRefusesExecWrite) {
+  if (pgConninfo().empty()) {
+    GTEST_SKIP() << "GLEDITOR_PG_TEST_CONNINFO unset";
+  }
+  PgDb db;
+  if (db.stub) {
+    GTEST_SKIP() << "stub build -- no libpq";
+  }
+  EXPECT_FALSE(db.be->execWrite("UPDATE invoices SET amount=0 WHERE id=1", {})
+                   .has_value());
+}
+
 } // namespace

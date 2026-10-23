@@ -1035,18 +1035,20 @@ SqlLens::applyContentChange(const ExternalKey &node,
   }
   std::vector<SqlValue> params{val};
   std::string sql = "UPDATE " + quotedIdent(q->stable) + " SET " +
-                    quotedIdent(col) + " = ? WHERE ";
+                    quotedIdent(col) + " = " + backend_->paramPlaceholder(1) +
+                    " WHERE ";
   if (q->cls == SqlKeyClass::Pk) {
     for (std::size_t i = 0; i < q->pkCols.size(); ++i) {
       const auto idx = static_cast<std::size_t>(q->pkCols[i]);
       if (i > 0) {
         sql += " AND ";
       }
-      sql += quotedIdent(q->colNames[idx]) + " IS ?";
+      sql += backend_->nullSafeEq(quotedIdent(q->colNames[idx]),
+                                  params.size() + 1);
       params.push_back(s.values[idx]);
     }
   } else {
-    sql += "rowid IS ?";
+    sql += backend_->nullSafeEq("rowid", params.size() + 1);
     params.push_back(s.values[static_cast<std::size_t>(q->ridCol)]);
   }
   const auto n = backend_->execWrite(sql, params);
@@ -1085,21 +1087,45 @@ openSqlUri(std::string_view uri, std::size_t pageSize) {
     return std::unexpected("sql: URI needs a backend: " + std::string(uri));
   }
   const auto backend = rest.substr(0, sep);
+  // The lens's own query param: write=1 opens the writable half (still
+  // backend-gated); it's stripped before the conninfo/path sees it.
+  bool writable   = false;
+  auto stripWrite = [&writable](std::string &s) {
+    for (const std::string_view needle : {"?write=1", "&write=1"}) {
+      if (const auto p = s.find(needle); p != std::string::npos) {
+        s.erase(p, needle.size());
+        writable = true;
+      }
+    }
+  };
   if (backend == "sqlite") {
     auto path = rest.substr(sep + 1);
     // sql:sqlite:///abs/path -- strip the URI authority slashes.
     while (path.starts_with('/')) {
       path.remove_prefix(1);
     }
-    return openSqliteLens("/" + std::string(path), pageSize);
+    std::string p = "/" + std::string(path);
+    // Suffix-only: a literal '?' is legal in a filename.
+    if (p.ends_with("?write=1")) {
+      p.resize(p.size() - 8);
+      writable = true;
+    }
+    auto be = openSqliteBackend(p, {.writable = writable});
+    if (!be) {
+      return std::unexpected(be.error());
+    }
+    return std::unique_ptr<SqlLens>(
+        new SqlLens(std::move(*be), dbidForPath(p), "sqlite", p, pageSize));
   }
   if (backend == "pg") {
     // sql:pg://host:port/dbname?schema=public -> libpq's URI form. The
     // refusing stub answers when the build lacks libpq (GLEDITOR_SQL_PG).
     // dbid is the conninfo hash -- the URI names the service, the key
     // names the hash (spec section 4.1).
-    const auto uriPart = "postgresql:" + std::string{rest.substr(sep + 1)};
-    auto be            = openPgBackend(uriPart);
+    auto ci = std::string{rest.substr(sep + 1)};
+    stripWrite(ci);
+    const auto uriPart = "postgresql:" + ci;
+    auto be            = openPgBackend(uriPart, {.writable = writable});
     if (!be) {
       return std::unexpected(be.error());
     }

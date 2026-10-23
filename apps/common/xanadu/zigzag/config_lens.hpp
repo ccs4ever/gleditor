@@ -21,6 +21,8 @@
 #include <variant>
 #include <vector>
 
+#include "common/xanadu/zigzag/file_watch.hpp"
+
 #include "common/xanadu/zigzag/projection_lens.hpp"
 
 namespace zigzag {
@@ -84,7 +86,9 @@ private:
 
   std::string path_;
   std::string fileKey_;
-  std::optional<JsonValue> seed_; ///< fromText documents
+  std::optional<JsonValue> seed_;  ///< fromText documents
+  mutable FileWatch watch_{path_}; ///< kernel events; inert on a
+                                   ///< nonexistent or seeded path
   /// mtime+size of path_ at the last enumeration (null for seeded).
   mutable std::optional<std::pair<std::int64_t, std::uint64_t>> stamp_;
   /// The epoch's snapshot, rebuilt at the head of each forEachNode --

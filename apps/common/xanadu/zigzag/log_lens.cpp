@@ -26,7 +26,7 @@ std::string lineKey(const std::string &conn, const std::size_t ordinal) {
 
 LogLens::LogLens(std::string path, const std::size_t pageSize)
     : path_(std::move(path)), pageSize_(pageSize == 0 ? 1 : pageSize),
-      connKey_("log:" + path_) {}
+      connKey_("log:" + path_), watch_(path_) {}
 
 std::vector<std::pair<std::string, std::optional<GenericDim>>>
 LogLens::dimensions() const {
@@ -93,7 +93,9 @@ bool LogLens::pollChanged() const {
   if (!stamp_.has_value()) {
     return false; // never browsed: first projection does the read
   }
-  return fileStamp() != stamp_;
+  // Kernel events answer inside an mtime quantum; the stamp stays the
+  // ground truth (a watch dies on replace-in-place, the stat catches it).
+  return watch_.dirty() || fileStamp() != stamp_;
 }
 
 std::expected<void, std::string> LogLens::browse() {

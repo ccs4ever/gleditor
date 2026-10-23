@@ -521,6 +521,11 @@ bool ConfigLens::pollChanged() const {
   if (seed_.has_value() || !stamp_.has_value()) {
     return false;
   }
+  // Kernel events answer inside an mtime quantum; the stat stays the
+  // ground truth when the watch is inert (replace-in-place, non-Linux).
+  if (watch_.dirty()) {
+    return true;
+  }
   std::error_code ec;
   const auto wt = std::filesystem::last_write_time(path_, ec);
   const auto sz = std::filesystem::file_size(path_, ec);
