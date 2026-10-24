@@ -135,7 +135,11 @@ struct Routine {
   int id{0};
 };
 
+struct Container;
+
 struct MethodInfo {
+  /// The skill whose method this is; null for the agent's own.
+  Container *owner{nullptr};
   const MethodDef *def{nullptr};
   Routine rt;
   CellRef entry{noCell};
@@ -151,6 +155,8 @@ struct MethodInfo {
 };
 
 struct HandlerInfo {
+  /// The behavior whose handler this is; null for the agent's own.
+  Container *owner{nullptr};
   const HandlerDef *def{nullptr};
   std::string eventType;
   std::optional<std::string> binder;
@@ -164,6 +170,34 @@ struct HandlerInfo {
   const Term *beliefTerm{nullptr};
   CellRef bindEntry{noCell};
   std::vector<std::pair<std::string, Local>> beliefLocals;
+};
+
+/// A skill or behavior reachable from the agent (§5.3, §5.7). Its cells are
+/// minted at compile time like the agent's own, because no opcode addresses a
+/// cell minted at run time (compiler.hpp); `install` and `mount` link them
+/// into the agent's `d.skill` / `d.behavior` rank and `uninstall` / `unmount`
+/// unlink them, so membership of that rank is the only installed-state there
+/// is.
+struct Container {
+  enum class K : std::uint8_t { Skill, Behavior } k{K::Skill};
+  std::string name;
+  const std::vector<Param> *params{nullptr};
+  const std::vector<Member> *members{nullptr};
+  SourceLocation loc{};
+  CellRef cell{noCell}; ///< skill frame / behavior instance, holds the fields
+  CellRef lastField{noCell};
+  std::unordered_map<std::string, FieldInfo> fields;
+  std::map<std::string, MethodInfo> methods;
+  std::vector<std::string> uses;
+  /// Skill: every capacity it implements, extended ones included.
+  std::vector<std::string> capacities;
+  std::vector<CellRef> instances; ///< one per capacity, on d.skill when live
+  /// The cell whose rank membership means "installed": the first instance, or
+  /// the frame itself for a skill that implements no capacity.
+  CellRef member{noCell};
+  CellRef prepLabel{noCell};      ///< uninstalls what shares a capacity
+  CellRef installLabel{noCell};   ///< install / mount body
+  CellRef uninstallLabel{noCell}; ///< uninstall / unmount body
 };
 
 // -- Child walker (call graph) ------------------------------------------------
@@ -293,6 +327,15 @@ private:
 
   std::map<std::string, MethodInfo> methods_;
   std::vector<HandlerInfo> handlers_;
+
+  // -- skills, behaviors and capacities (§5.3, §5.7); see the section below
+  std::map<std::string, Container> skills_;
+  std::map<std::string, Container> behaviors_;
+  std::unordered_map<std::string, const CapacityDecl *> capacities_;
+  std::vector<std::string> agentUses_;
+  /// The skill or behavior whose code is being emitted; null for the agent's.
+  Container *own_{nullptr};
+  CellRef rtCapFind_{noCell};
 
   // Per-routine emission state.
   std::vector<std::unordered_map<std::string, Local>> scopes_;
@@ -676,6 +719,44 @@ private:
   Ty forBelieves(const EFor &f, CellRef out);
   Ty beliefChange(EBeliefChange::Kind kind, const Term &t, CellRef out);
   void emitBeliefBind(HandlerInfo &h);
+
+  // -- capacities, skills and behaviors (§5.3, §5.7)
+  // ---------------------------------
+  void prepareMethodSet(std::map<std::string, MethodInfo> &set,
+                        const std::vector<Member> &members, Container *owner);
+  void prepareExtensions();
+  void reachFrom(const std::vector<Member> &members,
+                 std::vector<std::string> &skillOrder,
+                 std::vector<std::string> &behaviorOrder);
+  void reachExpr(const Expr &e, std::vector<std::string> &skillOrder,
+                 std::vector<std::string> &behaviorOrder);
+  Container &makeContainer(Container::K k, const std::string &name,
+                           const std::vector<Param> &params,
+                           const std::vector<Member> &members,
+                           SourceLocation loc);
+  std::vector<std::string>
+  capacityClosure(const std::vector<std::string> &names) const;
+  void addFieldTo(CellRef owner, CellRef &last,
+                  std::unordered_map<std::string, FieldInfo> &into,
+                  const std::string &fname, const Ty &ty);
+  [[nodiscard]] const FieldInfo *findField(const std::string &n) const;
+  [[nodiscard]] MethodInfo *findMethod(const std::string &n);
+  [[nodiscard]] std::optional<std::string>
+  capacityOfMethod(const std::string &method) const;
+  std::vector<const MethodSig *> capacityMethods(const std::string &cap) const;
+  Ty capacityCall(const std::string &cap, const std::string &method,
+                  const std::vector<ExprPtr> &args, CellRef out,
+                  SourceLocation loc);
+  void emitRtCapFind();
+  void emitContainerRoutines();
+  void emitLifecycle(Container &c, bool uninstall);
+  void emitContainerInits(Container &c);
+  void beginRoutine(CellRef label, Container *owner);
+  Ty installByName(EInstall::Kind kind, const std::string &name,
+                   const std::vector<ExprPtr> &args, CellRef out,
+                   SourceLocation loc);
+  HandlerInfo makeHandlerInfo(const HandlerDef &h, std::size_t index,
+                              Container *owner);
 };
 
 // ---------------------------------------------------------------------------
@@ -975,17 +1056,7 @@ CellRef Gen::initialValueCell(const Ty &t) {
 }
 
 void Gen::addField(const std::string &fname, const Ty &ty) {
-  FieldInfo f;
-  f.ty        = ty;
-  f.nameCell  = arena_.makeCell(fname);
-  f.valueCell = initialValueCell(ty);
-  zigzag::expectWritten(arena_.link(f.nameCell, core_.dims().values,
-                                    DimVector::POS, f.valueCell));
-  zigzag::expectWritten(
-      arena_.link(lastFieldName_ == noCell ? agentCell_ : lastFieldName_,
-                  core_.dims().vars, DimVector::POS, f.nameCell));
-  lastFieldName_ = f.nameCell;
-  fields_[fname] = std::move(f);
+  addFieldTo(agentCell_, lastFieldName_, fields_, fname, ty);
 }
 
 CellRef Gen::loadFieldInto(const FieldInfo &f, CellRef out) {
@@ -1048,9 +1119,9 @@ Ty Gen::name(const EName &n, CellRef out, SourceLocation loc) {
     mov(S(out), S(l->reg));
     return l->ty;
   }
-  if (const auto f = fields_.find(n.name); f != fields_.end()) {
-    loadFieldInto(f->second, out);
-    return f->second.ty;
+  if (const FieldInfo *f = findField(n.name)) {
+    loadFieldInto(*f, out);
+    return f->ty;
   }
   bail(CompileError::UnknownName, "unknown name " + n.name, loc);
 }
@@ -1140,6 +1211,8 @@ Ty Gen::expr(const Expr &e, CellRef out) {
           return findallExpr(n, out, loc);
         } else if constexpr (std::is_same_v<T, EBeliefChange>) {
           return beliefChange(n.kind, n.fact, out);
+        } else if constexpr (std::is_same_v<T, EInstall>) {
+          return installByName(n.kind, n.name, n.args, out, loc);
         } else {
           unsupported("this construct", loc);
         }
@@ -1319,11 +1392,11 @@ void Gen::storeInto(const Expr &target, CellRef valueReg, const Ty &valueTy,
       mov(S(l->reg), S(valueReg));
       return;
     }
-    if (const auto f = fields_.find(n->name); f != fields_.end()) {
+    if (const FieldInfo *f = findField(n->name)) {
       if (n->name.starts_with('$')) {
         bail(CompileError::UnknownName, "reserved field " + n->name, loc);
       }
-      storeField(f->second, valueReg);
+      storeField(*f, valueReg);
       return;
     }
     bail(CompileError::UnknownName, "unknown name " + n->name, loc);
@@ -1425,6 +1498,12 @@ Ty Gen::range(const ERange &r, CellRef out) {
 }
 
 Ty Gen::call(const ECall &c, CellRef out, SourceLocation loc) {
+  if (const auto *fe = std::get_if<EField>(&c.callee->node)) {
+    const auto *cap = std::get_if<EName>(&fe->base->node);
+    if (cap != nullptr && capacities_.contains(cap->name)) {
+      return capacityCall(cap->name, fe->name, c.args, out, loc);
+    }
+  }
   const auto *callee = std::get_if<EName>(&c.callee->node);
   if (callee == nullptr) unsupported("a call on a non-name", loc);
   if (callee->name == "text") {
@@ -1441,11 +1520,14 @@ Ty Gen::call(const ECall &c, CellRef out, SourceLocation loc) {
     }
     return tyOf(Ty::K::Str);
   }
-  const auto m = methods_.find(callee->name);
-  if (m == methods_.end()) {
+  MethodInfo *own = findMethod(callee->name);
+  if (own == nullptr) {
+    if (const auto cap = capacityOfMethod(callee->name)) {
+      return capacityCall(*cap, callee->name, c.args, out, loc);
+    }
     bail(CompileError::UnknownName, "unknown method " + callee->name, loc);
   }
-  MethodInfo &mi = m->second;
+  MethodInfo &mi = *own;
   if (c.args.size() != mi.paramRegs.size()) {
     bail(CompileError::BadArity,
          callee->name + " takes " + std::to_string(mi.paramRegs.size()) +
@@ -2493,23 +2575,50 @@ void Gen::mintAgentCell() {
 }
 
 void Gen::prepareMethods() {
+  prepareMethodSet(methods_, agent_->members, nullptr);
+}
+
+/// True when @p e reaches code the static call graph cannot see: a capacity
+/// call (dispatched on whatever skill is installed then) or an install, whose
+/// `on install` block runs arbitrary methods. Such a method may re-enter
+/// itself, so it saves its registers like a recursive one.
+static bool hasDynamicCall(const Expr &e,
+                           const std::map<std::string, MethodInfo> &set) {
+  if (std::holds_alternative<EInstall>(e.node)) return true;
+  if (const auto *c = std::get_if<ECall>(&e.node)) {
+    const auto *nm = std::get_if<EName>(&c->callee->node);
+    if (nm == nullptr || (nm->name != "text" && !set.contains(nm->name))) {
+      return true;
+    }
+  }
+  bool found = false;
+  forEachChild(e, [&](const Expr &child) {
+    if (!found && hasDynamicCall(child, set)) found = true;
+  });
+  return found;
+}
+
+void Gen::prepareMethodSet(std::map<std::string, MethodInfo> &set,
+                           const std::vector<Member> &members,
+                           Container *owner) {
   std::map<std::string, std::set<std::string>> calls;
-  for (const Member &m : agent_->members) {
+  for (const Member &m : members) {
     if (const auto *md = std::get_if<MethodDef>(&m)) {
       if (md->sig.isEffect) unsupported("effect methods", md->sig.loc);
       if (md->sig.name == "text") {
         bail(CompileError::DuplicateName, "text is built in", md->sig.loc);
       }
       MethodInfo mi;
-      mi.def = md;
-      if (methods_.contains(md->sig.name)) {
+      mi.def   = md;
+      mi.owner = owner;
+      if (set.contains(md->sig.name)) {
         bail(CompileError::DuplicateName, md->sig.name, md->sig.loc);
       }
       if (md->body) collectCallees(*md->body, calls[md->sig.name]);
-      methods_.emplace(md->sig.name, std::move(mi));
+      set.emplace(md->sig.name, std::move(mi));
     }
   }
-  for (auto &[name, mi] : methods_) {
+  for (auto &[name, mi] : set) {
     // Reachability from the method back to itself.
     std::set<std::string> seen;
     std::vector<std::string> work(calls[name].begin(), calls[name].end());
@@ -2520,8 +2629,11 @@ void Gen::prepareMethods() {
         mi.cyclic = true;
         break;
       }
-      if (!seen.insert(c).second || !methods_.contains(c)) continue;
+      if (!seen.insert(c).second || !set.contains(c)) continue;
       for (const auto &n2 : calls[c]) work.push_back(n2);
+    }
+    if (!mi.cyclic && mi.def->body && hasDynamicCall(*mi.def->body, set)) {
+      mi.cyclic = true;
     }
     mi.rt.id = nextRoutineId_++;
     curRegs_ = &mi.rt.regs;
@@ -2544,6 +2656,7 @@ void Gen::prepareMethods() {
 }
 
 void Gen::emitMethod(MethodInfo &m) {
+  own_     = m.owner;
   tail_    = noCell;
   curRegs_ = &m.rt.regs;
   scopes_.clear();
@@ -2583,6 +2696,7 @@ void Gen::emitMethod(MethodInfo &m) {
 }
 
 void Gen::beginHandlerCtx(const HandlerInfo &h) {
+  own_     = h.owner;
   tail_    = noCell;
   curRegs_ = nullptr;
   scopes_.clear();
@@ -2652,6 +2766,11 @@ void Gen::emitHandlerRun(const HandlerInfo &h, bool checkConsumed,
                          CellRef end) {
   const CellRef next = newLabel();
   const CellRef hd   = global();
+  if (h.owner != nullptr) {
+    // A behavior's handlers are in the merged rank always; it answers only
+    // while it is on the agent's d.behavior rank.
+    branchIfZero(rd(S(h.owner->cell), dims_.behavior, true), next);
+  }
   emit(OpcodeKind::ChoiceDepth, "h", {}, {hd});
   emit(OpcodeKind::Choice, "next", {S(opref(next))});
   if (h.bindEntry != noCell) callLabel(h.bindEntry);
@@ -2680,6 +2799,7 @@ void Gen::emitInit(CellRef entryLabel) {
   pushScope();
   ctx_        = Ctx{};
   ctx_.retReg = scratchG_;
+  own_        = nullptr;
   mov(S(curEvent_), S(zero_));
   for (const Member &m : agent_->members) {
     const auto *v = std::get_if<VarDecl>(&m);
@@ -2691,11 +2811,20 @@ void Gen::emitInit(CellRef entryLabel) {
       storeField(f, val);
     });
   }
+  // §8.5: believe, install and behavior members run in declaration order.
   for (const Member &m : agent_->members) {
-    const auto *b = std::get_if<BeliefDecl>(&m);
-    if (b == nullptr) continue;
-    stmtWrap(
-        [&] { beliefChange(EBeliefChange::Kind::Believe, b->fact, reg()); });
+    if (const auto *b = std::get_if<BeliefDecl>(&m)) {
+      stmtWrap(
+          [&] { beliefChange(EBeliefChange::Kind::Believe, b->fact, reg()); });
+    } else if (const auto *i = std::get_if<InstallDecl>(&m)) {
+      stmtWrap([&] {
+        installByName(EInstall::Kind::Install, i->name, i->args, reg(), i->loc);
+      });
+    } else if (const auto *u = std::get_if<BehaviorUse>(&m)) {
+      stmtWrap([&] {
+        installByName(EInstall::Kind::Mount, u->name, u->args, reg(), u->loc);
+      });
+    }
   }
   const CellRef end = newLabel();
   for (const HandlerInfo *h : mergedFor(std::string(kEventInitialize))) {
@@ -2719,6 +2848,7 @@ void Gen::emitDispatch(CellRef entryLabel) {
   dRegs_.clear();
   stmtDepth_        = 0;
   ctx_              = Ctx{};
+  own_              = nullptr;
   const CellRef end = newLabel();
   mov(S(fields_.at(std::string(kFieldConsumed)).valueCell), S(false_));
   const FieldInfo &turn = fields_.at(std::string(kFieldTurn));
@@ -2768,7 +2898,8 @@ void Gen::buildProgramStructure() {
     CellRef prev = nameCell;
     for (const HandlerInfo *h : mergedFor(t)) {
       if (h->eventType != t) continue;
-      const CellRef hc = arena_.makeCell(agentType_ + ".on " + t);
+      const CellRef hc = arena_.makeCell(
+          (h->owner != nullptr ? h->owner->name : agentType_) + ".on " + t);
       zigzag::expectWritten(
           arena_.link(prev, core_.dims().clause, DimVector::POS, hc));
       prev = hc;
@@ -2796,6 +2927,506 @@ void Gen::buildProgramStructure() {
       pe = sc;
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Capacities, skills and behaviors (design §5.3, §5.7, §8.5)
+//
+// Deviation from §5.3, which mints a skill frame and its instances when
+// `install` runs: no opcode can address a cell minted at run time (see
+// compiler.hpp), so the frame, its fields, one instance per capacity and the
+// capacity-name cells are minted here, once per skill reachable from the
+// agent, and `install` links them into the agent's `d.skill` rank. `uninstall`
+// unlinks them. Rank membership is therefore the installed state, and a skill
+// has at most one live installation, which `install`'s own rule (replace
+// every skill that shares a capacity, itself included) already implies. A skill
+// that implements no capacity has no instance to put on the rank, so its
+// frame goes there instead; capacity walks skip a cell with no `+d.capacity`.
+//
+// A behavior is the same: one cell per reachable behavior, on `d.behavior`
+// while mounted. Its handlers are in the dispatcher's merged ranks always and
+// answer only while mounted. Deviation from §5.7: the tie-break "behaviors in
+// mount order" is "behaviors in the order the agent first names them", which is
+// the mount order for every behavior the agent mounts in its own body.
+// ---------------------------------------------------------------------------
+
+HandlerInfo Gen::makeHandlerInfo(const HandlerDef &h, std::size_t index,
+                                 Container *owner) {
+  HandlerInfo hi;
+  hi.owner    = owner;
+  hi.def      = &h;
+  hi.priority = h.priority.value_or(0);
+  hi.index    = index;
+  if (const auto *bt = std::get_if<BeliefTrigger>(&h.trigger)) {
+    (void)predOf(bt->fact);
+    hi.eventType =
+        std::string(bt->added ? kBeliefAdded : kBeliefRemoved) + bt->fact.name;
+    hi.beliefTerm = &bt->fact;
+  } else {
+    const auto &trig = std::get<EventTrigger>(h.trigger);
+    hi.eventType     = trig.eventType;
+    hi.binder        = trig.binder;
+  }
+  return hi;
+}
+
+void Gen::addFieldTo(CellRef owner, CellRef &last,
+                     std::unordered_map<std::string, FieldInfo> &into,
+                     const std::string &fname, const Ty &ty) {
+  FieldInfo f;
+  f.ty        = ty;
+  f.nameCell  = arena_.makeCell(fname);
+  f.valueCell = initialValueCell(ty);
+  zigzag::expectWritten(arena_.link(f.nameCell, core_.dims().values,
+                                    DimVector::POS, f.valueCell));
+  zigzag::expectWritten(arena_.link(last == noCell ? owner : last,
+                                    core_.dims().vars, DimVector::POS,
+                                    f.nameCell));
+  last        = f.nameCell;
+  into[fname] = std::move(f);
+}
+
+/// A skill's or behavior's own field, then the agent's: the reserved `$`
+/// fields (`consume`, `self`) belong to the agent whoever's code runs.
+const FieldInfo *Gen::findField(const std::string &n) const {
+  if (own_ != nullptr) {
+    if (const auto f = own_->fields.find(n); f != own_->fields.end()) {
+      return &f->second;
+    }
+  }
+  const auto f = fields_.find(n);
+  return f == fields_.end() ? nullptr : &f->second;
+}
+
+MethodInfo *Gen::findMethod(const std::string &n) {
+  auto &set    = own_ != nullptr ? own_->methods : methods_;
+  const auto m = set.find(n);
+  return m == set.end() ? nullptr : &m->second;
+}
+
+std::vector<std::string>
+Gen::capacityClosure(const std::vector<std::string> &names) const {
+  std::vector<std::string> out;
+  std::function<void(const std::string &)> add = [&](const std::string &n) {
+    if (std::ranges::find(out, n) != out.end()) return;
+    out.push_back(n);
+    if (const auto it = capacities_.find(n); it != capacities_.end()) {
+      for (const std::string &base : it->second->extends) add(base);
+    }
+  };
+  for (const std::string &n : names) add(n);
+  return out;
+}
+
+std::vector<const MethodSig *>
+Gen::capacityMethods(const std::string &cap) const {
+  std::vector<const MethodSig *> out;
+  for (const std::string &c : capacityClosure({cap})) {
+    if (const auto it = capacities_.find(c); it != capacities_.end()) {
+      for (const MethodSig &m : it->second->methods) out.push_back(&m);
+    }
+  }
+  return out;
+}
+
+std::optional<std::string>
+Gen::capacityOfMethod(const std::string &method) const {
+  const auto &uses = own_ != nullptr ? own_->uses : agentUses_;
+  for (const std::string &cap : uses) {
+    for (const MethodSig *m : capacityMethods(cap)) {
+      if (m->name == method) return cap;
+    }
+  }
+  return std::nullopt;
+}
+
+void Gen::reachExpr(const Expr &e, std::vector<std::string> &skillOrder,
+                    std::vector<std::string> &behaviorOrder) {
+  if (const auto *i = std::get_if<EInstall>(&e.node)) {
+    auto &order = (i->kind == EInstall::Kind::Install ||
+                   i->kind == EInstall::Kind::Uninstall)
+                      ? skillOrder
+                      : behaviorOrder;
+    if (std::ranges::find(order, i->name) == order.end()) {
+      order.push_back(i->name);
+    }
+  }
+  forEachChild(e,
+               [&](const Expr &c) { reachExpr(c, skillOrder, behaviorOrder); });
+}
+
+void Gen::reachFrom(const std::vector<Member> &members,
+                    std::vector<std::string> &skillOrder,
+                    std::vector<std::string> &behaviorOrder) {
+  const auto note = [](std::vector<std::string> &order, const std::string &n) {
+    if (std::ranges::find(order, n) == order.end()) order.push_back(n);
+  };
+  const auto walk = [&](const ExprPtr &p) {
+    if (p) reachExpr(*p, skillOrder, behaviorOrder);
+  };
+  for (const Member &m : members) {
+    if (const auto *i = std::get_if<InstallDecl>(&m)) {
+      note(skillOrder, i->name);
+    } else if (const auto *b = std::get_if<BehaviorUse>(&m)) {
+      note(behaviorOrder, b->name);
+    } else if (const auto *md = std::get_if<MethodDef>(&m)) {
+      walk(md->body);
+    } else if (const auto *h = std::get_if<HandlerDef>(&m)) {
+      walk(h->guard);
+      walk(h->body);
+    } else if (const auto *l = std::get_if<LifecycleDef>(&m)) {
+      walk(l->body);
+    } else if (const auto *v = std::get_if<VarDecl>(&m)) {
+      walk(v->init);
+    }
+  }
+}
+
+Container &Gen::makeContainer(Container::K k, const std::string &name,
+                              const std::vector<Param> &params,
+                              const std::vector<Member> &members,
+                              SourceLocation loc) {
+  Container c;
+  c.k            = k;
+  c.name         = name;
+  c.params       = &params;
+  c.members      = &members;
+  c.loc          = loc;
+  c.cell         = arena_.makeCell(name);
+  const auto add = [&](const std::string &fname, const Ty &ty,
+                       SourceLocation at) {
+    if (c.fields.contains(fname)) bail(CompileError::DuplicateName, fname, at);
+    addFieldTo(c.cell, c.lastField, c.fields, fname, ty);
+  };
+  for (const Param &p : params) add(p.name, fromType(p.type, p.loc), p.loc);
+  for (const Member &m : members) {
+    if (const auto *v = std::get_if<VarDecl>(&m)) {
+      add(v->name, fromType(v->type, v->loc), v->loc);
+    } else if (const auto *u = std::get_if<UsesDecl>(&m)) {
+      c.uses.insert(c.uses.end(), u->capacities.begin(), u->capacities.end());
+    } else if (k == Container::K::Behavior &&
+               (std::holds_alternative<GoalDecl>(m) ||
+                std::holds_alternative<PlanDecl>(m) ||
+                std::holds_alternative<AnswerDef>(m) ||
+                std::holds_alternative<BeliefDecl>(m) ||
+                std::holds_alternative<InstallDecl>(m) ||
+                std::holds_alternative<BehaviorUse>(m))) {
+      unsupported("this member of a behavior", loc);
+    }
+  }
+  c.prepLabel      = newLabel();
+  c.installLabel   = newLabel();
+  c.uninstallLabel = newLabel();
+  auto &table      = k == Container::K::Skill ? skills_ : behaviors_;
+  return table.emplace(name, std::move(c)).first->second;
+}
+
+void Gen::prepareExtensions() {
+  std::unordered_map<std::string, const SkillDecl *> skillDecls;
+  std::unordered_map<std::string, const BehaviorDecl *> behaviorDecls;
+  for (const TopDecl &d : unit_.decls) {
+    if (const auto *c = std::get_if<CapacityDecl>(&d)) {
+      capacities_.emplace(c->name, c);
+    } else if (const auto *sk = std::get_if<SkillDecl>(&d)) {
+      skillDecls.emplace(sk->name, sk);
+    } else if (const auto *b = std::get_if<BehaviorDecl>(&d)) {
+      behaviorDecls.emplace(b->name, b);
+    }
+  }
+  std::vector<std::string> skillOrder, behaviorOrder;
+  reachFrom(agent_->members, skillOrder, behaviorOrder);
+  std::size_t si = 0, bi = 0;
+  while (si < skillOrder.size() || bi < behaviorOrder.size()) {
+    while (si < skillOrder.size()) {
+      const std::string name = skillOrder[si++];
+      const auto it          = skillDecls.find(name);
+      if (it == skillDecls.end()) {
+        bail(CompileError::UnknownName, "unknown skill " + name);
+      }
+      const SkillDecl &sd = *it->second;
+      if (sd.native) {
+        unsupported("native skill " + name + " (its methods are effects)",
+                    sd.loc);
+      }
+      Container &c = makeContainer(Container::K::Skill, name, sd.params,
+                                   sd.members, sd.loc);
+      c.capacities = capacityClosure(sd.implements);
+      CellRef prev = c.cell;
+      for (const std::string &cap : c.capacities) {
+        const CellRef inst = arena_.makeCell(name);
+        zigzag::expectWritten(arena_.link(inst, dims_.capacity, DimVector::POS,
+                                          arena_.makeCell(cap)));
+        zigzag::expectWritten(
+            arena_.link(prev, core_.dims().clone, DimVector::POS, inst));
+        prev = inst;
+        c.instances.push_back(inst);
+      }
+      c.member = c.instances.empty() ? c.cell : c.instances.front();
+      prepareMethodSet(c.methods, sd.members, &c);
+      reachFrom(sd.members, skillOrder, behaviorOrder);
+    }
+    while (bi < behaviorOrder.size()) {
+      const std::string name = behaviorOrder[bi++];
+      const auto it          = behaviorDecls.find(name);
+      if (it == behaviorDecls.end()) {
+        bail(CompileError::UnknownName, "unknown behavior " + name);
+      }
+      const BehaviorDecl &bd = *it->second;
+      Container &c = makeContainer(Container::K::Behavior, name, bd.params,
+                                   bd.members, bd.loc);
+      c.member     = c.cell;
+      prepareMethodSet(c.methods, bd.members, &c);
+      reachFrom(bd.members, skillOrder, behaviorOrder);
+    }
+  }
+  // Handlers last, in the order the behaviors were first named, so a behavior
+  // that comes later loses a priority tie to one that comes earlier.
+  for (const std::string &name : behaviorOrder) {
+    Container &c = behaviors_.at(name);
+    for (const Member &m : *c.members) {
+      if (const auto *h = std::get_if<HandlerDef>(&m)) {
+        handlers_.push_back(makeHandlerInfo(*h, handlers_.size(), &c));
+      }
+    }
+  }
+}
+
+Ty Gen::capacityCall(const std::string &cap, const std::string &method,
+                     const std::vector<ExprPtr> &args, CellRef out,
+                     SourceLocation loc) {
+  const MethodSig *sig = nullptr;
+  for (const MethodSig *m : capacityMethods(cap)) {
+    if (m->name == method) {
+      sig = m;
+      break;
+    }
+  }
+  if (sig == nullptr) {
+    bail(CompileError::UnknownName, cap + " has no method " + method, loc);
+  }
+  if (sig->isEffect) unsupported("effect methods", loc);
+  if (args.size() != sig->params.size()) {
+    bail(CompileError::BadArity,
+         method + " takes " + std::to_string(sig->params.size()) + " arguments",
+         loc);
+  }
+  std::vector<Container *> candidates;
+  for (auto &[n, sk] : skills_) {
+    if (std::ranges::find(sk.capacities, cap) != sk.capacities.end() &&
+        sk.methods.contains(method)) {
+      candidates.push_back(&sk);
+    }
+  }
+  if (candidates.empty()) {
+    bail(CompileError::UnknownName,
+         "no skill reachable from the agent implements " + cap + "." + method,
+         loc);
+  }
+  std::vector<CellRef> temps;
+  for (const auto &a : args) {
+    const CellRef t = reg();
+    valueInto(*a, t);
+    temps.push_back(t);
+  }
+  const CellRef frame = reg();
+  movC(a0_, cStr(cap));
+  callLabel(rtCapFind_);
+  mov(S(frame), S(r0_));
+  branchIfZero(frame, failStep_);
+  std::vector<CellRef> labels;
+  for (const Container *sk : candidates) {
+    const CellRef label = newLabel(), eq = reg();
+    emit(OpcodeKind::Eq, "skill?", {D(frame), S(cStr(sk->name))}, {eq});
+    branch(S(eq), label);
+    labels.push_back(label);
+  }
+  jump(failStep_);
+  const CellRef end = newLabel();
+  for (std::size_t i = 0; i < candidates.size(); ++i) {
+    place(labels[i]);
+    MethodInfo &mi = candidates[i]->methods.at(method);
+    if (mi.argRegs.size() != temps.size()) {
+      bail(CompileError::BadArity,
+           candidates[i]->name + "." + method + " differs from " + cap, loc);
+    }
+    for (std::size_t j = 0; j < temps.size(); ++j) {
+      mov(S(mi.argRegs[j]), S(temps[j]));
+    }
+    callLabel(mi.entry);
+    mov(S(out), S(mi.retReg));
+    jump(end);
+  }
+  place(end);
+  return sig->result ? fromType(*sig->result, loc) : tyOf(Ty::K::Unit);
+}
+
+/// a0 = a capacity name; r0 = the frame of the first installed skill with an
+/// instance for it (the clone master, §5.3), or 0.
+void Gen::emitRtCapFind() {
+  beginInternal(rtCapFind_);
+  const CellRef inst = reg(), capName = reg(), eq = reg(), prev = reg(),
+                frame = reg();
+  const CellRef loop = newLabel(), next = newLabel(), found = newLabel(),
+                climb = newLabel(), top = newLabel(), miss = newLabel();
+  mov(S(inst), S(rd(S(agentCell_), dims_.skill)));
+  place(loop);
+  branchIfZero(inst, miss);
+  mov(S(capName), S(rd(D(inst), dims_.capacity)));
+  branchIfZero(capName, next);
+  emit(OpcodeKind::Eq, "cap?", {D(capName), S(a0_)}, {eq});
+  branch(S(eq), found);
+  place(next);
+  mov(S(inst), S(rd(D(inst), dims_.skill)));
+  jump(loop);
+  place(found);
+  mov(S(frame), S(inst));
+  place(climb);
+  mov(S(prev), S(rd(D(frame), core_.dims().clone, true)));
+  branchIfZero(prev, top);
+  mov(S(frame), S(prev));
+  jump(climb);
+  place(top);
+  mov(S(r0_), S(frame));
+  ret();
+  place(miss);
+  movC(r0_, zero_);
+  ret();
+}
+
+void Gen::beginRoutine(CellRef label, Container *owner) {
+  own_     = owner;
+  tail_    = noCell;
+  curRegs_ = nullptr;
+  scopes_.clear();
+  dRegs_.clear();
+  stmtDepth_ = 0;
+  pushScope();
+  ctx_        = Ctx{};
+  ctx_.retReg = scratchG_;
+  place(label);
+}
+
+void Gen::emitContainerInits(Container &c) {
+  for (const Member &m : *c.members) {
+    const auto *v = std::get_if<VarDecl>(&m);
+    if (v == nullptr) continue;
+    const FieldInfo &f = c.fields.at(v->name);
+    const CellRef val  = global();
+    stmtWrap([&] {
+      valueInto(*v->init, val);
+      storeField(f, val);
+    });
+  }
+}
+
+void Gen::emitLifecycle(Container &c, bool uninstall) {
+  for (const Member &m : *c.members) {
+    const auto *l = std::get_if<LifecycleDef>(&m);
+    if (l == nullptr || l->uninstall != uninstall || !l->body) continue;
+    expr(*l->body, global());
+  }
+}
+
+void Gen::emitContainerRoutines() {
+  const auto cellsOf = [&](Container &c) {
+    return c.instances.empty() ? std::vector<CellRef>{c.cell} : c.instances;
+  };
+  for (auto &[name, c] : skills_) {
+    // Uninstall whatever shares a capacity with this skill, itself included.
+    beginRoutine(c.prepLabel, nullptr);
+    for (auto &[tn, t] : skills_) {
+      const bool shares =
+          &t == &c || std::ranges::any_of(t.capacities, [&](const auto &x) {
+            return std::ranges::find(c.capacities, x) != c.capacities.end();
+          });
+      if (shares) callLabel(t.uninstallLabel);
+    }
+    ret();
+
+    beginRoutine(c.installLabel, &c);
+    emitContainerInits(c);
+    for (const CellRef cell : cellsOf(c)) {
+      const CellRef r = reg();
+      movC(r, opref(cell));
+      emitAppendTail(S(agentCell_), dims_.skill, dims_.skill, r);
+    }
+    emitLifecycle(c, false);
+    ret();
+
+    beginRoutine(c.uninstallLabel, &c);
+    const CellRef gone = newLabel();
+    branchIfZero(rd(S(c.member), dims_.skill, true), gone);
+    emitLifecycle(c, true);
+    for (const CellRef cell : cellsOf(c)) {
+      const CellRef r = reg();
+      movC(r, opref(cell));
+      unlinkFromRank(r, dims_.skill);
+    }
+    place(gone);
+    ret();
+  }
+  for (auto &[name, c] : behaviors_) {
+    beginRoutine(c.installLabel, &c);
+    emitContainerInits(c);
+    const CellRef doLink = newLabel(), done = newLabel();
+    branchIfZero(rd(S(c.cell), dims_.behavior, true), doLink);
+    jump(done);
+    place(doLink);
+    const CellRef r = reg();
+    movC(r, opref(c.cell));
+    emitAppendTail(S(agentCell_), dims_.behavior, dims_.behavior, r);
+    place(done);
+    ret();
+
+    beginRoutine(c.uninstallLabel, &c);
+    const CellRef off = newLabel();
+    branchIfZero(rd(S(c.cell), dims_.behavior, true), off);
+    const CellRef u = reg();
+    movC(u, opref(c.cell));
+    unlinkFromRank(u, dims_.behavior);
+    place(off);
+    ret();
+  }
+  own_ = nullptr;
+}
+
+Ty Gen::installByName(EInstall::Kind kind, const std::string &name,
+                      const std::vector<ExprPtr> &args, CellRef out,
+                      SourceLocation loc) {
+  const bool skill =
+      kind == EInstall::Kind::Install || kind == EInstall::Kind::Uninstall;
+  auto &table   = skill ? skills_ : behaviors_;
+  const auto it = table.find(name);
+  if (it == table.end()) {
+    bail(CompileError::UnknownName,
+         std::string(skill ? "unknown skill " : "unknown behavior ") + name,
+         loc);
+  }
+  Container &c = it->second;
+  if (kind == EInstall::Kind::Install || kind == EInstall::Kind::Mount) {
+    if (args.size() != c.params->size()) {
+      bail(CompileError::BadArity,
+           name + " takes " + std::to_string(c.params->size()) + " arguments",
+           loc);
+    }
+    // Arguments first: they may read the very fields the replaced skill's
+    // `on uninstall` block is about to change.
+    std::vector<CellRef> temps;
+    for (const auto &a : args) {
+      const CellRef t = reg();
+      valueInto(*a, t);
+      temps.push_back(t);
+    }
+    if (skill) callLabel(c.prepLabel);
+    for (std::size_t i = 0; i < temps.size(); ++i) {
+      storeField(c.fields.at((*c.params)[i].name), temps[i]);
+    }
+    callLabel(c.installLabel);
+  } else {
+    callLabel(c.uninstallLabel);
+  }
+  movC(out, unit_c_);
+  return tyOf(Ty::K::Unit);
 }
 
 CompiledAgent Gen::run() {
@@ -2831,6 +3462,7 @@ CompiledAgent Gen::run() {
   rtBDrop_        = newLabel();
   rtBSet_         = newLabel();
   rtSettle_       = newLabel();
+  rtCapFind_      = newLabel();
   a3_             = global();
   a4_             = global();
   roundsG_        = global();
@@ -2843,36 +3475,21 @@ CompiledAgent Gen::run() {
   mintPredicates();
 
   // Handlers and the members the iteration does not support.
-  std::size_t index = 0;
   for (const Member &m : agent_->members) {
     if (const auto *h = std::get_if<HandlerDef>(&m)) {
-      HandlerInfo hi;
-      hi.def      = h;
-      hi.priority = h->priority.value_or(0);
-      hi.index    = index++;
-      if (const auto *bt = std::get_if<BeliefTrigger>(&h->trigger)) {
-        (void)predOf(bt->fact);
-        hi.eventType = std::string(bt->added ? kBeliefAdded : kBeliefRemoved) +
-                       bt->fact.name;
-        hi.beliefTerm = &bt->fact;
-      } else {
-        const auto &trig = std::get<EventTrigger>(h->trigger);
-        hi.eventType     = trig.eventType;
-        hi.binder        = trig.binder;
-      }
-      handlers_.push_back(std::move(hi));
+      handlers_.push_back(makeHandlerInfo(*h, handlers_.size(), nullptr));
     } else if (const auto *u = std::get_if<UsesDecl>(&m)) {
-      unsupported("uses", u->loc);
+      agentUses_.insert(agentUses_.end(), u->capacities.begin(),
+                        u->capacities.end());
     } else if (std::holds_alternative<AnswerDef>(m) ||
                std::holds_alternative<GoalDecl>(m) ||
                std::holds_alternative<PlanDecl>(m) ||
-               std::holds_alternative<InstallDecl>(m) ||
-               std::holds_alternative<BehaviorUse>(m) ||
                std::holds_alternative<LifecycleDef>(m)) {
       unsupported("this member", agent_->loc);
     }
   }
   prepareMethods();
+  prepareExtensions();
 
   emitRtFind();
   emitRtAppendField();
@@ -2883,7 +3500,15 @@ CompiledAgent Gen::run() {
   emitRtHasSrc();
   emitRtBDrop();
   emitRtBSet();
+  emitRtCapFind();
   for (auto &[n, mi] : methods_) emitMethod(mi);
+  for (auto &[sn, sk] : skills_) {
+    for (auto &[n, mi] : sk.methods) emitMethod(mi);
+  }
+  for (auto &[bn, bh] : behaviors_) {
+    for (auto &[n, mi] : bh.methods) emitMethod(mi);
+  }
+  emitContainerRoutines();
   for (HandlerInfo &h : handlers_) emitHandlerRoutines(h);
 
   CompiledAgent out;
