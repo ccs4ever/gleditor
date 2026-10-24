@@ -25,6 +25,7 @@
 #include <chrono>
 #include <cstdint>
 #include <expected>
+#include <filesystem>
 #include <functional>
 #include <map>
 #include <memory>
@@ -33,9 +34,11 @@
 #include <string_view>
 #include <vector>
 
+#include "common/xanadu/resolver.hpp"
 #include "common/xanadu/vagent/runtime_abi.hpp"
 #include "common/xanadu/vagent/wire.hpp"
 #include "common/xanadu/vortex/mesh_actor.hpp"
+#include "common/xanadu/vortex/mesh_value.hpp"
 #include "common/xanadu/vortex/worker_context.hpp"
 
 namespace xanadu::vagent {
@@ -51,6 +54,10 @@ struct AgentSettings {
   double renewFraction{0.8};
   std::size_t readyPerMessage{4};
   std::size_t compactEvery{64};
+  /// `vagent.value_operations`: operations one checkpoint may mint, and the
+  /// most `resume` will rebuild (P5). An agent that grows past it cannot be
+  /// moved or have its dead cells reclaimed.
+  std::uint32_t valueOperations{65536};
   /// The validator wants a hashcash stamp on a spawn and the runtime does not
   /// check one, so a spawn the host itself issues carries this fixed text.
   std::string spawnStamp{"vagent-local-spawn"};
@@ -132,6 +139,50 @@ inline constexpr std::string_view kStatStopRefused = "stop_refused";
 inline constexpr std::string_view kCauseRetries  = "retries";
 inline constexpr std::string_view kCauseDeadline = "deadline";
 
+/// Why `AgentExecutor::checkpoint` declined (§4.2, "quiescent"). Each names
+/// one condition, in the order the adapter tests them.
+enum class CheckpointRefusal : std::uint8_t {
+  UnknownAgent,        ///< no such pid, or it has not had its first turn
+  Stopped,             ///< stopped, or on its way out
+  HostDeliveryPending, ///< the adapter holds an event it has yet to run
+  MailboxNotEmpty,
+  SendsIncomplete, ///< a message this agent sent has no reply yet
+  NotQuiescent,    ///< the runtime refused: a choice point, mark or run
+  NoIdentity,      ///< `setCheckpointIdentity` was never called
+  PublishFailed,
+};
+
+[[nodiscard]] std::string_view toString(CheckpointRefusal refusal) noexcept;
+
+/// What signs and names a checkpoint. `origin.str()` must equal the node name
+/// the executor was built with, because `resume` compares them.
+struct CheckpointIdentity {
+  xanadu::MutableKeys keys;
+  zigzag::vortex::mesh::NodeId origin;
+  /// Where sealed checkpoint payloads are written; the host owns the
+  /// directory and keeps it for as long as a checkpoint may be resumed.
+  std::filesystem::path seedRoot;
+  /// A running agent holds no signing key (§4.1), so the host supplies the
+  /// provenance a checkpoint carries, as it supplies the issuer.
+  xanadu::SignedProvenance provenance;
+};
+
+/// A published checkpoint and what `resume` needs to name the agent again.
+/// The sealed state is in `seed` and `source`; the rest is what the adapter
+/// keeps outside the arena.
+struct AgentCheckpoint {
+  identity::ActorPid pid;
+  std::string agentType;
+  std::string name;
+  std::string parentName;
+  std::string programRef;
+  bool adopted{false};
+  /// The hash a fresh grant must name as its base (`ActorGrant::baseRef`).
+  std::string contentHash;
+  std::shared_ptr<xanadu::DirectoryContentSource> source;
+  zigzag::vortex::mesh::ValueSeed seed;
+};
+
 class AgentExecutor {
 public:
   AgentExecutor(zigzag::vortex::mesh::MeshActorRuntime &runtime,
@@ -187,6 +238,36 @@ public:
   /// spent (§7.3); false if it is not outstanding.
   bool setDeliveryDeadline(std::string_view requestId,
                            std::chrono::system_clock::time_point deadline);
+
+  /// Runtime options with `floorOf` set and the checkpoint bound taken from
+  /// @p settings (`vagent.value_operations`, P5).
+  [[nodiscard]] static zigzag::vortex::mesh::ActorOptions
+  runtimeOptions(const AgentSettings &settings);
+
+  /// Required before `checkpoint`.
+  AgentExecutor *setCheckpointIdentity(CheckpointIdentity identity);
+
+  /// Publish the agent's state at a message boundary (§4.2, §4.4). Refuses
+  /// unless the agent is quiescent: not stopped, nothing in the mailbox, no
+  /// message it sent still unanswered, no event the adapter has yet to run,
+  /// and nothing the runtime objects to. Effects do not exist yet, so none is
+  /// checked. Timers and beliefs travel in the state and do not prevent it.
+  [[nodiscard]] std::expected<AgentCheckpoint, CheckpointRefusal>
+  checkpoint(const identity::ActorPid &pid);
+
+  /// Re-admit a checkpoint under a new pid on this executor's runtime
+  /// (§4.4, §4.5). The program is instantiated afresh in the rebuilt arena and
+  /// the saved state is copied onto it, so `Initialize` does not run again;
+  /// the agent tells its peers where it went (`Moved`) on its first turn. The
+  /// old actor is not stopped: `retire` it once the peers have been told.
+  [[nodiscard]] std::expected<identity::ActorPid,
+                              zigzag::vortex::mesh::ActorError>
+  resume(const AgentCheckpoint &checkpoint);
+
+  /// Stop an actor that has been resumed elsewhere, without the orderly
+  /// shutdown (`Destroy`, `ChildStopping`). False if it is not a live actor
+  /// of this executor.
+  bool retire(const identity::ActorPid &pid);
 
   /// Called at the start of every turn that dispatches an event, with the
   /// event cell already minted, so a host can watch what agents are told
@@ -251,7 +332,16 @@ private:
   State &stateFor(const identity::ActorPid &pid);
   [[nodiscard]] bool prepare(State &state,
                              zigzag::vortex::WorkerContext &context,
-                             const zigzag::vortex::mesh::ActorMessage &spawn);
+                             const zigzag::vortex::mesh::ActorMessage &spawn,
+                             std::optional<zigzag::CellRef> savedAgent);
+  /// Copy the saved agent cell's state onto the freshly instantiated one:
+  /// fields, beliefs, hosted spaces and children. Compiled routines address
+  /// their own cells by ref, so the restored cells cannot be used in place.
+  void restoreState(State &state, zigzag::CellRef saved);
+  void announceMoved(State &state);
+  void applyMoved(State &state,
+                  const zigzag::vortex::mesh::ActorMessage &message,
+                  const Envelope &envelope);
   std::expected<std::string, zigzag::vortex::mesh::ActorError>
   handleMessage(State &state,
                 const zigzag::vortex::mesh::ActorExecution &execution,
@@ -378,6 +468,11 @@ private:
   std::map<std::string, std::unique_ptr<State>> states_;
   std::map<std::string, Outstanding> outstanding_;
   std::vector<identity::ActorPid> needsFirstTurn_;
+  std::optional<CheckpointIdentity> checkpointIdentity_;
+  std::uint64_t resumes_{0};
+  /// Per resumed pid, what the arena does not hold: whether the launcher had
+  /// adopted it. Consumed by `prepare`.
+  std::map<std::string, bool> resumeAdopted_;
 };
 
 } // namespace xanadu::vagent

@@ -75,8 +75,6 @@ using zigzag::vortex::mesh::ActorGrant;
 using zigzag::vortex::mesh::ActorMessage;
 using zigzag::vortex::mesh::MeshActorRuntime;
 
-constexpr std::string_view kLocalNode = "local";
-constexpr std::uint64_t kLocalEpoch   = 1;
 constexpr std::string_view kCapPrefix = "vagent-local:";
 constexpr std::size_t kMacHexDigits   = 64;
 constexpr std::size_t kMacKeyBytes    = 32;
@@ -135,9 +133,15 @@ LocalHost::LocalHost(CompiledProgram program)
     : LocalHost(std::move(program), Options{}) {}
 
 LocalHost::LocalHost(CompiledProgram program, Options options)
-    : program_(std::move(program)), issuer_(std::make_unique<Issuer>()),
+    : program_(std::move(program)),
+      keys_(options.keys ? *options.keys : xanadu::createMutableKeys()),
+      node_(zigzag::vortex::mesh::NodeId{options.author, keys_.publicKey.hex(),
+                                         options.epoch}
+                .str()),
+      issuer_(std::make_unique<Issuer>()),
       runtime_(std::make_unique<MeshActorRuntime>(
-          std::string(kLocalNode), kLocalEpoch, AgentExecutor::withFloors())) {
+          node_, options.epoch,
+          AgentExecutor::runtimeOptions(options.settings))) {
   if (options.manualClock) {
     manualNow_ = std::make_shared<std::chrono::system_clock::time_point>(
         options.clock.wall());
@@ -153,8 +157,21 @@ LocalHost::LocalHost(CompiledProgram program, Options options)
         if (request.programRef != program_.programRef()) {
           return std::unexpected(ActorError::NotAuthorized);
         }
+        // A resume request names the checkpoint its grant is based on.
+        std::string base = "base";
+        if (const auto parameters = issuer_->parametersOf(request.capability)) {
+          if (const auto decoded = decodeValue(*parameters)) {
+            if (const auto *record = std::get_if<WireRecord>(&decoded->data)) {
+              if (const auto *named = record->find(kWireSpawnBase)) {
+                if (const auto *hash = std::get_if<std::string>(&named->data)) {
+                  base = *hash;
+                }
+              }
+            }
+          }
+        }
         return ActorGrant{request.programRef,
-                          "base",
+                          base,
                           instructions,
                           kLocalMaxCells,
                           kLocalMaxOutputBytes,
@@ -164,13 +181,35 @@ LocalHost::LocalHost(CompiledProgram program, Options options)
                           true};
       });
   executor_ = std::make_unique<AgentExecutor>(
-      *runtime_, *issuer_, program_, owner, std::string(kLocalNode),
-      kLocalEpoch, options.settings, std::move(options.clock));
+      *runtime_, *issuer_, program_, owner, node_, options.epoch,
+      options.settings, std::move(options.clock));
   executor_->install()->setHostSink(
       [this](const Envelope &event) { emissions_.push_back(event); });
+  seedRoot_ = std::filesystem::temp_directory_path() /
+              ("vagent-host-" + keys_.publicKey.hex() + "-" +
+               std::to_string(options.epoch));
+  executor_->setCheckpointIdentity(CheckpointIdentity{
+      keys_,
+      zigzag::vortex::mesh::NodeId{options.author, keys_.publicKey.hex(),
+                                   options.epoch},
+      seedRoot_, xanadu::SignedProvenance{"vagent-local-host", "unsigned"}});
 }
 
-LocalHost::~LocalHost() = default;
+LocalHost::~LocalHost() {
+  std::error_code ignored;
+  std::filesystem::remove_all(seedRoot_, ignored);
+}
+
+void LocalHost::connect(LocalHost &peer) {
+  const auto owner = *identity::Fingerprint::fromString(kLocalOwner);
+  const auto link  = [&owner](LocalHost &from, LocalHost &to) {
+    from.runtime_->trustNode(to.node_, owner);
+    from.runtime_->setSender(
+        from.executor_->loopbackSender(to.executor_->loopbackSender()));
+  };
+  link(*this, peer);
+  link(peer, *this);
+}
 
 std::expected<identity::ActorPid, ActorError>
 LocalHost::launch(std::string_view agentType, std::string_view name,

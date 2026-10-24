@@ -13,6 +13,7 @@
 #define COMMON_XANADU_VAGENT_PROGRAM_HPP
 
 #include <expected>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -82,6 +83,14 @@ public:
     /// Replace `clock` with one that starts at the system time and moves only
     /// when `advance` is called, so timers run deterministically.
     bool manualClock{false};
+    /// The node's name is `author:device:epoch`, the shape `resume` demands of
+    /// a checkpoint's origin, with the device named by its public key (the
+    /// key that signs checkpoints). Unset `keys` mint a new device; passing a
+    /// host's `deviceKeys()` with a larger epoch stands for that device
+    /// restarted.
+    std::string author{"local"};
+    std::optional<xanadu::MutableKeys> keys;
+    std::uint64_t epoch{1};
   };
 
   explicit LocalHost(CompiledProgram program);
@@ -112,10 +121,22 @@ public:
     return *runtime_;
   }
   [[nodiscard]] CompiledProgram &program() noexcept { return program_; }
+  [[nodiscard]] const std::string &node() const noexcept { return node_; }
+  [[nodiscard]] const xanadu::MutableKeys &deviceKeys() const noexcept {
+    return keys_;
+  }
+
+  /// Let this host and @p peer deliver to each other, so an agent resumed on
+  /// one can talk to its parent and children on the other. Both must outlive
+  /// the connection.
+  void connect(LocalHost &peer);
 
 private:
   class Issuer;
   CompiledProgram program_;
+  xanadu::MutableKeys keys_;
+  std::string node_;
+  std::filesystem::path seedRoot_;
   std::unique_ptr<Issuer> issuer_;
   std::unique_ptr<zigzag::vortex::mesh::MeshActorRuntime> runtime_;
   std::unique_ptr<AgentExecutor> executor_;
