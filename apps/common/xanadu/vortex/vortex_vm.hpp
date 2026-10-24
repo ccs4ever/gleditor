@@ -86,6 +86,8 @@ enum class OpcodeKind : std::uint8_t {
   Cut,
   // Appended last so artifacts minted before it keep their opcode numbers.
   ChoiceDepth,
+  // #Point out, ref: out becomes a handle to the cell `ref` names.
+  Point,
 };
 
 struct ChoicePoint {
