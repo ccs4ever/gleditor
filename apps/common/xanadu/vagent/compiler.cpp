@@ -357,6 +357,13 @@ private:
   /// remaps it, and reading it as a value yields the record's ref.
   enum class Backing : std::uint8_t { Temp, Local, RefLocal };
   std::unordered_map<CellRef, Backing> backed_;
+  /// Cells that are agent state: the agent cell, its fields, predicates, and
+  /// the cells of skills and behaviors. Compiled code names them through a
+  /// handle, so a promotion that carries program and state together would
+  /// remap every one of those refs instead of leaving integers that name
+  /// whatever the old number names in the new arena.
+  std::unordered_set<CellRef> stateCells_;
+  std::unordered_map<CellRef, CellRef> stateHandles_;
   FramePlan *frame_{nullptr};
   CellRef frameH_{noCell}; ///< the handle naming the top frame
   CellRef walkH_{noCell};  ///< a walker along a frame's name cells
@@ -446,9 +453,9 @@ private:
 
   /// A handle, marked for relocation so promotion remaps its target, naming a
   /// private cell until it is first pointed.
-  CellRef mintHandle() {
+  CellRef mintHandle(CellRef pointedAt = noCell) {
     const CellRef h      = arena_.makeCell();
-    const CellRef target = arena_.makeCell();
+    const CellRef target = pointedAt != noCell ? pointedAt : arena_.makeCell();
     zigzag::expectWritten(
         arena_.setValueBits(h, xanadu::ValueKind::OpHandle, target));
     const CellRef marker = arena_.makeCell(xanadu::cellRelocationMarker);
@@ -456,6 +463,15 @@ private:
         arena_.link(h, arena_.ensureDimension(xanadu::cellRelocationDimension),
                     DimVector::POS, marker));
     return h;
+  }
+  CellRef stateHandle(CellRef cell) {
+    auto [it, fresh] = stateHandles_.try_emplace(cell, noCell);
+    if (fresh) it->second = mintHandle(cell);
+    return it->second;
+  }
+  /// Put the ref of state cell @p cell in register @p dst.
+  void loadRef(CellRef dst, CellRef cell) {
+    emit(OpcodeKind::Deref, "sref", {S(cell)}, {dst});
   }
   [[nodiscard]] std::optional<Backing> backingOf(CellRef c) const {
     const auto it = backed_.find(c);
@@ -487,7 +503,9 @@ private:
   /// editing the program graph.
   CellRef addSlot(CellRef op, const Opd &o, bool input, std::vector<Poke> *pk) {
     CellRef target = o.cell;
-    if (o.ptr != noCell) {
+    if (o.ptr == noCell && stateCells_.contains(o.cell)) {
+      target = stateHandle(o.cell);
+    } else if (o.ptr != noCell) {
       if (isRefLocal(o.ptr)) {
         bail(CompileError::Unsupported,
              "internal: a ref local used as a pointer");
@@ -547,7 +565,7 @@ private:
     for (const Opd &o : ins) addSlot(op, o, true, &pk);
     std::vector<std::pair<CellRef, CellRef>> after;
     for (const CellRef o : outs) {
-      if (backed_.contains(o)) {
+      if (backed_.contains(o) || stateCells_.contains(o)) {
         const CellRef sc = scratch_.at(after.size());
         core_.bindOutput(op, sc);
         after.emplace_back(o, sc);
@@ -1005,6 +1023,7 @@ private:
                   SourceLocation loc);
   void emitRtCapFind();
   void emitContainerRoutines();
+  void forEachInstanceRef(Container &c, const std::function<void(CellRef)> &fn);
   void emitLifecycle(Container &c, bool uninstall);
   void emitContainerInits(Container &c);
   void beginRoutine(CellRef label, Container *owner, Framed *fr = nullptr);
@@ -2347,7 +2366,8 @@ void Gen::mintPredicates() {
       }
       pi.argTys.push_back(std::move(t));
     }
-    pi.cell            = arena_.makeCell(pd->name);
+    pi.cell = arena_.makeCell(pd->name);
+    stateCells_.insert(pi.cell);
     const CellRef cell = pi.cell;
     if (!preds_.emplace(pd->name, std::move(pi)).second) {
       bail(CompileError::DuplicateName, "predicate " + pd->name, pd->loc);
@@ -2924,7 +2944,7 @@ Ty Gen::beliefChange(EBeliefChange::Kind kind, const Term &t, CellRef out) {
       mov(S(cl), D(e));
       mov(S(ct), S(rd(D(cl), core_.dims().grab)));
       emitMatch(pl, ct, noMatch);
-      movC(a0_, opref(p.cell));
+      loadRef(a0_, p.cell);
       mov(S(a1_), S(cl));
       mov(S(a2_), S(who));
       callLabel(rtBDrop_);
@@ -2935,7 +2955,7 @@ Ty Gen::beliefChange(EBeliefChange::Kind kind, const Term &t, CellRef out) {
     const TermPlan pl = planTerm(t, false);
     const CellRef tr  = buildTerm(pl);
     const bool repl   = kind == Kind::Revise || p.nkeys > 0;
-    movC(a0_, opref(p.cell));
+    loadRef(a0_, p.cell);
     mov(S(a1_), S(tr));
     mov(S(a2_), S(who));
     movC(a3_, repl ? one_ : zero_);
@@ -3108,7 +3128,7 @@ void Gen::emitTellBodies(const std::vector<TellSeq> &seqs, CellRef end) {
     branchIfZero(named, end);
     mov(S(who), D(named));
     if (!s.untell) {
-      movC(a0_, opref(p.cell));
+      loadRef(a0_, p.cell);
       mov(S(a1_), S(tr));
       mov(S(a2_), S(who));
       movC(a3_, p.nkeys > 0 ? one_ : zero_);
@@ -3124,7 +3144,7 @@ void Gen::emitTellBodies(const std::vector<TellSeq> &seqs, CellRef end) {
         mov(S(ct), S(rd(D(cl), core_.dims().grab)));
         emit(OpcodeKind::Unify, "same", {D(tr), D(ct)}, {same});
         requireTrue(same, skip);
-        movC(a0_, opref(p.cell));
+        loadRef(a0_, p.cell);
         mov(S(a1_), S(cl));
         mov(S(a2_), S(who));
         callLabel(rtBDrop_);
@@ -3164,6 +3184,7 @@ void Gen::collect() {
 
 void Gen::mintAgentCell() {
   agentCell_ = arena_.makeCell(agentType_);
+  stateCells_.insert(agentCell_);
   for (const Param &p : agent_->params) {
     if (fields_.contains(p.name)) {
       bail(CompileError::DuplicateName, p.name, p.loc);
@@ -3675,6 +3696,8 @@ void Gen::addFieldTo(CellRef owner, CellRef &last,
   f.ty        = ty;
   f.nameCell  = arena_.makeCell(fname);
   f.valueCell = initialValueCell(ty);
+  stateCells_.insert(f.nameCell);
+  stateCells_.insert(f.valueCell);
   zigzag::expectWritten(arena_.link(f.nameCell, core_.dims().values,
                                     DimVector::POS, f.valueCell));
   zigzag::expectWritten(arena_.link(last == noCell ? owner : last,
@@ -3785,12 +3808,13 @@ Container &Gen::makeContainer(Container::K k, const std::string &name,
                               const std::vector<Member> &members,
                               SourceLocation loc) {
   Container c;
-  c.k            = k;
-  c.name         = name;
-  c.params       = &params;
-  c.members      = &members;
-  c.loc          = loc;
-  c.cell         = arena_.makeCell(name);
+  c.k       = k;
+  c.name    = name;
+  c.params  = &params;
+  c.members = &members;
+  c.loc     = loc;
+  c.cell    = arena_.makeCell(name);
+  stateCells_.insert(c.cell);
   const auto add = [&](const std::string &fname, const Ty &ty,
                        SourceLocation at) {
     if (c.fields.contains(fname)) bail(CompileError::DuplicateName, fname, at);
@@ -3852,6 +3876,7 @@ void Gen::prepareExtensions() {
       CellRef prev = c.cell;
       for (const std::string &cap : c.capacities) {
         const CellRef inst = arena_.makeCell(name);
+        stateCells_.insert(inst);
         zigzag::expectWritten(arena_.link(inst, dims_.capacity, DimVector::POS,
                                           arena_.makeCell(cap)));
         zigzag::expectWritten(
@@ -4030,10 +4055,26 @@ void Gen::emitLifecycle(Container &c, bool uninstall) {
   }
 }
 
+/// The refs of a skill's instances, in order. `#Deref` follows `d.clone` to
+/// the master, so an instance is reached by walking the clone chain instead.
+void Gen::forEachInstanceRef(Container &c,
+                             const std::function<void(CellRef)> &fn) {
+  if (c.instances.empty()) {
+    const CellRef r = reg();
+    loadRef(r, c.cell);
+    fn(r);
+    return;
+  }
+  CellRef prev = noCell;
+  for (std::size_t i = 0; i < c.instances.size(); ++i) {
+    const CellRef r = reg();
+    mov(S(r), S(rd(prev == noCell ? S(c.cell) : D(prev), core_.dims().clone)));
+    fn(r);
+    prev = r;
+  }
+}
+
 void Gen::emitContainerRoutines() {
-  const auto cellsOf = [&](Container &c) {
-    return c.instances.empty() ? std::vector<CellRef>{c.cell} : c.instances;
-  };
   for (auto &[name, c] : skills_) {
     // Uninstall whatever shares a capacity with this skill, itself included.
     beginRoutine(c.prepLabel, nullptr);
@@ -4049,11 +4090,9 @@ void Gen::emitContainerRoutines() {
     Framed inst;
     beginRoutine(c.installLabel, &c, &inst);
     emitContainerInits(c);
-    for (const CellRef cell : cellsOf(c)) {
-      const CellRef r = reg();
-      movC(r, opref(cell));
+    forEachInstanceRef(c, [&](CellRef r) {
       emitAppendTail(S(agentCell_), dims_.skill, dims_.skill, r);
-    }
+    });
     emitLifecycle(c, false);
     closeFramed(inst);
 
@@ -4062,11 +4101,7 @@ void Gen::emitContainerRoutines() {
     const CellRef gone = newLabel();
     branchIfZero(rd(S(c.member), dims_.skill, true), gone);
     emitLifecycle(c, true);
-    for (const CellRef cell : cellsOf(c)) {
-      const CellRef r = reg();
-      movC(r, opref(cell));
-      unlinkFromRank(r, dims_.skill);
-    }
+    forEachInstanceRef(c, [&](CellRef r) { unlinkFromRank(r, dims_.skill); });
     place(gone);
     closeFramed(uninst);
   }
@@ -4079,7 +4114,7 @@ void Gen::emitContainerRoutines() {
     jump(done);
     place(doLink);
     const CellRef r = reg();
-    movC(r, opref(c.cell));
+    loadRef(r, c.cell);
     emitAppendTail(S(agentCell_), dims_.behavior, dims_.behavior, r);
     place(done);
     closeFramed(inst);
@@ -4088,7 +4123,7 @@ void Gen::emitContainerRoutines() {
     const CellRef off = newLabel();
     branchIfZero(rd(S(c.cell), dims_.behavior, true), off);
     const CellRef u = reg();
-    movC(u, opref(c.cell));
+    loadRef(u, c.cell);
     unlinkFromRank(u, dims_.behavior);
     place(off);
     ret();

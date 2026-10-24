@@ -3,18 +3,20 @@
  * @brief Lowers one vagent agent type to Vortex opcode graphs and the agent
  *        cell the executor adapter drives (design §5.2, §5.5, §5.7-§5.9, §9).
  *
- * What the existing opcode set can and cannot do shapes every choice here:
- * an operand is a *slot* cell whose value names the cell to read, so an
- * operation reaches a cell minted at run time only if the compiler first
- * writes that cell's ref into the operation's slot (a "poke"), and a
- * neighbour can be read only through a parameter pipeline. The compiler
- * therefore emits a small pointer machine: registers are static cells,
- * records, lists and events are held as refs in registers, and shared
- * routines (field lookup, append, deep copy, outbox push) are called with
- * `#Call` and globals for arguments. Locals live in per-routine registers; a
- * routine in a call cycle saves and restores its whole register set around
- * each activation (name-keyed, by call depth), which is the design's "spill
- * across the call" realised without an addressable frame cell.
+ * An operand is a *slot* cell whose value names the cell to read. Since P16 a
+ * slot may name a handle (`#Point`), which an input operand follows to its
+ * target, so code reaches a cell minted at run time without editing the
+ * program graph. Locals and arguments live on an activation frame, a cell
+ * hung with name cells on `d.vars` and values on `+d.values` (design §5.8);
+ * each is reached through a static handle that the routine's prologue points
+ * at the frame's cell. A routine in a call cycle also keeps its temporaries
+ * there, and re-points its handles after each call that could have re-entered
+ * it. Registers that need no frame (a non-recursive routine's temporaries,
+ * outputs of opcodes) stay static cells: an opcode's output is always a
+ * static cell, and a value that must outlive a call is moved to the frame.
+ * Records, lists and events are held as refs in registers, and shared routines
+ * (field lookup, append, deep copy, outbox push) are called with `#Call` and
+ * globals for arguments.
  *
  * Refuses by returning std::expected<_, CompileFailure>; user input never
  * throws out of this API.
