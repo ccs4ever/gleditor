@@ -498,7 +498,7 @@ agent A(limit: Int) {
   const auto methods = allMethods(*checked, "Motor");
   ASSERT_EQ(methods.size(), 2U);
   EXPECT_TRUE(methods[0]->isEffect);
-  EXPECT_EQ(methods[0]->withinNs, 5'000'000'000);
+  EXPECT_EQ(methods[0]->withinMs, 5'000);
   EXPECT_EQ(checked->questions.at("depth").result.kind, Type::Kind::Int);
   EXPECT_TRUE(checked->predicates.at("seen").params[0].key);
   EXPECT_EQ(checked->goals.at("Work").params.size(), 2U);

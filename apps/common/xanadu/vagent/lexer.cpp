@@ -13,9 +13,9 @@ namespace xanadu::vagent {
 
 namespace {
 
-constexpr std::int64_t nanosPerMilli         = 1'000'000;
-constexpr std::int64_t nanosPerSecond        = 1'000'000'000;
-constexpr std::int64_t nanosPerMinute        = 60 * nanosPerSecond;
+constexpr std::int64_t msPerMilli            = 1;
+constexpr std::int64_t msPerSecond           = 1000;
+constexpr std::int64_t msPerMinute           = 60 * msPerSecond;
 constexpr char32_t maxCodePoint              = 0x10FFFF;
 constexpr char32_t surrogateFirst            = 0xD800;
 constexpr char32_t surrogateLast             = 0xDFFF;
@@ -392,27 +392,27 @@ std::expected<Token, LexFailure> Lexer::scanNumber() {
         suffixStart, scanner_.position() - suffixStart);
     std::int64_t unit = 0;
     if (suffix == "ms") {
-      unit = nanosPerMilli;
+      unit = msPerMilli;
     } else if (suffix == "s") {
-      unit = nanosPerSecond;
+      unit = msPerSecond;
     } else if (suffix == "min") {
-      unit = nanosPerMinute;
+      unit = msPerMinute;
     } else {
       return badNumber("unknown duration unit '" + std::string(suffix) +
                        "' (expected ms, s or min)");
     }
-    std::int64_t ns{};
+    std::int64_t ms{};
     if (isFloat) {
       const double scaled = floatValue * static_cast<double>(unit);
       if (!(scaled < 9.2e18)) {
-        return badNumber("duration does not fit in 64 bits of nanoseconds");
+        return badNumber("duration does not fit in 64 bits of milliseconds");
       }
-      ns = static_cast<std::int64_t>(std::llround(scaled));
-    } else if (__builtin_mul_overflow(intValue, unit, &ns)) {
-      return badNumber("duration does not fit in 64 bits of nanoseconds");
+      ms = static_cast<std::int64_t>(std::llround(scaled));
+    } else if (__builtin_mul_overflow(intValue, unit, &ms)) {
+      return badNumber("duration does not fit in 64 bits of milliseconds");
     }
     Token t      = make(TokenKind::DurationLiteral, loc, start);
-    t.durationNs = ns;
+    t.durationMs = ms;
     return t;
   }
 

@@ -56,9 +56,6 @@ constexpr std::string_view kStopType = "Stop";
 /// handler that provokes its own event cannot hold the owner thread.
 constexpr std::size_t kMaxHostEventRounds = 8;
 
-/// A Duration literal is nanoseconds; timers and `$turn.time` are
-/// milliseconds.
-constexpr std::int64_t kNanosPerMilli = 1'000'000;
 /// A periodic timer that fell far behind (a suspended host, a long manual
 /// advance) delivers at most this many missed periods at once and skips the
 /// rest, so a tick cannot be turned into an unbounded burst of turns.
@@ -80,6 +77,21 @@ constexpr std::string_view kVmMaxCycles = "Exceeded max cycles";
 
 std::string text(const ArenaManifold &arena, CellRef cell) {
   return arena.textOf(cell);
+}
+
+/// An `Opt<Agent>` or `Opt<Space>` value as the wire shapes it: a list of at
+/// most one element, which is also its layout in a cell (§5.9). An empty name
+/// is `none`.
+WireValue optionalText(std::string_view name) {
+  WireList held;
+  if (!name.empty()) held.push_back(WireValue::text(std::string(name)));
+  return WireValue::list(std::move(held));
+}
+
+std::string optionalTextOf(const ArenaManifold &arena, const ValueDims &dims,
+                           CellRef optional) {
+  const auto held = zigzag::step(arena, optional, dims.grab);
+  return held ? arena.textOf(*held) : std::string{};
 }
 
 bool contains(const std::vector<std::string> &names, std::string_view name) {
@@ -181,8 +193,8 @@ struct AgentExecutor::OutboxItem {
   bool keepChildren{false};
   // timer, timer_cancel
   std::int64_t timerId{0};
-  std::int64_t delayNs{0};
-  std::int64_t periodNs{0};
+  std::int64_t delayMs{0};
+  std::int64_t periodMs{0};
   // log
   std::string level;
   std::string message;
@@ -470,7 +482,7 @@ bool AgentExecutor::prepare(State &state, WorkerContext &context,
                 WireValue::text(std::string(kSpaceInner)));
     }
     ensure(kFieldName, WireValue::text(state.name));
-    ensure(kFieldParent, WireValue::text(state.parentName));
+    ensure(kFieldParent, optionalText(state.parentName));
     ensure(kFieldOuter, WireValue::record(std::move(outer)));
     ensure(kFieldInitialized, WireValue::boolean(false));
     ensure(kFieldPeers, WireValue::record({}));
@@ -493,7 +505,7 @@ bool AgentExecutor::prepare(State &state, WorkerContext &context,
         state.name = text(arena, *n);
       }
       if (const auto p = fieldValue(arena, vd, ac, kFieldParent)) {
-        state.parentName = text(arena, *p);
+        state.parentName = optionalTextOf(arena, vd, *p);
       }
     }
     state.prefix = senderPrefix(state.name);
@@ -859,10 +871,8 @@ void AgentExecutor::adoptByLauncher(State &state) {
   state.parentName.clear();
   state.parentPid.reset();
   state.adopted = true;
-  if (const auto parent = fieldValue(arena, vd, ac, kFieldParent)) {
-    const std::array spans{arena.intern(std::string_view{})};
-    zigzag::expectWritten(arena.setContent(*parent, spans));
-  }
+  setField(arena, vd, ac, kFieldParent,
+           writeValue(arena, vd, optionalText("")));
   WireRecord outer;
   outer.type = std::string(kSpaceRecordType);
   outer.set(std::string(kSpaceHost), WireValue::text(std::string{}));
@@ -1116,11 +1126,11 @@ CellRef AgentExecutor::mintEvent(State &state, const Envelope &envelope,
   declared.values = envelope.fields.values;
   const auto cell =
       writeValue(arena, vd, WireValue::record(std::move(declared)));
-  // The compiler types `source` and `space` as Str, so an absent source is
-  // the empty string rather than an empty Opt.
+  // `source` and `space` are `Opt` (§5.5): a host delivery names neither.
   setField(arena, vd, cell, kEventImplicitSource,
-           arena.makeCell(envelope.from));
-  setField(arena, vd, cell, kEventImplicitSpace, arena.makeCell(space));
+           writeValue(arena, vd, optionalText(envelope.from)));
+  setField(arena, vd, cell, kEventImplicitSpace,
+           writeValue(arena, vd, optionalText(space)));
   setField(arena, vd, cell, kEventImplicitTime, arena.makeScalarCell(millis));
   setField(arena, vd, cell, kEventImplicitOrdinal,
            arena.makeScalarCell(static_cast<std::int64_t>(envelope.ordinal)));
@@ -1258,8 +1268,8 @@ AgentExecutor::collectOutbox(State &state, WorkerContext &context) {
           continue;
         }
         item.args     = *record;
-        item.delayNs  = *delay;
-        item.periodNs = integer(kOutboxTimerPeriod).value_or(0);
+        item.delayMs  = *delay;
+        item.periodMs = integer(kOutboxTimerPeriod).value_or(0);
       }
     } else if (item.kind == kKindLog) {
       const auto level   = textOf(read(entry, kOutboxLogLevel));
@@ -1364,13 +1374,9 @@ void AgentExecutor::applyTimerChange(State &state, const OutboxItem &item) {
     });
   } else {
     WireRecord timer;
-    timer.type = std::string(kTimerRecord);
-    const std::int64_t period =
-        item.periodNs > 0
-            ? std::max<std::int64_t>(item.periodNs / kNanosPerMilli, 1)
-            : 0;
-    const std::int64_t delay =
-        std::max<std::int64_t>(item.delayNs, 0) / kNanosPerMilli;
+    timer.type                = std::string(kTimerRecord);
+    const std::int64_t period = std::max<std::int64_t>(item.periodMs, 0);
+    const std::int64_t delay  = std::max<std::int64_t>(item.delayMs, 0);
     timer.set(std::string(kTimerId), WireValue::integer(item.timerId));
     timer.set(std::string(kTimerDue),
               WireValue::integer(state.turnMillis + delay));

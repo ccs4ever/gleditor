@@ -178,7 +178,7 @@ struct MethodInfo {
   bool hasResult{false};
   bool isEffect{false};
   bool preempts{false};
-  std::optional<std::int64_t> withinNs;
+  std::optional<std::int64_t> withinMs;
   SourceLocation loc{};
 };
 

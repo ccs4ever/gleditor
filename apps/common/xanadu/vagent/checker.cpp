@@ -18,9 +18,12 @@
 #include <format>
 #include <functional>
 #include <ranges>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <variant>
+
+#include "common/xanadu/vagent/prelude.hpp"
 
 namespace xanadu::vagent {
 
@@ -170,18 +173,26 @@ std::string typeName(const Type &t) {
   return "?";
 }
 
+namespace {
+Type preludeFieldType(const PreludeField &f) {
+  using K                                                    = Type::Kind;
+  static const std::unordered_map<std::string_view, K> kinds = {
+      {"Int", K::Int},     {"Str", K::Str},     {"Time", K::Time},
+      {"Agent", K::Agent}, {"Space", K::Space}, {"Intention", K::Intention}};
+  const auto it = kinds.find(f.type);
+  Type t{it == kinds.end() ? K::Any : it->second, {}, {}};
+  return f.optional ? Type{K::Opt, {}, {std::move(t)}} : t;
+}
+} // namespace
+
 const std::vector<FieldInfo> &implicitEventFields() {
-  // `source` and `space` are Opt: a host delivery has neither (§5.5).
-  static const std::vector<FieldInfo> fields = {
-      {"source",
-       Type{Type::Kind::Opt, {}, {Type{Type::Kind::Agent, {}, {}}}},
-       {}},
-      {"space",
-       Type{Type::Kind::Opt, {}, {Type{Type::Kind::Space, {}, {}}}},
-       {}},
-      {"time", Type{Type::Kind::Time, {}, {}}, {}},
-      {"ordinal", Type{Type::Kind::Int, {}, {}}, {}},
-  };
+  static const std::vector<FieldInfo> fields = [] {
+    std::vector<FieldInfo> out;
+    for (const PreludeField &f : preludeImplicitFields()) {
+      out.push_back({std::string(f.name), preludeFieldType(f), {}});
+    }
+    return out;
+  }();
   return fields;
 }
 
@@ -591,35 +602,16 @@ private:
   // -- pass 0: builtins and imports -----------------------------------------
 
   void installBuiltins() {
-    auto ev = [&](const char *name,
-                  std::vector<std::pair<const char *, K>> fields) {
+    for (const PreludeEvent &pe : preludeEvents()) {
       EventInfo info;
-      info.name    = name;
+      info.name    = std::string(pe.name);
       info.builtin = true;
-      for (const auto &[n, k] : fields) {
-        info.fields.push_back({n, basic(k), {}});
+      for (const PreludeField &f : pe.fields) {
+        info.fields.push_back({std::string(f.name), preludeFieldType(f), {}});
       }
-      typeNames_.emplace(name, TypeKind::Event);
-      out_.events.emplace(name, std::move(info));
-    };
-    ev("Initialize", {});
-    ev("Destroy", {});
-    ev("GoalAchieved", {{"intention", K::Intention}, {"goal", K::Str}});
-    ev("GoalFailed",
-       {{"intention", K::Intention}, {"goal", K::Str}, {"cause", K::Str}});
-    ev("GoalDropped", {{"intention", K::Intention}, {"goal", K::Str}});
-    ev("PlanFailed",
-       {{"intention", K::Intention}, {"plan", K::Str}, {"cause", K::Str}});
-    ev("EffectFailed",
-       {{"capacity", K::Str}, {"method", K::Str}, {"cause", K::Str}});
-    ev("ConditionFault", {{"intention", K::Intention}, {"cause", K::Str}});
-    ev("ChildDown", {{"child", K::Agent}});
-    ev("ChildStopping", {{"child", K::Agent}, {"cause", K::Str}});
-    ev("SpawnFailed", {{"child", K::Agent}});
-    ev("DeliveryFailed",
-       {{"to", K::Agent}, {"kind", K::Str}, {"cause", K::Str}});
-    ev("Orphaned", {{"former_parent", K::Agent}});
-    ev("Moved", {{"name", K::Agent}});
+      typeNames_.emplace(info.name, TypeKind::Event);
+      out_.events.emplace(info.name, std::move(info));
+    }
 
     auto method = [](const char *owner, const char *name,
                      std::vector<ParamInfo> params, Type result,
@@ -848,7 +840,7 @@ private:
     m.result    = s.result ? resolveType(*s.result) : basic(K::Unit);
     m.isEffect  = s.isEffect;
     m.preempts  = s.preempts;
-    m.withinNs  = s.withinNs;
+    m.withinMs  = s.withinMs;
     m.loc       = s.loc;
     checkValueName(s.name, s.loc);
     return m;
@@ -871,7 +863,7 @@ private:
                           c->name));
           continue;
         }
-        if (sig.isEffect && !sig.withinNs) {
+        if (sig.isEffect && !sig.withinMs) {
           err(CheckErrorCode::EffectWithoutWithin, sig.loc,
               std::format("effect `{}` must declare `within` (§6.6)",
                           sig.name));

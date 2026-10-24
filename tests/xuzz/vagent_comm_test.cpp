@@ -64,6 +64,16 @@ protected:
     return s == nullptr ? std::string{} : *s;
   }
 
+  /// `$parent` is an `Opt<Agent>`: empty for an agent with no parent.
+  std::string parentOf(const xanadu::identity::ActorPid &pid) {
+    const auto value = field(pid, kFieldParent);
+    const auto *list = value ? std::get_if<WireList>(&value->data) : nullptr;
+    EXPECT_NE(list, nullptr);
+    if (list == nullptr || list->empty()) return {};
+    const auto *s = std::get_if<std::string>(&list->front().data);
+    return s == nullptr ? std::string{} : *s;
+  }
+
   /// A child's pid, read from its parent's `$peers` while the parent lives.
   std::optional<xanadu::identity::ActorPid>
   peer(const xanadu::identity::ActorPid &parent, std::string_view child) {
@@ -325,7 +335,7 @@ TEST_F(VagentComm, StopKeepingChildrenLeavesTheGrandchildRunning) {
   host->pump();
   // Mid is gone, Leaf lives and now belongs to the launcher.
   EXPECT_EQ(host->runtime().actorCount(), 2U);
-  EXPECT_EQ(textField(*leaf, kFieldParent), "");
+  EXPECT_EQ(parentOf(*leaf), "");
   ASSERT_TRUE(host->send(*leaf, event("Ping")));
   host->pump();
   ASSERT_EQ(emitted("Pong"), 1U);
@@ -346,8 +356,8 @@ TEST_F(VagentComm, TerminateKeepingChildrenReparentsToTheLauncher) {
   // Top is gone; Mid kept Leaf in turn only because Top kept Mid, and Mid was
   // not stopped, so both run on.
   EXPECT_EQ(host->runtime().actorCount(), 2U);
-  EXPECT_EQ(textField(*mid, kFieldParent), "");
-  EXPECT_EQ(textField(*leaf, kFieldParent), "top/Mid#0");
+  EXPECT_EQ(parentOf(*mid), "");
+  EXPECT_EQ(parentOf(*leaf), "top/Mid#0");
   ASSERT_TRUE(host->send(*mid, event("Ping")));
   host->pump();
   ASSERT_EQ(emitted("Pong"), 1U);
