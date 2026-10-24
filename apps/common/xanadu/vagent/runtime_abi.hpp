@@ -34,6 +34,7 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <string_view>
 
 #include "common/xanadu/zigzag/arena_manifold.hpp"
@@ -386,6 +387,169 @@ inline constexpr std::string_view kEffectCauseDeadline  = "deadline";
 inline constexpr std::string_view kEffectCauseMigrated  = "migrated";
 inline constexpr std::string_view kEffectCauseUnbound   = "unbound";
 
+// -- Questions, delegation and awaiting (§6.6, §7.1, §8.6, §12.4)
+// ------------------------------------------------------------------------
+//
+// THE CONTRACT BETWEEN THE COMPILER AND THE ADAPTER FOR `ask`/`answer`,
+// `achieve ... by` and `await`. Each name is written once.
+//
+// ASK. The statement `x := ask a.q(args) within d` stages one `kKindAsk`
+// outbox entry and the asking intention then waits with
+// `waiting.kind = kWaitKindAsk`, `waiting.key = the entry's id` and
+// `waiting.deadline = the entry's deadline`. Entry fields: `kOutboxReqId`
+// (Int from `$next_id`), `kOutboxReqTo` (text, the asked agent's name),
+// `kOutboxReqName` (text, the question's name), `kOutboxReqArgs` (a record
+// whose fields are named by position, `positionalName(i)`, as a tell's fact
+// is), `kOutboxReqDeadline` (absolute Int ms: the turn time plus `within`) and
+// `kOutboxReqIntention` (Int, the asking intention's id). At the drain the
+// adapter sends one `ActorSend` of kind `ask` (envelope type = the question's
+// name, fields = the positional args), bounds its delivery by the deadline,
+// and remembers request id -> (intention, key). The asked agent must be a
+// peer (its parent or a child): a reply needs a pid.
+//
+// THE ANSWER. The adapter runs a turn of `CompiledAgent::answerEntry` on the
+// receiver. `$turn` carries `kTurnQuestion` (Str), `kTurnArgs` (the
+// positional record) and `kTurnSender` (Str, the asker's name). The routine
+// finds the `answer` for that question, runs it, and leaves the value in the
+// agent field `kFieldAnswer` (`$answer`, any value of §5.9). A routine with
+// no `answer` for the question leaves `$answer` without a value, and the
+// adapter replies with the fault `kFaultUnanswered`. The adapter ALWAYS rolls
+// the turn back after reading `$answer` (answers are read-only, §7.1), so the
+// routine need not clean up, and anything it staged is dropped with it. The
+// answer rides back as the receiver's turn result in the runtime's
+// `ActorDeliverValue`, encoded by `encodeReply`: `ok` and the value, or a
+// fault text. A routine that fails hard (fuel, cycles, `fail`) gives
+// `kFaultRemote`; an answer larger than a message gives `kFaultTooLarge`.
+// With no `answerEntry` every ask is `kFaultUnanswered`.
+//
+// THE REPLY. When it arrives, the adapter, if the intention still waits on
+// that key, writes `waiting.match` (an `kEffectOutcomeRecord`: `ok` true with
+// `value`, or `ok` false with `cause` the fault text) and marks the
+// intention ready; otherwise it drops the reply and counts `kStatReplyStale`.
+// A deadline elapsing marks a waiting intention ready with `timed_out` and,
+// for ask and delegate waits, a failed `match` whose cause is
+// `kEffectCauseDeadline`. A send that cannot be made, or a delivery abandoned
+// after its retries, fails the wait the same way at once, with cause
+// `kCauseUnroutable`, `kCauseSendFailed` or `kCauseDelivery`.
+//
+// DELEGATION. `achieve G(args) by a within d` stages one `kKindAchieve`
+// entry (`kOutboxReqId`, `kOutboxReqTo`, `kOutboxReqName` = the goal's name,
+// `kOutboxReqArgs`, `kOutboxReqDeadline`, `kOutboxReqIntention`) and the
+// intention waits with `kWaitKindDelegate` and the same key and deadline. At
+// the drain the adapter sends the `achieve` and writes
+// `waiting.correlation` (`kWaitingCorrelation`, Str): the request id of that
+// send, which IS the correlation id every later message names.
+//
+// The receiver of an `achieve` that is not in its `$cancelled` list runs the
+// dispatcher on an internal event whose type is `kAchieveEventPrefix` plus the
+// goal's name, with the positional args as declared fields,
+// `kEventCorrelation` (Str) and the implicit `source` (the delegator's name).
+// The dispatcher's default handling asks `accepts(source, goal_name)` through
+// the `Accepts` capacity: on accept it adopts the goal with the intention's
+// `kIntentionDelegator` field set to a `kDelegatorRecord` {`kDelegatorPeer`
+// Str, `kDelegatorCorr` Str}; on refusal it stages a `kKindRefuse` entry.
+// When a delegated intention ends, the compiled code stages a `kKindOutcome`
+// entry. All three carry `kOutboxReqTo` (the delegator's name) and
+// `kOutboxCorrelation`; an outcome adds `kOutboxOutcomeStatus`
+// (`kOutcomeSucceeded`, `kOutcomeFailed` or `kOutcomeDropped`) and, unless it
+// succeeded, `kOutboxOutcomeCause`. On the wire these are envelopes of kind
+// `outcome`, `refuse` and `cancel`, of type `kOutcomeType`, `kRefuseType` and
+// `kCancelType`, with `Envelope::correlation` set and, for an outcome, the
+// fields `kOutcomeFieldStatus` and `kOutcomeFieldCause`.
+//
+// The delegating adapter settles the wait itself: an `outcome` from the
+// delegate named in the entry writes `waiting.match` (ok when the status is
+// succeeded; else the cause, or the status text when there is none) and marks
+// the intention ready; `refuse` does the same with cause `kCauseRefused`.
+// Either is dropped and counted `kStatReplyStale` if the intention no longer
+// waits on that correlation, or if it is not the delegate that sent it.
+//
+// CANCEL. The delegating routine, resumed with `timed_out` or on any other
+// early end of the wait, stages a `kKindCancel` entry (`kOutboxReqTo` and
+// `kOutboxCorrelation` = `waiting.correlation`); the adapter sends it. The
+// receiver's adapter then looks for an intention whose `delegator` has that
+// correlation. If one exists it raises the internal event `kCancelEvent` with
+// the field `kCancelIntention` (Int id) so the dispatcher drops it, staging
+// no outcome. If none exists yet it records the id in `$cancelled` (a list of
+// `kCancelledRecord` {`kCancelledId` Str, `kCancelledUntil` Int ms}) until
+// `send_retries x send_retry_interval` has passed, and an `achieve` arriving
+// with that id is ignored, counted `kStatCancelledEarly`. Compiled code never
+// touches `$cancelled`.
+//
+// AWAIT. `await t` tests the belief base first; otherwise the intention waits
+// with `kWaitKindAwaitBelief`, `waiting.pattern` (`kWaitingPattern`: the term,
+// laid out as a belief fact) and its deadline. `await E as e [g]` waits with
+// `kWaitKindAwaitEvent` and `waiting.event_type` (`kWaitingEventType`, Str).
+// Further fields the compiler needs to evaluate a guard are its own and begin
+// with `$`. The compiled dispatcher matches an incoming event, and the
+// belief-event routine a belief change, against waiting intentions BEFORE the
+// handlers (§6.5); on a match it writes `waiting.match` (the event or the
+// bindings, copied) and marks the intention ready. The adapter's part is the
+// deadline: it marks the intention ready with `timed_out` and writes no
+// `match`.
+
+inline constexpr std::string_view kOutboxReqId         = "id";
+inline constexpr std::string_view kOutboxReqTo         = "to";
+inline constexpr std::string_view kOutboxReqName       = "name";
+inline constexpr std::string_view kOutboxReqArgs       = "args";
+inline constexpr std::string_view kOutboxReqDeadline   = "deadline";
+inline constexpr std::string_view kOutboxReqIntention  = "intention";
+inline constexpr std::string_view kOutboxCorrelation   = "correlation";
+inline constexpr std::string_view kOutboxOutcomeStatus = "status";
+inline constexpr std::string_view kOutboxOutcomeCause  = "cause";
+
+/// A tell's fact and a request's arguments are records whose fields are named
+/// by position.
+[[nodiscard]] inline std::string positionalName(std::size_t index) {
+  return std::to_string(index);
+}
+
+inline constexpr std::string_view kTurnQuestion = "question";
+inline constexpr std::string_view kTurnArgs     = "args";
+inline constexpr std::string_view kTurnSender   = "sender";
+inline constexpr std::string_view kFieldAnswer  = "$answer";
+
+inline constexpr std::string_view kFaultUnanswered = "unanswered";
+inline constexpr std::string_view kFaultRemote     = "remote_fault";
+inline constexpr std::string_view kFaultTooLarge   = "too_large";
+
+inline constexpr std::string_view kCauseRefused    = "refused";
+inline constexpr std::string_view kCauseUnroutable = "unroutable";
+inline constexpr std::string_view kCauseSendFailed = "send_failed";
+inline constexpr std::string_view kCauseDelivery   = "delivery_failed";
+
+inline constexpr std::string_view kWaitingCorrelation = "correlation";
+inline constexpr std::string_view kWaitingPattern     = "pattern";
+inline constexpr std::string_view kWaitingEventType   = "event_type";
+
+inline constexpr std::string_view kAchieveEventPrefix = "$achieve ";
+inline constexpr std::string_view kCancelEvent        = "$cancel";
+inline constexpr std::string_view kEventCorrelation   = "correlation";
+inline constexpr std::string_view kCancelIntention    = "intention";
+
+inline constexpr std::string_view kDelegatorRecord = "Delegator";
+inline constexpr std::string_view kDelegatorPeer   = "peer";
+inline constexpr std::string_view kDelegatorCorr   = "correlation";
+
+inline constexpr std::string_view kCancelledRecord = "Cancelled";
+inline constexpr std::string_view kCancelledId     = "id";
+inline constexpr std::string_view kCancelledUntil  = "until";
+
+inline constexpr std::string_view kOutcomeSucceeded   = "succeeded";
+inline constexpr std::string_view kOutcomeFailed      = "failed";
+inline constexpr std::string_view kOutcomeDropped     = "dropped";
+inline constexpr std::string_view kOutcomeType        = "Outcome";
+inline constexpr std::string_view kRefuseType         = "Refuse";
+inline constexpr std::string_view kCancelType         = "Cancel";
+inline constexpr std::string_view kOutcomeFieldStatus = "status";
+inline constexpr std::string_view kOutcomeFieldCause  = "cause";
+
+/// Counters (`$stats`) these exchanges add: a reply, outcome or refusal that
+/// no intention was waiting for, and an `achieve` ignored because its
+/// delegator had already cancelled it.
+inline constexpr std::string_view kStatReplyStale     = "reply_stale";
+inline constexpr std::string_view kStatCancelledEarly = "cancelled_early";
+
 // -- Wire (§5.5, §7.3)
 // --------------------------------------------------------- An `ActorSend`'s
 // value is a bencoded dictionary with these keys. Values travel tagged so a
@@ -452,6 +616,10 @@ struct CompiledAgent {
   /// `fail_step(id, cause)` (§4.2), run after a hard failure in an intention
   /// turn, with `$turn.intention` and `$turn.cause`.
   std::optional<zigzag::CellRef> failStepEntry{};
+  /// Answers one `ask` (§7.1): reads `$turn.question`, `args` and `sender`,
+  /// leaves the value in `$answer`. The adapter rolls the turn back. Absent:
+  /// every ask is `unanswered`.
+  std::optional<zigzag::CellRef> answerEntry{};
 };
 
 } // namespace xanadu::vagent
