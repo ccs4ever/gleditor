@@ -2,7 +2,7 @@
 
 | field         | value                                                                                                                                                                                                                       |
 | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| version       | 3.10 (see [Appendix](#appendix-versioning-and-change-history))                                                                                                                                                              |
+| version       | 3.11 (see [Appendix](#appendix-versioning-and-change-history))                                                                                                                                                              |
 | status        | Specification only. Nothing here is built or wired into the gleditor build.                                                                                                                                                 |
 | compiles to   | Vortex opcode streams over an `ArenaManifold`, run one turn at a time by a Spool-Mesh actor executor                                                                                                                        |
 | rests on      | Vortex ([runtime](vortex-hyperstructural-runtime.md)), Vlog ([logic](vlog-logic-extension.md)), vicon ([goals](vicon-goal-directed-language.md)), the Spool-Mesh actor runtime (`apps/common/xanadu/vortex/mesh_actor.hpp`) |
@@ -1198,7 +1198,10 @@ name and a space name), `Intention` and `Timer` (scalar ids), `Event` (the super
 `record Name { fields }` declares a record with no wire kind; geometry such as a `Point` is a record
 the program declares. `predicate p(args)` declares a belief predicate and `question q(args): T` an
 askable query. Values are copied when stored (V11). Types are checked statically, including belief
-terms against their predicates; locals are inferred.
+terms against their predicates; locals are inferred. `Time` is milliseconds since the Unix epoch and
+`Duration` a number of milliseconds, both `Int`-sized scalars, so `Clock.now() + 5s` needs no
+conversion and the turn time of §4.2 is a `Time` as read; durations finer than a millisecond are not
+expressible.
 
 ### 8.8 Names in scope
 
@@ -2095,6 +2098,9 @@ ______________________________________________________________________
 ______________________________________________________________________
 
 ## Appendix: Versioning and Change History
+
+**3.11 — Time units.** `Time` and `Duration` are both milliseconds (§8.7); the implementation had
+literals in nanoseconds and times in milliseconds.
 
 **3.10 — P16 proposed.** Building the compiler showed that running code cannot use a ref to a cell
 minted at run time without editing the program graph; P16 (handle operands) is proposed, pending
