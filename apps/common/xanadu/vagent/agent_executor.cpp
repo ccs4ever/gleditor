@@ -284,6 +284,16 @@ struct AgentExecutor::Flight {
   std::int64_t deadline{};
 };
 
+/// An `ask` or delegated `achieve` this agent sent and has not yet settled.
+/// Adapter-side only: a wait that outlives a checkpoint fails as migrated.
+struct AgentExecutor::PendingRequest {
+  bool ask{true};
+  std::int64_t intention{};
+  std::int64_t key{};
+  /// The delegate, whom only an outcome or refusal may speak for.
+  std::string to;
+};
+
 struct AgentExecutor::State {
   identity::ActorPid pid;
   std::string name;
@@ -320,6 +330,9 @@ struct AgentExecutor::State {
   bool resumed{false};
   /// Effects started and not yet reported, by the id the agent gave them.
   std::map<std::int64_t, AgentExecutor::Flight> flights;
+  /// Requests awaiting a reply, by the request id they were sent under (which
+  /// is also a delegation's correlation id).
+  std::map<std::string, AgentExecutor::PendingRequest> requests;
   /// The intention the next wake turn continues, set by `wakeReady` just
   /// before it asks the runtime for the wake.
   std::optional<std::int64_t> wakeIntention;
@@ -392,11 +405,18 @@ struct AgentExecutor::TurnSpec {
   /// An emission this agent hosts a space for, to fan out after the turn.
   const Envelope *relayed{};
   bool markInitialized{false};
+  /// An `answer` turn (§7.1): read `$answer`, then undo the turn whether or
+  /// not it succeeded, so the answer cannot have written anything.
+  bool readOnly{false};
+  /// Extra fields of `$turn`, for a turn that needs more than `time`.
+  WireRecord turnFields;
 };
 
 struct AgentExecutor::TurnOutcome {
   bool committed{false};
   std::string cause;
+  /// The value a `readOnly` turn left in `$answer`.
+  std::optional<WireValue> answer;
 };
 
 struct AgentExecutor::HostEvent {
@@ -433,6 +453,15 @@ struct AgentExecutor::OutboxItem {
   std::int64_t deadlineMs{0};
   std::optional<std::int64_t> intention;
   bool preempts{false};
+  // ask, achieve, cancel, outcome, refuse
+  std::int64_t reqId{0};
+  std::string reqTo;
+  std::string reqName;
+  WireRecord reqArgs;
+  std::int64_t reqDeadlineMs{0};
+  std::string correlation;
+  std::string status;
+  std::string cause;
 };
 
 AgentExecutor::AgentExecutor(zigzag::vortex::mesh::MeshActorRuntime &runtime,
@@ -941,8 +970,10 @@ AgentExecutor::handleMessage(State &state, const ActorExecution &execution,
     return handleSend(state, execution, context);
   case MessageType::ActorDeliverValue:
   case MessageType::ActorDeliverWriteSet:
-    // The runtime already reaped the delivery; the reply runs no user code.
+    // The runtime already reaped the delivery; the reply runs no user code,
+    // but an `ask`'s reply is the answer and ends the asking intention's wait.
     outstanding_.erase(message.requestId);
+    receiveReply(state, message);
     return std::string{};
   case MessageType::ActorDown:
     onDown(state, context, message);
@@ -1022,7 +1053,12 @@ AgentExecutor::handleSend(State &state, const ActorExecution &execution,
   const Envelope &envelope = *decoded;
   const bool isTell =
       envelope.kind == kKindTell || envelope.kind == kKindUntell;
-  if (envelope.kind != kKindEvent && envelope.kind != kKindStop && !isTell) {
+  const bool isRequest =
+      envelope.kind == kKindAsk || envelope.kind == kKindAchieve ||
+      envelope.kind == kKindCancel || envelope.kind == kKindOutcome ||
+      envelope.kind == kKindRefuse;
+  if (envelope.kind != kKindEvent && envelope.kind != kKindStop && !isTell &&
+      !isRequest) {
     bumpStat(state, kStatUnsupported);
     return std::string{};
   }
@@ -1053,6 +1089,20 @@ AgentExecutor::handleSend(State &state, const ActorExecution &execution,
   }
 
   if (envelope.kind == kKindStop) return handleStop(state, execution, context);
+  if (envelope.kind == kKindAsk) {
+    return answerAsk(state, execution, context, envelope);
+  }
+  if (envelope.kind == kKindAchieve) {
+    return receiveAchieve(state, execution, context, envelope);
+  }
+  if (envelope.kind == kKindCancel) {
+    receiveCancel(state, envelope);
+    return std::string{};
+  }
+  if (envelope.kind == kKindOutcome || envelope.kind == kKindRefuse) {
+    receiveResponse(state, envelope);
+    return std::string{};
+  }
 
   if (isTell) {
     // The dispatcher runs compiled code on the rewritten type (see
@@ -1068,6 +1118,18 @@ AgentExecutor::handleSend(State &state, const ActorExecution &execution,
     tell.entry = state.agent.dispatchEntry;
     tell.event = &internal;
     tell.space = std::string(kSpaceInner);
+    if (envelope.relaySpace) {
+      // A sibling's tell, relayed by this agent as the space's host. Only a
+      // member may use the relay, and the host hears the tell itself only
+      // when it is among the names (a relay is not an emission to everyone).
+      if (*envelope.relaySpace != kSpaceInner ||
+          !contains(innerMembers(state), envelope.from)) {
+        bumpStat(state, kStatUnroutable);
+        return std::string{};
+      }
+      tell.relayed = &envelope;
+      if (!contains(envelope.relayFor, state.name)) tell.entry.reset();
+    }
     runTurn(state, execution.cursor, execution.grant, context, tell);
     return std::string{};
   }
@@ -1334,6 +1396,7 @@ AgentExecutor::TurnOutcome AgentExecutor::runTurnOnce(State &state,
                                  grant.maxOutputBytes);
 
     std::optional<std::string> failure;
+    std::optional<WireValue> answer;
     try {
       // 3. Turn cell.
       const auto millis = static_cast<std::int64_t>(
@@ -1349,6 +1412,9 @@ AgentExecutor::TurnOutcome AgentExecutor::runTurnOnce(State &state,
       }
       if (!spec.cause.empty()) {
         turnRecord.set(std::string(kTurnCause), WireValue::text(spec.cause));
+      }
+      for (std::size_t i = 0; i < spec.turnFields.names.size(); ++i) {
+        turnRecord.set(spec.turnFields.names[i], spec.turnFields.values[i]);
       }
       const auto turnCell =
           writeValue(arena, state.vd, WireValue::record(turnRecord));
@@ -1397,6 +1463,17 @@ AgentExecutor::TurnOutcome AgentExecutor::runTurnOnce(State &state,
           failure = std::string(kFailUnfinished);
         }
       }
+      // An answer is read before the undo below discards it (§7.1).
+      if (!failure && spec.readOnly) {
+        if (const auto cell =
+                fieldValue(arena, state.vd, agent.agentCell, kFieldAnswer)) {
+          if (auto value = readValue(arena, state.vd, *cell)) {
+            answer = std::move(*value);
+          } else {
+            failure = std::string(kFailStatement);
+          }
+        }
+      }
       // 6. Settle: nothing raises internal events in this iteration.
       if (!failure && spec.markInitialized) {
         setField(arena, state.vd, agent.agentCell, kFieldInitialized,
@@ -1410,10 +1487,12 @@ AgentExecutor::TurnOutcome AgentExecutor::runTurnOnce(State &state,
 
     // 7. Commit or undo. Either way no choice point survives the turn.
     vm.clearChoicePoints();
-    if (failure) {
+    if (failure || spec.readOnly) {
       arena.release(m0);
       vm.setCursorOpcode(cursor, *spec.entry);
-      outcome = {.committed = false, .cause = *failure};
+      outcome = {.committed = !failure,
+                 .cause     = failure.value_or(std::string{}),
+                 .answer    = std::move(answer)};
     } else {
       arena.discard(m0);
     }
@@ -1654,6 +1733,53 @@ AgentExecutor::collectOutbox(State &state, WorkerContext &context) {
           }
         }
       }
+    } else if (item.kind == kKindAsk || item.kind == kKindAchieve) {
+      const auto integer = [&](std::string_view field) {
+        const auto value = read(entry, field);
+        const auto *i =
+            value ? std::get_if<std::int64_t>(&value->data) : nullptr;
+        return i == nullptr ? std::optional<std::int64_t>{}
+                            : std::optional<std::int64_t>(*i);
+      };
+      const auto id        = integer(kOutboxReqId);
+      const auto to        = textOf(read(entry, kOutboxReqTo));
+      const auto name      = textOf(read(entry, kOutboxReqName));
+      const auto deadline  = integer(kOutboxReqDeadline);
+      const auto intention = integer(kOutboxReqIntention);
+      const auto args      = read(entry, kOutboxReqArgs);
+      const auto *record =
+          args ? std::get_if<WireRecord>(&args->data) : nullptr;
+      if (!id || !to || !name || !deadline || !intention ||
+          (args && record == nullptr)) {
+        bumpStat(state, kStatMalformed);
+        continue;
+      }
+      item.reqId         = *id;
+      item.reqTo         = *to;
+      item.reqName       = *name;
+      item.reqDeadlineMs = *deadline;
+      item.intention     = *intention;
+      if (record != nullptr) item.reqArgs = *record;
+      item.reqArgs.type.clear();
+    } else if (item.kind == kKindCancel || item.kind == kKindOutcome ||
+               item.kind == kKindRefuse) {
+      const auto to          = textOf(read(entry, kOutboxReqTo));
+      const auto correlation = textOf(read(entry, kOutboxCorrelation));
+      if (!to || !correlation) {
+        bumpStat(state, kStatMalformed);
+        continue;
+      }
+      item.reqTo       = *to;
+      item.correlation = *correlation;
+      if (item.kind == kKindOutcome) {
+        const auto status = textOf(read(entry, kOutboxOutcomeStatus));
+        if (!status) {
+          bumpStat(state, kStatMalformed);
+          continue;
+        }
+        item.status = *status;
+        item.cause  = textOf(read(entry, kOutboxOutcomeCause)).value_or("");
+      }
     } else {
       bumpStat(state, kStatUnsupported);
       continue;
@@ -1688,6 +1814,20 @@ void AgentExecutor::drain(State &state, WorkerContext &context,
   }
   for (const auto &item : items) {
     if (item.kind == kKindStop) sendStop(state, turn, position, item);
+  }
+  // Requests, then the answers to them (§7.1). A cancel is sent in the order
+  // the routine staged it relative to an outcome, which only matters to the
+  // receiver as much as unordered delivery lets it.
+  for (const auto &item : items) {
+    if (item.kind == kKindAsk || item.kind == kKindAchieve) {
+      sendRequest(state, turn, position, item);
+    }
+  }
+  for (const auto &item : items) {
+    if (item.kind == kKindCancel || item.kind == kKindOutcome ||
+        item.kind == kKindRefuse) {
+      sendResponse(state, turn, position, item);
+    }
   }
   if (spec.relayed) relay(state, context, turn, position, *spec.relayed);
   // Effects (§4.2 step 9): cancels, then those that preempt, then the rest. A
@@ -1844,15 +1984,29 @@ void AgentExecutor::routeTell(State &state, std::uint64_t turn,
                               std::uint64_t &position, const OutboxItem &item) {
   // Only peers are addressable: a name is a pid only where `$peers` says so
   // (the parent and the children), the same rule `emit ... for` follows.
+  std::vector<std::string> viaHost;
   for (const auto &name : item.forNames) {
     const auto pid = peerPid(state, name);
     if (!pid) {
-      bumpStat(state, kStatUnroutable);
+      // Not a parent or child: a name in `outer` (a sibling) is reached
+      // through the space's host, which knows its members (§5.4, §7.2).
+      if (state.parentPid && name != state.name) {
+        viaHost.push_back(name);
+      } else {
+        bumpStat(state, kStatUnroutable);
+      }
       continue;
     }
     Envelope envelope = item.envelope;
     envelope.from     = state.name;
     sendEnvelope(state, turn, position, *pid, std::move(envelope));
+  }
+  if (!viaHost.empty()) {
+    Envelope envelope   = item.envelope;
+    envelope.from       = state.name;
+    envelope.relaySpace = std::string(kSpaceInner);
+    envelope.relayFor   = std::move(viaHost);
+    sendEnvelope(state, turn, position, *state.parentPid, std::move(envelope));
   }
 }
 
@@ -2160,6 +2314,14 @@ void AgentExecutor::upkeepDeliveries(
                        std::string(late ? kCauseDeadline : kCauseRetries)));
         raise(state, kDeliveryFailed, std::move(fields));
         bumpStat(state, kStatDeliveryFailed);
+        // An `ask` or delegated `achieve` fails at once (§6.7).
+        if (const auto request = state.requests.find(it->first);
+            request != state.requests.end() && !state.inTurn) {
+          const auto pending = request->second;
+          liftLimits(*state.context);
+          failWait(state, pending.intention, pending.key,
+                   late ? kEffectCauseDeadline : kCauseDelivery, late);
+        }
       }
       GLEDITOR_LOG_DEBUG(kLog, "delivery {} abandoned", it->first);
       it = outstanding_.erase(it);
@@ -2304,6 +2466,15 @@ bool waitsOnEffect(const ArenaManifold &arena, const ValueDims &vd,
                    CellRef waiting) {
   const auto kind = fieldValue(arena, vd, waiting, kWaitingKind);
   return kind && arena.textOf(*kind) == kWaitKindEffect;
+}
+
+/// A wait the adapter settles itself: an `ask` or a delegated `achieve`.
+bool waitsOnReply(const ArenaManifold &arena, const ValueDims &vd,
+                  CellRef waiting) {
+  const auto kind = fieldValue(arena, vd, waiting, kWaitingKind);
+  if (!kind) return false;
+  const auto name = arena.textOf(*kind);
+  return name == kWaitKindAsk || name == kWaitKindDelegate;
 }
 
 } // namespace
@@ -2467,6 +2638,16 @@ bool AgentExecutor::expireDeadlines(State &state, std::int64_t nowMillis) {
     const auto deadline = intFieldOf(arena, vd, *waiting, kWaitingDeadline);
     if (!deadline || *deadline > nowMillis) continue;
     const bool effect = waitsOnEffect(arena, vd, *waiting);
+    bool reply        = false;
+    if (waitsOnReply(arena, vd, *waiting)) {
+      const auto id  = intFieldOf(arena, vd, cell, kIntentionId);
+      const auto key = intFieldOf(arena, vd, *waiting, kWaitingKey);
+      if (id && key) {
+        const auto before = state.requests.size();
+        dropRequests(state, *id, *key);
+        reply = state.requests.size() != before;
+      }
+    }
     if (effect) {
       // The wait's own deadline beat the flight's: end the flight with it.
       if (const auto key = intFieldOf(arena, vd, *waiting, kWaitingKey)) {
@@ -2481,8 +2662,8 @@ bool AgentExecutor::expireDeadlines(State &state, std::int64_t nowMillis) {
     }
     const auto outcome =
         EffectResult::failure(std::string(kEffectCauseDeadline));
-    settleWaiting(arena, vd, cell, *waiting, effect ? &outcome : nullptr, true,
-                  stamp);
+    settleWaiting(arena, vd, cell, *waiting,
+                  effect || reply ? &outcome : nullptr, true, stamp);
     changed = true;
   }
   if (changed) deriveSchedule(state);
@@ -2494,6 +2675,8 @@ void AgentExecutor::failMigrated(State &state) {
   const auto &vd   = state.vd;
   const auto stamp = static_cast<std::int64_t>(counter(state, kFieldTurnCount));
   const auto outcome = EffectResult::failure(std::string(kEffectCauseMigrated));
+  // An agent that moved has lost the table of requests it was waiting on.
+  state.requests.clear();
   for (const auto cell :
        intentionCells(arena, state.dims, state.agent.agentCell)) {
     // One already ready has its result; leave it be.
@@ -2594,6 +2777,369 @@ bool AgentExecutor::wakeReady(State &state, std::size_t &turns,
     if (!backlog) break;
   }
   return woke;
+}
+
+// -- Questions and delegation (§6.6, §7.1)
+// ---------------------------------------------------------
+// The contract is the questions block of `runtime_abi.hpp`.
+
+namespace {
+
+std::chrono::system_clock::time_point fromMillis(std::int64_t millis) {
+  return std::chrono::system_clock::time_point{
+      std::chrono::milliseconds{millis}};
+}
+
+/// Bound on `$cancelled`: a peer that cancels ids that never arrive must not
+/// grow the list for the life of the agent.
+constexpr std::size_t kMaxCancelled = 1024;
+
+bool expired(const WireValue &entry, std::int64_t nowMillis) {
+  const auto *r = std::get_if<WireRecord>(&entry.data);
+  const auto *u = r ? r->find(kCancelledUntil) : nullptr;
+  const auto *t = u ? std::get_if<std::int64_t>(&u->data) : nullptr;
+  return t == nullptr || *t <= nowMillis;
+}
+
+} // namespace
+
+void AgentExecutor::sendRequest(State &state, std::uint64_t turn,
+                                std::uint64_t &position,
+                                const OutboxItem &item) {
+  const bool ask       = item.kind == kKindAsk;
+  const auto intention = item.intention.value_or(0);
+  const auto pid       = peerPid(state, item.reqTo);
+  if (!pid) {
+    bumpStat(state, kStatUnroutable);
+    failWait(state, intention, item.reqId, kCauseUnroutable);
+    return;
+  }
+  Envelope envelope;
+  envelope.kind   = item.kind;
+  envelope.type   = item.reqName;
+  envelope.from   = state.name;
+  envelope.fields = item.reqArgs;
+  const auto id   = requestId(state.prefix, turn, position);
+  if (!sendEnvelope(state, turn, position, *pid, std::move(envelope))) {
+    failWait(state, intention, item.reqId, kCauseSendFailed);
+    return;
+  }
+  state.requests[id] = PendingRequest{ask, intention, item.reqId, item.reqTo};
+  // The wait's own deadline ends the delivery too (§7.3), so a message to a
+  // receiver that never answers stops being redelivered.
+  setDeliveryDeadline(id, fromMillis(item.reqDeadlineMs));
+  if (ask) return;
+  // The request id is the correlation every later message names, and only the
+  // adapter knows it.
+  auto &arena    = state.context->arena;
+  const auto &vd = state.vd;
+  const auto cell =
+      findIntention(arena, state.dims, vd, state.agent.agentCell, intention);
+  const auto waiting =
+      cell ? fieldValue(arena, vd, *cell, kIntentionWaiting) : std::nullopt;
+  if (waiting && intFieldOf(arena, vd, *waiting, kWaitingKey) == item.reqId) {
+    setField(arena, vd, *waiting, kWaitingCorrelation,
+             writeValue(arena, vd, WireValue::text(id)));
+  }
+}
+
+void AgentExecutor::sendResponse(State &state, std::uint64_t turn,
+                                 std::uint64_t &position,
+                                 const OutboxItem &item) {
+  const auto pid = peerPid(state, item.reqTo);
+  if (!pid) {
+    bumpStat(state, kStatUnroutable);
+    return;
+  }
+  Envelope envelope;
+  envelope.kind        = item.kind;
+  envelope.from        = state.name;
+  envelope.correlation = item.correlation;
+  if (item.kind == kKindOutcome) {
+    envelope.type = std::string(kOutcomeType);
+    envelope.fields.set(std::string(kOutcomeFieldStatus),
+                        WireValue::text(item.status));
+    envelope.fields.set(std::string(kOutcomeFieldCause),
+                        WireValue::text(item.cause));
+  } else {
+    envelope.type =
+        std::string(item.kind == kKindRefuse ? kRefuseType : kCancelType);
+  }
+  sendEnvelope(state, turn, position, *pid, std::move(envelope));
+}
+
+bool AgentExecutor::failWait(State &state, std::int64_t intention,
+                             std::int64_t key, std::string_view cause,
+                             bool timedOut) {
+  auto &arena    = state.context->arena;
+  const auto &vd = state.vd;
+  const auto cell =
+      findIntention(arena, state.dims, vd, state.agent.agentCell, intention);
+  if (!cell || intFieldOf(arena, vd, *cell, kIntentionReady)) return false;
+  const auto waiting = fieldValue(arena, vd, *cell, kIntentionWaiting);
+  if (!waiting || !waitsOnReply(arena, vd, *waiting) ||
+      intFieldOf(arena, vd, *waiting, kWaitingKey) != key) {
+    return false;
+  }
+  const auto outcome = EffectResult::failure(std::string(cause));
+  settleWaiting(arena, vd, *cell, *waiting, &outcome, timedOut,
+                static_cast<std::int64_t>(counter(state, kFieldTurnCount)));
+  dropRequests(state, intention, key);
+  deriveSchedule(state);
+  return true;
+}
+
+void AgentExecutor::dropRequests(State &state, std::int64_t intention,
+                                 std::int64_t key) {
+  std::erase_if(state.requests, [&](const auto &entry) {
+    return entry.second.intention == intention && entry.second.key == key;
+  });
+}
+
+bool AgentExecutor::settleRequest(State &state, const std::string &id,
+                                  const EffectResult &outcome) {
+  const auto found = state.requests.find(id);
+  if (found == state.requests.end()) {
+    bumpStat(state, kStatReplyStale);
+    return false;
+  }
+  const PendingRequest request = found->second;
+  state.requests.erase(found);
+  auto &arena     = state.context->arena;
+  const auto &vd  = state.vd;
+  const auto cell = findIntention(arena, state.dims, vd, state.agent.agentCell,
+                                  request.intention);
+  const auto waiting =
+      cell ? fieldValue(arena, vd, *cell, kIntentionWaiting) : std::nullopt;
+  // The intention ended, or its deadline already ended the wait (§6.6).
+  if (!waiting || intFieldOf(arena, vd, *cell, kIntentionReady) ||
+      !waitsOnReply(arena, vd, *waiting) ||
+      intFieldOf(arena, vd, *waiting, kWaitingKey) != request.key) {
+    bumpStat(state, kStatReplyStale);
+    return false;
+  }
+  settleWaiting(arena, vd, *cell, *waiting, &outcome, false,
+                static_cast<std::int64_t>(counter(state, kFieldTurnCount)));
+  deriveSchedule(state);
+  return true;
+}
+
+void AgentExecutor::receiveReply(State &state, const ActorMessage &message) {
+  const auto request = state.requests.find(message.requestId);
+  if (request == state.requests.end()) return;
+  // An `achieve` is acknowledged with an empty result; its answer is the
+  // later `outcome`.
+  if (!request->second.ask) return;
+  const auto reply = decodeReply(message.value);
+  EffectResult result;
+  if (reply && reply->value) {
+    result = EffectResult::success(*reply->value);
+  } else {
+    result =
+        EffectResult::failure(reply ? reply->fault : std::string(kFaultRemote));
+  }
+  settleRequest(state, message.requestId, result);
+}
+
+void AgentExecutor::receiveResponse(State &state, const Envelope &envelope) {
+  const auto found = envelope.correlation
+                         ? state.requests.find(*envelope.correlation)
+                         : state.requests.end();
+  // Only the delegate may end the wait.
+  if (found == state.requests.end() || found->second.ask ||
+      found->second.to != envelope.from) {
+    bumpStat(state, kStatReplyStale);
+    return;
+  }
+  EffectResult result;
+  if (envelope.kind == kKindRefuse) {
+    result = EffectResult::failure(std::string(kCauseRefused));
+  } else {
+    const auto text = [&](std::string_view name) -> std::string {
+      const auto *v = envelope.fields.find(name);
+      const auto *s = v ? std::get_if<std::string>(&v->data) : nullptr;
+      return s ? *s : std::string{};
+    };
+    const auto status = text(kOutcomeFieldStatus);
+    if (status == kOutcomeSucceeded) {
+      result = EffectResult::success();
+    } else {
+      auto cause = text(kOutcomeFieldCause);
+      result     = EffectResult::failure(cause.empty() ? status : cause);
+    }
+  }
+  settleRequest(state, *envelope.correlation, result);
+}
+
+WireList AgentExecutor::readCancelled(const State &state) const {
+  const auto &arena = state.context->arena;
+  const auto cell =
+      fieldValue(arena, state.vd, state.agent.agentCell, kFieldCancelled);
+  if (!cell) return {};
+  const auto value = readValue(arena, state.vd, *cell);
+  const auto *list = value ? std::get_if<WireList>(&value->data) : nullptr;
+  return list == nullptr ? WireList{} : *list;
+}
+
+void AgentExecutor::writeCancelled(State &state, WireList list) {
+  auto &arena = state.context->arena;
+  setField(arena, state.vd, state.agent.agentCell, kFieldCancelled,
+           writeValue(arena, state.vd, WireValue::list(std::move(list))));
+}
+
+void AgentExecutor::receiveCancel(State &state, const Envelope &envelope) {
+  if (!envelope.correlation) {
+    bumpStat(state, kStatMalformed);
+    return;
+  }
+  const auto &id = *envelope.correlation;
+  auto &arena    = state.context->arena;
+  const auto &vd = state.vd;
+  for (const auto cell :
+       intentionCells(arena, state.dims, state.agent.agentCell)) {
+    const auto delegator = fieldValue(arena, vd, cell, kIntentionDelegator);
+    if (!delegator) continue;
+    const auto value = readValue(arena, vd, *delegator);
+    const auto *record =
+        value ? std::get_if<WireRecord>(&value->data) : nullptr;
+    if (record == nullptr) continue;
+    const auto field = [&](std::string_view name) -> const std::string * {
+      const auto *v = record->find(name);
+      return v ? std::get_if<std::string>(&v->data) : nullptr;
+    };
+    const auto *corr = field(kDelegatorCorr);
+    const auto *peer = field(kDelegatorPeer);
+    if (corr == nullptr || *corr != id) continue;
+    // Only the delegator may withdraw what it delegated.
+    if (peer == nullptr || *peer != envelope.from) {
+      bumpStat(state, kStatReplyStale);
+      return;
+    }
+    const auto target = intFieldOf(arena, vd, cell, kIntentionId);
+    if (!target) return;
+    WireRecord fields;
+    fields.set(std::string(kCancelIntention), WireValue::integer(*target));
+    raise(state, kCancelEvent, std::move(fields));
+    return;
+  }
+  // The `achieve` has not arrived (delivery is unordered): remember the id
+  // for as long as it could still be redelivered.
+  const auto nowMillis = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             wallNow().time_since_epoch())
+                             .count();
+  const auto window = static_cast<std::int64_t>(settings_.sendRetries) *
+                      settings_.sendRetryInterval.count();
+  auto list = readCancelled(state);
+  std::erase_if(
+      list, [&](const WireValue &entry) { return expired(entry, nowMillis); });
+  while (list.size() >= kMaxCancelled) list.erase(list.begin());
+  WireRecord entry;
+  entry.type = std::string(kCancelledRecord);
+  entry.set(std::string(kCancelledId), WireValue::text(id));
+  entry.set(std::string(kCancelledUntil),
+            WireValue::integer(nowMillis + window));
+  list.push_back(WireValue::record(std::move(entry)));
+  writeCancelled(state, std::move(list));
+}
+
+std::expected<std::string, ActorError>
+AgentExecutor::answerAsk(State &state, const ActorExecution &execution,
+                         WorkerContext &context, const Envelope &envelope) {
+  const auto fault = [](std::string_view cause) {
+    return *encodeReply(Reply{std::nullopt, std::string(cause)});
+  };
+  if (!state.agent.answerEntry) return fault(kFaultUnanswered);
+  TurnSpec spec;
+  spec.entry    = state.agent.answerEntry;
+  spec.readOnly = true;
+  spec.turnFields.set(std::string(kTurnQuestion),
+                      WireValue::text(envelope.type));
+  WireRecord args = envelope.fields;
+  args.type.clear();
+  spec.turnFields.set(std::string(kTurnArgs),
+                      WireValue::record(std::move(args)));
+  spec.turnFields.set(std::string(kTurnSender), WireValue::text(envelope.from));
+  const auto outcome =
+      runTurn(state, execution.cursor, execution.grant, context, spec);
+  if (!outcome.cause.empty()) return fault(kFaultRemote);
+  if (!outcome.answer) return fault(kFaultUnanswered);
+  const auto bytes = encodeReply(Reply{outcome.answer, {}});
+  if (!bytes) return fault(kFaultRemote);
+  // The answer rides in one message (§7.1).
+  if (bytes->size() > kMaxMessageValue) return fault(kFaultTooLarge);
+  return *bytes;
+}
+
+std::expected<std::string, ActorError>
+AgentExecutor::receiveAchieve(State &state, const ActorExecution &execution,
+                              WorkerContext &context,
+                              const Envelope &envelope) {
+  const auto &message  = *execution.message;
+  const auto nowMillis = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             wallNow().time_since_epoch())
+                             .count();
+  auto cancelled    = readCancelled(state);
+  const auto before = cancelled.size();
+  // Expired ids first: one past its window is an ordinary `achieve` again.
+  std::erase_if(cancelled, [&](const WireValue &entry) {
+    return expired(entry, nowMillis);
+  });
+  const auto listed = std::ranges::find_if(cancelled, [&](const WireValue &v) {
+    const auto *r = std::get_if<WireRecord>(&v.data);
+    const auto *i = r ? r->find(kCancelledId) : nullptr;
+    const auto *s = i ? std::get_if<std::string>(&i->data) : nullptr;
+    return s != nullptr && *s == message.requestId;
+  });
+  const bool early  = listed != cancelled.end();
+  if (early) cancelled.erase(listed);
+  if (cancelled.size() != before) writeCancelled(state, std::move(cancelled));
+  if (early) {
+    bumpStat(state, kStatCancelledEarly);
+    return std::string{};
+  }
+
+  // The dispatcher runs compiled code on the rewritten type (see
+  // `kAchieveEventPrefix`); the request id is the correlation.
+  Envelope internal = envelope;
+  internal.kind     = std::string(kKindEvent);
+  internal.type     = std::string(kAchieveEventPrefix) + envelope.type;
+  internal.fields.set(std::string(kEventCorrelation),
+                      WireValue::text(message.requestId));
+  TurnSpec spec;
+  spec.entry = state.agent.dispatchEntry;
+  spec.event = &internal;
+  spec.space = state.parentPid && message.source == state.parentPid
+                   ? std::string(kSpaceOuter)
+                   : std::string(kSpaceInner);
+  const auto outcome =
+      runTurn(state, execution.cursor, execution.grant, context, spec);
+  if (!outcome.committed && state.context) {
+    // The receiver failed hard: tell the delegator at once rather than let it
+    // wait for its deadline (§6.7, remote fault).
+    stageResponse(state, execution.grant, context, kKindOutcome, envelope.from,
+                  message.requestId, kOutcomeFailed, kFaultRemote);
+  }
+  return std::string{};
+}
+
+void AgentExecutor::stageResponse(State &state, const ActorGrant &grant,
+                                  WorkerContext &context, std::string_view kind,
+                                  std::string_view to,
+                                  std::string_view correlation,
+                                  std::string_view status,
+                                  std::string_view cause) {
+  auto &arena      = context.arena;
+  const auto &vd   = state.vd;
+  const auto entry = arena.makeCell(kind);
+  setField(arena, vd, entry, kOutboxReqTo, arena.makeCell(to));
+  setField(arena, vd, entry, kOutboxCorrelation, arena.makeCell(correlation));
+  if (kind == kKindOutcome) {
+    setField(arena, vd, entry, kOutboxOutcomeStatus, arena.makeCell(status));
+    setField(arena, vd, entry, kOutboxOutcomeCause, arena.makeCell(cause));
+  }
+  appendToRank(arena, state.agent.agentCell, state.dims.outbox, entry);
+  TurnSpec spec;
+  runTurn(state, state.cursor, grant, context, spec);
 }
 
 // -- Checkpoint, resume and migration (§4.2, §4.4, §4.5)

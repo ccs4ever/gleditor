@@ -121,6 +121,21 @@ encodeEnvelope(const Envelope &envelope);
 [[nodiscard]] std::expected<Envelope, WireError>
 decodeEnvelope(std::string_view bytes);
 
+/// The turn result of an `ask` (§7.1): the answer, or a typed fault. Carried
+/// as a record whose type begins with `$`, which no user type can, so an
+/// answer that is itself a record is never mistaken for a fault.
+struct Reply {
+  /// The answer on success, nullopt for a fault.
+  std::optional<WireValue> value;
+  /// The fault's cause; empty on success.
+  std::string fault;
+  bool operator==(const Reply &) const = default;
+};
+[[nodiscard]] std::expected<std::string, WireError>
+encodeReply(const Reply &reply);
+[[nodiscard]] std::expected<Reply, WireError>
+decodeReply(std::string_view bytes);
+
 // -- Request ids and floors (§5.5, §7.3)
 // ---------------------------------------------
 

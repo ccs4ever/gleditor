@@ -434,6 +434,44 @@ std::expected<WireValue, WireError> decodeValue(std::string_view bytes) {
   return fromNode(*node, 0);
 }
 
+namespace {
+constexpr std::string_view kReplyType = "$reply";
+constexpr std::string_view kFaultType = "$fault";
+constexpr std::string_view kReplyBody = "value";
+constexpr std::string_view kFaultBody = "cause";
+} // namespace
+
+std::expected<std::string, WireError> encodeReply(const Reply &reply) {
+  WireRecord record;
+  if (reply.value) {
+    record.type = std::string(kReplyType);
+    record.set(std::string(kReplyBody), *reply.value);
+  } else {
+    record.type = std::string(kFaultType);
+    record.set(std::string(kFaultBody), WireValue::text(reply.fault));
+  }
+  return encodeValue(WireValue::record(std::move(record)));
+}
+
+std::expected<Reply, WireError> decodeReply(std::string_view bytes) {
+  auto decoded = decodeValue(bytes);
+  if (!decoded) return std::unexpected(decoded.error());
+  const auto *record = std::get_if<WireRecord>(&decoded->data);
+  if (record == nullptr) return std::unexpected(WireError::WrongType);
+  if (record->type == kReplyType) {
+    const auto *body = record->find(kReplyBody);
+    if (body == nullptr) return std::unexpected(WireError::MissingKey);
+    return Reply{*body, {}};
+  }
+  if (record->type == kFaultType) {
+    const auto *body = record->find(kFaultBody);
+    const auto *text = body ? std::get_if<std::string>(&body->data) : nullptr;
+    if (text == nullptr) return std::unexpected(WireError::MissingKey);
+    return Reply{std::nullopt, *text};
+  }
+  return std::unexpected(WireError::WrongType);
+}
+
 std::expected<std::string, WireError> encodeEnvelope(const Envelope &e) {
   auto fieldDict = fieldsNode(e.fields);
   if (!fieldDict) return std::unexpected(fieldDict.error());
