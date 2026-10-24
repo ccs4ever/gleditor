@@ -138,6 +138,11 @@ LocalHost::LocalHost(CompiledProgram program, Options options)
     : program_(std::move(program)), issuer_(std::make_unique<Issuer>()),
       runtime_(std::make_unique<MeshActorRuntime>(
           std::string(kLocalNode), kLocalEpoch, AgentExecutor::withFloors())) {
+  if (options.manualClock) {
+    manualNow_ = std::make_shared<std::chrono::system_clock::time_point>(
+        options.clock.wall());
+    options.clock.wall = [now = manualNow_] { return *now; };
+  }
   const auto owner = *identity::Fingerprint::fromString(kLocalOwner);
   const auto life  = options.clock.wall() + kLocalGrantLife;
   program_.setBeliefEventDepth(options.settings.beliefEventDepth);
@@ -179,6 +184,13 @@ LocalHost::launch(std::string_view agentType, std::string_view name,
 std::expected<void, ActorError>
 LocalHost::send(const identity::ActorPid &target, Envelope event) {
   return executor_->deliver(target, std::move(event));
+}
+
+std::size_t LocalHost::advance(std::chrono::milliseconds by,
+                               std::size_t maxTurns) {
+  if (manualNow_) *manualNow_ += by;
+  executor_->tick();
+  return executor_->pumpUntilIdle(maxTurns);
 }
 
 std::size_t LocalHost::pump(std::size_t maxTurns) {

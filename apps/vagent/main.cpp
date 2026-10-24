@@ -15,6 +15,7 @@
 #include <argparse/argparse.hpp>
 #include <cctype>
 #include <charconv>
+#include <chrono>
 #include <cstdint>
 #include <format>
 #include <fstream>
@@ -297,7 +298,22 @@ std::string_view errorName(zigzag::vortex::mesh::ActorError error) {
 }
 
 constexpr std::string_view kRunLauncherName = "main";
-constexpr long kDefaultTurns                = 100000;
+
+/// `250ms`, `2s`, `5min`: the duration units of the language (lexer.cpp).
+std::optional<std::chrono::milliseconds> parseDuration(std::string_view text) {
+  std::int64_t amount{};
+  const auto [end, ec] =
+      std::from_chars(text.data(), text.data() + text.size(), amount);
+  if (ec != std::errc{} || end == text.data() || amount < 0) {
+    return std::nullopt;
+  }
+  const std::string_view unit = text.substr(end - text.data());
+  if (unit == "ms") return std::chrono::milliseconds(amount);
+  if (unit == "s") return std::chrono::seconds(amount);
+  if (unit == "min") return std::chrono::minutes(amount);
+  return std::nullopt;
+}
+constexpr long kDefaultTurns = 100000;
 
 int runRun(const argparse::ArgumentParser &command) {
   const auto path = command.get<std::string>("file");
@@ -348,7 +364,21 @@ int runRun(const argparse::ArgumentParser &command) {
     sends.push_back(std::move(event));
   }
 
-  LocalHost host(std::move(*program));
+  std::vector<std::chrono::milliseconds> advances;
+  for (const auto &text : command.get<std::vector<std::string>>("--advance")) {
+    const auto by = parseDuration(text);
+    if (!by) {
+      std::cerr << "vagent: --advance wants a duration such as 250ms, 2s or "
+                   "5min, got '"
+                << text << "'\n";
+      return exitUsage;
+    }
+    advances.push_back(*by);
+  }
+
+  LocalHost::Options hostOptions;
+  hostOptions.manualClock = true;
+  LocalHost host(std::move(*program), std::move(hostOptions));
   const auto pid = host.launch(agent, kRunLauncherName, std::move(args));
   if (!pid) {
     std::cerr << "vagent: cannot launch " << agent << " ("
@@ -365,6 +395,12 @@ int runRun(const argparse::ArgumentParser &command) {
       return exitError;
     }
     used += host.pump(turns - used);
+  }
+  // Each --advance moves the manual clock and runs what fell due, in order, so
+  // a periodic timer fires once per period crossed.
+  for (const auto by : advances) {
+    if (used >= turns) break;
+    used += host.advance(by, turns - used);
   }
   for (const auto &emitted : host.emissions()) {
     std::cout << renderEmission(emitted) << '\n';
@@ -394,6 +430,10 @@ int main(int argc, char **argv) {
       .append();
   runCommand.add_argument("--send")
       .help("event delivered to the agent, Event{field: value} (repeatable)")
+      .append();
+  runCommand.add_argument("--advance")
+      .help("move the manual clock forward and run due timers, e.g. 250ms, 2s "
+            "or 5min (repeatable, applied in order after --send)")
       .append();
   runCommand.add_argument("--turns")
       .help("stop after this many turns")

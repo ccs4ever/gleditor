@@ -635,6 +635,10 @@ private:
   Ty assign(const EBinary &b, CellRef out, SourceLocation loc);
   Ty range(const ERange &r, CellRef out);
   Ty call(const ECall &c, CellRef out, SourceLocation loc);
+  /// Built-in capacities `Schedules`, `Clock`, `Logging` (§10): a call on
+  /// `Cap.method`. Nullopt when the callee is not one of them.
+  std::optional<Ty> capacityCall(const ECall &c, CellRef out,
+                                 SourceLocation loc);
   Ty index(const EIndex &i, CellRef out);
   Ty field(const EField &f, CellRef out, SourceLocation loc);
   Ty list(const EList &l, CellRef out);
@@ -1523,6 +1527,7 @@ Ty Gen::range(const ERange &r, CellRef out) {
 }
 
 Ty Gen::call(const ECall &c, CellRef out, SourceLocation loc) {
+  if (const auto cap = capacityCall(c, out, loc)) return *cap;
   if (const auto *fe = std::get_if<EField>(&c.callee->node)) {
     const auto *cap = std::get_if<EName>(&fe->base->node);
     if (cap != nullptr && capacities_.contains(cap->name)) {
@@ -1571,6 +1576,90 @@ Ty Gen::call(const ECall &c, CellRef out, SourceLocation loc) {
   callLabel(mi.entry);
   mov(S(out), S(mi.retReg));
   return mi.ret;
+}
+
+// ---------------------------------------------------------------------------
+// Built-in capacities: Schedules, Clock, Logging (design §10)
+//
+// Vortex cannot call C++, so `Schedules` and `Logging` stage outbox entries
+// the adapter applies at the drain (§4.2 step 9: "timer changes"), and `Clock`
+// reads the `time` field of `$turn` (§4.2 step 3). A Timer is the scalar id
+// minted here from `$next_id`, so the call can return it before the drain.
+// ---------------------------------------------------------------------------
+
+std::optional<Ty> Gen::capacityCall(const ECall &c, CellRef out,
+                                    SourceLocation loc) {
+  const auto *callee = std::get_if<EField>(&c.callee->node);
+  if (callee == nullptr) return std::nullopt;
+  const auto *owner = std::get_if<EName>(&callee->base->node);
+  if (owner == nullptr) return std::nullopt;
+  const std::string &cap = owner->name;
+  const std::string &fn  = callee->name;
+  const auto arity       = [&](std::size_t n) {
+    if (c.args.size() != n) {
+      bail(CompileError::BadArity,
+                 cap + "." + fn + " takes " + std::to_string(n) + " arguments", loc);
+    }
+  };
+  CellRef vc;
+  if (cap == "Clock" && fn == "now") {
+    arity(0);
+    const FieldInfo &turn = fields_.at(std::string(kFieldTurn));
+    const CellRef tp      = reg();
+    CellRef timeP, nameP;
+    mov(S(tp), S(rd(S(turn.nameCell), core_.dims().values)));
+    callFind(tp, std::string(kTurnTime), timeP, nameP);
+    branchIfZero(timeP, failStep_);
+    mov(S(out), D(timeP));
+    return tyOf(Ty::K::Int);
+  }
+  if (cap == "Schedules" && (fn == "after" || fn == "periodic")) {
+    arity(2);
+    const CellRef delay = reg(), ev = reg(), id = reg();
+    valueInto(*c.args[0], delay);
+    const Ty et = valueInto(*c.args[1], ev);
+    if (et.k != Ty::K::Record) {
+      bail(CompileError::TypeMismatch, cap + "." + fn + " needs an event", loc);
+    }
+    const FieldInfo &next = fields_.at(std::string(kFieldNextId));
+    mov(S(id), S(next.valueCell));
+    emit(OpcodeKind::Add, "id+", {S(next.valueCell), S(one_)},
+         {next.valueCell});
+    const CellRef entry = callOutbox(kKindTimer);
+    callAppendField(entry, std::string(kOutboxTimerId), std::nullopt, vc);
+    mov(D(vc), S(id));
+    callAppendField(entry, std::string(kOutboxTimerDelay), std::nullopt, vc);
+    mov(D(vc), S(delay));
+    callAppendField(entry, std::string(kOutboxTimerPeriod), std::nullopt, vc);
+    mov(D(vc), fn == "periodic" ? S(delay) : S(zero_));
+    callAppendField(entry, std::string(kOutboxEvent), ev, vc);
+    mov(S(out), S(id));
+    return tyOf(Ty::K::Int);
+  }
+  if (cap == "Schedules" && fn == "cancel") {
+    arity(1);
+    const CellRef id = reg();
+    valueInto(*c.args[0], id);
+    const CellRef entry = callOutbox(kKindTimerCancel);
+    callAppendField(entry, std::string(kOutboxTimerId), std::nullopt, vc);
+    mov(D(vc), S(id));
+    movC(out, unit_c_);
+    return tyOf(Ty::K::Unit);
+  }
+  if (cap == "Logging" && (fn == "info" || fn == "debug")) {
+    arity(1);
+    const CellRef msg = reg();
+    valueInto(*c.args[0], msg);
+    const CellRef entry = callOutbox(kKindLog);
+    callAppendField(entry, std::string(kOutboxLogLevel), std::nullopt, vc);
+    mov(D(vc),
+        S(cStr(std::string(fn == "info" ? kLogLevelInfo : kLogLevelDebug))));
+    callAppendField(entry, std::string(kOutboxLogMessage), std::nullopt, vc);
+    mov(D(vc), S(msg));
+    movC(out, unit_c_);
+    return tyOf(Ty::K::Unit);
+  }
+  return std::nullopt;
 }
 
 Ty Gen::index(const EIndex &i, CellRef out) {
