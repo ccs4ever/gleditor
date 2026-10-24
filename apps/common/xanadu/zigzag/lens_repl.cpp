@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 
+#include <sys/stat.h>
+
 #include "common/xanadu/spool.hpp"
 #include "common/xanadu/zigzag/lens_uri.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
@@ -11,6 +13,23 @@
 #include "common/xanadu/zigzag/router_lens.hpp"
 
 namespace zigzag {
+
+namespace {
+
+/// A path-shaped arg resolves to the cell's fs:<dev>:<ino> key --
+/// users think in paths, mounts are keyed by inode. Anything else is
+/// already an ExternalKey and passes through.
+std::string keyArg(const std::string_view arg) {
+  std::string key{arg};
+  struct stat st{};
+  if (arg.starts_with('/') && ::stat(key.c_str(), &st) == 0) {
+    key = "fs:" + std::to_string(static_cast<std::uint64_t>(st.st_dev)) + ":" +
+          std::to_string(static_cast<std::uint64_t>(st.st_ino));
+  }
+  return key;
+}
+
+} // namespace
 
 void printLensTree(ProjectionSession &session, vortex::VortexCore &core,
                    ArenaManifold &arena, const std::string_view label,
@@ -125,7 +144,7 @@ bool LensRepl::run(const std::string_view line, std::ostream &out,
       out << "lens: no router at the root -- mount needs a dir: view\n";
       return true;
     }
-    const auto opened = router->open(std::string{arg.substr(6)});
+    const auto opened = router->open(keyArg(arg.substr(6)));
     if (!opened) {
       out << "lens: mount refused: " << opened.error() << "\n";
       return true;
@@ -140,7 +159,7 @@ bool LensRepl::run(const std::string_view line, std::ostream &out,
       out << "lens: no router at the root\n";
       return true;
     }
-    const auto boundary = router->mountBoundary(std::string{arg.substr(8)});
+    const auto boundary = router->mountBoundary(keyArg(arg.substr(8)));
     if (!boundary) {
       out << "lens: no mount at or above " << arg.substr(8) << "\n";
       return true;
