@@ -235,26 +235,34 @@ LensFilePicker *LensFilePicker::open() {
 }
 
 void LensFilePicker::project() {
-  // The typed filter composes with the host's Filter at this seam: dirs
-  // always survive (FilteredFilesystemLens keeps them so the listing
-  // stays navigable), files must pass both.
-  session_ = std::make_unique<zigzag::ProjectionSession>(
-      std::make_unique<FilteredFilesystemLens>(
-          root_,
-          [this](const std::filesystem::path &p) {
-            if (filter_ && !filter_(p)) return false;
-            return filterText_.empty() ||
-                   p.filename().string().find(filterText_) != std::string::npos;
-          }),
-      core_);
-  // Resolve the dims through the core, exactly as the session minted them --
-  // findOrMintDimension is idempotent, so this never creates a second cell.
-  dContains_ = core_.findOrMintDimension("d.contains");
-  dSeq_      = core_.findOrMintDimension("d.seq");
-  dRole_     = core_.findOrMintDimension("d.role");
-  rebuildItems();
-  if (!session_->roots().empty()) {
-    cursor_.store(session_->roots().front());
+  {
+    // Held for the whole rebuild: drawFrame's emitDocument->buildDocument
+    // reads session_/items_/visible_ under the same mutex on the render
+    // thread, and a mid-projection swap there is a use-after-rebuild.
+    // markDirty's eager emit takes the mutex too, so it runs outside.
+    std::scoped_lock locker(emitMutex_);
+    // The typed filter composes with the host's Filter at this seam: dirs
+    // always survive (FilteredFilesystemLens keeps them so the listing
+    // stays navigable), files must pass both.
+    session_ = std::make_unique<zigzag::ProjectionSession>(
+        std::make_unique<FilteredFilesystemLens>(
+            root_,
+            [this](const std::filesystem::path &p) {
+              if (filter_ && !filter_(p)) return false;
+              return filterText_.empty() ||
+                     p.filename().string().find(filterText_) !=
+                         std::string::npos;
+            }),
+        core_);
+    // Resolve the dims through the core, exactly as the session minted them --
+    // findOrMintDimension is idempotent, so this never creates a second cell.
+    dContains_ = core_.findOrMintDimension("d.contains");
+    dSeq_      = core_.findOrMintDimension("d.seq");
+    dRole_     = core_.findOrMintDimension("d.role");
+    rebuildItems();
+    if (!session_->roots().empty()) {
+      cursor_.store(session_->roots().front());
+    }
   }
   markDirty();
 }
