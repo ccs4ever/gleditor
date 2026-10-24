@@ -1797,13 +1797,22 @@ int XuzzApp::run(const int argc, char **argv) {
 
   const auto bindZigzag = [&session, &zigzagPresentation, &linkContext,
                            &bridgeCoordinator, &views, &map, &zigzagStoreIndex,
-                           &sliceHeads](RenderState &rState,
-                                        const std::size_t storeIndex,
-                                        const xanadu::MicroversionId &version) {
+                           &sliceHeads, &lensSurface](RenderState &rState,
+                                                     const std::size_t storeIndex,
+                                                     const xanadu::MicroversionId
+                                                         &version) {
     if (!zigzagPresentation->sliceHead().isZero()) {
       sliceHeads[zigzagStoreIndex] = zigzagPresentation->sliceHead();
     }
-    zigzagPresentation->bindXanaduStore(session->store(storeIndex), version);
+    // While a lens surface owns the view -- or the picker's transient
+    // document does under suspendView -- a store rebind would clobber
+    // what is showing: the pane keeps the adopted projection. The
+    // bookkeeping below still runs so the next real store view lands
+    // correctly.
+    if (lensSurface == nullptr) {
+      zigzagPresentation->bindXanaduStore(session->store(storeIndex),
+                                          version);
+    }
     zigzagStoreIndex       = storeIndex;
     sliceHeads[storeIndex] = version;
     map.setStoreIndex(storeIndex);
