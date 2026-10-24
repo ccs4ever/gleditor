@@ -1109,6 +1109,22 @@ void Compiler::installXanadu() {
     v->ctorArity               = 1;
     globals_->vars["openLens"] = v;
   }
+  // The rest of the verb set, same session (§7.4): mount/unmount path or
+  // fs: keys, next materializes a windowed page, commit writes dirty
+  // cells, close drops the session; lensKey names a cell's ExternalKey.
+  for (const auto &[name, tag, arity] : std::initializer_list<
+           std::tuple<const char *, const char *, std::size_t>>{
+           {"lensMount", "IO.LensMount", 1},
+           {"lensUnmount", "IO.LensUnmount", 1},
+           {"lensNext", "IO.LensNext", 0},
+           {"lensCommit", "IO.LensCommit", 0},
+           {"lensClose", "IO.LensClose", 0},
+           {"lensKey", "IO.LensKey", 1},
+       }) {
+    auto v               = makeCtor(tag, {});
+    v->ctorArity         = arity;
+    globals_->vars[name] = v;
+  }
 }
 
 void Compiler::installBuiltins() {
@@ -1200,10 +1216,11 @@ Compiler::runIO(const ValuePtr &action, std::istream &in, std::ostream &out) {
       return fail(CompileError::TypeMismatch,
                   "openLens: argument is not a String", {});
     }
-    auto session = std::make_shared<zigzag::ProjectionSession>(
-        std::make_unique<zigzag::FilesystemLens>((*pE)->s), core_);
-    sessions_.push_back(session);
-    if (session->roots().empty()) {
+    if (const auto r = lens_.openUri((*pE)->s); !r) {
+      return fail(CompileError::TypeMismatch, "openLens: " + r.error(), {});
+    }
+    const auto root = lens_.root();
+    if (!root.has_value()) {
       // An unreadable / empty source: None would be more honest, but openLens
       // is typed IO Cell; return a bare cell so a program can detect emptiness
       // via cellText == "". A richer IO (Option Cell) is a later refinement.
@@ -1216,10 +1233,58 @@ Compiler::runIO(const ValuePtr &action, std::istream &in, std::ostream &out) {
     }
     auto inner      = std::make_shared<Value>();
     inner->kind     = Value::Kind::Int;
-    inner->i        = static_cast<std::int64_t>(session->roots().front());
+    inner->i        = static_cast<std::int64_t>(*root);
     auto cell       = makeCtor("Cell", {inner});
     cell->ctorArity = 1;
     return cell;
+  }
+  if (tag == "IO.LensMount" || tag == "IO.LensUnmount" ||
+      tag == "IO.LensNext" || tag == "IO.LensCommit" || tag == "IO.LensClose" ||
+      tag == "IO.LensKey") {
+    auto failRes = [&](const std::string &why) {
+      return fail(CompileError::TypeMismatch, tag + ": " + why, {});
+    };
+    auto boolv = [&](const bool ok) {
+      auto b       = makeCtor(ok ? "True" : "False", {});
+      b->ctorArity = 0;
+      return b;
+    };
+    if (tag == "IO.LensClose") {
+      lens_.close();
+      return boolv(true);
+    }
+    if (tag == "IO.LensNext") {
+      const auto r = lens_.nextPage();
+      return boolv(r.has_value());
+    }
+    if (tag == "IO.LensCommit") {
+      const auto r = lens_.commit();
+      return boolv(r.has_value());
+    }
+    // Arg-taking ops: key string (mount/unmount) or cell (lensKey).
+    auto pE = force(v->args.at(0));
+    if (!pE) return pE;
+    if (tag == "IO.LensKey") {
+      if ((*pE)->kind != Value::Kind::Ctor || (*pE)->tag != "Cell" ||
+          (*pE)->args.empty() || (*pE)->args.at(0)->kind != Value::Kind::Int) {
+        return failRes("argument is not a Cell");
+      }
+      auto *sess = lens_.session();
+      if (sess == nullptr) return failRes("no lens open");
+      const auto k =
+          sess->keyFor(static_cast<zigzag::CellRef>((*pE)->args.at(0)->i));
+      if (!k) return failRes("cell has no ExternalKey");
+      auto s  = std::make_shared<Value>();
+      s->kind = Value::Kind::Str;
+      s->s    = *k;
+      return s;
+    }
+    if ((*pE)->kind != Value::Kind::Str) {
+      return failRes("argument is not a String key");
+    }
+    const auto r = tag == "IO.LensMount" ? lens_.mountKey((*pE)->s)
+                                         : lens_.unmountKey((*pE)->s);
+    return boolv(r.has_value());
   }
   if (tag == "IO.Then") {
     // Perform the first action for its effect, discard its value, run second.

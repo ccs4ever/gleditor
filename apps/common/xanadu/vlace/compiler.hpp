@@ -28,6 +28,7 @@
 #include "common/xanadu/vlace/ast.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
+#include "common/xanadu/zigzag/lens_repl.hpp"
 
 namespace zigzag {
 class ProjectionSession;
@@ -223,6 +224,10 @@ private:
   // Projection sessions opened by `openLens` (§7.4). Held so the projected
   // cells (and their arena) outlive the evaluation that reads them.
   std::vector<std::shared_ptr<zigzag::ProjectionSession>> sessions_;
+  // The program's one lens session: openLens/mount/unmount/next/commit/
+  // close all act on it. Declared after core_ -- it projects into core_'s
+  // arena, so cells it mints are ordinary evaluator cells.
+  zigzag::LensRepl lens_{core_};
 };
 
 } // namespace xanadu::vlace
