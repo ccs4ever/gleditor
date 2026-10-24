@@ -22,6 +22,7 @@
 #ifndef COMMON_XANADU_VAGENT_COMPILER_HPP
 #define COMMON_XANADU_VAGENT_COMPILER_HPP
 
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <string>
@@ -62,12 +63,17 @@ public:
   [[nodiscard]] std::expected<CompiledAgent, CompileFailure>
   compileAgent(const Unit &unit, std::string_view agentType);
 
+  /// `vagent.belief_event_depth` (§4.2): settle rounds allowed per turn before
+  /// the turn fails hard. Applies to agents compiled afterwards.
+  Compiler *setBeliefEventDepth(std::size_t rounds) noexcept;
+
   [[nodiscard]] zigzag::vortex::VortexCore &core() noexcept { return core_; }
   [[nodiscard]] zigzag::vortex::VortexVM &vm() noexcept { return vm_; }
 
 private:
   zigzag::vortex::VortexCore &core_;
   zigzag::vortex::VortexVM vm_;
+  std::size_t beliefEventDepth_{kDefaultBeliefEventDepth};
 };
 
 } // namespace xanadu::vagent

@@ -123,6 +123,16 @@ inline constexpr std::string_view kEventDestroy    = "Destroy";
 /// Content of a list value cell; distinguishes `[]` from a bare `()` cell.
 inline constexpr std::string_view kListContent = "[]";
 
+// -- Beliefs (§6.1, §6.5) -----------------------------------------------------
+
+/// A belief event on `d.pending` has content `+pred` or `-pred` and the fact's
+/// term (a copy) on `+d.grab`.
+inline constexpr std::string_view kBeliefAdded   = "+";
+inline constexpr std::string_view kBeliefRemoved = "-";
+
+/// `vagent.belief_event_depth` (§10): settle rounds per turn.
+inline constexpr std::size_t kDefaultBeliefEventDepth = 16;
+
 // -- Spaces (§5.4, §7.2) ------------------------------------------------------
 
 inline constexpr std::string_view kSpaceInner = "inner";
