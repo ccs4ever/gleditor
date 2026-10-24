@@ -291,6 +291,14 @@ private:
   void acknowledgeChildStop(State &state,
                             const zigzag::vortex::mesh::ActorMessage &message,
                             const Envelope &envelope);
+  /// `$timers` as a list of `Timer` records (`kTimerRecord`).
+  [[nodiscard]] WireList readTimers(const State &state) const;
+  void writeTimers(State &state, WireList timers);
+  void applyTimerChange(State &state, const OutboxItem &item);
+  /// Raises the copied event of every timer due at `nowMillis` as a host
+  /// event, then removes a one-shot or advances a periodic one. True if any
+  /// event was raised.
+  bool fireDueTimers(State &state, std::int64_t nowMillis);
   void upkeepDeliveries(std::chrono::system_clock::time_point now);
   void upkeepLeases(std::chrono::system_clock::time_point now);
   [[nodiscard]] bool renewLease(State &state,

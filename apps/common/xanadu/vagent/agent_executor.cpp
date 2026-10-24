@@ -56,6 +56,14 @@ constexpr std::string_view kStopType = "Stop";
 /// handler that provokes its own event cannot hold the owner thread.
 constexpr std::size_t kMaxHostEventRounds = 8;
 
+/// A Duration literal is nanoseconds; timers and `$turn.time` are
+/// milliseconds.
+constexpr std::int64_t kNanosPerMilli = 1'000'000;
+/// A periodic timer that fell far behind (a suspended host, a long manual
+/// advance) delivers at most this many missed periods at once and skips the
+/// rest, so a tick cannot be turned into an unbounded burst of turns.
+constexpr std::int64_t kMaxTimerCatchUp = 64;
+
 /// A sender's floor is tracked per sender prefix; a peer cannot be allowed to
 /// grow the table without bound by inventing prefixes.
 constexpr std::size_t kMaxTrackedFloors = 4096;
@@ -129,6 +137,9 @@ struct AgentExecutor::State {
   std::optional<zigzag::vortex::mesh::ActorGrant> grant;
   CellRef cursor{};
   std::chrono::system_clock::time_point leaseSeen;
+  /// `$turn.time` of the turn in progress, so the drain files a timer against
+  /// the same instant the handler saw.
+  std::int64_t turnMillis{0};
 };
 
 struct AgentExecutor::TurnSpec {
@@ -163,6 +174,13 @@ struct AgentExecutor::OutboxItem {
   std::string agentType;
   std::string childName;
   WireRecord args;
+  // timer, timer_cancel
+  std::int64_t timerId{0};
+  std::int64_t delayNs{0};
+  std::int64_t periodNs{0};
+  // log
+  std::string level;
+  std::string message;
 };
 
 AgentExecutor::AgentExecutor(zigzag::vortex::mesh::MeshActorRuntime &runtime,
@@ -863,6 +881,7 @@ AgentExecutor::TurnOutcome AgentExecutor::runTurn(State &state, CellRef cursor,
           std::chrono::duration_cast<std::chrono::milliseconds>(
               wallNow().time_since_epoch())
               .count());
+      state.turnMillis = millis;
       WireRecord turnRecord;
       turnRecord.set(std::string(kTurnTime), WireValue::integer(millis));
       const auto turnCell =
@@ -1065,6 +1084,42 @@ AgentExecutor::collectOutbox(State &state, WorkerContext &context) {
         continue;
       }
       item.childName = *child;
+    } else if (item.kind == kKindTimer || item.kind == kKindTimerCancel) {
+      const auto integer = [&](std::string_view field) {
+        const auto value = read(entry, field);
+        const auto *i =
+            value ? std::get_if<std::int64_t>(&value->data) : nullptr;
+        return i == nullptr ? std::optional<std::int64_t>{}
+                            : std::optional<std::int64_t>(*i);
+      };
+      const auto id = integer(kOutboxTimerId);
+      if (!id) {
+        bumpStat(state, kStatMalformed);
+        continue;
+      }
+      item.timerId = *id;
+      if (item.kind == kKindTimer) {
+        const auto event = read(entry, kOutboxEvent);
+        const auto *record =
+            event ? std::get_if<WireRecord>(&event->data) : nullptr;
+        const auto delay = integer(kOutboxTimerDelay);
+        if (record == nullptr || !delay) {
+          bumpStat(state, kStatMalformed);
+          continue;
+        }
+        item.args     = *record;
+        item.delayNs  = *delay;
+        item.periodNs = integer(kOutboxTimerPeriod).value_or(0);
+      }
+    } else if (item.kind == kKindLog) {
+      const auto level   = textOf(read(entry, kOutboxLogLevel));
+      const auto message = textOf(read(entry, kOutboxLogMessage));
+      if (!level || !message) {
+        bumpStat(state, kStatMalformed);
+        continue;
+      }
+      item.level   = *level;
+      item.message = *message;
     } else {
       bumpStat(state, kStatUnsupported);
       continue;
@@ -1096,6 +1151,125 @@ void AgentExecutor::drain(State &state, WorkerContext &context,
     if (item.kind == kKindStop) sendStop(state, turn, position, item);
   }
   if (spec.relayed) relay(state, context, turn, position, *spec.relayed);
+  // Logging names the agent and carries the handler's own text, never an
+  // event payload (§10).
+  for (const auto &item : items) {
+    if (item.kind != kKindLog) continue;
+    if (item.level == kLogLevelInfo) {
+      GLEDITOR_LOG_INFO(kLog, "{}: {}", state.name, item.message);
+    } else {
+      GLEDITOR_LOG_DEBUG(kLog, "{}: {}", state.name, item.message);
+    }
+  }
+  // Timer changes last (§4.2 step 9), in the order the handler made them.
+  for (const auto &item : items) {
+    if (item.kind == kKindTimer || item.kind == kKindTimerCancel) {
+      applyTimerChange(state, item);
+    }
+  }
+}
+
+// -- Timers (§5.6, §10)
+// -----------------------------------------------------------
+
+WireList AgentExecutor::readTimers(const State &state) const {
+  const auto &arena = state.context->arena;
+  const auto cell =
+      fieldValue(arena, state.vd, state.agent.agentCell, kFieldTimers);
+  if (!cell) return {};
+  const auto value = readValue(arena, state.vd, *cell);
+  const auto *list = value ? std::get_if<WireList>(&value->data) : nullptr;
+  return list == nullptr ? WireList{} : *list;
+}
+
+void AgentExecutor::writeTimers(State &state, WireList timers) {
+  auto &arena = state.context->arena;
+  setField(arena, state.vd, state.agent.agentCell, kFieldTimers,
+           writeValue(arena, state.vd, WireValue::list(std::move(timers))));
+}
+
+namespace {
+
+std::optional<std::int64_t> timerInt(const WireRecord &record,
+                                     std::string_view field) {
+  const auto *value = record.find(field);
+  const auto *i     = value ? std::get_if<std::int64_t>(&value->data) : nullptr;
+  return i == nullptr ? std::optional<std::int64_t>{}
+                      : std::optional<std::int64_t>(*i);
+}
+
+} // namespace
+
+void AgentExecutor::applyTimerChange(State &state, const OutboxItem &item) {
+  auto timers = readTimers(state);
+  if (item.kind == kKindTimerCancel) {
+    std::erase_if(timers, [&](const WireValue &t) {
+      const auto *r = std::get_if<WireRecord>(&t.data);
+      return r != nullptr && timerInt(*r, kTimerId) == item.timerId;
+    });
+  } else {
+    WireRecord timer;
+    timer.type = std::string(kTimerRecord);
+    const std::int64_t period =
+        item.periodNs > 0
+            ? std::max<std::int64_t>(item.periodNs / kNanosPerMilli, 1)
+            : 0;
+    const std::int64_t delay =
+        std::max<std::int64_t>(item.delayNs, 0) / kNanosPerMilli;
+    timer.set(std::string(kTimerId), WireValue::integer(item.timerId));
+    timer.set(std::string(kTimerDue),
+              WireValue::integer(state.turnMillis + delay));
+    timer.set(std::string(kTimerPeriod), WireValue::integer(period));
+    timer.set(std::string(kTimerEvent), WireValue::record(item.args));
+    timers.push_back(WireValue::record(std::move(timer)));
+  }
+  writeTimers(state, std::move(timers));
+}
+
+bool AgentExecutor::fireDueTimers(State &state, std::int64_t nowMillis) {
+  auto timers  = readTimers(state);
+  bool changed = false;
+  bool fired   = false;
+  for (auto it = timers.begin(); it != timers.end();) {
+    auto *record   = std::get_if<WireRecord>(&it->data);
+    const auto due = record ? timerInt(*record, kTimerDue) : std::nullopt;
+    if (record == nullptr || !due) {
+      it      = timers.erase(it);
+      changed = true;
+      continue;
+    }
+    if (*due > nowMillis) {
+      ++it;
+      continue;
+    }
+    const auto period = timerInt(*record, kTimerPeriod).value_or(0);
+    const auto *event = record->find(kTimerEvent);
+    const auto *body  = event ? std::get_if<WireRecord>(&event->data) : nullptr;
+    const std::int64_t missed =
+        period > 0 ? (nowMillis - *due) / period + 1 : 1;
+    if (body != nullptr) {
+      WireRecord fields;
+      fields.names  = body->names;
+      fields.values = body->values;
+      for (std::int64_t n = 0; n < std::min(missed, kMaxTimerCatchUp); ++n) {
+        raise(state, body->type, fields);
+        fired = true;
+      }
+    }
+    changed = true;
+    if (period > 0 && body != nullptr) {
+      for (std::size_t i = 0; i < record->names.size(); ++i) {
+        if (record->names[i] == kTimerDue) {
+          record->values[i] = WireValue::integer(*due + missed * period);
+        }
+      }
+      ++it;
+    } else {
+      it = timers.erase(it);
+    }
+  }
+  if (changed) writeTimers(state, std::move(timers));
+  return fired;
 }
 
 void AgentExecutor::sendStop(State &state, std::uint64_t turn,
@@ -1356,6 +1530,16 @@ bool AgentExecutor::setDeliveryDeadline(
 void AgentExecutor::tick(std::chrono::system_clock::time_point now) {
   upkeepDeliveries(now);
   upkeepLeases(now);
+  // The timer heap is a function of cells (§5.6): read `$timers` afresh rather
+  // than keep a second copy that `resume` would have to rebuild.
+  const auto nowMillis = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             now.time_since_epoch())
+                             .count();
+  for (auto &[key, state] : states_) {
+    if (!live(*state) || state->inTurn) continue;
+    liftLimits(*state->context);
+    (void)fireDueTimers(*state, nowMillis);
+  }
   // Events raised between turns need a turn to be heard in.
   for (auto &[key, state] : states_) {
     if (state->hostEvents.empty()) continue;

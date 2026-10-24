@@ -162,6 +162,11 @@ inline constexpr std::string_view kKindCancel  = "cancel";
 inline constexpr std::string_view kKindOutcome = "outcome";
 inline constexpr std::string_view kKindRefuse  = "refuse";
 inline constexpr std::string_view kKindStop    = "stop";
+/// Timer changes and log lines (§4.2 step 9, §10). Vortex cannot call C++, so
+/// `Schedules` and `Logging` stage entries the adapter applies at the drain.
+inline constexpr std::string_view kKindTimer       = "timer";
+inline constexpr std::string_view kKindTimerCancel = "timer_cancel";
+inline constexpr std::string_view kKindLog         = "log";
 
 /// `event` entries: the event cell (`event`, laid out as an event cell with
 /// declared fields only; the adapter stamps the implicit ones), the space as
@@ -177,6 +182,31 @@ inline constexpr std::string_view kOutboxChildName = "name";
 inline constexpr std::string_view kOutboxArgs      = "args";
 /// `stop` entries: the child's name (text); the parent alone may stop a child.
 inline constexpr std::string_view kOutboxStopChild = "child";
+
+/// `timer` entries: the id (minted from `$next_id` when the handler ran, so
+/// `Schedules.after` can return it), the delay and period in nanoseconds (the
+/// unit of a Duration literal; the period is 0 for a one-shot) and the event
+/// to deliver (`kOutboxEvent`). `timer_cancel` entries carry the id alone.
+inline constexpr std::string_view kOutboxTimerId     = "id";
+inline constexpr std::string_view kOutboxTimerDelay  = "delay";
+inline constexpr std::string_view kOutboxTimerPeriod = "period";
+/// `log` entries: `info` or `debug`, and the message text.
+inline constexpr std::string_view kOutboxLogLevel   = "level";
+inline constexpr std::string_view kOutboxLogMessage = "message";
+inline constexpr std::string_view kLogLevelInfo     = "info";
+inline constexpr std::string_view kLogLevelDebug    = "debug";
+
+// -- Timers (§5.6, §10)
+// -----------------------------------------------------------
+// `$timers` is a list of records of type `kTimerRecord`. Times are Int
+// milliseconds since the epoch, the unit of `$turn.time`; a Duration literal is
+// nanoseconds, so the adapter divides when it files a timer.
+
+inline constexpr std::string_view kTimerRecord = "Timer";
+inline constexpr std::string_view kTimerId     = "id";
+inline constexpr std::string_view kTimerDue    = "due";
+inline constexpr std::string_view kTimerPeriod = "period";
+inline constexpr std::string_view kTimerEvent  = "event";
 
 // -- Wire (§5.5, §7.3)
 // --------------------------------------------------------- An `ActorSend`'s

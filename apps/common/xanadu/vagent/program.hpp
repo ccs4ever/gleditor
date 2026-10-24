@@ -79,6 +79,9 @@ public:
     std::uint64_t maxInstructions{10'000'000};
     /// Optional test hooks.
     AgentClock clock{AgentClock::system()};
+    /// Replace `clock` with one that starts at the system time and moves only
+    /// when `advance` is called, so timers run deterministically.
+    bool manualClock{false};
   };
 
   explicit LocalHost(CompiledProgram program);
@@ -94,6 +97,11 @@ public:
   [[nodiscard]] std::expected<void, zigzag::vortex::mesh::ActorError>
   send(const identity::ActorPid &target, Envelope event);
   std::size_t pump(std::size_t maxTurns = 100000);
+  /// Moves a manual clock forward, wakes agents whose timers fell due and
+  /// pumps. Without `Options::manualClock` there is no clock to move, so it
+  /// only ticks and pumps. Returns the turns run.
+  std::size_t advance(std::chrono::milliseconds by,
+                      std::size_t maxTurns = 100000);
 
   /// Events agents emitted `in outer`, in arrival order.
   [[nodiscard]] const std::vector<Envelope> &emissions() const noexcept {
@@ -112,6 +120,7 @@ private:
   std::unique_ptr<zigzag::vortex::mesh::MeshActorRuntime> runtime_;
   std::unique_ptr<AgentExecutor> executor_;
   std::vector<Envelope> emissions_;
+  std::shared_ptr<std::chrono::system_clock::time_point> manualNow_;
 };
 
 } // namespace xanadu::vagent
