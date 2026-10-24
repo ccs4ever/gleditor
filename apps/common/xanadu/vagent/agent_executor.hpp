@@ -370,6 +370,7 @@ private:
   struct HostEvent;
   struct PostBox;
   struct Flight;
+  struct PendingRequest;
 
   [[nodiscard]] std::optional<SpawnInfo>
   readSpawn(const zigzag::vortex::mesh::ActorMessage &request) const;
@@ -461,6 +462,44 @@ private:
   void adoptByLauncher(State &state);
   void routeTell(State &state, std::uint64_t turn, std::uint64_t &position,
                  const OutboxItem &item);
+  /// `ask`, `achieve`, `cancel`, `outcome` and `refuse` (design §7.1): see the
+  /// questions block of `runtime_abi.hpp`.
+  void sendRequest(State &state, std::uint64_t turn, std::uint64_t &position,
+                   const OutboxItem &item);
+  void sendResponse(State &state, std::uint64_t turn, std::uint64_t &position,
+                    const OutboxItem &item);
+  /// The receiving sides. Each returns the turn result.
+  std::expected<std::string, zigzag::vortex::mesh::ActorError>
+  answerAsk(State &state, const zigzag::vortex::mesh::ActorExecution &execution,
+            zigzag::vortex::WorkerContext &context, const Envelope &envelope);
+  std::expected<std::string, zigzag::vortex::mesh::ActorError> receiveAchieve(
+      State &state, const zigzag::vortex::mesh::ActorExecution &execution,
+      zigzag::vortex::WorkerContext &context, const Envelope &envelope);
+  void receiveCancel(State &state, const Envelope &envelope);
+  void receiveResponse(State &state, const Envelope &envelope);
+  /// A reply to an `ask` arrived as a turn result.
+  void receiveReply(State &state,
+                    const zigzag::vortex::mesh::ActorMessage &message);
+  /// End the `ask` or delegate wait of intention @p intention that is waiting
+  /// on @p key with a failed match; false if it is no longer waiting there.
+  bool failWait(State &state, std::int64_t intention, std::int64_t key,
+                std::string_view cause, bool timedOut = false);
+  /// Settle a pending request with @p outcome; false (and a stale count) when
+  /// nothing waits on it.
+  bool settleRequest(State &state, const std::string &requestId,
+                     const EffectResult &outcome);
+  /// Forget the requests of one wait (it ended some other way).
+  void dropRequests(State &state, std::int64_t intention, std::int64_t key);
+  /// Stage an outbox entry the adapter itself needs sent and drain it in a
+  /// turn that runs no routine.
+  void stageResponse(State &state,
+                     const zigzag::vortex::mesh::ActorGrant &grant,
+                     zigzag::vortex::WorkerContext &context,
+                     std::string_view kind, std::string_view to,
+                     std::string_view correlation, std::string_view status,
+                     std::string_view cause);
+  [[nodiscard]] WireList readCancelled(const State &state) const;
+  void writeCancelled(State &state, WireList list);
   std::expected<std::string, zigzag::vortex::mesh::ActorError>
   handleStop(State &state,
              const zigzag::vortex::mesh::ActorExecution &execution,
