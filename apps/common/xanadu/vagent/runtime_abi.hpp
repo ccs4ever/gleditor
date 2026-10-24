@@ -262,6 +262,9 @@ inline constexpr std::string_view kWireSpawnArgs   = "args";
 /// The agent type, so a remote or resumed child knows which compiled agent
 /// to instantiate.
 inline constexpr std::string_view kWireSpawnAgent = "agent";
+/// Present on a resume request only: the checkpoint hash the fresh grant must
+/// name as its base (`ActorGrant::baseRef`).
+inline constexpr std::string_view kWireSpawnBase = "base";
 
 inline constexpr std::string_view kWireTagFloat  = "f";
 inline constexpr std::string_view kWireTagBool   = "b";

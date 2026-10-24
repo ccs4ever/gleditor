@@ -2,6 +2,7 @@
 
 #include <gleditor/logging.hpp>
 
+#include "common/xanadu/vortex/mesh_checkpoint.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
 
 #include <algorithm>
@@ -9,6 +10,7 @@
 #include <bit>
 #include <limits>
 #include <ranges>
+#include <unordered_map>
 
 namespace xanadu::vagent {
 namespace {
@@ -47,6 +49,12 @@ constexpr std::string_view kCauseInit      = "init";
 constexpr std::string_view kCauseStop      = "stop";
 constexpr std::string_view kCauseTerminate = "terminate";
 constexpr std::string_view kCauseLease     = "lease";
+
+/// `Moved{name}` (§4.5): an agent that resumed elsewhere tells its peers.
+constexpr std::string_view kEventMoved = "Moved";
+constexpr std::string_view kMovedName  = "name";
+/// The resume request's own name prefix, so its ids cannot meet a launch's.
+constexpr std::string_view kResumeSuffix = "/resume";
 
 /// The envelope type that carries a `stop` performative.
 constexpr std::string_view kStopType = "Stop";
@@ -104,7 +112,97 @@ bool removeFromRank(ArenaManifold &arena, CellRef anchor, zigzag::DimRef dim,
   return false;
 }
 
+/// Content and typed value of @p from onto @p to; links are not touched.
+void copyCellData(ArenaManifold &arena, CellRef from, CellRef to) {
+  const auto spans = arena.contentOf(from);
+  const std::vector<xanadu::PrimediaSpan> held(spans.begin(), spans.end());
+  zigzag::expectWritten(arena.setContent(to, held));
+  switch (arena.valueKindOf(from)) {
+  case xanadu::ValueKind::Int64:
+    zigzag::expectWritten(arena.setValueBits(
+        to, xanadu::ValueKind::Int64,
+        std::bit_cast<std::uint64_t>(arena.asInt64(from).value_or(0))));
+    break;
+  case xanadu::ValueKind::Double:
+    zigzag::expectWritten(arena.setValueBits(
+        to, xanadu::ValueKind::Double,
+        xanadu::canonicalDoubleBits(arena.asDouble(from).value_or(0.0))));
+    break;
+  case xanadu::ValueKind::Bool:
+    zigzag::expectWritten(arena.setValueBits(
+        to, xanadu::ValueKind::Bool, arena.asBool(from).value_or(false)));
+    break;
+  default:
+    break;
+  }
+}
+
+bool hasLinks(const ArenaManifold &arena, CellRef cell,
+              std::span<const zigzag::DimRef> dims) {
+  return std::ranges::any_of(dims, [&](zigzag::DimRef d) {
+    return arena.linked(cell, d).has_value();
+  });
+}
+
+/// A copy of everything reachable from @p from by positive links along
+/// @p dims, relinked along @p into (the same dimensions as the arena now
+/// knows them). Iterative: a list or a clause chain can be long.
+CellRef cloneGraph(ArenaManifold &arena, CellRef from,
+                   std::span<const zigzag::DimRef> dims,
+                   std::span<const zigzag::DimRef> into) {
+  std::vector<CellRef> order{from};
+  std::unordered_map<CellRef, CellRef> copy;
+  const auto admit = [&](CellRef c) {
+    const auto made = arena.makeCell();
+    copyCellData(arena, c, made);
+    copy.emplace(c, made);
+    order.push_back(c);
+  };
+  copy.emplace(from, CellRef{});
+  copy.at(from) = arena.makeCell();
+  copyCellData(arena, from, copy.at(from));
+  for (std::size_t i = 0; i < order.size(); ++i) {
+    for (const auto d : dims) {
+      if (const auto next = arena.linked(order[i], d);
+          next && !copy.contains(*next)) {
+        admit(*next);
+      }
+    }
+  }
+  for (const auto c : order) {
+    for (std::size_t k = 0; k < dims.size(); ++k) {
+      if (const auto next = arena.linked(c, dims[k])) {
+        zigzag::expectWritten(
+            arena.link(copy.at(c), into[k], DimVector::POS, copy.at(*next)));
+      }
+    }
+  }
+  return copy.at(from);
+}
+
 } // namespace
+
+std::string_view toString(CheckpointRefusal refusal) noexcept {
+  switch (refusal) {
+  case CheckpointRefusal::UnknownAgent:
+    return "unknown agent";
+  case CheckpointRefusal::Stopped:
+    return "stopped";
+  case CheckpointRefusal::HostDeliveryPending:
+    return "host delivery pending";
+  case CheckpointRefusal::MailboxNotEmpty:
+    return "mailbox not empty";
+  case CheckpointRefusal::SendsIncomplete:
+    return "sends incomplete";
+  case CheckpointRefusal::NotQuiescent:
+    return "not quiescent";
+  case CheckpointRefusal::NoIdentity:
+    return "no checkpoint identity";
+  case CheckpointRefusal::PublishFailed:
+    return "publish failed";
+  }
+  return "unknown";
+}
 
 AgentClock AgentClock::system() {
   return AgentClock{.wall   = [] { return std::chrono::system_clock::now(); },
@@ -143,6 +241,8 @@ struct AgentExecutor::State {
   /// `$turn.time` of the turn in progress, so the drain files a timer against
   /// the same instant the handler saw.
   std::int64_t turnMillis{0};
+  /// Rebuilt by `resume`: the first executor call announces `Moved`.
+  bool resumed{false};
 };
 
 struct AgentExecutor::TurnSpec {
@@ -205,6 +305,13 @@ AgentExecutor::withFloors(zigzag::vortex::mesh::ActorOptions options) {
   options.floorOf = [](const ActorMessage &message) {
     return floorMarkOf(message);
   };
+  return options;
+}
+
+zigzag::vortex::mesh::ActorOptions
+AgentExecutor::runtimeOptions(const AgentSettings &settings) {
+  auto options                   = withFloors();
+  options.valueLimits.operations = settings.valueOperations;
   return options;
 }
 
@@ -392,7 +499,8 @@ std::optional<AgentExecutor::SpawnInfo> AgentExecutor::readSpawn(
 }
 
 bool AgentExecutor::prepare(State &state, WorkerContext &context,
-                            const ActorMessage &spawn) {
+                            const ActorMessage &spawn,
+                            std::optional<CellRef> savedAgent) {
   auto &arena     = context.arena;
   const auto info = readSpawn(spawn);
   state.context   = &context;
@@ -426,6 +534,10 @@ bool AgentExecutor::prepare(State &state, WorkerContext &context,
 
     const auto ac  = state.agent.agentCell;
     const auto &vd = state.vd;
+    if (savedAgent) {
+      restoreState(state, *savedAgent);
+      state.resumed = true;
+    }
     // A compiled agent already holds every reserved field, empty, so a fresh
     // one is told by its name never having been written.
     const auto nameValue = fieldValue(arena, vd, ac, kFieldName);
@@ -494,6 +606,18 @@ bool AgentExecutor::prepare(State &state, WorkerContext &context,
       }
       if (const auto p = fieldValue(arena, vd, ac, kFieldParent)) {
         state.parentName = text(arena, *p);
+      }
+    }
+    if (state.resumed) {
+      // The spawn request's source is the host that resumed it, not the
+      // parent; the parent's pid is in $peers, where Moved keeps it current.
+      state.parentPid = state.parentName.empty()
+                            ? std::nullopt
+                            : peerPid(state, state.parentName);
+      if (const auto hint = resumeAdopted_.find(pidKey(state.pid));
+          hint != resumeAdopted_.end()) {
+        state.adopted = hint->second;
+        resumeAdopted_.erase(hint);
       }
     }
     state.prefix = senderPrefix(state.name);
@@ -570,8 +694,15 @@ AgentExecutor::execute(const ActorExecution &execution,
     ~InTurn() { state.inTurn = false; }
   } inTurn(state);
   liftLimits(context);
-  if (!state.prepared && !prepare(state, context, execution.spawnRequest)) {
+  if (!state.prepared &&
+      !prepare(state, context, execution.spawnRequest, execution.stateRoot)) {
     return fatal(state, kCauseInit);
+  }
+  if (state.resumed) {
+    state.resumed = false;
+    announceMoved(state);
+    // The first wake of a resumed agent has nothing to dispatch.
+    if (!execution.message) state.quietWake = true;
   }
   if (!state.grant || state.grant->expiresAt != execution.grant.expiresAt) {
     state.leaseSeen = wallNow();
@@ -789,6 +920,10 @@ AgentExecutor::handleSend(State &state, const ActorExecution &execution,
   if (!envelope.relaySpace && envelope.type == kEventOrphaned &&
       state.parentPid && message.source == state.parentPid) {
     adoptByLauncher(state);
+  }
+
+  if (!envelope.relaySpace && envelope.type == kEventMoved) {
+    applyMoved(state, message, envelope);
   }
 
   const bool relayed = envelope.relaySpace.has_value();
@@ -1676,10 +1811,14 @@ AgentExecutor::launch(std::string_view agentType, std::string_view name,
 std::expected<void, ActorError>
 AgentExecutor::deliver(const identity::ActorPid &target, Envelope envelope) {
   // The lowest possible floor: a host delivery declares nothing complete.
-  const auto prefix = senderPrefix(std::string(kHostName) + "/send");
-  envelope.kind     = std::string(kKindEvent);
-  envelope.floor    = requestId(prefix, 0, 0);
-  const auto bytes  = encodeEnvelope(envelope);
+  // Per node: an agent resumed on another host remembers the ids the old
+  // host's deliveries used, and a second host counting from zero would
+  // collide with them.
+  const auto prefix =
+      senderPrefix(std::string(kHostName) + "/send@" + localNode_);
+  envelope.kind    = std::string(kKindEvent);
+  envelope.floor   = requestId(prefix, 0, 0);
+  const auto bytes = encodeEnvelope(envelope);
   if (!bytes) return std::unexpected(ActorError::InvalidMessage);
   ActorMessage message;
   message.type      = MessageType::ActorSend;
@@ -1865,6 +2004,319 @@ std::size_t AgentExecutor::pumpUntilIdle(std::size_t maxTurns) {
     if (!progressed && needsFirstTurn_.empty()) break;
   }
   return turns;
+}
+
+// -- Checkpoint, resume and migration (§4.2, §4.4, §4.5)
+// -------------------------
+//
+// How compiled routines find restored state. A checkpoint is the graph
+// reachable from the agent cell, and `resume` rebuilds it as a base Manifold
+// whose refs are dense indices of the replayed history, not the refs the
+// running arena used. The compiled routines name their registers, field value
+// cells and the agent cell by ref, in operand slots that hold those refs as
+// plain integers, which promotion does not remap. The restored cells are
+// therefore never run: `prepare` instantiates the program afresh in the
+// rebuilt arena (a new agent cell, new registers) and `restoreState` copies the
+// saved values onto it. Nothing here needs handle operands (P16).
+
+void AgentExecutor::restoreState(State &state, CellRef saved) {
+  auto &arena      = state.context->arena;
+  const auto &vd   = state.vd;
+  const auto ac    = state.agent.agentCell;
+  const auto &core = state.context->core.dims();
+
+  // The rebuilt base does not register its dimensions, so the core and
+  // `registerDimensions` minted fresh cells for "d.vars" and the rest, while
+  // the saved cells link along the old ones. Find those by name. Only the
+  // base's cells are walked: the core hangs its standard library off the
+  // base's home cell, which is the agent cell, and that part is the new
+  // arena's own.
+  const auto inBase = [](CellRef ref) {
+    return ref != zigzag::noCell && (ref & zigzag::ephemeralBit) == 0;
+  };
+  std::unordered_map<std::string, zigzag::DimRef> savedDim;
+  {
+    std::unordered_map<CellRef, bool> seen{{saved, true}};
+    std::vector<CellRef> frontier{saved};
+    for (std::size_t i = 0; i < frontier.size(); ++i) {
+      for (const auto &link : arena.dimensionsOf(frontier[i])) {
+        if (!inBase(link.dim)) continue;
+        savedDim.try_emplace(text(arena, link.dim), link.dim);
+        for (const auto next : {link.pos, link.neg}) {
+          if (inBase(next) && seen.emplace(next, true).second) {
+            frontier.push_back(next);
+          }
+        }
+      }
+    }
+  }
+  const auto old = [&](std::string_view name) {
+    const auto found = savedDim.find(std::string(name));
+    return found == savedDim.end() ? zigzag::noCell : found->second;
+  };
+  const ValueDims oldVd{.vars   = old("d.vars"),
+                        .values = old("d.values"),
+                        .grab   = old("d.grab"),
+                        .step   = old("d.step")};
+  GLEDITOR_LOG_DEBUG(kLog, "restoring {} from '{}': {} dimensions known",
+                     state.name, text(arena, saved), savedDim.size());
+
+  const std::array valueFrom{oldVd.vars, oldVd.values, oldVd.grab, oldVd.step};
+  const std::array valueInto{vd.vars, vd.values, vd.grab, vd.step};
+  const std::array termFrom{oldVd.grab, oldVd.step, old("d.source")};
+  const std::array termInto{vd.grab, vd.step, state.dims.source};
+  const std::array newValueDims{vd.vars, vd.values, vd.grab, vd.step};
+
+  // Fields. A scalar or text field is read by compiled code through its
+  // static value cell, so it is overwritten in place; a field with structure
+  // (a list, a record) is read through its name cell and is replaced.
+  if (oldVd.vars != zigzag::noCell && oldVd.values != zigzag::noCell) {
+    for (const auto &[nameCell, valueCell] : fieldsOf(arena, oldVd, saved)) {
+      if (!valueCell) continue;
+      const auto name = text(arena, nameCell);
+      if (name.empty() || name == kFieldTurn) continue;
+      const auto target = fieldValue(arena, vd, ac, name);
+      const bool structured =
+          hasLinks(arena, *valueCell, valueFrom) ||
+          (target && hasLinks(arena, *target, newValueDims));
+      if (target && !structured) {
+        copyCellData(arena, *valueCell, *target);
+      } else {
+        setField(arena, vd, ac, name,
+                 cloneGraph(arena, *valueCell, valueFrom, valueInto));
+      }
+    }
+  }
+
+  const auto ranked = [&](CellRef owner, zigzag::DimRef dim) {
+    return dim == zigzag::noCell ? std::vector<CellRef>{}
+                                 : zigzag::rankAfter(arena, owner, dim) |
+                                       std::ranges::to<std::vector<CellRef>>();
+  };
+
+  // Beliefs: the predicates are the new program's cells; the clauses, with
+  // their terms and sources, are copied under them.
+  const auto freshPredicates = ranked(ac, state.dims.belief);
+  const auto oldClause       = old("d.clause");
+  for (const auto predicate : ranked(saved, old("d.belief"))) {
+    const auto name = text(arena, predicate);
+    const auto match =
+        std::ranges::find_if(freshPredicates, [&](CellRef candidate) {
+          return text(arena, candidate) == name;
+        });
+    if (match == freshPredicates.end()) continue;
+    for (const auto clause : ranked(predicate, oldClause)) {
+      appendToRank(arena, *match, core.clause,
+                   cloneGraph(arena, clause, termFrom, termInto));
+    }
+  }
+
+  // Hosted spaces and their members, then children.
+  auto spaces = ranked(ac, state.dims.space);
+  for (const auto space : ranked(saved, old("d.space"))) {
+    const auto name  = text(arena, space);
+    const auto match = std::ranges::find_if(
+        spaces, [&](CellRef c) { return text(arena, c) == name; });
+    CellRef fresh;
+    if (match == spaces.end()) {
+      fresh = arena.makeCell(std::string_view(name));
+      appendToRank(arena, ac, state.dims.space, fresh);
+      spaces.push_back(fresh);
+    } else {
+      fresh = *match;
+    }
+    for (const auto member : ranked(space, old("d.member"))) {
+      appendToRank(arena, fresh, state.dims.member,
+                   arena.makeCell(std::string_view(text(arena, member))));
+    }
+  }
+  for (const auto child : ranked(saved, old("d.holon"))) {
+    appendToRank(arena, ac, state.dims.holon,
+                 arena.makeCell(std::string_view(text(arena, child))));
+  }
+
+  // §5.5: request ids from this name must exceed any the old incarnation
+  // sent, whose turn counter the checkpoint may be behind.
+  const auto millis = static_cast<std::uint64_t>(
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          wallNow().time_since_epoch())
+          .count());
+  if (counter(state, kFieldTurnCount) < millis) {
+    setCounter(state, kFieldTurnCount, millis);
+  }
+}
+
+void AgentExecutor::announceMoved(State &state) {
+  const auto &arena = state.context->arena;
+  const auto peers =
+      fieldValue(arena, state.vd, state.agent.agentCell, kFieldPeers);
+  if (!peers) return;
+  std::vector<identity::ActorPid> targets;
+  for (const auto &[nameCell, valueCell] : fieldsOf(arena, state.vd, *peers)) {
+    if (!valueCell) continue;
+    if (const auto pid = pidFromText(text(arena, *valueCell))) {
+      targets.push_back(*pid);
+    }
+  }
+  const std::uint64_t turn = counter(state, kFieldTurnCount);
+  std::uint64_t position   = 0;
+  for (const auto &pid : targets) {
+    Envelope envelope;
+    envelope.kind = std::string(kKindEvent);
+    envelope.type = std::string(kEventMoved);
+    envelope.from = state.name;
+    envelope.fields.set(std::string(kMovedName), WireValue::text(state.name));
+    sendEnvelope(state, turn, position, pid, std::move(envelope));
+  }
+  // The ids above are spent; no later turn may mint them again.
+  setCounter(state, kFieldTurnCount, turn + 1);
+}
+
+void AgentExecutor::applyMoved(State &state, const ActorMessage &message,
+                               const Envelope &envelope) {
+  const auto *named = envelope.fields.find(kMovedName);
+  const auto *name  = named ? std::get_if<std::string>(&named->data) : nullptr;
+  // Only an agent can announce its own move, and only a peer we know of.
+  if (!name || *name != envelope.from || !message.source) return;
+  auto &arena = state.context->arena;
+  const auto peers =
+      fieldValue(arena, state.vd, state.agent.agentCell, kFieldPeers);
+  if (!peers || !fieldNameCell(arena, state.vd, *peers, *name)) return;
+  setField(arena, state.vd, *peers, *name,
+           arena.makeCell(std::string_view(pidToText(*message.source))));
+  if (*name == state.parentName) state.parentPid = message.source;
+  GLEDITOR_LOG_DEBUG(kLog, "{} learns that {} moved", state.name, *name);
+}
+
+AgentExecutor *AgentExecutor::setCheckpointIdentity(CheckpointIdentity id) {
+  checkpointIdentity_ = std::move(id);
+  return this;
+}
+
+std::expected<AgentCheckpoint, CheckpointRefusal>
+AgentExecutor::checkpoint(const identity::ActorPid &pid) {
+  const auto found = states_.find(pidKey(pid));
+  if (found == states_.end() || !found->second->prepared) {
+    return std::unexpected(CheckpointRefusal::UnknownAgent);
+  }
+  State &state = *found->second;
+  if (!live(state)) return std::unexpected(CheckpointRefusal::Stopped);
+  if (!state.hostEvents.empty()) {
+    return std::unexpected(CheckpointRefusal::HostDeliveryPending);
+  }
+  if (runtime_.pending(pid) != 0) {
+    return std::unexpected(CheckpointRefusal::MailboxNotEmpty);
+  }
+  const auto owner = pidKey(pid);
+  if (std::ranges::any_of(outstanding_, [&](const auto &entry) {
+        return entry.second.ownerKey == owner;
+      })) {
+    return std::unexpected(CheckpointRefusal::SendsIncomplete);
+  }
+  const auto view = runtime_.checkpointView(pid, state.agent.agentCell);
+  if (!view) return std::unexpected(CheckpointRefusal::NotQuiescent);
+  if (!checkpointIdentity_) {
+    return std::unexpected(CheckpointRefusal::NoIdentity);
+  }
+  const auto continuation =
+      zigzag::vortex::mesh::encodeContinuation(view->continuation);
+  if (!continuation) {
+    return std::unexpected(CheckpointRefusal::PublishFailed);
+  }
+  const auto &id = *checkpointIdentity_;
+  zigzag::vortex::mesh::ValueLimits limits;
+  limits.operations = settings_.valueOperations;
+  xanadu::Store store;
+  auto seed = zigzag::vortex::mesh::publishValue(
+      store, {}, view->arena, view->root, id.keys, id.origin, id.provenance,
+      id.seedRoot, limits, {}, *continuation);
+  if (!seed) {
+    GLEDITOR_LOG_DEBUG(kLog, "checkpoint of {} failed: {}", state.name,
+                       seed.error());
+    return std::unexpected(CheckpointRefusal::PublishFailed);
+  }
+  AgentCheckpoint out;
+  out.pid        = pid;
+  out.agentType  = state.agentType;
+  out.name       = state.name;
+  out.parentName = state.parentName;
+  out.programRef = std::string(program_.programRef());
+  out.adopted    = state.adopted;
+  out.source     = std::make_shared<xanadu::DirectoryContentSource>();
+  for (const auto &payload : seed->payloads) {
+    out.source->add(payload.torrent.file, payload.path.string());
+  }
+  out.source->add(seed->history.torrentFile,
+                  (id.seedRoot / seed->history.hash.hex()).string());
+  out.source->add(seed->carrier.file, seed->carrierPath.string());
+  out.contentHash =
+      xanadu::sha256Hex(zigzag::vortex::mesh::encodeValue(seed->value));
+  out.seed = std::move(*seed);
+  return out;
+}
+
+std::expected<identity::ActorPid, ActorError>
+AgentExecutor::resume(const AgentCheckpoint &checkpoint) {
+  zigzag::vortex::mesh::ValueLimits limits;
+  limits.operations = settings_.valueOperations;
+  auto received     = zigzag::vortex::mesh::fetchValue(
+      checkpoint.seed.carrier.hash, *checkpoint.source,
+      std::make_shared<xanadu::UserPermascroll>(), limits);
+  if (!received) {
+    GLEDITOR_LOG_DEBUG(kLog, "resume cannot read the checkpoint: {}",
+                       received.error());
+    return std::unexpected(ActorError::InvalidMessage);
+  }
+  // This host's owner signed the checkpoint, so the node that spawned the
+  // agent is the owner's too; the runtime checks the spawner's node is known.
+  if (const auto continuation = zigzag::vortex::mesh::decodeContinuation(
+          received->value.continuation);
+      continuation && continuation->spawnRequest.source) {
+    runtime_.trustNode(continuation->spawnRequest.source->node, owner_);
+  }
+  WireRecord params;
+  params.set(std::string(kWireSpawnName), WireValue::text(checkpoint.name));
+  params.set(std::string(kWireSpawnParent),
+             WireValue::text(checkpoint.parentName));
+  params.set(std::string(kWireSpawnArgs), WireValue::record({}));
+  params.set(std::string(kWireSpawnAgent),
+             WireValue::text(checkpoint.agentType));
+  params.set(std::string(kWireSpawnBase),
+             WireValue::text(checkpoint.contentHash));
+  auto parameters = encodeValue(WireValue::record(std::move(params)));
+  if (!parameters) return std::unexpected(ActorError::InvalidMessage);
+  SpawnTicket ticket{.programRef = checkpoint.programRef,
+                     .agentType  = checkpoint.agentType,
+                     .childName  = checkpoint.name,
+                     .parentName = {},
+                     .parent     = std::nullopt,
+                     .parameters = std::move(*parameters)};
+  auto issued = issuer_.issue(ticket);
+  if (!issued) return std::unexpected(issued.error());
+  ActorMessage request;
+  request.type      = MessageType::ActorSpawn;
+  request.requestId = requestId(
+      senderPrefix(std::string(kHostName) + std::string(kResumeSuffix)),
+      resumes_++, 0);
+  request.source        = hostPid_;
+  request.programRef    = checkpoint.programRef;
+  request.hashcashStamp = issued->hashcashStamp.empty() ? settings_.spawnStamp
+                                                        : issued->hashcashStamp;
+  request.capability    = std::move(issued->capability);
+  const auto pid        = runtime_.resume(owner_, request, std::move(*received),
+                                          checkpoint.source, wallNow());
+  if (!pid) return std::unexpected(pid.error());
+  resumeAdopted_[pidKey(*pid)] = checkpoint.adopted;
+  needsFirstTurn_.push_back(*pid);
+  return pid;
+}
+
+bool AgentExecutor::retire(const identity::ActorPid &pid) {
+  const auto found = states_.find(pidKey(pid));
+  if (found == states_.end() || !live(*found->second)) return false;
+  if (!runtime_.stop(pid)) return false;
+  found->second->context = nullptr;
+  return true;
 }
 
 } // namespace xanadu::vagent
