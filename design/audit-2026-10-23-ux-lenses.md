@@ -43,22 +43,25 @@ edits the filter while one is typed, else ascends.
 URI lenses project into `compiler.core()` so projected cells are cells
 goals can unify over.
 
-**F5 — NEW: `vpl :rank` cannot reach lens cells.** `bindRank` resolves
-dimensions only on the open store's manifold; a lens projects into the
-coordinator's arena. `:rank d.contains` with a lens open replies "No
-dimension named". The idiomatic VPL bridge is a rank bound over
-`coordinator.arena()` — needs the federation/proxy seam wired, left as
-a follow-up.
+**F5 — FIXED (`8ee05e05`).** vpl's `LensRepl` now projects into the
+engine's own arena (`core`), and `bindRank` falls back to the lens when
+the store lacks the dim: `:lens /dir` then `:rank d.contains` binds the
+listing as `data` — verified: `data: data.db ... repo settings.json
+shots`. `d.seq` walks siblings; the contains-head is the rank origin.
 
-**F6 — NEW: vprolog goals cannot name a lens cell.** Cells are
-first-class terms, but no builtin (`lensroot/1`, `extkey/2`) binds the
-projection's root or maps keys to refs, so a goal cannot reach the
-projected cells unaided. Small compiler addition when wanted.
+**F6 — FIXED (`8ee05e05`).** After a `:lens` open (label change),
+vprolog compiles every projected cell as `lens_entry(Key, Text)` via
+`compileClause` — `lens_entry(K, N).` enumerates the projection through
+ordinary unification (verified: `K = cfg:...:/name, N = demo` over a
+`.json`). Richer builtins (`lensroot/1`, `extkey/2`) could bind cells
+directly when wanted.
 
 **F7 — NEW: vlace has no core seam.** Its Driver holds no store or
 VortexCore; `:lens`/`--lens` project into a private fold. A
 `lens("uri")` builtin returning a cell record is the idiomatic bridge
-if vlace should introspect sources.
+if vlace should introspect sources — deferred: vlace's normative
+type-check needs the builtin declared in its prelude env before eval,
+so this is a compiler change, not a REPL wiring.
 
 ## Transcripts
 
