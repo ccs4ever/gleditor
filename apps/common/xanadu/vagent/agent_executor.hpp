@@ -35,6 +35,7 @@
 #include <vector>
 
 #include "common/xanadu/resolver.hpp"
+#include "common/xanadu/vagent/host_bindings.hpp"
 #include "common/xanadu/vagent/runtime_abi.hpp"
 #include "common/xanadu/vagent/wire.hpp"
 #include "common/xanadu/vortex/mesh_actor.hpp"
@@ -134,6 +135,11 @@ inline constexpr std::string_view kStatChildDown      = "child_down";
 inline constexpr std::string_view kStatBadTell = "bad_tell";
 /// A `stop` from anyone but the parent, refused.
 inline constexpr std::string_view kStatStopRefused = "stop_refused";
+/// An effect's result that no intention or flight was waiting for: it was
+/// cancelled, timed out, or the intention ended (§6.6).
+inline constexpr std::string_view kStatEffectStale = "effect_stale";
+/// An intention's turn failed hard and the recovery turn could not record it.
+inline constexpr std::string_view kStatIntentionFailed = "intention_failed";
 
 /// Why a delivery was abandoned (the `cause` of `DeliveryFailed`).
 inline constexpr std::string_view kCauseRetries  = "retries";
@@ -147,6 +153,7 @@ enum class CheckpointRefusal : std::uint8_t {
   HostDeliveryPending, ///< the adapter holds an event it has yet to run
   MailboxNotEmpty,
   SendsIncomplete, ///< a message this agent sent has no reply yet
+  EffectInFlight,  ///< a native skill is still running an effect it started
   NotQuiescent,    ///< the runtime refused: a choice point, mark or run
   NoIdentity,      ///< `setCheckpointIdentity` was never called
   PublishFailed,
@@ -229,6 +236,45 @@ public:
   [[nodiscard]] std::expected<void, zigzag::vortex::mesh::ActorError>
   deliver(const identity::ActorPid &target, Envelope envelope);
 
+  /// Where native-skill effects go (§5.3). Without a registry every effect
+  /// fails at once with cause "unbound". Not owned; it must outlive the
+  /// executor.
+  AgentExecutor *setBindings(HostBindings *bindings) {
+    bindings_ = bindings;
+    return this;
+  }
+  /// Post an event of type @p type to @p target as a percept (§7.5): a host
+  /// delivery with no source, run in a wake turn of its own, in arrival order
+  /// with the other host deliveries. It takes no mailbox slot. Callable from
+  /// any thread; it is queued and the agent hears it at the next
+  /// `pumpUntilIdle` or `tick`, and always before a checkpoint is accepted.
+  /// An event type the program does not declare is counted unhandled by the
+  /// dispatcher, as any event is.
+  void percept(const identity::ActorPid &target, std::string type,
+               WireRecord fields = {});
+
+  /// Called at the start of every wake turn that continues an intention,
+  /// after `$turn` (with `intention`) is written, so a host or test can watch
+  /// which intention the adapter chose.
+  using IntentionObserver = std::function<void(
+      const identity::ActorPid &, const zigzag::vortex::WorkerContext &,
+      std::int64_t intention)>;
+  AgentExecutor *setIntentionObserver(IntentionObserver observer) {
+    intentionObserver_ = std::move(observer);
+    return this;
+  }
+  /// The ids of the agent's ready intentions in the order the adapter will
+  /// run them (§5.6): derived from cells now, not remembered.
+  [[nodiscard]] std::vector<std::int64_t>
+  readyIntentions(const identity::ActorPid &pid) const;
+  /// The earliest absolute time, in milliseconds, at which a waiting
+  /// intention's deadline or a timer falls due; nullopt when none is pending.
+  [[nodiscard]] std::optional<std::int64_t>
+  nextDeadline(const identity::ActorPid &pid) const;
+  /// Effects the agent started that the host has not yet reported.
+  [[nodiscard]] std::size_t
+  effectsInFlight(const identity::ActorPid &pid) const;
+
   /// Delivery upkeep (§7.3): redeliver what is overdue, abandon what has
   /// exhausted `sendRetries`, forget what completed.
   void tick();
@@ -249,9 +295,10 @@ public:
 
   /// Publish the agent's state at a message boundary (§4.2, §4.4). Refuses
   /// unless the agent is quiescent: not stopped, nothing in the mailbox, no
-  /// message it sent still unanswered, no event the adapter has yet to run,
-  /// and nothing the runtime objects to. Effects do not exist yet, so none is
-  /// checked. Timers and beliefs travel in the state and do not prevent it.
+  /// message it sent still unanswered, no event or result the adapter has yet
+  /// to run, no effect still running, and nothing the runtime objects to.
+  /// Timers, beliefs, ready intentions and pending deadlines travel in the
+  /// state and do not prevent it.
   [[nodiscard]] std::expected<AgentCheckpoint, CheckpointRefusal>
   checkpoint(const identity::ActorPid &pid);
 
@@ -321,6 +368,8 @@ private:
   struct TurnOutcome;
   struct OutboxItem;
   struct HostEvent;
+  struct PostBox;
+  struct Flight;
 
   [[nodiscard]] std::optional<SpawnInfo>
   readSpawn(const zigzag::vortex::mesh::ActorMessage &request) const;
@@ -350,10 +399,39 @@ private:
   handleSend(State &state,
              const zigzag::vortex::mesh::ActorExecution &execution,
              zigzag::vortex::WorkerContext &context);
+  /// One turn, and for a turn that continued an intention and failed hard,
+  /// the `fail_step` recovery turn after it (§4.2).
   TurnOutcome runTurn(State &state, zigzag::CellRef cursor,
                       const zigzag::vortex::mesh::ActorGrant &grant,
                       zigzag::vortex::WorkerContext &context,
                       const TurnSpec &spec);
+  TurnOutcome runTurnOnce(State &state, zigzag::CellRef cursor,
+                          const zigzag::vortex::mesh::ActorGrant &grant,
+                          zigzag::vortex::WorkerContext &context,
+                          const TurnSpec &spec);
+  /// The wake turn that continues intention @p id (§6.5).
+  void continueIntention(State &state, std::int64_t id,
+                         const zigzag::vortex::mesh::ActorGrant &grant,
+                         zigzag::vortex::WorkerContext &context);
+  /// Runs the ready intentions of @p state that the interleaving allows,
+  /// `ready_per_message` at most while its mailbox has messages waiting.
+  bool wakeReady(State &state, std::size_t &turns, std::size_t maxTurns);
+  /// Rebuild the ready list and the deadline heap from cells (§5.6).
+  void deriveSchedule(State &state) const;
+  /// Move percepts and effect results the host posted onto their agents.
+  void drainPosted();
+  void startEffect(State &state, const OutboxItem &item);
+  void cancelEffect(State &state, std::int64_t id);
+  void cancelFlights(State &state);
+  /// An effect ended (or was found past its deadline): wake its intention, or
+  /// raise `EffectFailed` for a handler's call.
+  void finishEffect(State &state, std::int64_t id, EffectResult result,
+                    bool timedOut);
+  /// Mark intentions whose `waiting.deadline` and effects whose deadline have
+  /// elapsed. True if anything changed.
+  bool expireDeadlines(State &state, std::int64_t nowMillis);
+  /// §4.5: an intention waiting on an effect cannot follow the device.
+  void failMigrated(State &state);
   /// A host delivery: an event with no source, dispatched in a turn of its
   /// own (§5.5).
   TurnOutcome deliverHost(State &state, zigzag::CellRef cursor,
@@ -461,6 +539,9 @@ private:
   AgentSettings settings_;
   AgentClock clock_;
   TurnObserver observer_;
+  IntentionObserver intentionObserver_;
+  HostBindings *bindings_{};
+  std::shared_ptr<PostBox> posts_;
   identity::ActorPid hostPid_;
   std::uint64_t launches_{0};
   std::uint64_t hostSends_{0};

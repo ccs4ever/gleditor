@@ -106,6 +106,15 @@ public:
   [[nodiscard]] std::expected<void, zigzag::vortex::mesh::ActorError>
   send(const identity::ActorPid &target, Envelope event);
   std::size_t pump(std::size_t maxTurns = 100000);
+  /// Post an event of type @p type to @p target as a percept (§7.5), as a
+  /// native skill's driver does; run `pump` to deliver it. Takes no mailbox
+  /// slot and is heard before a checkpoint is accepted.
+  void percept(const identity::ActorPid &target, std::string type,
+               WireRecord fields = {});
+  /// The native skills this host offers its agents (§5.3), keyed by qualified
+  /// skill name. Bind before launching an agent that calls one.
+  [[nodiscard]] HostBindings &bindings() noexcept { return bindings_; }
+
   /// Moves a manual clock forward, wakes agents whose timers fell due and
   /// pumps. Without `Options::manualClock` there is no clock to move, so it
   /// only ticks and pumps. Returns the turns run.
@@ -138,6 +147,8 @@ private:
   std::string node_;
   std::filesystem::path seedRoot_;
   std::unique_ptr<Issuer> issuer_;
+  /// Outlives the executor, whose in-flight effects it still holds.
+  HostBindings bindings_;
   std::unique_ptr<zigzag::vortex::mesh::MeshActorRuntime> runtime_;
   std::unique_ptr<AgentExecutor> executor_;
   std::vector<Envelope> emissions_;

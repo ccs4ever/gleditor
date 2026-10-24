@@ -183,8 +183,10 @@ LocalHost::LocalHost(CompiledProgram program, Options options)
   executor_ = std::make_unique<AgentExecutor>(
       *runtime_, *issuer_, program_, owner, node_, options.epoch,
       options.settings, std::move(options.clock));
-  executor_->install()->setHostSink(
-      [this](const Envelope &event) { emissions_.push_back(event); });
+  executor_->install()
+      ->setBindings(&bindings_)
+      ->setHostSink(
+          [this](const Envelope &event) { emissions_.push_back(event); });
   seedRoot_ = std::filesystem::temp_directory_path() /
               ("vagent-host-" + keys_.publicKey.hex() + "-" +
                std::to_string(options.epoch));
@@ -223,6 +225,11 @@ LocalHost::launch(std::string_view agentType, std::string_view name,
 std::expected<void, ActorError>
 LocalHost::send(const identity::ActorPid &target, Envelope event) {
   return executor_->deliver(target, std::move(event));
+}
+
+void LocalHost::percept(const identity::ActorPid &target, std::string type,
+                        WireRecord fields) {
+  executor_->percept(target, std::move(type), std::move(fields));
 }
 
 std::size_t LocalHost::advance(std::chrono::milliseconds by,
