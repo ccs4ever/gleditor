@@ -66,6 +66,35 @@ REPL is the interactive surface; `openLens` is the code surface, into
 the evaluator's own core. My earlier "no seam" finding was wrong — the
 seam predates this work.
 
+## In-code lens ops across all four frontends
+
+`LensRepl` exposes the verb set programmatically —
+`openUri`/`mountKey`/`unmountKey`/`nextPage`/`commit`/`close` — and
+each language binds it in its own idiom (`afb0dd62` + follow-ups):
+
+- **VQL** — `lens("uri")`, `lensmount`, `lensunmount`, `lensnext`,
+  `lenscommit`, `lensclose` as store-generator anchors; path steps
+  continue into the projection. `setLensSession` injects the REPL's
+  `LensRepl` so `lens()` and `:lens` share one session (per-query
+  engines otherwise lose it — found and fixed).
+- **vpl** — the `lens` variable binds the root view after `:lens`;
+  `:rank` materializes projected ranks. No callable-verb mechanism in
+  the language, so mount/unmount/close stay `:lens`-side — the one
+  honest asymmetry.
+- **vprolog** — `lens_open/1`, `lens_mount/1`, `lens_unmount/1`,
+  `lens_next`, `lens_commit`, `lens_close` evaluated as goal builtins;
+  `lens_entry/2` facts reseed on each swap so `lens_entry(K, N).`
+  enumerates the live projection.
+- **vlace** — `IO.Lens*` effects: `openLens`, `lensMount`/`lensUnmount`
+  (`String -> IO Bool`), `lensNext`/`lensCommit`/`lensClose` (`IO
+  Bool`), `lensKey` (`Cell -> IO String`); `openLens` moved to
+  `openLensUri` so every scheme opens.
+
+Verified in code: vlace `open->mount git->grandchildren +1->unmount->
+gone->close`; vprolog `lens_open` seeds 70 facts, `lens_mount` → 75,
+`lens_unmount` → 69; VQL `lensmount` toggles `git.repo` cells visible
+to `:lens` in the same session.
+
 ## Transcripts
 
 `vquery` (abbreviated; fixture `/tmp/lensj` = git repo + `settings.json` + `data.db`):

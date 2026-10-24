@@ -137,8 +137,18 @@ Evidence: a REPL transcript where `:lens` prints the tree and a VQL
 query over `$lens` returns the projected names (gate:
 `LensVqlGate.*`, plus the live run).
 
+The full verb set also exists as generator ops: `lens("uri")` opens,
+`lensmount("path-or-key")`/`lensunmount(...)` swap a delegate,
+`lensnext()`/`lenscommit()`/`lensclose()` cover the rest — each
+yields the session root so path steps continue (`lens("/dir")/
+d.contains/d.seq`). The engine's session is the REPL's
+`setLensSession`-injected `LensRepl`, so code and `:lens` see one
+projection.
+
 Watch for: a private second arena (the classic second-CellID-space
-bug); `$lens` bound to a cell that dies on the next `:lens` swap.
+bug); `$lens` bound to a cell that dies on the next `:lens` swap; a
+per-query engine losing the lens session between `lens()` and
+`lensmount()`.
 
 ### J-L8. Bridge a lens into VPL (vpl)
 
@@ -147,25 +157,31 @@ bug); `$lens` bound to a cell that dies on the next `:lens` swap.
    verbs (`+`, `⌽`, reshape) calculate over them.
 
 Evidence: transcript — the lens tree, a bound rank echoing the lens
-cells' values, a calculation over it.
+cells' values (`:rank d.contains` → `data: data.db ... shots`), and
+the `lens` variable binding the root's text (`lens` → `lensj`).
 
 Watch for: `:rank` reading the store's own manifold (a lens projects
 into the arena, not a store fold — if `:rank` only sees store folds,
-the bridge is a finding, not a pass).
+the bridge is a finding, not a pass); `lens` left bound to a dead
+root after `:lens close`.
 
-### J-L9. Bridge a lens into vprolog (`lens_entry/2`)
+### J-L9. Bridge a lens into vprolog (`lens_entry/2`, `lens_*` goals)
 
 1. `vprolog`, `:open <store>` then `:lens /path` (or `:lens meta:`).
 1. The projected cells live in the compiler's VortexCore; each one is
    seeded as `lens_entry(Key, Text)` so a goal unifies over the lens:
    `lens_entry(K, N).` enumerates the projection's cells.
+1. In code: `lens_open(URI).` / `lens_mount(Key).` /
+   `lens_unmount(Key).` / `lens_next.` / `lens_commit.` / `lens_close.`
+   run the ops as evaluated goals — `true.`/`false.` — and reseed the
+   facts when the projection changes.
 
-Evidence: transcript of `:lens` + `lens_entry(K, N).` returning the
-projected (key, name) pairs; `:lens meta:` projecting the consulted
-store itself.
+Evidence: `lens_open('/tmp/lensj').` → `% lens: 70 entries seeded`;
+`lens_entry(K,N).` enumerates; `lens_mount('/tmp/lensj/repo').` →
+`% 75 entries` (git cells added); `lens_unmount(...)` → `% 69`.
 
-Watch for: entries silently unseeded after a swap; `meta:` binding a
-store `:open` discarded.
+Watch for: a `lens_*` conjunct inside a compound goal falls through to
+the engine unhandled; entries going stale after code-side swaps.
 
 ### J-L10. Bridge a lens into vlace (`openLens`)
 

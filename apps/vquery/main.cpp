@@ -520,6 +520,10 @@ int main(int argc, char *argv[]) {
     } else {
       // Direct fast-path execution
       xanadu::vql::VQLEngine engine(coordinator);
+      // The lens() generators and the REPL share one session: opening
+      // in code is visible to ':lens', and a ':lens'-opened view is
+      // mountable from queries.
+      engine.setLensSession(lensRepl);
       // An open lens enters the query space as $lens: '$lens/d.contains'
       // walks the projected tree exactly as if the cells were authored.
       if (const auto root = lensRepl.root()) {

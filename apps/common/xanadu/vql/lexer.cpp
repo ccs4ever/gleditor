@@ -158,6 +158,16 @@ std::string_view tokenKindName(TokenKind kind) noexcept {
     return "def";
   case TokenKind::KwPure:
     return "pure";
+  case TokenKind::KwLensmount:
+    return "lensmount";
+  case TokenKind::KwLensunmount:
+    return "lensunmount";
+  case TokenKind::KwLensnext:
+    return "lensnext";
+  case TokenKind::KwLenscommit:
+    return "lenscommit";
+  case TokenKind::KwLensclose:
+    return "lensclose";
   case TokenKind::KwMount:
     return "mount";
   case TokenKind::KwAs:
@@ -768,6 +778,18 @@ Token Lexer::scanIdentifierOrKeyword() {
     return Token{.kind = TokenKind::KwDef, .text = text, .loc = startLoc};
   if (text == "pure")
     return Token{.kind = TokenKind::KwPure, .text = text, .loc = startLoc};
+  if (text == "lensmount")
+    return Token{.kind = TokenKind::KwLensmount, .text = text, .loc = startLoc};
+  if (text == "lensunmount")
+    return Token{
+        .kind = TokenKind::KwLensunmount, .text = text, .loc = startLoc};
+  if (text == "lensnext")
+    return Token{.kind = TokenKind::KwLensnext, .text = text, .loc = startLoc};
+  if (text == "lenscommit")
+    return Token{
+        .kind = TokenKind::KwLenscommit, .text = text, .loc = startLoc};
+  if (text == "lensclose")
+    return Token{.kind = TokenKind::KwLensclose, .text = text, .loc = startLoc};
   if (text == "mount")
     return Token{.kind = TokenKind::KwMount, .text = text, .loc = startLoc};
   if (text == "as")

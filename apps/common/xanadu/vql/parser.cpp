@@ -525,7 +525,10 @@ AnchorNode Parser::parseAnchorNode() {
       check(TokenKind::KwCiting) || check(TokenKind::KwBacklinks) ||
       check(TokenKind::KwSystem) || check(TokenKind::KwBtih) ||
       check(TokenKind::KwLedger) || check(TokenKind::KwSlices) ||
-      check(TokenKind::KwDocs)) {
+      check(TokenKind::KwDocs) || check(TokenKind::KwLens) ||
+      check(TokenKind::KwLensmount) || check(TokenKind::KwLensunmount) ||
+      check(TokenKind::KwLensnext) || check(TokenKind::KwLenscommit) ||
+      check(TokenKind::KwLensclose)) {
     Token genTok = advance();
     consume(TokenKind::OpenParen, "Expected '(' after generator name");
     std::vector<ValueExpr> args;
@@ -1386,7 +1389,7 @@ BooleanFactor Parser::parseBooleanFactor() {
     return BooleanFactor{
         .negated = negated,
         .test    = PredicateTest{
-               .kind = std::get<std::shared_ptr<PathExpression>>(left.kind)}};
+            .kind = std::get<std::shared_ptr<PathExpression>>(left.kind)}};
   }
 
   return BooleanFactor{

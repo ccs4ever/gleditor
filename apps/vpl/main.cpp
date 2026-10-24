@@ -688,6 +688,12 @@ int main(int argc, char *argv[]) {
     }
     if (zigzag::LensRepl::handles(trimmed)) {
       lensRepl.run(trimmed, std::cout, lensMeta);
+      // The projection's root binds as `lens` -- a scalar view array
+      // code can name (e.g. ':rank d.contains' then compute over data).
+      if (const auto r = lensRepl.root()) {
+        directEngine.setVariable(
+            "lens", VplView{*r, std::vector<zigzag::DirectedDim>{}});
+      }
       continue;
     }
     if (trimmed.starts_with(":open ")) {
