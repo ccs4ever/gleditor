@@ -153,32 +153,35 @@ Watch for: `:rank` reading the store's own manifold (a lens projects
 into the arena, not a store fold — if `:rank` only sees store folds,
 the bridge is a finding, not a pass).
 
-### J-L9. Bridge a lens into vprolog
+### J-L9. Bridge a lens into vprolog (`lens_entry/2`)
 
 1. `vprolog`, `:open <store>` then `:lens /path` (or `:lens meta:`).
-1. The projected cells live in the compiler's VortexCore — goals can
-   unify over them once a term names a cell; `:lens meta:` projects
-   the consulted store itself.
+1. The projected cells live in the compiler's VortexCore; each one is
+   seeded as `lens_entry(Key, Text)` so a goal unifies over the lens:
+   `lens_entry(K, N).` enumerates the projection's cells.
 
-Evidence: transcript of `:open`, `:lens`, and a goal that reaches a
-projected cell or the meta fold.
+Evidence: transcript of `:lens` + `lens_entry(K, N).` returning the
+projected (key, name) pairs; `:lens meta:` projecting the consulted
+store itself.
 
-Watch for: no way for a goal term to name a projected CellRef (a
-`lensroot(X)` or `extkey(K,C)` builtin may be the missing affordance);
-`meta:` binding a store `:open` discarded.
+Watch for: entries silently unseeded after a swap; `meta:` binding a
+store `:open` discarded.
 
-### J-L10. vlace's lens surface (no store)
+### J-L10. Bridge a lens into vlace (`openLens`)
 
 1. `vlace`, `:lens /path` prints the projected tree at the prompt;
    `--lens <uri>` prints it and exits.
+1. In code: `openLens "path" >>= (fn root => ...)` projects into the
+   evaluator's own core and hands the program the root cell —
+   `cellText`, `linked`, `childrenAll`, `words` read it like any
+   authored cell (gate: `LensVlaceGate.*`).
 
-Evidence: transcript + raster. vlace evaluates expressions over its
-own Driver with no store or VortexCore seam — the REPL surface is the
-affordance; a `lens("uri")` builtin returning a record of cells would
-be the idiomatic bridge if one is added.
+Evidence: transcript + raster, plus the gate's histogram over a real
+directory's projected cells.
 
 Watch for: the verb silently absent where the other three frontends
-have it.
+have it; `openLens` returning a cell whose arena dies with the
+evaluation (the compiler pins `sessions_`).
 
 ## Findings taxonomy
 

@@ -56,12 +56,15 @@ ordinary unification (verified: `K = cfg:...:/name, N = demo` over a
 `.json`). Richer builtins (`lensroot/1`, `extkey/2`) could bind cells
 directly when wanted.
 
-**F7 — NEW: vlace has no core seam.** Its Driver holds no store or
-VortexCore; `:lens`/`--lens` project into a private fold. A
-`lens("uri")` builtin returning a cell record is the idiomatic bridge
-if vlace should introspect sources — deferred: vlace's normative
-type-check needs the builtin declared in its prelude env before eval,
-so this is a compiler change, not a REPL wiring.
+**F7 — RESOLVED (was already built).** vlace's bridge exists and is
+gated: `openLens :: String -> IO Cell` (an `IO.OpenLens` effect
+interpreted by `runIO`, which keeps the session alive for the
+evaluation) plus `cellText`/`linked`/`childrenAll`/`words` natives —
+`LensVlaceGate.WordFrequencyHistogramOverProjectedDirectory` walks a
+projected directory in-language and passes. `:lens`/`--lens` in the
+REPL is the interactive surface; `openLens` is the code surface, into
+the evaluator's own core. My earlier "no seam" finding was wrong — the
+seam predates this work.
 
 ## Transcripts
 
