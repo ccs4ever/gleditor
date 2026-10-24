@@ -401,7 +401,7 @@ std::string show(const Expr &e) {
           case ELiteral::Kind::Bool:
             return n.boolValue ? "true" : "false";
           case ELiteral::Kind::Duration:
-            return std::to_string(n.durationNs) + "ns";
+            return std::to_string(n.durationMs) + "ms";
           case ELiteral::Kind::Unit:
             return "()";
           case ELiteral::Kind::None:
@@ -654,10 +654,10 @@ TEST(VagentParser, LogicVariablesAndTerms) {
   ASSERT_TRUE(u.has_value()) << formatParseError(u.error());
 }
 
-TEST(VagentParser, DurationLiteralsCarryNanoseconds) {
-  EXPECT_EQ(shape("250ms"), "250000000ns");
-  EXPECT_EQ(shape("2s"), "2000000000ns");
-  EXPECT_EQ(shape("5min"), "300000000000ns");
+TEST(VagentParser, DurationLiteralsCarryMilliseconds) {
+  EXPECT_EQ(shape("250ms"), "250ms");
+  EXPECT_EQ(shape("2s"), "2000ms");
+  EXPECT_EQ(shape("5min"), "300000ms");
 }
 
 TEST(VagentParser, NumericAndStringLiterals) {

@@ -212,8 +212,8 @@ inline constexpr std::string_view kEventOrphaned  = "Orphaned";
 inline constexpr std::string_view kOrphanedFormer = "former_parent";
 
 /// `timer` entries: the id (minted from `$next_id` when the handler ran, so
-/// `Schedules.after` can return it), the delay and period in nanoseconds (the
-/// unit of a Duration literal; the period is 0 for a one-shot) and the event
+/// `Schedules.after` can return it), the delay and period in milliseconds (the
+/// unit of a Duration literal and of `Time`; the period is 0 for a one-shot) and the event
 /// to deliver (`kOutboxEvent`). `timer_cancel` entries carry the id alone.
 inline constexpr std::string_view kOutboxTimerId     = "id";
 inline constexpr std::string_view kOutboxTimerDelay  = "delay";
@@ -227,8 +227,8 @@ inline constexpr std::string_view kLogLevelDebug    = "debug";
 // -- Timers (§5.6, §10)
 // -----------------------------------------------------------
 // `$timers` is a list of records of type `kTimerRecord`. Times are Int
-// milliseconds since the epoch, the unit of `$turn.time`; a Duration literal is
-// nanoseconds, so the adapter divides when it files a timer.
+// milliseconds since the epoch, the unit of `$turn.time`, of `Time` and of a
+// Duration literal (§8.7), so a delay is filed as it was written.
 
 inline constexpr std::string_view kTimerRecord = "Timer";
 inline constexpr std::string_view kTimerId     = "id";

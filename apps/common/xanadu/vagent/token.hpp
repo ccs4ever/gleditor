@@ -119,7 +119,7 @@ struct Token {
   bool newlineBefore{false};
   std::int64_t intValue{0};
   double floatValue{0.0};
-  std::int64_t durationNs{0}; ///< DurationLiteral, in nanoseconds
+  std::int64_t durationMs{0}; ///< DurationLiteral, in milliseconds (§8.7)
   std::string stringValue;    ///< decoded StringLiteral
 
   [[nodiscard]] bool is(TokenKind k) const noexcept { return kind == k; }

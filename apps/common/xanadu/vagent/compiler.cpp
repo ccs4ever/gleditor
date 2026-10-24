@@ -32,6 +32,7 @@
 
 #include <gleditor/logging.hpp>
 
+#include "common/xanadu/vagent/prelude.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
 
 namespace xanadu::vagent {
@@ -88,12 +89,13 @@ struct Ty {
     Str,
     Unit,
     Record,
-    List
+    List,
+    Opt ///< laid out as a list of at most one element (§5.9)
   } k{K::Unit};
   std::string name;     ///< Record: the declared type
-  std::vector<Ty> args; ///< List: the element type
+  std::vector<Ty> args; ///< List, Opt: the element type
   [[nodiscard]] bool composite() const {
-    return k == K::Record || k == K::List;
+    return k == K::Record || k == K::List || k == K::Opt;
   }
 };
 
@@ -571,6 +573,16 @@ private:
 
   // -- types -----------------------------------------------------------------
   Ty fromType(const TypeExpr &t, SourceLocation loc);
+  /// A prelude field's type (`Opt` for `source` and `space`).
+  Ty preludeTy(const PreludeField &f);
+  void appendImplicitFields(std::vector<std::pair<std::string, Ty>> &out);
+  /// Reading an `Opt<T>` succeeds with its value or fails when it is `none`
+  /// (§8.2): the value of the optional held in @p optReg goes to @p out.
+  Ty unwrapOpt(CellRef optReg, const Ty &opt, CellRef out, SourceLocation loc);
+  /// Wraps a `T` stored where `Opt<T>` is declared; @p v is replaced.
+  void coerceInto(const Ty &target, const Ty &actual, CellRef v);
+  /// The declared type of an assignment target, when it is known statically.
+  std::optional<Ty> staticTy(const Expr &e);
   std::vector<std::pair<std::string, Ty>> fieldsOf(const std::string &type);
   std::optional<Ty> fieldTy(const std::string &type, const std::string &f);
   std::vector<std::string> supertypesOf(const std::string &type);
@@ -808,8 +820,15 @@ Ty Gen::fromType(const TypeExpr &t, SourceLocation loc) {
   if (n == "Float") return tyOf(Ty::K::Float);
   if (n == "Bool") return tyOf(Ty::K::Bool);
   if (n == "Str" || n == "Agent" || n == "Space") return tyOf(Ty::K::Str);
-  if (n == "Opt") unsupported("Opt<T>", loc);
-  if (events_.contains(n) || records_.contains(n)) {
+  if (n == "Opt") {
+    if (t.args.size() != 1) {
+      bail(CompileError::TypeMismatch, "Opt takes one type argument", loc);
+    }
+    Ty o = tyOf(Ty::K::Opt);
+    o.args.push_back(fromType(t.args[0], loc));
+    return o;
+  }
+  if (events_.contains(n) || records_.contains(n) || findPreludeEvent(n)) {
     Ty r   = tyOf(Ty::K::Record);
     r.name = n;
     return r;
@@ -854,19 +873,33 @@ std::vector<std::pair<std::string, Ty>> Gen::fieldsOf(const std::string &type) {
         out.emplace_back(f.name, fromType(f.type, f.loc));
       }
     }
-    out.emplace_back(std::string(kEventImplicitSource), tyOf(Ty::K::Str));
-    out.emplace_back(std::string(kEventImplicitSpace), tyOf(Ty::K::Str));
-    out.emplace_back(std::string(kEventImplicitTime), tyOf(Ty::K::Int));
-    out.emplace_back(std::string(kEventImplicitOrdinal), tyOf(Ty::K::Int));
+    appendImplicitFields(out);
     return out;
   }
-  if (type == kEventInitialize || type == kEventDestroy) {
-    out.emplace_back(std::string(kEventImplicitSource), tyOf(Ty::K::Str));
-    out.emplace_back(std::string(kEventImplicitSpace), tyOf(Ty::K::Str));
-    out.emplace_back(std::string(kEventImplicitTime), tyOf(Ty::K::Int));
-    out.emplace_back(std::string(kEventImplicitOrdinal), tyOf(Ty::K::Int));
+  if (const PreludeEvent *pe = findPreludeEvent(type)) {
+    for (const PreludeField &f : pe->fields) {
+      out.emplace_back(std::string(f.name), preludeTy(f));
+    }
+    appendImplicitFields(out);
   }
   return out;
+}
+
+Ty Gen::preludeTy(const PreludeField &f) {
+  TypeExpr te;
+  te.kind = TypeExpr::Kind::Named;
+  te.name = std::string(f.type);
+  Ty t    = fromType(te, {});
+  if (!f.optional) return t;
+  Ty o = tyOf(Ty::K::Opt);
+  o.args.push_back(std::move(t));
+  return o;
+}
+
+void Gen::appendImplicitFields(std::vector<std::pair<std::string, Ty>> &out) {
+  for (const PreludeField &f : preludeImplicitFields()) {
+    out.emplace_back(std::string(f.name), preludeTy(f));
+  }
 }
 
 std::optional<Ty> Gen::fieldTy(const std::string &type, const std::string &f) {
@@ -1064,6 +1097,7 @@ CellRef Gen::initialValueCell(const Ty &t) {
   case Ty::K::Str:
     return arena_.makeCell("");
   case Ty::K::List:
+  case Ty::K::Opt:
     return arena_.makeCell(std::string(kListContent));
   case Ty::K::Record: {
     const CellRef record = arena_.makeCell(t.name);
@@ -1117,7 +1151,7 @@ Ty Gen::literal(const ELiteral &l, CellRef out, SourceLocation loc) {
     movC(out, cInt(l.intValue));
     return tyOf(Ty::K::Int);
   case ELiteral::Kind::Duration:
-    movC(out, cInt(l.durationNs));
+    movC(out, cInt(l.durationMs));
     return tyOf(Ty::K::Int);
   case ELiteral::Kind::Float:
     movC(out, cFloat(l.floatValue));
@@ -1131,8 +1165,11 @@ Ty Gen::literal(const ELiteral &l, CellRef out, SourceLocation loc) {
   case ELiteral::Kind::Unit:
     movC(out, unit_c_);
     return tyOf(Ty::K::Unit);
-  case ELiteral::Kind::None:
-    unsupported("none", loc);
+  case ELiteral::Kind::None: {
+    alloc(out);
+    mov(D(out), S(cStr(std::string(kListContent))));
+    return tyOf(Ty::K::Opt);
+  }
   }
   unsupported("literal", loc);
 }
@@ -1140,13 +1177,59 @@ Ty Gen::literal(const ELiteral &l, CellRef out, SourceLocation loc) {
 Ty Gen::name(const EName &n, CellRef out, SourceLocation loc) {
   if (const Local *l = findLocal(n.name)) {
     mov(S(out), S(l->reg));
-    return l->ty;
+    return l->ty.k == Ty::K::Opt ? unwrapOpt(out, l->ty, out, loc) : l->ty;
   }
   if (const FieldInfo *f = findField(n.name)) {
     loadFieldInto(*f, out);
-    return f->ty;
+    return f->ty.k == Ty::K::Opt ? unwrapOpt(out, f->ty, out, loc) : f->ty;
   }
   bail(CompileError::UnknownName, "unknown name " + n.name, loc);
+}
+
+Ty Gen::unwrapOpt(CellRef optReg, const Ty &opt, CellRef out,
+                  SourceLocation loc) {
+  if (opt.args.empty()) unsupported("a read of an untyped none", loc);
+  const Ty &inner    = opt.args[0];
+  const CellRef held = rd(D(optReg), core_.dims().grab);
+  branchIfZero(held, failStep_);
+  if (inner.composite()) {
+    mov(S(out), S(held));
+  } else {
+    mov(S(out), D(held));
+  }
+  return inner;
+}
+
+void Gen::coerceInto(const Ty &target, const Ty &actual, CellRef v) {
+  if (target.k != Ty::K::Opt || actual.k == Ty::K::Opt) return;
+  const CellRef res = reg();
+  alloc(res);
+  mov(D(res), S(cStr(std::string(kListContent))));
+  CellRef cell = v;
+  if (!actual.composite()) {
+    cell = reg();
+    alloc(cell);
+    mov(D(cell), S(v));
+  }
+  callListPush(res, cell);
+  mov(S(v), S(res));
+}
+
+std::optional<Ty> Gen::staticTy(const Expr &e) {
+  if (const auto *n = std::get_if<EName>(&e.node)) {
+    if (const Local *l = findLocal(n->name)) return l->ty;
+    if (const FieldInfo *f = findField(n->name)) return f->ty;
+    return std::nullopt;
+  }
+  if (const auto *f = std::get_if<EField>(&e.node)) {
+    auto base = staticTy(*f->base);
+    if (base && base->k == Ty::K::Opt && !base->args.empty()) {
+      base = base->args[0];
+    }
+    if (!base || base->k != Ty::K::Record) return std::nullopt;
+    return fieldTy(base->name, f->name);
+  }
+  return std::nullopt;
 }
 
 Ty Gen::special(const ESpecial &s, CellRef out, SourceLocation loc) {
@@ -1154,9 +1237,11 @@ Ty Gen::special(const ESpecial &s, CellRef out, SourceLocation loc) {
   case ESpecial::Kind::Self:
     loadFieldInto(fields_.at(std::string(kFieldName)), out);
     return tyOf(Ty::K::Str);
-  case ESpecial::Kind::Parent:
-    loadFieldInto(fields_.at(std::string(kFieldParent)), out);
-    return tyOf(Ty::K::Str);
+  case ESpecial::Kind::Parent: {
+    const FieldInfo &parent = fields_.at(std::string(kFieldParent));
+    loadFieldInto(parent, out);
+    return unwrapOpt(out, parent.ty, out, loc);
+  }
   case ESpecial::Kind::Inner:
     movC(out, cStr(std::string(kSpaceInner)));
     return tyOf(Ty::K::Str);
@@ -1479,6 +1564,7 @@ void Gen::storeInto(const Expr &target, CellRef valueReg, const Ty &valueTy,
 Ty Gen::assign(const EBinary &b, CellRef out, SourceLocation loc) {
   const CellRef v = reg();
   const Ty t      = valueInto(*b.right, v);
+  if (const auto target = staticTy(*b.left)) coerceInto(*target, t, v);
   storeInto(*b.left, v, t, loc);
   movC(out, unit_c_);
   return tyOf(Ty::K::Unit);
@@ -1706,7 +1792,7 @@ Ty Gen::field(const EField &f, CellRef out, SourceLocation loc) {
   } else {
     mov(S(out), D(vp));
   }
-  return *ft;
+  return ft->k == Ty::K::Opt ? unwrapOpt(out, *ft, out, loc) : *ft;
 }
 
 Ty Gen::list(const EList &l, CellRef out) {
@@ -1747,7 +1833,8 @@ Ty Gen::record(const ERecord &r, CellRef out, SourceLocation loc) {
            loc);
     }
     const CellRef v = reg();
-    valueInto(*rf.value, v);
+    const Ty vt     = valueInto(*rf.value, v);
+    coerceInto(it->second, vt, v);
     CellRef vc;
     if (it->second.composite()) {
       callAppendField(res, rf.name, v, vc);
@@ -1755,6 +1842,20 @@ Ty Gen::record(const ERecord &r, CellRef out, SourceLocation loc) {
       callAppendField(res, rf.name, std::nullopt, vc);
       mov(D(vc), S(v));
     }
+  }
+  // A field that may be empty and was left out is `none` (§8.3).
+  for (const auto &[fname, fty] : decl) {
+    const bool given = std::ranges::any_of(
+        r.fields, [&](const auto &rf) { return rf.name == fname; });
+    const bool implicit =
+        std::ranges::any_of(preludeImplicitFields(),
+                            [&](const auto &f) { return f.name == fname; });
+    if (given || implicit || fty.k != Ty::K::Opt) continue;
+    const CellRef none = reg();
+    alloc(none);
+    mov(D(none), S(cStr(std::string(kListContent))));
+    CellRef vc;
+    callAppendField(res, fname, none, vc);
   }
   mov(S(out), S(res));
   Ty t   = tyOf(Ty::K::Record);
@@ -2753,7 +2854,10 @@ void Gen::emitTellBodies(const std::vector<TellSeq> &seqs, CellRef end) {
     callLabel(rtFind_);
     mov(S(sp), S(r0_));
     branchIfZero(sp, end);
-    mov(S(who), D(sp));
+    // `source` is an `Opt<Agent>`; a tell from no one is malformed.
+    const CellRef named = rd(D(sp), core_.dims().grab);
+    branchIfZero(named, end);
+    mov(S(who), D(named));
     if (!s.untell) {
       movC(a0_, opref(p.cell));
       mov(S(a1_), S(tr));
@@ -2833,7 +2937,9 @@ void Gen::mintAgentCell() {
   Ty bare       = tyOf(Ty::K::Unit);
   Ty lst        = tyOf(Ty::K::List);
   reserved(kFieldName, str);
-  reserved(kFieldParent, str);
+  Ty maybeStr = tyOf(Ty::K::Opt);
+  maybeStr.args.push_back(str);
+  reserved(kFieldParent, maybeStr);
   reserved(kFieldOuter, str);
   reserved(kFieldInitialized, flag);
   reserved(kFieldPeers, bare);
@@ -2994,7 +3100,7 @@ void Gen::beginHandlerCtx(const HandlerInfo &h) {
 
 void Gen::emitHandlerRoutines(HandlerInfo &h) {
   if (h.beliefTerm == nullptr && !events_.contains(h.eventType) &&
-      h.eventType != kEventInitialize && h.eventType != kEventDestroy) {
+      findPreludeEvent(h.eventType) == nullptr) {
     bail(CompileError::UnknownType, "unknown event " + h.eventType, h.def->loc);
   }
   const auto routine = [&](CellRef entry, const std::function<void()> &body) {
@@ -3085,7 +3191,8 @@ void Gen::emitInit(CellRef entryLabel) {
     const FieldInfo &f = fields_.at(v->name);
     const CellRef val  = global();
     stmtWrap([&] {
-      valueInto(*v->init, val);
+      const Ty vt = valueInto(*v->init, val);
+      coerceInto(f.ty, vt, val);
       storeField(f, val);
     });
   }
@@ -3145,7 +3252,10 @@ void Gen::emitDispatch(CellRef entryLabel) {
   std::vector<std::pair<std::string, CellRef>> seqs;
   std::vector<std::string> types;
   for (const auto &[n, d] : events_) types.push_back(n);
-  types.emplace_back(kEventDestroy);
+  // Initialize runs from emitInit, not from a delivery.
+  for (const PreludeEvent &pe : preludeEvents()) {
+    if (pe.name != kEventInitialize) types.emplace_back(pe.name);
+  }
   for (const std::string &t : types) {
     if (mergedFor(t).empty()) continue;
     const CellRef seq = newLabel();

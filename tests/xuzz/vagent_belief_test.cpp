@@ -122,14 +122,20 @@ struct Harness {
     }
     return l;
   }
+  /// An `Opt<Agent>` or `Opt<Space>` holding @p value: a list cell of one.
+  CellRef optCell(const std::string &value) {
+    const CellRef l = arena.makeCell(std::string(kListContent));
+    chain(l, core.dims().grab, arena.makeCell(value));
+    return l;
+  }
   CellRef
   makeEventCells(const std::string &type,
                  const std::vector<std::pair<std::string, CellRef>> &declared,
                  const std::string &space = "inner") {
     const CellRef e                                    = arena.makeCell(type);
     std::vector<std::pair<std::string, CellRef>> cells = declared;
-    cells.emplace_back("source", arena.makeCell("peer"));
-    cells.emplace_back("space", arena.makeCell(space));
+    cells.emplace_back("source", optCell("peer"));
+    cells.emplace_back("space", optCell(space));
     cells.emplace_back("time", arena.makeScalarCell(std::int64_t{1000}));
     cells.emplace_back("ordinal", arena.makeScalarCell(std::int64_t{1}));
     CellRef prev = e;

@@ -605,7 +605,7 @@ MethodSig Parser::parseMethodSig() {
       failHere(ParseErrorCode::ExpectedExpression,
                "'within' on a method takes a duration literal such as 30s");
     }
-    sig.withinNs = advance().durationNs;
+    sig.withinMs = advance().durationMs;
   }
   while (atWord("requires") || atWord("ensures")) {
     Contract c;
@@ -1193,7 +1193,7 @@ ExprPtr Parser::parsePrimary() {
   }
   case TokenKind::DurationLiteral: {
     ELiteral l   = literal(ELiteral::Kind::Duration);
-    l.durationNs = t.durationNs;
+    l.durationMs = t.durationMs;
     advance();
     return mk(std::move(l), loc);
   }

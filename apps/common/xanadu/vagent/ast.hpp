@@ -78,7 +78,7 @@ struct ELiteral {
   std::int64_t intValue{0};
   double floatValue{0.0};
   bool boolValue{false};
-  std::int64_t durationNs{0};
+  std::int64_t durationMs{0};
   std::string text;
 };
 
@@ -347,7 +347,7 @@ struct MethodSig {
   std::string name;
   std::vector<Param> params;
   std::optional<TypeExpr> result;
-  std::optional<std::int64_t> withinNs;
+  std::optional<std::int64_t> withinMs;
   std::vector<Contract> contracts;
   SourceLocation loc{};
 };

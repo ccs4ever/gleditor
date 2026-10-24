@@ -558,7 +558,10 @@ TEST_F(VagentExecutor, ParentSpawnsChildrenWhoseOuterEmissionIsRelayed) {
   const auto agent       = *exec->agentCell(*c1);
   const auto parentField = fieldValue(ctx->arena, vd, agent, kFieldParent);
   ASSERT_TRUE(parentField);
-  EXPECT_EQ(ctx->arena.textOf(*parentField), "p");
+  // `$parent` is an `Opt<Agent>`: a list cell holding the name.
+  const auto parentName = ctx->arena.linked(*parentField, vd.grab);
+  ASSERT_TRUE(parentName);
+  EXPECT_EQ(ctx->arena.textOf(*parentName), "p");
 }
 
 TEST_F(VagentExecutor, FloorsDropStaleIdsBeforeTheyRun) {
