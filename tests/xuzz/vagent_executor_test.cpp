@@ -3,6 +3,8 @@
 #include "common/xanadu/vagent/agent_executor.hpp"
 #include "common/xanadu/vagent/wire.hpp"
 
+#include "common/xanadu/zigzag/cell_views.hpp"
+
 #include <functional>
 
 namespace xanadu::vagent {
@@ -261,8 +263,13 @@ public:
 class FakeIssuer final : public CapabilityIssuer {
 public:
   std::vector<SpawnTicket> tickets;
+  /// Refuses any ticket whose child name contains this text.
+  std::string refuse;
   std::expected<IssuedCapability, ActorError>
   issue(const SpawnTicket &ticket) override {
+    if (!refuse.empty() && ticket.childName.contains(refuse)) {
+      return std::unexpected(ActorError::NotAuthorized);
+    }
     tickets.push_back(ticket);
     return IssuedCapability{"cap:" + ticket.childName + ":" + ticket.parameters,
                             ""};
@@ -290,6 +297,9 @@ protected:
   std::unique_ptr<MeshActorRuntime> runtime;
   std::unique_ptr<AgentExecutor> exec;
   std::vector<ActorMessage> sent;
+  /// Lease length by the capability text (which carries the child's name).
+  std::function<std::chrono::seconds(const std::string &)> leaseOf =
+      [](const std::string &) { return 1000s; };
 
   void SetUp() override {
     program.types["Counter"] = [](WorkerContext &c) {
@@ -365,16 +375,22 @@ protected:
   void build(AgentSettings settings = {}) {
     runtime = std::make_unique<MeshActorRuntime>("node", 1,
                                                  AgentExecutor::withFloors());
-    runtime->setAuthorizer([this](const Fingerprint &,
-                                  const ActorMessage &request)
-                               -> std::expected<ActorGrant, ActorError> {
-      if (request.programRef != "prog") {
-        return std::unexpected(ActorError::NotAuthorized);
-      }
-      return ActorGrant{
-          request.programRef, "base", maxInstructions, 10000, 32768, 100, 65536,
-          wallStart + 1000s,  true};
-    });
+    runtime->setAuthorizer(
+        [this](const Fingerprint &, const ActorMessage &request)
+            -> std::expected<ActorGrant, ActorError> {
+          if (request.programRef != "prog") {
+            return std::unexpected(ActorError::NotAuthorized);
+          }
+          return ActorGrant{request.programRef,
+                            "base",
+                            maxInstructions,
+                            10000,
+                            32768,
+                            100,
+                            65536,
+                            now + leaseOf(request.capability),
+                            true};
+        });
     AgentClock clock{.wall   = [this] { return now; },
                      .steady = [] { return ActorTime{}; }};
     exec = std::make_unique<AgentExecutor>(*runtime, issuer, program, owner,
@@ -674,6 +690,269 @@ TEST_F(VagentExecutor, ChildParametersSurviveAFreshAdapterOverTheSameRuntime) {
       fieldValue(ctx->arena, valueDims(ctx->core), *agent, kFieldName);
   ASSERT_TRUE(name);
   EXPECT_EQ(ctx->arena.textOf(*name), "p/Counter#9");
+}
+
+// -- Lifecycle and delivery events
+// ----------------------------------------------------
+
+/// What an agent was told, read from the event cell while the turn runs.
+struct Heard {
+  ActorPid pid;
+  std::string type;
+  std::optional<std::string> source;
+  std::map<std::string, std::string> text;
+};
+
+class VagentLifecycle : public VagentExecutor {
+protected:
+  std::vector<Heard> heard;
+
+  void listen() {
+    exec->setTurnObserver([this](const ActorPid &pid, const WorkerContext &c,
+                                 CellRef event) {
+      const auto vd = valueDims(c.core);
+      Heard h{pid, c.arena.textOf(event), std::nullopt, {}};
+      if (const auto s = fieldValue(c.arena, vd, event, kEventImplicitSource)) {
+        if (const auto v = c.arena.linked(*s, vd.grab)) {
+          h.source = c.arena.textOf(*v);
+        }
+      }
+      for (const auto name : {"child", "cause", "to", "kind"}) {
+        if (const auto f = fieldValue(c.arena, vd, event, name)) {
+          h.text[name] = c.arena.textOf(*f);
+        }
+      }
+      heard.push_back(std::move(h));
+    });
+  }
+  [[nodiscard]] std::vector<Heard> heardBy(const ActorPid &pid,
+                                           std::string_view type) const {
+    std::vector<Heard> out;
+    for (const auto &h : heard) {
+      if (h.pid == pid && h.type == type) out.push_back(h);
+    }
+    return out;
+  }
+  /// A parent that spawns one child of `childType` and optionally stops it.
+  void addMother(const std::string &type, const std::string &childType,
+                 const std::string &childName, bool stopIt) {
+    program.types[type] = [=](WorkerContext &c) {
+      Asm a(c);
+      const auto agent = c.arena.makeCell(std::string_view(type));
+      const auto s     = a.spawnEntry(childType, childName);
+      std::vector<CellRef> init{a.linkTo(agent, a.dims.outbox, s)};
+      if (stopIt) {
+        const auto vd   = valueDims(c.core);
+        const auto stop = c.arena.makeCell(std::string_view(kKindStop));
+        setField(c.arena, vd, stop, kOutboxStopChild,
+                 c.arena.makeCell(std::string_view(childName)));
+        init.push_back(a.linkTo(s, a.dims.outbox, stop));
+      }
+      return CompiledAgent{agent, a.chain(init),
+                           a.chain({a.add(a.counterField(agent, "msgs"))}),
+                           a.halt, a.fail};
+    };
+  }
+  [[nodiscard]] bool inHolon(const ActorPid &pid, std::string_view name) {
+    auto *ctx        = exec->context(pid);
+    const auto agent = *exec->agentCell(pid);
+    const auto dims  = registerDimensions(ctx->arena);
+    for (const auto c : zigzag::rankAfter(ctx->arena, agent, dims.holon)) {
+      if (ctx->arena.textOf(c) == name) return true;
+    }
+    return false;
+  }
+};
+
+TEST_F(VagentLifecycle, ParentStopRunsDestroyAnnouncesAndRemovesTheChild) {
+  addMother("Mother", "Counter", "m/Counter#1", true);
+  build();
+  listen();
+  const auto mother = exec->launch("Mother", "m");
+  ASSERT_TRUE(mother);
+  exec->pumpUntilIdle();
+  EXPECT_EQ(runtime->actorCount(), 1U);
+  EXPECT_FALSE(peer(*mother, "m/Counter#1"));
+  EXPECT_FALSE(inHolon(*mother, "m/Counter#1"));
+  const auto stopping = heardBy(*mother, "ChildStopping");
+  ASSERT_EQ(stopping.size(), 1U);
+  EXPECT_EQ(stopping[0].text.at("child"), "m/Counter#1");
+  EXPECT_EQ(stopping[0].text.at("cause"), "stop");
+  // The ActorDown that follows is not a second report.
+  EXPECT_TRUE(heardBy(*mother, "ChildDown").empty());
+  std::size_t destroys = 0;
+  for (const auto &h : heard) {
+    if (h.type == "Destroy") {
+      ++destroys;
+      EXPECT_FALSE(h.source);
+      EXPECT_NE(h.pid, *mother);
+    }
+  }
+  EXPECT_EQ(destroys, 1U);
+}
+
+TEST_F(VagentLifecycle, AStopFromAnyoneButTheParentIsRefused) {
+  build();
+  listen();
+  const auto pid = exec->launch("Counter", "c");
+  ASSERT_TRUE(pid);
+  auto m = external(*pid, "s1", "Stop");
+  Envelope e;
+  e.kind  = "stop";
+  e.type  = "Stop";
+  e.floor = "none";
+  m.value = *encodeEnvelope(e);
+  ASSERT_TRUE(deliver(m));
+  ASSERT_EQ(runtime->pumpOne(now), true);
+  EXPECT_EQ(runtime->actorCount(), 1U);
+  EXPECT_EQ(exec->stat(*pid, kStatStopRefused), 1U);
+  EXPECT_TRUE(heardBy(*pid, "Destroy").empty());
+}
+
+TEST_F(VagentLifecycle, TerminateRunsDestroyThenStops) {
+  program.types["Quitter"] = [](WorkerContext &c) {
+    Asm a(c);
+    const auto agent = c.arena.makeCell(std::string_view("Quitter"));
+    const auto flag  = c.arena.makeScalarCell(false);
+    setField(c.arena, valueDims(c.core), agent, kFieldTerminating, flag);
+    const auto yes = c.vm.mintOpcode(OpcodeKind::Not);
+    c.core.bindInput(yes, flag);
+    c.core.bindOutput(yes, flag);
+    return CompiledAgent{agent, a.chain({a.add(a.counterField(agent, "i"))}),
+                         a.chain({yes}), a.halt, a.fail};
+  };
+  addMother("Mother", "Quitter", "m/Quitter#1", false);
+  build();
+  listen();
+  const auto mother = exec->launch("Mother", "m");
+  ASSERT_TRUE(mother);
+  exec->pumpUntilIdle();
+  EXPECT_EQ(runtime->actorCount(), 2U);
+  const auto child = peer(*mother, "m/Quitter#1");
+  ASSERT_TRUE(child);
+  // Dispatch sets $terminating; the next turn's settle ends the agent.
+  ASSERT_TRUE(runtime->wake(*child, now));
+  EXPECT_EQ(heardBy(*child, "Destroy").size(), 1U);
+  // Erasure waits for the parent to answer the announcement.
+  exec->pumpUntilIdle();
+  EXPECT_EQ(runtime->actorCount(), 1U);
+  const auto stopping = heardBy(*mother, "ChildStopping");
+  ASSERT_EQ(stopping.size(), 1U);
+  EXPECT_EQ(stopping[0].text.at("cause"), "terminate");
+  EXPECT_FALSE(peer(*mother, "m/Quitter#1"));
+}
+
+TEST_F(VagentLifecycle, AChildGoneWithoutAnnouncementRaisesChildDown) {
+  addMother("Mother", "Counter", "m/Counter#1", false);
+  build();
+  listen();
+  const auto mother = exec->launch("Mother", "m");
+  ASSERT_TRUE(mother);
+  exec->pumpUntilIdle();
+  const auto child = peer(*mother, "m/Counter#1");
+  ASSERT_TRUE(child);
+  ASSERT_TRUE(runtime->stop(*child));
+  exec->pumpUntilIdle();
+  const auto down = heardBy(*mother, "ChildDown");
+  ASSERT_EQ(down.size(), 1U);
+  EXPECT_EQ(down[0].text.at("child"), "m/Counter#1");
+  EXPECT_FALSE(down[0].source);
+  EXPECT_FALSE(peer(*mother, "m/Counter#1"));
+  EXPECT_FALSE(inHolon(*mother, "m/Counter#1"));
+  EXPECT_EQ(exec->stat(*mother, kStatChildDown), 1U);
+  EXPECT_TRUE(heardBy(*mother, "ChildStopping").empty());
+}
+
+TEST_F(VagentLifecycle, ARefusedSpawnRaisesSpawnFailed) {
+  addMother("Mother", "Counter", "m/Counter#1", false);
+  issuer.refuse = "Counter";
+  build();
+  listen();
+  const auto mother = exec->launch("Mother", "m");
+  ASSERT_TRUE(mother);
+  exec->pumpUntilIdle();
+  const auto failed = heardBy(*mother, "SpawnFailed");
+  ASSERT_EQ(failed.size(), 1U);
+  EXPECT_EQ(failed[0].text.at("child"), "m/Counter#1");
+  EXPECT_FALSE(failed[0].source);
+  EXPECT_EQ(exec->stat(*mother, kStatSpawnFailed), 1U);
+  EXPECT_EQ(runtime->actorCount(), 1U);
+}
+
+TEST_F(VagentLifecycle, AnAbandonedDeliveryRaisesDeliveryFailedAndWritesStats) {
+  build();
+  listen();
+  const auto talker = exec->launch("Talker", "t");
+  ASSERT_TRUE(talker);
+  ASSERT_TRUE(runtime->wake(*talker, now));
+  for (int i = 1; i <= 6; ++i) exec->tick(now + std::chrono::seconds(i));
+  const auto failed = heardBy(*talker, "DeliveryFailed");
+  ASSERT_EQ(failed.size(), 1U);
+  EXPECT_EQ(failed[0].text.at("to"), "t/Counter#1");
+  EXPECT_EQ(failed[0].text.at("kind"), "event");
+  EXPECT_EQ(failed[0].text.at("cause"), "retries");
+  EXPECT_FALSE(failed[0].source);
+  // The agent was idle, yet its $stats cell already holds the count.
+  auto *ctx     = exec->context(*talker);
+  const auto vd = valueDims(ctx->core);
+  const auto stats =
+      fieldValue(ctx->arena, vd, *exec->agentCell(*talker), kFieldStats);
+  ASSERT_TRUE(stats);
+  const auto cell = fieldValue(ctx->arena, vd, *stats, kStatDeliveryFailed);
+  ASSERT_TRUE(cell);
+  EXPECT_EQ(ctx->arena.asInt64(*cell), 1);
+}
+
+TEST_F(VagentLifecycle, ADeadlineAbandonsBeforeTheRetriesAreSpent) {
+  build();
+  listen();
+  const auto talker = exec->launch("Talker", "t");
+  ASSERT_TRUE(talker);
+  ASSERT_TRUE(runtime->wake(*talker, now));
+  const auto id = requestId(senderPrefix("t"), 0, 1);
+  ASSERT_TRUE(exec->setDeliveryDeadline(id, now + 2s));
+  EXPECT_FALSE(exec->setDeliveryDeadline("nope", now));
+  exec->tick(now + 3s);
+  const auto failed = heardBy(*talker, "DeliveryFailed");
+  ASSERT_EQ(failed.size(), 1U);
+  EXPECT_EQ(failed[0].text.at("cause"), "deadline");
+  EXPECT_EQ(exec->outstanding(), 0U);
+}
+
+TEST_F(VagentLifecycle, ALeaseIsRenewedAtTheFractionAndEndsWithoutRenewal) {
+  leaseOf = [](const std::string &capability) {
+    return capability.contains("Counter") ? 100s : 1000s;
+  };
+  addMother("Mother", "Counter", "m/Counter#1", false);
+  build();
+  listen();
+  const auto mother = exec->launch("Mother", "m");
+  ASSERT_TRUE(mother);
+  exec->pumpUntilIdle();
+  const auto child = peer(*mother, "m/Counter#1");
+  ASSERT_TRUE(child);
+  const auto issued = issuer.tickets.size();
+  exec->tick(now + 79s);
+  EXPECT_EQ(issuer.tickets.size(), issued);
+  // At 90 s the lease is renewed (the authorizer reads the fixture's clock).
+  now += 90s;
+  exec->tick(now);
+  EXPECT_EQ(issuer.tickets.size(), issued + 1);
+  // The old expiry (100 s) passes without a stop.
+  now += 20s;
+  exec->tick(now);
+  EXPECT_EQ(runtime->actorCount(), 2U);
+  EXPECT_TRUE(heardBy(*child, "Destroy").empty());
+  // Renewal now refused: the agent ends at its lease.
+  issuer.refuse = "Counter";
+  now += 200s;
+  exec->tick(now);
+  EXPECT_EQ(heardBy(*child, "Destroy").size(), 1U);
+  exec->pumpUntilIdle();
+  EXPECT_EQ(runtime->actorCount(), 1U);
+  const auto stopping = heardBy(*mother, "ChildStopping");
+  ASSERT_EQ(stopping.size(), 1U);
+  EXPECT_EQ(stopping[0].text.at("cause"), "lease");
 }
 
 } // namespace

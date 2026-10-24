@@ -18,6 +18,7 @@ using zigzag::DimVector;
 using zigzag::vortex::WorkerContext;
 using zigzag::vortex::mesh::ActorError;
 using zigzag::vortex::mesh::ActorExecution;
+using zigzag::vortex::mesh::ActorGrant;
 using zigzag::vortex::mesh::ActorMessage;
 
 constexpr const char *kLog = "vortex.agent";
@@ -32,10 +33,26 @@ constexpr std::string_view kSpaceRecordType = "Space";
 constexpr std::string_view kSpaceHost       = "host";
 constexpr std::string_view kSpaceName       = "name";
 
-constexpr std::string_view kChildStopping = "ChildStopping";
-constexpr std::string_view kChildField    = "child";
-constexpr std::string_view kCauseField    = "cause";
-constexpr std::string_view kCauseInit     = "init";
+constexpr std::string_view kChildStopping  = "ChildStopping";
+constexpr std::string_view kChildDown      = "ChildDown";
+constexpr std::string_view kSpawnFailed    = "SpawnFailed";
+constexpr std::string_view kDeliveryFailed = "DeliveryFailed";
+constexpr std::string_view kChildField     = "child";
+constexpr std::string_view kCauseField     = "cause";
+constexpr std::string_view kToField        = "to";
+constexpr std::string_view kKindField      = "kind";
+constexpr std::string_view kCauseInit      = "init";
+constexpr std::string_view kCauseStop      = "stop";
+constexpr std::string_view kCauseTerminate = "terminate";
+constexpr std::string_view kCauseLease     = "lease";
+
+/// The envelope type that carries a `stop` performative.
+constexpr std::string_view kStopType = "Stop";
+
+/// A host event that raises another keeps the actor busy; this many rounds of
+/// them run in one executor call and the rest wait for the next tick, so a
+/// handler that provokes its own event cannot hold the owner thread.
+constexpr std::size_t kMaxHostEventRounds = 8;
 
 /// A sender's floor is tracked per sender prefix; a peer cannot be allowed to
 /// grow the table without bound by inventing prefixes.
@@ -57,6 +74,24 @@ std::string text(const ArenaManifold &arena, CellRef cell) {
 
 bool contains(const std::vector<std::string> &names, std::string_view name) {
   return std::ranges::find(names, name) != names.end();
+}
+
+/// Unlink the first cell of `anchor`'s rank along `dim` that `chosen` accepts,
+/// closing the gap. The cell is left unreachable, as every undone write is.
+template <class Pred>
+bool removeFromRank(ArenaManifold &arena, CellRef anchor, zigzag::DimRef dim,
+                    Pred chosen) {
+  CellRef before = anchor;
+  for (const auto cell : zigzag::rankAfter(arena, anchor, dim)) {
+    if (chosen(cell)) {
+      const auto after = arena.linked(cell, dim);
+      zigzag::expectWritten(arena.unlink(cell, dim, DimVector::POS));
+      zigzag::expectWritten(arena.link(before, dim, DimVector::POS, after));
+      return true;
+    }
+    before = cell;
+  }
+  return false;
 }
 
 } // namespace
@@ -81,6 +116,17 @@ struct AgentExecutor::State {
   std::map<std::string, std::string> floors;
   std::map<std::string, std::uint64_t, std::less<>> pendingStats;
   std::size_t sinceCompact{0};
+  /// Events the host raises for the agent, run as turns of their own.
+  std::vector<AgentExecutor::HostEvent> hostEvents;
+  /// True inside `execute`: the arena is the runtime's and mid-turn.
+  bool inTurn{false};
+  /// The next wake only refreshes the lease and runs no dispatch.
+  bool quietWake{false};
+  /// What the last `execute` was given, so the adapter can run a turn between
+  /// executor calls (lease end) and knows when the lease runs out.
+  std::optional<zigzag::vortex::mesh::ActorGrant> grant;
+  CellRef cursor{};
+  std::chrono::system_clock::time_point leaseSeen;
 };
 
 struct AgentExecutor::TurnSpec {
@@ -97,6 +143,11 @@ struct AgentExecutor::TurnSpec {
 struct AgentExecutor::TurnOutcome {
   bool committed{false};
   std::string cause;
+};
+
+struct AgentExecutor::HostEvent {
+  std::string type;
+  WireRecord fields;
 };
 
 struct AgentExecutor::OutboxItem {
@@ -225,6 +276,18 @@ bool AgentExecutor::initialized(const State &state) const {
 void AgentExecutor::bumpStat(State &state, std::string_view name,
                              std::uint64_t by) {
   state.pendingStats[std::string(name)] += by;
+  // Between turns nothing else writes them until the agent's next turn, which
+  // for an idle agent may never come. The runtime lends the arena for the
+  // whole life of the actor, so the adapter writes it at once.
+  if (!state.inTurn && live(state)) {
+    liftLimits(*state.context);
+    flushStats(state);
+  }
+}
+
+bool AgentExecutor::live(const State &state) const {
+  return state.prepared && state.context &&
+         runtime_.localCursor(state.pid).has_value();
 }
 
 void AgentExecutor::flushStats(State &state) {
@@ -448,10 +511,20 @@ AgentExecutor::execute(const ActorExecution &execution,
                        WorkerContext &context) {
   State &state  = stateFor(execution.pid);
   state.context = &context;
+  struct InTurn {
+    State &state;
+    explicit InTurn(State &s) : state(s) { state.inTurn = true; }
+    ~InTurn() { state.inTurn = false; }
+  } inTurn(state);
   liftLimits(context);
   if (!state.prepared && !prepare(state, context, execution.spawnRequest)) {
     return fatal(state, kCauseInit);
   }
+  if (!state.grant || state.grant->expiresAt != execution.grant.expiresAt) {
+    state.leaseSeen = wallNow();
+  }
+  state.grant  = execution.grant;
+  state.cursor = execution.cursor;
   flushStats(state);
 
   bool justInitialised = false;
@@ -459,21 +532,31 @@ AgentExecutor::execute(const ActorExecution &execution,
     TurnSpec spec;
     spec.entry           = state.agent.initEntry;
     spec.markInitialized = true;
-    if (!runTurn(state, execution, context, spec).committed) {
+    if (!runTurn(state, execution.cursor, execution.grant, context, spec)
+             .committed) {
       return fatal(state, kCauseInit);
     }
     justInitialised = true;
   }
   if (!execution.message) {
-    if (!justInitialised) {
+    // A wake that only refreshes a lease or carries host events must not also
+    // run a dispatch with no event.
+    const bool plain =
+        !justInitialised && !state.quietWake && state.hostEvents.empty();
+    state.quietWake = false;
+    if (plain) {
       TurnSpec spec;
       spec.entry = state.agent.dispatchEntry;
-      runTurn(state, execution, context, spec);
+      runTurn(state, execution.cursor, execution.grant, context, spec);
     }
+    settle(state, execution.cursor, execution.grant, context);
     return std::string{};
   }
   auto result = handleMessage(state, execution, context);
-  flushStats(state);
+  if (state.context) {
+    settle(state, execution.cursor, execution.grant, context);
+    flushStats(state);
+  }
   return result;
 }
 
@@ -535,13 +618,48 @@ void AgentExecutor::onDown(State &state, WorkerContext &,
     if (!valueCell) continue;
     const auto pid = pidFromText(text(arena, *valueCell));
     if (!pid || *pid != *message.source) continue;
+    // A child that announced its stop is already gone from $peers, which is
+    // how a stop is reported once and not twice (section 4.5); reaching here
+    // means it vanished without a word.
     const auto name = text(arena, nameCell);
     bumpStat(state, kStatChildDown);
-    // A stopped sender will send no later envelope carrying a floor, so its
-    // last remembered ids would stay for good without this (P14).
-    (void)runtime_.forgetSender(state.pid, senderPrefix(name));
+    removeChild(state, name);
+    WireRecord fields;
+    fields.set(std::string(kChildField), WireValue::text(name));
+    raise(state, kChildDown, std::move(fields));
     return;
   }
+}
+
+bool AgentExecutor::removeChild(State &state, std::string_view name) {
+  auto &arena      = state.context->arena;
+  const auto &vd   = state.vd;
+  const auto ac    = state.agent.agentCell;
+  const auto peers = fieldValue(arena, vd, ac, kFieldPeers);
+  const bool known = peers && fieldNameCell(arena, vd, *peers, name);
+  const auto named = [&](CellRef cell) { return text(arena, cell) == name; };
+  if (peers) removeFromRank(arena, *peers, vd.vars, named);
+  removeFromRank(arena, ac, state.dims.holon, named);
+  if (const auto space = innerSpace(state)) {
+    removeFromRank(arena, *space, state.dims.member, named);
+  }
+  // A stopped sender will send no later envelope carrying a floor, so its
+  // last remembered ids would stay for good without this (P14).
+  (void)runtime_.forgetSender(state.pid, senderPrefix(name));
+  GLEDITOR_LOG_DEBUG(kLog, "{} forgets child {}", state.name, name);
+  return known;
+}
+
+void AgentExecutor::acknowledgeChildStop(State &state,
+                                         const ActorMessage &message,
+                                         const Envelope &envelope) {
+  const auto *child = envelope.fields.find(kChildField);
+  const auto *name  = child ? std::get_if<std::string>(&child->data) : nullptr;
+  // Only the child itself can announce its own stop.
+  if (!name || *name != envelope.from) return;
+  const auto pid = peerPid(state, *name);
+  if (!pid || message.source != pid) return;
+  removeChild(state, *name);
 }
 
 std::expected<std::string, ActorError>
@@ -556,7 +674,7 @@ AgentExecutor::handleSend(State &state, const ActorExecution &execution,
     return std::string{};
   }
   const Envelope &envelope = *decoded;
-  if (envelope.kind != kKindEvent) {
+  if (envelope.kind != kKindEvent && envelope.kind != kKindStop) {
     bumpStat(state, kStatUnsupported);
     return std::string{};
   }
@@ -580,6 +698,8 @@ AgentExecutor::handleSend(State &state, const ActorExecution &execution,
     }
   }
 
+  if (envelope.kind == kKindStop) return handleStop(state, execution, context);
+
   const bool relayed = envelope.relaySpace.has_value();
   if (relayed && *envelope.relaySpace != kSpaceInner) {
     bumpStat(state, kStatUnsupported);
@@ -589,6 +709,9 @@ AgentExecutor::handleSend(State &state, const ActorExecution &execution,
   // out; the relay to its members is the host's duty either way.
   const bool handle = !relayed || envelope.relayFor.empty() ||
                       contains(envelope.relayFor, state.name);
+  if (!relayed && envelope.type == kChildStopping) {
+    acknowledgeChildStop(state, message, envelope);
+  }
   TurnSpec spec;
   if (handle) spec.entry = state.agent.dispatchEntry;
   spec.event = &envelope;
@@ -600,19 +723,91 @@ AgentExecutor::handleSend(State &state, const ActorExecution &execution,
   } else {
     spec.space = std::string(kSpaceInner);
   }
-  runTurn(state, execution, context, spec);
+  runTurn(state, execution.cursor, execution.grant, context, spec);
   return std::string{};
+}
+
+std::expected<std::string, ActorError>
+AgentExecutor::handleStop(State &state, const ActorExecution &execution,
+                          WorkerContext &context) {
+  // Accepted from the parent only (section 8.6): a sibling or a stranger
+  // cannot end an agent.
+  if (!state.parentPid || execution.message->source != state.parentPid) {
+    bumpStat(state, kStatStopRefused);
+    return std::string{};
+  }
+  orderlyStop(state, execution.cursor, execution.grant, context, kCauseStop);
+  return std::string{};
+}
+
+// -- Host events and the orderly stop (sections 4.5, 5.5)
+// ------------------------
+
+void AgentExecutor::raise(State &state, std::string_view type,
+                          WireRecord fields) {
+  state.hostEvents.push_back(HostEvent{std::string(type), std::move(fields)});
+}
+
+AgentExecutor::TurnOutcome AgentExecutor::deliverHost(State &state,
+                                                      CellRef cursor,
+                                                      const ActorGrant &grant,
+                                                      WorkerContext &context,
+                                                      const HostEvent &event) {
+  Envelope envelope;
+  envelope.kind   = std::string(kKindEvent);
+  envelope.type   = event.type;
+  envelope.fields = event.fields;
+  TurnSpec spec;
+  spec.entry = state.agent.dispatchEntry;
+  spec.event = &envelope;
+  return runTurn(state, cursor, grant, context, spec);
+}
+
+void AgentExecutor::settle(State &state, CellRef cursor,
+                           const ActorGrant &grant, WorkerContext &context) {
+  for (std::size_t round = 0; round < kMaxHostEventRounds && state.context &&
+                              !state.hostEvents.empty();
+       ++round) {
+    const auto batch = std::exchange(state.hostEvents, {});
+    for (const auto &event : batch) {
+      deliverHost(state, cursor, grant, context, event);
+    }
+  }
+  if (!state.context) return;
+  const auto &arena = context.arena;
+  const auto flag =
+      fieldValue(arena, state.vd, state.agent.agentCell, kFieldTerminating);
+  if (flag && arena.asBool(*flag).value_or(false)) {
+    orderlyStop(state, cursor, grant, context, kCauseTerminate);
+  }
+}
+
+void AgentExecutor::orderlyStop(State &state, CellRef cursor,
+                                const ActorGrant &grant, WorkerContext &context,
+                                std::string_view cause) {
+  GLEDITOR_LOG_DEBUG(kLog, "agent {} stops: {}", state.name, cause);
+  // Whatever was waiting is moot once the agent is on its way out.
+  state.hostEvents.clear();
+  deliverHost(state, cursor, grant, context,
+              HostEvent{std::string(kEventDestroy), {}});
+  state.hostEvents.clear();
+  stageChildStopping(state, cause);
+  flushStats(state);
+  // stop() frees the slot and tells monitors; erasure waits for the executor
+  // to return and the deliveries to drain.
+  (void)runtime_.stop(state.pid);
+  state.context = nullptr;
 }
 
 // -- One turn (§4.2)
 // -------------------------------------------------------------
 
-AgentExecutor::TurnOutcome
-AgentExecutor::runTurn(State &state, const ActorExecution &execution,
-                       WorkerContext &context, const TurnSpec &spec) {
+AgentExecutor::TurnOutcome AgentExecutor::runTurn(State &state, CellRef cursor,
+                                                  const ActorGrant &grant,
+                                                  WorkerContext &context,
+                                                  const TurnSpec &spec) {
   auto &arena              = context.arena;
   auto &vm                 = context.vm;
-  const auto cursor        = execution.cursor;
   const auto &agent        = state.agent;
   const std::uint64_t turn = counter(state, kFieldTurnCount);
   TurnOutcome outcome{.committed = true, .cause = {}};
@@ -621,7 +816,6 @@ AgentExecutor::runTurn(State &state, const ActorExecution &execution,
     // 1. Mark.
     const auto m0 = arena.mark();
     // 2. Fuel, relative to where the turn starts.
-    const auto &grant = execution.grant;
     const auto cells =
         std::min<std::uint64_t>(std::uint64_t{m0.cellCount} + grant.maxCells,
                                 std::numeric_limits<std::uint32_t>::max());
@@ -645,6 +839,7 @@ AgentExecutor::runTurn(State &state, const ActorExecution &execution,
       if (spec.event) {
         const auto event = mintEvent(state, *spec.event, spec.space, millis);
         setField(arena, state.vd, turnCell, kTurnEvent, event);
+        if (observer_) observer_(state.pid, context, event);
       }
       setField(arena, state.vd, agent.agentCell, kFieldTurn, turnCell);
 
@@ -835,6 +1030,13 @@ AgentExecutor::collectOutbox(State &state, WorkerContext &context) {
           item.args = *record;
         }
       }
+    } else if (item.kind == kKindStop) {
+      const auto child = textOf(read(entry, kOutboxStopChild));
+      if (!child) {
+        bumpStat(state, kStatMalformed);
+        continue;
+      }
+      item.childName = *child;
     } else {
       bumpStat(state, kStatUnsupported);
       continue;
@@ -862,7 +1064,24 @@ void AgentExecutor::drain(State &state, WorkerContext &context,
       routeEvent(state, context, turn, position, item);
     }
   }
+  for (const auto &item : items) {
+    if (item.kind == kKindStop) sendStop(state, turn, position, item);
+  }
   if (spec.relayed) relay(state, context, turn, position, *spec.relayed);
+}
+
+void AgentExecutor::sendStop(State &state, std::uint64_t turn,
+                             std::uint64_t &position, const OutboxItem &item) {
+  const auto pid = peerPid(state, item.childName);
+  if (!pid || !contains(innerMembers(state), item.childName)) {
+    bumpStat(state, kStatUnroutable);
+    return;
+  }
+  Envelope envelope;
+  envelope.kind = std::string(kKindStop);
+  envelope.type = std::string(kStopType);
+  envelope.from = state.name;
+  sendEnvelope(state, turn, position, *pid, std::move(envelope));
 }
 
 void AgentExecutor::spawnChild(State &state, WorkerContext &context,
@@ -874,9 +1093,15 @@ void AgentExecutor::spawnChild(State &state, WorkerContext &context,
   params.set(std::string(kWireSpawnParent), WireValue::text(state.name));
   params.set(std::string(kWireSpawnArgs), WireValue::record(item.args));
   params.set(std::string(kWireSpawnAgent), WireValue::text(item.agentType));
-  auto parameters = encodeValue(WireValue::record(std::move(params)));
-  if (!parameters || position > kMaxRequestPosition) {
+  auto parameters   = encodeValue(WireValue::record(std::move(params)));
+  const auto failed = [&] {
     bumpStat(state, kStatSpawnFailed);
+    WireRecord fields;
+    fields.set(std::string(kChildField), WireValue::text(item.childName));
+    raise(state, kSpawnFailed, std::move(fields));
+  };
+  if (!parameters || position > kMaxRequestPosition) {
+    failed();
     return;
   }
   SpawnTicket ticket{.programRef = std::string(program_.programRef()),
@@ -887,7 +1112,7 @@ void AgentExecutor::spawnChild(State &state, WorkerContext &context,
                      .parameters = std::move(*parameters)};
   auto issued = issuer_.issue(ticket);
   if (!issued) {
-    bumpStat(state, kStatSpawnFailed);
+    failed();
     return;
   }
   ActorMessage request;
@@ -901,7 +1126,7 @@ void AgentExecutor::spawnChild(State &state, WorkerContext &context,
   const auto pid        = runtime_.spawn(owner_, request, wallNow());
   if (!pid) {
     GLEDITOR_LOG_DEBUG(kLog, "spawn of {} refused", item.childName);
-    bumpStat(state, kStatSpawnFailed);
+    failed();
     return;
   }
   needsFirstTurn_.push_back(*pid);
@@ -1022,7 +1247,8 @@ bool AgentExecutor::sendEnvelope(State &state, std::uint64_t turn,
   message.value     = *bytes;
   // Registered before the send: a loopback peer may answer before it returns.
   outstanding_[message.requestId] =
-      Outstanding{pidKey(state.pid), to.node, wallNow(), 0};
+      Outstanding{pidKey(state.pid), to.node, wallNow(),   0,
+                  envelope.kind,     to,      std::nullopt};
   const auto sent = runtime_.send(to.node, message);
   if (!sent && sent.error() != ActorError::TransportUnavailable) {
     outstanding_.erase(message.requestId);
@@ -1070,19 +1296,61 @@ AgentExecutor::launch(std::string_view agentType, std::string_view name,
 
 void AgentExecutor::tick() { tick(wallNow()); }
 
+bool AgentExecutor::setDeliveryDeadline(
+    std::string_view id, std::chrono::system_clock::time_point deadline) {
+  const auto found = outstanding_.find(std::string(id));
+  if (found == outstanding_.end()) return false;
+  found->second.deadline = deadline;
+  return true;
+}
+
 void AgentExecutor::tick(std::chrono::system_clock::time_point now) {
+  upkeepDeliveries(now);
+  upkeepLeases(now);
+  // Events raised between turns need a turn to be heard in.
+  for (auto &[key, state] : states_) {
+    if (state->hostEvents.empty()) continue;
+    if (!live(*state) || !runtime_.wake(state->pid, now)) {
+      state->hostEvents.clear();
+    }
+  }
+}
+
+void AgentExecutor::upkeepDeliveries(
+    std::chrono::system_clock::time_point now) {
   for (auto it = outstanding_.begin(); it != outstanding_.end();) {
-    auto &sent = it->second;
-    if (now - sent.lastSent < settings_.sendRetryInterval) {
+    auto &sent      = it->second;
+    const bool late = sent.deadline && now >= *sent.deadline;
+    if (!late && now - sent.lastSent < settings_.sendRetryInterval) {
       ++it;
       continue;
     }
-    if (sent.redeliveries >= settings_.sendRetries) {
+    if (late || sent.redeliveries >= settings_.sendRetries) {
       (void)runtime_.abandon(it->first);
-      // Raising DeliveryFailed waits for iteration 3; the count is kept now.
       if (const auto owner = states_.find(sent.ownerKey);
-          owner != states_.end()) {
-        bumpStat(*owner->second, kStatDeliveryFailed);
+          owner != states_.end() && live(*owner->second)) {
+        State &state       = *owner->second;
+        std::string target = pidKey(sent.to);
+        for (const auto &[nameCell, valueCell] :
+             fieldsOf(state.context->arena, state.vd,
+                      fieldValue(state.context->arena, state.vd,
+                                 state.agent.agentCell, kFieldPeers)
+                          .value_or(state.agent.agentCell))) {
+          if (valueCell &&
+              pidFromText(text(state.context->arena, *valueCell)) ==
+                  std::optional<identity::ActorPid>(sent.to)) {
+            target = text(state.context->arena, nameCell);
+            break;
+          }
+        }
+        WireRecord fields;
+        fields.set(std::string(kToField), WireValue::text(target));
+        fields.set(std::string(kKindField), WireValue::text(sent.kind));
+        fields.set(std::string(kCauseField),
+                   WireValue::text(
+                       std::string(late ? kCauseDeadline : kCauseRetries)));
+        raise(state, kDeliveryFailed, std::move(fields));
+        bumpStat(state, kStatDeliveryFailed);
       }
       GLEDITOR_LOG_DEBUG(kLog, "delivery {} abandoned", it->first);
       it = outstanding_.erase(it);
@@ -1099,6 +1367,60 @@ void AgentExecutor::tick(std::chrono::system_clock::time_point now) {
     sent.lastSent = now;
     ++it;
   }
+}
+
+void AgentExecutor::upkeepLeases(std::chrono::system_clock::time_point now) {
+  for (auto &[key, owned] : states_) {
+    State &state = *owned;
+    if (!live(state) || !state.grant) continue;
+    const auto end = state.grant->expiresAt;
+    if (now >= end) {
+      // The runtime refuses to run an expired actor, so Destroy runs here on
+      // the arena it lent us.
+      liftLimits(*state.context);
+      orderlyStop(state, state.cursor, *state.grant, *state.context,
+                  kCauseLease);
+      continue;
+    }
+    const auto renewAt =
+        state.leaseSeen +
+        std::chrono::duration_cast<std::chrono::system_clock::duration>(
+            (end - state.leaseSeen) * settings_.renewFraction);
+    if (now >= renewAt) (void)renewLease(state, now);
+  }
+}
+
+bool AgentExecutor::renewLease(State &state,
+                               std::chrono::system_clock::time_point now) {
+  WireRecord params;
+  params.set(std::string(kWireSpawnName), WireValue::text(state.name));
+  params.set(std::string(kWireSpawnParent), WireValue::text(state.parentName));
+  params.set(std::string(kWireSpawnArgs), WireValue::record({}));
+  params.set(std::string(kWireSpawnAgent), WireValue::text(state.agentType));
+  auto parameters = encodeValue(WireValue::record(std::move(params)));
+  if (!parameters) return false;
+  SpawnTicket ticket{.programRef = std::string(program_.programRef()),
+                     .agentType  = state.agentType,
+                     .childName  = state.name,
+                     .parentName = state.parentName,
+                     .parent     = state.parentPid,
+                     .parameters = std::move(*parameters)};
+  auto issued = issuer_.issue(ticket);
+  if (!issued) return false;
+  ActorMessage request;
+  request.type          = MessageType::ActorSpawn;
+  request.requestId     = requestId(senderPrefix(kHostName), launches_++, 0);
+  request.source        = hostPid_;
+  request.programRef    = ticket.programRef;
+  request.hashcashStamp = issued->hashcashStamp.empty() ? settings_.spawnStamp
+                                                        : issued->hashcashStamp;
+  request.capability    = std::move(issued->capability);
+  if (!runtime_.renew(state.pid, owner_, request, now)) return false;
+  // The runtime hands the new grant to the executor, not to us; a wake that
+  // runs nothing is how the adapter learns the new expiry.
+  state.quietWake = true;
+  if (!runtime_.wake(state.pid, now)) state.quietWake = false;
+  return true;
 }
 
 std::size_t AgentExecutor::pumpUntilIdle(std::size_t maxTurns) {
@@ -1123,6 +1445,16 @@ std::size_t AgentExecutor::pumpUntilIdle(std::size_t maxTurns) {
       if (!pumped || !*pumped) break;
       ++turns;
       progressed = true;
+    }
+    for (auto &[key, state] : states_) {
+      if (!state->hostEvents.empty() && live(*state) && turns < maxTurns) {
+        if (runtime_.wake(state->pid, wallNow())) {
+          ++turns;
+          progressed = true;
+        } else {
+          state->hostEvents.clear();
+        }
+      }
     }
     if (!progressed && needsFirstTurn_.empty()) break;
   }

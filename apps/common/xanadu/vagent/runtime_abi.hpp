@@ -156,6 +156,8 @@ inline constexpr std::string_view kOutboxFor   = "for";
 inline constexpr std::string_view kOutboxAgentType = "agent";
 inline constexpr std::string_view kOutboxChildName = "name";
 inline constexpr std::string_view kOutboxArgs      = "args";
+/// `stop` entries: the child's name (text); the parent alone may stop a child.
+inline constexpr std::string_view kOutboxStopChild = "child";
 
 // -- Wire (§5.5, §7.3)
 // --------------------------------------------------------- An `ActorSend`'s

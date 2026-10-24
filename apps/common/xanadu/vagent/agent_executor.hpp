@@ -122,6 +122,12 @@ inline constexpr std::string_view kStatSendFailed     = "send_failed";
 inline constexpr std::string_view kStatUnroutable     = "unroutable";
 inline constexpr std::string_view kStatDeliveryFailed = "delivery_failed";
 inline constexpr std::string_view kStatChildDown      = "child_down";
+/// A `stop` from anyone but the parent, refused.
+inline constexpr std::string_view kStatStopRefused = "stop_refused";
+
+/// Why a delivery was abandoned (the `cause` of `DeliveryFailed`).
+inline constexpr std::string_view kCauseRetries  = "retries";
+inline constexpr std::string_view kCauseDeadline = "deadline";
 
 class AgentExecutor {
 public:
@@ -161,6 +167,22 @@ public:
   void tick();
   void tick(std::chrono::system_clock::time_point now);
 
+  /// Abandon the delivery `requestId` at `deadline` even if its retries are not
+  /// spent (§7.3); false if it is not outstanding.
+  bool setDeliveryDeadline(std::string_view requestId,
+                           std::chrono::system_clock::time_point deadline);
+
+  /// Called at the start of every turn that dispatches an event, with the
+  /// event cell already minted, so a host can watch what agents are told
+  /// (the cell is undone with the turn if the turn fails).
+  using TurnObserver = std::function<void(const identity::ActorPid &,
+                                          const zigzag::vortex::WorkerContext &,
+                                          zigzag::CellRef event)>;
+  AgentExecutor *setTurnObserver(TurnObserver observer) {
+    observer_ = std::move(observer);
+    return this;
+  }
+
   /// Wake agents that have not had their first turn, then pump messages until
   /// nothing is left to do or `maxTurns` is reached; returns the turns run.
   std::size_t pumpUntilIdle(std::size_t maxTurns = 100000);
@@ -186,6 +208,9 @@ private:
     std::string node;
     std::chrono::system_clock::time_point lastSent;
     std::size_t redeliveries{0};
+    std::string kind;
+    identity::ActorPid to;
+    std::optional<std::chrono::system_clock::time_point> deadline;
   };
   /// What a spawn request's capability carries (§4.1).
   struct SpawnInfo {
@@ -198,6 +223,7 @@ private:
   struct TurnSpec;
   struct TurnOutcome;
   struct OutboxItem;
+  struct HostEvent;
 
   [[nodiscard]] std::optional<SpawnInfo>
   readSpawn(const zigzag::vortex::mesh::ActorMessage &request) const;
@@ -218,10 +244,45 @@ private:
   handleSend(State &state,
              const zigzag::vortex::mesh::ActorExecution &execution,
              zigzag::vortex::WorkerContext &context);
-  TurnOutcome runTurn(State &state,
-                      const zigzag::vortex::mesh::ActorExecution &execution,
+  TurnOutcome runTurn(State &state, zigzag::CellRef cursor,
+                      const zigzag::vortex::mesh::ActorGrant &grant,
                       zigzag::vortex::WorkerContext &context,
                       const TurnSpec &spec);
+  /// A host delivery: an event with no source, dispatched in a turn of its
+  /// own (§5.5).
+  TurnOutcome deliverHost(State &state, zigzag::CellRef cursor,
+                          const zigzag::vortex::mesh::ActorGrant &grant,
+                          zigzag::vortex::WorkerContext &context,
+                          const HostEvent &event);
+  void raise(State &state, std::string_view type, WireRecord fields);
+  /// Runs the host events raised so far, then an orderly stop if user code set
+  /// `$terminating`.
+  void settle(State &state, zigzag::CellRef cursor,
+              const zigzag::vortex::mesh::ActorGrant &grant,
+              zigzag::vortex::WorkerContext &context);
+  /// `on Destroy`, `ChildStopping{cause}` to the parent, then the runtime's
+  /// stop (§4.5). The state's context is gone afterwards.
+  void orderlyStop(State &state, zigzag::CellRef cursor,
+                   const zigzag::vortex::mesh::ActorGrant &grant,
+                   zigzag::vortex::WorkerContext &context,
+                   std::string_view cause);
+  std::expected<std::string, zigzag::vortex::mesh::ActorError>
+  handleStop(State &state,
+             const zigzag::vortex::mesh::ActorExecution &execution,
+             zigzag::vortex::WorkerContext &context);
+  void sendStop(State &state, std::uint64_t turn, std::uint64_t &position,
+                const OutboxItem &item);
+  /// Drops a child from `d.holon`, the inner space and `$peers`; false if it
+  /// was not there.
+  bool removeChild(State &state, std::string_view name);
+  void acknowledgeChildStop(State &state,
+                            const zigzag::vortex::mesh::ActorMessage &message,
+                            const Envelope &envelope);
+  void upkeepDeliveries(std::chrono::system_clock::time_point now);
+  void upkeepLeases(std::chrono::system_clock::time_point now);
+  [[nodiscard]] bool renewLease(State &state,
+                                std::chrono::system_clock::time_point now);
+  [[nodiscard]] bool live(const State &state) const;
   void drain(State &state, zigzag::vortex::WorkerContext &context,
              std::uint64_t turn, const TurnSpec &spec);
   [[nodiscard]] std::vector<OutboxItem>
@@ -273,6 +334,7 @@ private:
   std::uint64_t epoch_;
   AgentSettings settings_;
   AgentClock clock_;
+  TurnObserver observer_;
   identity::ActorPid hostPid_;
   std::uint64_t launches_{0};
   std::map<std::string, std::unique_ptr<State>> states_;
