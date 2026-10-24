@@ -618,6 +618,7 @@ private:
     ev("SpawnFailed", {{"child", K::Agent}});
     ev("DeliveryFailed",
        {{"to", K::Agent}, {"kind", K::Str}, {"cause", K::Str}});
+    ev("Orphaned", {{"former_parent", K::Agent}});
     ev("Moved", {{"name", K::Agent}});
 
     auto method = [](const char *owner, const char *name,
@@ -2530,8 +2531,13 @@ private:
 
   Type node(const ETell &n, const Expr &e, Pos) {
     noteAction(e.loc, n.untell ? "untell" : "tell");
-    expectType(basic(K::Agent), infer(*n.to, operandPos), n.to->loc,
-               "recipient");
+    const Type to = infer(*n.to, operandPos);
+    if (!assignable(basic(K::Agent), to) &&
+        !assignable(listOf(basic(K::Agent)), to)) {
+      err(CheckErrorCode::TypeMismatch, n.to->loc,
+          std::format("recipient must be an Agent or a list of agents, not {}",
+                      typeName(to)));
+    }
     checkTerm(n.fact);
     return basic(K::Unit);
   }

@@ -129,6 +129,9 @@ struct AgentExecutor::State {
   std::optional<zigzag::vortex::mesh::ActorGrant> grant;
   CellRef cursor{};
   std::chrono::system_clock::time_point leaseSeen;
+  /// Re-parented to the launcher by `Orphaned`: its `ChildStopping` goes to
+  /// the host sink, since the launcher is no actor.
+  bool adopted{false};
 };
 
 struct AgentExecutor::TurnSpec {
@@ -163,6 +166,8 @@ struct AgentExecutor::OutboxItem {
   std::string agentType;
   std::string childName;
   WireRecord args;
+  // stop
+  bool keepChildren{false};
 };
 
 AgentExecutor::AgentExecutor(zigzag::vortex::mesh::MeshActorRuntime &runtime,
@@ -460,6 +465,7 @@ bool AgentExecutor::prepare(State &state, WorkerContext &context,
     ensure(kFieldStats, WireValue::record({}));
     ensure(kFieldOrdinal, WireValue::integer(0));
     ensure(kFieldConsumed, WireValue::boolean(false));
+    ensure(kFieldKeepChildren, WireValue::boolean(false));
     if (!fieldNameCell(arena, vd, ac, kFieldTurn)) {
       setField(arena, vd, ac, kFieldTurn, std::nullopt);
     }
@@ -599,8 +605,9 @@ AgentExecutor::fatal(State &state, std::string_view cause) {
   return std::unexpected(ActorError::ExecutionFailed);
 }
 
-void AgentExecutor::stageChildStopping(State &state, std::string_view cause) {
-  if (!state.parentPid) return;
+void AgentExecutor::stageChildStopping(State &state, std::string_view cause,
+                                       std::uint64_t position) {
+  if (!state.parentPid && !state.adopted) return;
   const std::uint64_t turn =
       state.prepared && state.context ? counter(state, kFieldTurnCount) : 0;
   Envelope envelope;
@@ -610,7 +617,11 @@ void AgentExecutor::stageChildStopping(State &state, std::string_view cause) {
   envelope.fields.set(std::string(kChildField), WireValue::text(state.name));
   envelope.fields.set(std::string(kCauseField),
                       WireValue::text(std::string(cause)));
-  std::uint64_t position = 0;
+  if (!state.parentPid) {
+    // The launcher hosts the space; there is no actor to send to.
+    if (hostSink_) hostSink_(envelope);
+    return;
+  }
   if (state.prefix.empty()) state.prefix = senderPrefix(state.name);
   sendEnvelope(state, turn, position, *state.parentPid, std::move(envelope));
 }
@@ -703,8 +714,16 @@ AgentExecutor::handleSend(State &state, const ActorExecution &execution,
     return std::string{};
   }
   const Envelope &envelope = *decoded;
-  if (envelope.kind != kKindEvent && envelope.kind != kKindStop) {
+  const bool isTell =
+      envelope.kind == kKindTell || envelope.kind == kKindUntell;
+  if (envelope.kind != kKindEvent && envelope.kind != kKindStop && !isTell) {
     bumpStat(state, kStatUnsupported);
+    return std::string{};
+  }
+  // An ordinary event may not impersonate the internal event a tell becomes.
+  if (envelope.kind == kKindEvent && !envelope.type.empty() &&
+      envelope.type.front() == kInternalEventMark) {
+    bumpStat(state, kStatBadTell);
     return std::string{};
   }
 
@@ -728,6 +747,31 @@ AgentExecutor::handleSend(State &state, const ActorExecution &execution,
   }
 
   if (envelope.kind == kKindStop) return handleStop(state, execution, context);
+
+  if (isTell) {
+    // The dispatcher runs compiled code on the rewritten type (see
+    // `kTellEventPrefix`). `from` is the sender's name, which becomes the
+    // source of the fact.
+    Envelope internal = envelope;
+    internal.kind     = std::string(kKindEvent);
+    internal.type =
+        std::string(envelope.kind == kKindTell ? kTellEventPrefix
+                                               : kUntellEventPrefix) +
+        envelope.type;
+    TurnSpec tell;
+    tell.entry = state.agent.dispatchEntry;
+    tell.event = &internal;
+    tell.space = std::string(kSpaceInner);
+    runTurn(state, execution.cursor, execution.grant, context, tell);
+    return std::string{};
+  }
+
+  // The parent left and kept this agent: it now belongs to the launcher. Done
+  // before the turn so the handler for `Orphaned` already sees the new parent.
+  if (!envelope.relaySpace && envelope.type == kEventOrphaned &&
+      state.parentPid && message.source == state.parentPid) {
+    adoptByLauncher(state);
+  }
 
   const bool relayed = envelope.relaySpace.has_value();
   if (relayed && *envelope.relaySpace != kSpaceInner) {
@@ -767,8 +811,81 @@ AgentExecutor::handleStop(State &state, const ActorExecution &execution,
     bumpStat(state, kStatStopRefused);
     return std::string{};
   }
-  orderlyStop(state, execution.cursor, execution.grant, context, kCauseStop);
+  const auto flag = [](const Envelope &e, std::string_view name) {
+    const auto *v = e.fields.find(name);
+    const auto *b = v ? std::get_if<bool>(&v->data) : nullptr;
+    return b != nullptr && *b;
+  };
+  bool keep     = false;
+  bool announce = true;
+  if (const auto decoded = decodeEnvelope(execution.message->value)) {
+    keep     = flag(*decoded, kWireStopKeep);
+    announce = !flag(*decoded, kWireStopParentStopping);
+  }
+  orderlyStop(state, execution.cursor, execution.grant, context, kCauseStop,
+              keep, announce);
   return std::string{};
+}
+
+void AgentExecutor::adoptByLauncher(State &state) {
+  auto &arena      = state.context->arena;
+  const auto &vd   = state.vd;
+  const auto ac    = state.agent.agentCell;
+  const auto named = [&](CellRef cell) {
+    return text(arena, cell) == state.parentName;
+  };
+  if (const auto peers = fieldValue(arena, vd, ac, kFieldPeers)) {
+    removeFromRank(arena, *peers, vd.vars, named);
+  }
+  (void)runtime_.forgetSender(state.pid, senderPrefix(state.parentName));
+  state.parentName.clear();
+  state.parentPid.reset();
+  state.adopted = true;
+  if (const auto parent = fieldValue(arena, vd, ac, kFieldParent)) {
+    const std::array spans{arena.intern(std::string_view{})};
+    zigzag::expectWritten(arena.setContent(*parent, spans));
+  }
+  WireRecord outer;
+  outer.type = std::string(kSpaceRecordType);
+  outer.set(std::string(kSpaceHost), WireValue::text(std::string{}));
+  outer.set(std::string(kSpaceName), WireValue::text(std::string(kSpaceOuter)));
+  setField(arena, vd, ac, kFieldOuter,
+           writeValue(arena, vd, WireValue::record(std::move(outer))));
+  GLEDITOR_LOG_DEBUG(kLog, "{} is adopted by the launcher", state.name);
+}
+
+void AgentExecutor::releaseChildren(State &state, std::uint64_t &position,
+                                    bool keepChildren) {
+  const auto &arena = state.context->arena;
+  const auto children =
+      zigzag::rankAfter(arena, state.agent.agentCell, state.dims.holon) |
+      std::views::transform([&](CellRef c) { return text(arena, c); }) |
+      std::ranges::to<std::vector>();
+  const std::uint64_t turn = counter(state, kFieldTurnCount);
+  if (state.prefix.empty()) state.prefix = senderPrefix(state.name);
+  for (const auto &child : children) {
+    const auto pid = peerPid(state, child);
+    if (!pid) {
+      bumpStat(state, kStatUnroutable);
+      continue;
+    }
+    Envelope envelope;
+    envelope.from = state.name;
+    if (keepChildren) {
+      envelope.kind = std::string(kKindEvent);
+      envelope.type = std::string(kEventOrphaned);
+      envelope.fields.set(std::string(kOrphanedFormer),
+                          WireValue::text(state.name));
+    } else {
+      envelope.kind = std::string(kKindStop);
+      envelope.type = std::string(kStopType);
+      envelope.fields.set(std::string(kWireStopKeep),
+                          WireValue::boolean(false));
+      envelope.fields.set(std::string(kWireStopParentStopping),
+                          WireValue::boolean(true));
+    }
+    sendEnvelope(state, turn, position, *pid, std::move(envelope));
+  }
 }
 
 // -- Host events and the orderly stop (sections 4.5, 5.5)
@@ -809,20 +926,28 @@ void AgentExecutor::settle(State &state, CellRef cursor,
   const auto flag =
       fieldValue(arena, state.vd, state.agent.agentCell, kFieldTerminating);
   if (flag && arena.asBool(*flag).value_or(false)) {
-    orderlyStop(state, cursor, grant, context, kCauseTerminate);
+    const auto keep =
+        fieldValue(arena, state.vd, state.agent.agentCell, kFieldKeepChildren);
+    orderlyStop(state, cursor, grant, context, kCauseTerminate,
+                keep && arena.asBool(*keep).value_or(false));
   }
 }
 
 void AgentExecutor::orderlyStop(State &state, CellRef cursor,
                                 const ActorGrant &grant, WorkerContext &context,
-                                std::string_view cause) {
+                                std::string_view cause, bool keepChildren,
+                                bool announce) {
   GLEDITOR_LOG_DEBUG(kLog, "agent {} stops: {}", state.name, cause);
   // Whatever was waiting is moot once the agent is on its way out.
   state.hostEvents.clear();
   deliverHost(state, cursor, grant, context,
               HostEvent{std::string(kEventDestroy), {}});
   state.hostEvents.clear();
-  stageChildStopping(state, cause);
+  // Lease end and init failure carry no statement to choose, so they reap
+  // (the default of `keepChildren`).
+  std::uint64_t position = 0;
+  if (state.context) releaseChildren(state, position, keepChildren);
+  if (announce) stageChildStopping(state, cause, position);
   flushStats(state);
   // stop() frees the slot and tells monitors; erasure waits for the executor
   // to return and the deliveries to drain.
@@ -1065,6 +1190,31 @@ AgentExecutor::collectOutbox(State &state, WorkerContext &context) {
         continue;
       }
       item.childName = *child;
+      if (const auto keep = read(entry, kOutboxStopKeep)) {
+        if (const auto *flag = std::get_if<bool>(&keep->data)) {
+          item.keepChildren = *flag;
+        }
+      }
+    } else if (item.kind == kKindTell || item.kind == kKindUntell) {
+      const auto fact = read(entry, kOutboxFact);
+      const auto *record =
+          fact ? std::get_if<WireRecord>(&fact->data) : nullptr;
+      const auto targets = read(entry, kOutboxFor);
+      const auto *list =
+          targets ? std::get_if<WireList>(&targets->data) : nullptr;
+      if (!record || record->type.empty() || !list) {
+        bumpStat(state, kStatMalformed);
+        continue;
+      }
+      item.envelope.kind   = item.kind;
+      item.envelope.type   = record->type;
+      item.envelope.fields = *record;
+      item.envelope.fields.type.clear();
+      for (const auto &element : *list) {
+        if (const auto *name = std::get_if<std::string>(&element.data)) {
+          item.forNames.push_back(*name);
+        }
+      }
     } else {
       bumpStat(state, kStatUnsupported);
       continue;
@@ -1093,6 +1243,11 @@ void AgentExecutor::drain(State &state, WorkerContext &context,
     }
   }
   for (const auto &item : items) {
+    if (item.kind == kKindTell || item.kind == kKindUntell) {
+      routeTell(state, turn, position, item);
+    }
+  }
+  for (const auto &item : items) {
     if (item.kind == kKindStop) sendStop(state, turn, position, item);
   }
   if (spec.relayed) relay(state, context, turn, position, *spec.relayed);
@@ -1109,7 +1264,25 @@ void AgentExecutor::sendStop(State &state, std::uint64_t turn,
   envelope.kind = std::string(kKindStop);
   envelope.type = std::string(kStopType);
   envelope.from = state.name;
+  envelope.fields.set(std::string(kWireStopKeep),
+                      WireValue::boolean(item.keepChildren));
   sendEnvelope(state, turn, position, *pid, std::move(envelope));
+}
+
+void AgentExecutor::routeTell(State &state, std::uint64_t turn,
+                              std::uint64_t &position, const OutboxItem &item) {
+  // Only peers are addressable: a name is a pid only where `$peers` says so
+  // (the parent and the children), the same rule `emit ... for` follows.
+  for (const auto &name : item.forNames) {
+    const auto pid = peerPid(state, name);
+    if (!pid) {
+      bumpStat(state, kStatUnroutable);
+      continue;
+    }
+    Envelope envelope = item.envelope;
+    envelope.from     = state.name;
+    sendEnvelope(state, turn, position, *pid, std::move(envelope));
+  }
 }
 
 void AgentExecutor::spawnChild(State &state, WorkerContext &context,

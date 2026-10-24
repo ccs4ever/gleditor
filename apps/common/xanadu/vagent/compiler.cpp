@@ -228,6 +228,11 @@ template <typename F> void forEachChild(const Expr &e, F &&f) {
           for (const auto &a : n.goal.args) opt(a.expr);
         } else if constexpr (std::is_same_v<T, EBeliefChange>) {
           for (const auto &a : n.fact.args) opt(a.expr);
+        } else if constexpr (std::is_same_v<T, ETell>) {
+          opt(n.to);
+          for (const auto &a : n.fact.args) opt(a.expr);
+        } else if constexpr (std::is_same_v<T, EStop>) {
+          opt(n.target);
         }
       },
       e.node);
@@ -676,6 +681,20 @@ private:
   Ty forBelieves(const EFor &f, CellRef out);
   Ty beliefChange(EBeliefChange::Kind kind, const Term &t, CellRef out);
   void emitBeliefBind(HandlerInfo &h);
+
+  // -- communication and stopping (§4.5, §7.1) --------------------------------
+  Ty tellExpr(const ETell &t, CellRef out, SourceLocation loc);
+  Ty stopExpr(const EStop &s, CellRef out, SourceLocation loc);
+  Ty terminateExpr(const ETerminate &t, CellRef out);
+  /// The receiver half of `tell`/`untell`, reached from the dispatcher.
+  struct TellSeq {
+    const std::string *pred{nullptr};
+    const PredInfo *info{nullptr};
+    bool untell{false};
+    CellRef label{noCell};
+  };
+  std::vector<TellSeq> emitTellTests(CellRef ty, CellRef eq);
+  void emitTellBodies(const std::vector<TellSeq> &seqs, CellRef end);
 };
 
 // ---------------------------------------------------------------------------
@@ -1140,6 +1159,12 @@ Ty Gen::expr(const Expr &e, CellRef out) {
           return findallExpr(n, out, loc);
         } else if constexpr (std::is_same_v<T, EBeliefChange>) {
           return beliefChange(n.kind, n.fact, out);
+        } else if constexpr (std::is_same_v<T, ETell>) {
+          return tellExpr(n, out, loc);
+        } else if constexpr (std::is_same_v<T, EStop>) {
+          return stopExpr(n, out, loc);
+        } else if constexpr (std::is_same_v<T, ETerminate>) {
+          return terminateExpr(n, out);
         } else {
           unsupported("this construct", loc);
         }
@@ -2424,6 +2449,169 @@ void Gen::emitBeliefBind(HandlerInfo &h) {
 }
 
 // ---------------------------------------------------------------------------
+// tell, untell, stop, terminate (design §4.5, §7.1, §8.6)
+//
+// `tell`/`untell` stage one outbox entry carrying the fact and the recipients.
+// The receiver half is compiled code reached from the dispatcher: the adapter
+// mints the received envelope as an event whose type is `$tell <pred>` /
+// `$untell <pred>` (runtime_abi.hpp), the dispatcher branches on it as it does
+// on a user event type, and the routine below adds or removes the sender as a
+// source through the `rtBSet_`/`rtBDrop_` that `believe` and `forget` use. A
+// `+`/`-` handler therefore fires only on a change, and a keyed predicate
+// replaces the sender's earlier fact. It is compiled code, not adapter C++,
+// because beliefs are cells of the agent's own arena and only compiled code
+// can raise the belief events the settle loop drains.
+// ---------------------------------------------------------------------------
+
+Ty Gen::tellExpr(const ETell &t, CellRef out, SourceLocation loc) {
+  (void)predOf(t.fact);
+  const CellRef to = reg();
+  const Ty tt      = valueInto(*t.to, to);
+  CellRef forList  = to;
+  if (tt.k == Ty::K::Str) {
+    const CellRef cell = reg();
+    forList            = reg();
+    alloc(forList);
+    mov(D(forList), S(cStr(std::string(kListContent))));
+    alloc(cell);
+    mov(D(cell), S(to));
+    callListPush(forList, cell);
+  } else if (tt.k != Ty::K::List) {
+    bail(CompileError::TypeMismatch, "tell needs an agent or a list", loc);
+  }
+  const TermPlan pl = planTerm(t.fact, false);
+  const CellRef rec = reg();
+  alloc(rec);
+  mov(D(rec), S(cStr(t.fact.name)));
+  markRecord(rec);
+  for (std::size_t i = 0; i < pl.args.size(); ++i) {
+    const ArgPlan &ap = pl.args[i];
+    CellRef vc;
+    if (ap.composite) {
+      const CellRef cp = reg();
+      callCopy(ap.reg, cp);
+      callAppendField(rec, std::to_string(i), cp, vc);
+    } else {
+      callAppendField(rec, std::to_string(i), std::nullopt, vc);
+      mov(D(vc), S(ap.reg));
+    }
+  }
+  const CellRef entry = callOutbox(t.untell ? kKindUntell : kKindTell);
+  CellRef vc;
+  callAppendField(entry, std::string(kOutboxFact), rec, vc);
+  callAppendField(entry, std::string(kOutboxFor), forList, vc);
+  movC(out, unit_c_);
+  return tyOf(Ty::K::Unit);
+}
+
+Ty Gen::stopExpr(const EStop &s, CellRef out, SourceLocation loc) {
+  const CellRef who = reg();
+  const Ty t        = valueInto(*s.target, who);
+  if (t.k != Ty::K::Str) {
+    bail(CompileError::TypeMismatch, "stop needs an agent", loc);
+  }
+  const CellRef entry = callOutbox(kKindStop);
+  CellRef vc;
+  callAppendField(entry, std::string(kOutboxStopChild), std::nullopt, vc);
+  mov(D(vc), S(who));
+  callAppendField(entry, std::string(kOutboxStopKeep), std::nullopt, vc);
+  mov(D(vc), S(cBool(s.keepChildren)));
+  movC(out, unit_c_);
+  return tyOf(Ty::K::Unit);
+}
+
+Ty Gen::terminateExpr(const ETerminate &t, CellRef out) {
+  // The orderly stop is the adapter's, after this turn commits: a turn that
+  // fails after `terminate` is undone, flag included.
+  mov(S(fields_.at(std::string(kFieldTerminating)).valueCell), S(true_));
+  mov(S(fields_.at(std::string(kFieldKeepChildren)).valueCell),
+      S(cBool(t.keepChildren)));
+  movC(out, unit_c_);
+  return tyOf(Ty::K::Unit);
+}
+
+/// One test per predicate and verb, emitted beside the dispatcher's own tests.
+std::vector<Gen::TellSeq> Gen::emitTellTests(CellRef ty, CellRef eq) {
+  std::vector<TellSeq> seqs;
+  for (auto &[name, info] : preds_) {
+    for (const bool untell : {false, true}) {
+      TellSeq s{&name, &info, untell, newLabel()};
+      const std::string type =
+          std::string(untell ? kUntellEventPrefix : kTellEventPrefix) + name;
+      emit(OpcodeKind::Eq, "tell?", {S(ty), S(cStr(type))}, {eq});
+      branch(S(eq), s.label);
+      seqs.push_back(s);
+    }
+  }
+  return seqs;
+}
+
+void Gen::emitTellBodies(const std::vector<TellSeq> &seqs, CellRef end) {
+  for (const TellSeq &s : seqs) {
+    place(s.label);
+    const PredInfo &p = *s.info;
+    // The fact is rebuilt from the event's positional fields; a field the
+    // sender left out makes the message malformed and it is ignored.
+    const CellRef tr = reg();
+    alloc(tr);
+    mov(D(tr), S(cStr(*s.pred)));
+    CellRef prev = noCell;
+    for (std::size_t i = 0; i < p.argTys.size(); ++i) {
+      mov(S(a0_), S(curEvent_));
+      movC(a1_, cStr(std::to_string(i)));
+      callLabel(rtFind_);
+      const CellRef vp = reg(), cell = reg();
+      mov(S(vp), S(r0_));
+      branchIfZero(vp, end);
+      if (p.argTys[i].composite()) {
+        callCopy(vp, cell);
+      } else {
+        alloc(cell);
+        mov(D(cell), D(vp));
+      }
+      if (prev == noCell) {
+        linkOp(D(tr), core_.dims().grab, D(cell));
+      } else {
+        linkOp(D(prev), core_.dims().step, D(cell));
+      }
+      prev = cell;
+    }
+    const CellRef who = reg(), sp = reg();
+    mov(S(a0_), S(curEvent_));
+    movC(a1_, cStr(std::string(kEventImplicitSource)));
+    callLabel(rtFind_);
+    mov(S(sp), S(r0_));
+    branchIfZero(sp, end);
+    mov(S(who), D(sp));
+    if (!s.untell) {
+      movC(a0_, opref(p.cell));
+      mov(S(a1_), S(tr));
+      mov(S(a2_), S(who));
+      movC(a3_, p.nkeys > 0 ? one_ : zero_);
+      movC(a4_, cInt(static_cast<std::int64_t>(p.nkeys)));
+      callLabel(rtBSet_);
+    } else {
+      // Walk a snapshot: dropping the last source unlinks the clause.
+      const CellRef snap = snapshotClauses(p);
+      listWalk(snap, [&](CellRef e) {
+        const CellRef cl = reg(), ct = reg(), same = reg();
+        const CellRef skip = newLabel();
+        mov(S(cl), D(e));
+        mov(S(ct), S(rd(D(cl), core_.dims().grab)));
+        emit(OpcodeKind::Unify, "same", {D(tr), D(ct)}, {same});
+        requireTrue(same, skip);
+        movC(a0_, opref(p.cell));
+        mov(S(a1_), S(cl));
+        mov(S(a2_), S(who));
+        callLabel(rtBDrop_);
+        place(skip);
+      });
+    }
+    jump(end);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Declarations
 // ---------------------------------------------------------------------------
 
@@ -2488,6 +2676,7 @@ void Gen::mintAgentCell() {
   reserved(kFieldStats, bare);
   reserved(kFieldOrdinal, num);
   reserved(kFieldConsumed, flag);
+  reserved(kFieldKeepChildren, flag);
   // Unit-typed reserved fields are read dynamically through their name cell.
   fields_.at(std::string(kFieldTurn)).ty = tyOf(Ty::K::Record);
 }
@@ -2745,12 +2934,14 @@ void Gen::emitDispatch(CellRef entryLabel) {
     branch(S(eq), seq);
     seqs.emplace_back(t, seq);
   }
+  const auto tellSeqs = emitTellTests(ty, eq);
   jump(end);
   for (const auto &[t, seq] : seqs) {
     place(seq);
     for (const HandlerInfo *h : mergedFor(t)) emitHandlerRun(*h, true, end);
     jump(end);
   }
+  emitTellBodies(tellSeqs, end);
   place(end);
   callLabel(rtSettle_);
   ret();

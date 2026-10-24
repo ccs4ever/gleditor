@@ -107,6 +107,9 @@ inline constexpr std::string_view kFieldStats       = "$stats";
 inline constexpr std::string_view kFieldOrdinal = "$ordinal";
 /// Set by `consume` inside a handler; the dispatcher clears it per event.
 inline constexpr std::string_view kFieldConsumed = "$consumed";
+/// Set with `$terminating` by `terminate keeping children` (§4.5): the orderly
+/// stop then stages `Orphaned` to the children instead of `stop`.
+inline constexpr std::string_view kFieldKeepChildren = "$keep_children";
 
 /// `$turn`'s value is a record with these fields: the turn time (Int,
 /// milliseconds since the epoch) and, for a message turn or host delivery,
@@ -177,6 +180,31 @@ inline constexpr std::string_view kOutboxChildName = "name";
 inline constexpr std::string_view kOutboxArgs      = "args";
 /// `stop` entries: the child's name (text); the parent alone may stop a child.
 inline constexpr std::string_view kOutboxStopChild = "child";
+/// `stop` entries: a Bool, true for `keeping children`. The stopped agent
+/// reads it from the envelope's `kWireStopKeep` field.
+inline constexpr std::string_view kOutboxStopKeep = "keep";
+/// `tell`/`untell` entries (§7.1): the fact as a record whose type is the
+/// predicate's name and whose fields are named "0", "1", ... by argument
+/// position, and the recipients' names as a list (`kOutboxFor`). The envelope
+/// carries the fact as `type` plus those fields.
+inline constexpr std::string_view kOutboxFact = "fact";
+/// The `Stop` envelope's flag field.
+inline constexpr std::string_view kWireStopKeep = "keep";
+/// Set on the `Stop` a stopping parent sends to reap a child: the parent will
+/// not run again, so the child must not announce `ChildStopping` to it (an
+/// announcement to a stopped actor is never answered and would keep the child
+/// from being erased).
+inline constexpr std::string_view kWireStopParentStopping = "parent_stopping";
+/// A received `tell`/`untell` reaches the compiled dispatcher as an event cell
+/// whose type is this prefix plus the predicate's name. The `$` keeps it out
+/// of any user event's namespace; the adapter refuses an ordinary `event`
+/// envelope that begins with it.
+inline constexpr std::string_view kTellEventPrefix   = "$tell ";
+inline constexpr std::string_view kUntellEventPrefix = "$untell ";
+inline constexpr char kInternalEventMark             = '$';
+/// The event a parent stages to each child it keeps (§4.5), and its field.
+inline constexpr std::string_view kEventOrphaned  = "Orphaned";
+inline constexpr std::string_view kOrphanedFormer = "former_parent";
 
 // -- Wire (§5.5, §7.3)
 // --------------------------------------------------------- An `ActorSend`'s

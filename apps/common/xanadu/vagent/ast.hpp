@@ -250,8 +250,11 @@ struct EDrop {
 };
 struct EStop {
   ExprPtr target;
+  bool keepChildren{false}; ///< `keeping children` (§4.5)
 };
-struct ETerminate {};
+struct ETerminate {
+  bool keepChildren{false};
+};
 /// `install S(args)`, `uninstall S`, `mount B(args)`, `unmount B`.
 struct EInstall {
   enum class Kind : std::uint8_t {

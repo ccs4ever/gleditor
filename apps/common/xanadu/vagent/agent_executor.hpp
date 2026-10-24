@@ -122,6 +122,9 @@ inline constexpr std::string_view kStatSendFailed     = "send_failed";
 inline constexpr std::string_view kStatUnroutable     = "unroutable";
 inline constexpr std::string_view kStatDeliveryFailed = "delivery_failed";
 inline constexpr std::string_view kStatChildDown      = "child_down";
+/// A `tell` or `untell` for a predicate the receiver did not declare, or a
+/// stray internal-event envelope, is counted here and dropped.
+inline constexpr std::string_view kStatBadTell = "bad_tell";
 /// A `stop` from anyone but the parent, refused.
 inline constexpr std::string_view kStatStopRefused = "stop_refused";
 
@@ -278,7 +281,18 @@ private:
   void orderlyStop(State &state, zigzag::CellRef cursor,
                    const zigzag::vortex::mesh::ActorGrant &grant,
                    zigzag::vortex::WorkerContext &context,
-                   std::string_view cause);
+                   std::string_view cause, bool keepChildren = false,
+                   bool announce = true);
+  /// After `on Destroy`: stage `stop` to every child on `d.holon` (reap), or
+  /// `Orphaned{former_parent}` (keep). Shares `position` with the
+  /// `ChildStopping` that follows so request ids stay distinct.
+  void releaseChildren(State &state, std::uint64_t &position,
+                       bool keepChildren);
+  /// A child told it was orphaned becomes the launcher's: no parent actor, the
+  /// launcher's space as `$outer` (§4.5).
+  void adoptByLauncher(State &state);
+  void routeTell(State &state, std::uint64_t turn, std::uint64_t &position,
+                 const OutboxItem &item);
   std::expected<std::string, zigzag::vortex::mesh::ActorError>
   handleStop(State &state,
              const zigzag::vortex::mesh::ActorExecution &execution,
@@ -314,7 +328,8 @@ private:
                     const identity::ActorPid &to, Envelope envelope);
   void onDown(State &state, zigzag::vortex::WorkerContext &context,
               const zigzag::vortex::mesh::ActorMessage &message);
-  void stageChildStopping(State &state, std::string_view cause);
+  void stageChildStopping(State &state, std::string_view cause,
+                          std::uint64_t position = 0);
   std::expected<std::string, zigzag::vortex::mesh::ActorError>
   fatal(State &state, std::string_view cause);
 
