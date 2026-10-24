@@ -979,4 +979,99 @@ TEST(VagentCheckerDeclarations, SkillImplementsUnknownCapacity) {
   neg("skill S implements Nope {\n}\n", C::UnknownCapacity, 1);
 }
 
+// -- questions, delegation and awaiting (§6.6, §7.1, §8.6)
+// ----------------------------------------------
+
+TEST(VagentCheckerDelegation, AskArityIsCheckedAgainstTheQuestion) {
+  neg("agent A {\n  plan p for Work {\n    let d := ask self.depth() within "
+      "1s\n  }\n}\n",
+      C::ArityMismatch, 3);
+}
+TEST(VagentCheckerDelegation, AskArgumentTypesAreCheckedAgainstTheQuestion) {
+  neg("agent A {\n  plan p for Work {\n    let d := ask self.depth(5) within "
+      "1s\n  }\n}\n",
+      C::TypeMismatch, 3);
+}
+TEST(VagentCheckerDelegation, TheAskedValueMustBeAnAgent) {
+  neg("agent A {\n  plan p for Work {\n    let d := ask job.depth(job) within "
+      "1s\n  }\n}\n",
+      C::TypeMismatch, 3);
+}
+TEST(VagentCheckerDelegation, AskWithinIsADuration) {
+  neg("agent A {\n  plan p for Work {\n    let d := ask self.depth(job) within "
+      "5\n  }\n}\n",
+      C::TypeMismatch, 3);
+}
+TEST(VagentCheckerDelegation, AskIsASuspensionPointOfAPlanOnly) {
+  neg("agent A {\n  on Ping {\n    let d := ask self.depth(\"a\") within "
+      "1s\n  }\n}\n",
+      C::SuspensionOutsidePlan, 3);
+}
+TEST(VagentCheckerDelegation, AchieveByNamesAnAgent) {
+  neg("agent A {\n  plan p for Work {\n    achieve Work(job, count) by job "
+      "within 1s\n  }\n}\n",
+      C::TypeMismatch, 3);
+}
+TEST(VagentCheckerDelegation, AchieveWithinIsADuration) {
+  neg("agent A {\n  plan p for Work {\n    achieve Work(job, count) by self "
+      "within 3\n  }\n}\n",
+      C::TypeMismatch, 3);
+}
+TEST(VagentCheckerDelegation, AchieveArgumentsAreCheckedAgainstTheGoal) {
+  neg("agent A {\n  plan p for Work {\n    achieve Work(job) by self within "
+      "1s\n  }\n}\n",
+      C::ArityMismatch, 3);
+}
+TEST(VagentCheckerDelegation, AwaitOfAnUnknownEvent) {
+  neg("agent A {\n  plan p for Work {\n    await Nope as e within 1s\n  "
+      "}\n}\n",
+      C::UnknownType, 3);
+}
+TEST(VagentCheckerDelegation, AwaitWithinIsADuration) {
+  neg("agent A {\n  plan p for Work {\n    await seen(job, ?k) within 3\n  "
+      "}\n}\n",
+      C::TypeMismatch, 3);
+}
+TEST(VagentCheckerDelegation, AwaitEventBindsItsEventInTheGuard) {
+  expectClean(std::string(prelude) + R"vagent(
+agent A {
+  plan p for Work {
+    await Pong as e [e.extra > 1.0] within 2s else fail
+    emit Ping{n: 1, tag: job}
+  }
+}
+)vagent",
+              "await E as e [g]");
+}
+TEST(VagentCheckerDelegation, AnAnswerMayNotAsk) {
+  neg("agent A {\n  answer depth(item: Str): Int {\n    ask self.depth(item) "
+      "within 1s\n  }\n}\n",
+      C::ImpureAnswer, 3);
+}
+TEST(VagentCheckerDelegation, AnAnswerMayNotCallAnEffect) {
+  neg("agent A {\n  uses Motor\n  answer depth(item: Str): Int {\n    "
+      "spin(1.0)\n    1\n  }\n}\n",
+      C::ImpureAnswer, 4);
+}
+TEST(VagentCheckerDelegation, AnAnswerMayNotBelieveOrTell) {
+  neg("agent A {\n  answer depth(item: Str): Int {\n    believe seen(item, "
+      "1)\n    1\n  }\n}\n",
+      C::ImpureAnswer, 3);
+}
+TEST(VagentCheckerDelegation, AnAnswerIsReadOnlyTwoCallsDown) {
+  neg("agent A {\n  var total: Int := 0\n  def bump(): Int {\n    total := "
+      "total + 1\n    total\n  }\n  def wrapper(): Int {\n    bump()\n  }\n  "
+      "answer depth(item: Str): Int {\n    wrapper()\n  }\n}\n",
+      C::ImpureAnswer, 11);
+}
+TEST(VagentCheckerDelegation, AnAnswerMayReadFieldsAndCallPureDefs) {
+  expectClean(std::string(prelude) + R"vagent(
+agent A(units: Int) {
+  def twice(n: Int): Int { n + n }
+  answer depth(item: Str): Int { twice(units) }
+}
+)vagent",
+              "a read-only answer");
+}
+
 } // namespace
