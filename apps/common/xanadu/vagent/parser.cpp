@@ -229,6 +229,15 @@ std::string Parser::expectWord(std::string_view what) {
   return std::string(advance().text);
 }
 
+// `keeping` and `children` stay ordinary identifiers (§8.1) so they remain
+// usable as names; they mean something only here, on the statement's own line.
+bool Parser::parseKeepingChildren() {
+  if (!atWord("keeping") || breaksLine()) return false;
+  advance();
+  expectContextual("children");
+  return true;
+}
+
 void Parser::expectContextual(std::string_view text) {
   if (!atWord(text)) {
     failHere(ParseErrorCode::UnexpectedToken,
@@ -1515,10 +1524,15 @@ ExprPtr Parser::parseAction() {
     return mk(EDrop{.target = parsePostfix()}, loc);
   case TokenKind::Stop:
     advance();
-    return mk(EStop{.target = parsePostfix()}, loc);
+    {
+      EStop s;
+      s.target       = parsePostfix();
+      s.keepChildren = parseKeepingChildren();
+      return mk(std::move(s), loc);
+    }
   case TokenKind::Terminate:
     advance();
-    return mk(ETerminate{}, loc);
+    return mk(ETerminate{.keepChildren = parseKeepingChildren()}, loc);
   case TokenKind::Install:
   case TokenKind::Uninstall:
   case TokenKind::Mount:

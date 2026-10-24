@@ -85,6 +85,8 @@ private:
   [[nodiscard]] std::string expectName(std::string_view what);
   [[nodiscard]] std::string expectWord(std::string_view what);
   void expectContextual(std::string_view text);
+  /// Optional trailing `keeping children` of `stop` and `terminate`.
+  [[nodiscard]] bool parseKeepingChildren();
   [[noreturn]] void fail(ParseErrorCode code, std::string message,
                          SourceLocation loc) const;
   [[noreturn]] void failHere(ParseErrorCode code, std::string message) const;
