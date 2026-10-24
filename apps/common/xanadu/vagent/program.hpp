@@ -40,6 +40,11 @@ public:
   instantiate(zigzag::vortex::WorkerContext &context,
               std::string_view agentType) override;
 
+  /// `vagent.belief_event_depth` for agents instantiated afterwards.
+  CompiledProgram *setBeliefEventDepth(std::size_t rounds) noexcept {
+    beliefEventDepth_ = rounds;
+    return this;
+  }
   [[nodiscard]] const Unit &unit() const noexcept { return unit_; }
   [[nodiscard]] const CheckedUnit &checked() const noexcept { return checked_; }
   [[nodiscard]] bool declares(std::string_view agentType) const;
@@ -52,6 +57,7 @@ private:
   Unit unit_;
   CheckedUnit checked_;
   std::string ref_;
+  std::size_t beliefEventDepth_{kDefaultBeliefEventDepth};
 };
 
 /// Everything a single-process host needs to run agents: a mesh runtime that

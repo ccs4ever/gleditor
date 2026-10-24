@@ -184,6 +184,25 @@ TEST(VagentCli, RunPrintsTheEmissionsReachingTheLauncher) {
   fs::remove(path);
 }
 
+TEST(VagentCli, RunExecutesTheLiteralSection12_1) {
+  REQUIRE_VAGENT(bin);
+  const auto path = writeSource("vagent_cli_run_12_1.vagent", scatterGather);
+  const auto res =
+      runProcess(bin + " run " + path.string() +
+                 " --agent SearchCoordinator --arg partitions=3"
+                 " --send 'SearchQuery{query_id: \"q1\", pattern: \"x\"}'");
+  EXPECT_EQ(res.exitCode, 0) << res.output;
+  // Arrival order of the partitions is the mesh's, so test membership.
+  EXPECT_EQ(res.output.rfind("SearchCompleted {query_id: \"q1\", hits: [", 0),
+            0U)
+      << res.output;
+  for (const char *hit :
+       {"alpha-0", "beta-0", "alpha-1", "beta-1", "alpha-2", "beta-2"}) {
+    EXPECT_NE(res.output.find(hit), std::string::npos) << res.output;
+  }
+  fs::remove(path);
+}
+
 TEST(VagentCli, RunRefusesAnUnknownAgentAndMalformedArguments) {
   REQUIRE_VAGENT(bin);
   const auto path =

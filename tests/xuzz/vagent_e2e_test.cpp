@@ -136,7 +136,8 @@ protected:
     return value ? std::optional<WireValue>(std::move(*value)) : std::nullopt;
   }
 
-  std::int64_t intField(const xanadu::identity::ActorPid &pid, std::string_view name) {
+  std::int64_t intField(const xanadu::identity::ActorPid &pid,
+                        std::string_view name) {
     const auto value = field(pid, name);
     const auto *i = value ? std::get_if<std::int64_t>(&value->data) : nullptr;
     EXPECT_NE(i, nullptr) << name;
@@ -154,9 +155,11 @@ TEST_F(VagentE2E, FieldsHandlerAndEmitToTheLauncher) {
   EXPECT_EQ(intField(*pid, "total"), 10);
   EXPECT_TRUE(host->emissions().empty());
 
-  ASSERT_TRUE(host->send(*pid, event("Bump", {{"amount", WireValue::integer(5)}})));
+  ASSERT_TRUE(
+      host->send(*pid, event("Bump", {{"amount", WireValue::integer(5)}})));
   host->pump();
-  ASSERT_TRUE(host->send(*pid, event("Bump", {{"amount", WireValue::integer(2)}})));
+  ASSERT_TRUE(
+      host->send(*pid, event("Bump", {{"amount", WireValue::integer(2)}})));
   host->pump();
   EXPECT_EQ(intField(*pid, "total"), 17);
 
@@ -264,11 +267,12 @@ TEST_F(VagentE2E, AFailingHandlerUndoesOnlyItsOwnTurn) {
   ASSERT_TRUE(host->send(*pid, event("Good", {})));
   host->pump();
   EXPECT_EQ(intField(*pid, "good"), 2);
-  EXPECT_EQ(host->executor().stat(*pid, kStatDropped), 1U);
+  // `fail` backtracks out of the handler alone; the turn itself survives, so
+  // nothing is counted as a lost message.
+  EXPECT_EQ(host->executor().stat(*pid, kStatDropped), 0U);
 }
 
-// The literal program of section 12.1. It needs beliefs (`believe`, `forget`,
-// `findall`, `not believes`), which task K lands; enable this test at merge.
+// The literal program of section 12.1, beliefs and all.
 constexpr const char *kSection12_1 = R"vagent(
 module demo:search
 import std:agent
@@ -317,7 +321,7 @@ agent SearchCoordinator(partitions: Int) {
 }
 )vagent";
 
-TEST_F(VagentE2E, DISABLED_LiteralSection12_1) {
+TEST_F(VagentE2E, LiteralSection12_1) {
   load(kSection12_1);
   constexpr std::int64_t kWorkers = 2;
   WireRecord args;

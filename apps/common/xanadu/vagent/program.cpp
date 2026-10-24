@@ -55,6 +55,7 @@ CompiledProgram::instantiate(zigzag::vortex::WorkerContext &context,
         std::format("unknown agent type '{}' in program", agentType));
   }
   Compiler compiler(context.core);
+  compiler.setBeliefEventDepth(beliefEventDepth_);
   auto compiled = compiler.compileAgent(unit_, agentType);
   if (!compiled) {
     return std::unexpected(std::format(
@@ -82,7 +83,7 @@ constexpr std::size_t kMacKeyBytes    = 32;
 // Arena and message ceilings for a local run; the runtime's own defaults
 // (128 actors, 128 queued messages) stay in force.
 constexpr std::uint32_t kLocalMaxCells      = 1U << 22;
-constexpr std::size_t kLocalMaxOutputBytes = 32768; // the runtime refuses more
+constexpr std::size_t kLocalMaxOutputBytes  = 32768; // the runtime refuses more
 constexpr std::size_t kLocalMaxSolutions    = 1U << 12;
 constexpr std::size_t kLocalMaxMailboxBytes = 1U << 20;
 constexpr std::chrono::hours kLocalGrantLife{24};
@@ -139,6 +140,7 @@ LocalHost::LocalHost(CompiledProgram program, Options options)
           std::string(kLocalNode), kLocalEpoch, AgentExecutor::withFloors())) {
   const auto owner = *identity::Fingerprint::fromString(kLocalOwner);
   const auto life  = options.clock.wall() + kLocalGrantLife;
+  program_.setBeliefEventDepth(options.settings.beliefEventDepth);
   runtime_->setAuthorizer(
       [this, instructions = options.maxInstructions,
        life](const identity::Fingerprint &, const ActorMessage &request)

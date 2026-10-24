@@ -127,7 +127,7 @@ private:
   }
   static bool wordChar(char c) {
     return std::isalnum(static_cast<unsigned char>(c)) || c == '_' ||
-           c == '.' || c == '-' || c == '+' || c == ':' || c == '/';
+           c == '.' || c == '-' || c == '+' || c == '/';
   }
   std::string_view bare() {
     const auto start = pos_;
