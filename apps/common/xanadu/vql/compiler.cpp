@@ -122,6 +122,8 @@ VQLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "CUT";
   case OpcodeKind::ChoiceDepth:
     return "CHOICE_DEPTH";
+  case OpcodeKind::Point:
+    return "POINT";
   default:
     return "UNKNOWN";
   }
