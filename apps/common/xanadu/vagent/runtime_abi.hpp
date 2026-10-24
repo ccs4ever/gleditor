@@ -33,6 +33,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <string_view>
 
 #include "common/xanadu/zigzag/arena_manifold.hpp"
@@ -113,9 +114,13 @@ inline constexpr std::string_view kFieldKeepChildren = "$keep_children";
 
 /// `$turn`'s value is a record with these fields: the turn time (Int,
 /// milliseconds since the epoch) and, for a message turn or host delivery,
-/// the event cell. A wake turn with no event leaves `event` absent.
-inline constexpr std::string_view kTurnTime  = "time";
-inline constexpr std::string_view kTurnEvent = "event";
+/// the event cell. A wake turn with no event leaves `event` absent. A wake
+/// turn for one intention also carries `intention` (Int, the scalar id of
+/// §5.6), and the `fail_step` recovery turn carries `cause` (Str) besides.
+inline constexpr std::string_view kTurnTime      = "time";
+inline constexpr std::string_view kTurnEvent     = "event";
+inline constexpr std::string_view kTurnIntention = "intention";
+inline constexpr std::string_view kTurnCause     = "cause";
 
 // -- Event cells (§5.5)
 // --------------------------------------------------------
@@ -170,6 +175,9 @@ inline constexpr std::string_view kKindStop    = "stop";
 inline constexpr std::string_view kKindTimer       = "timer";
 inline constexpr std::string_view kKindTimerCancel = "timer_cancel";
 inline constexpr std::string_view kKindLog         = "log";
+/// Native-skill calls and their cancellation (§5.3); see the effects block.
+inline constexpr std::string_view kKindEffect       = "effect";
+inline constexpr std::string_view kKindEffectCancel = "effect_cancel";
 
 /// `event` entries: the event cell (`event`, laid out as an event cell with
 /// declared fields only; the adapter stamps the implicit ones), the space as
@@ -213,8 +221,9 @@ inline constexpr std::string_view kOrphanedFormer = "former_parent";
 
 /// `timer` entries: the id (minted from `$next_id` when the handler ran, so
 /// `Schedules.after` can return it), the delay and period in milliseconds (the
-/// unit of a Duration literal and of `Time`; the period is 0 for a one-shot) and the event
-/// to deliver (`kOutboxEvent`). `timer_cancel` entries carry the id alone.
+/// unit of a Duration literal and of `Time`; the period is 0 for a one-shot)
+/// and the event to deliver (`kOutboxEvent`). `timer_cancel` entries carry the
+/// id alone.
 inline constexpr std::string_view kOutboxTimerId     = "id";
 inline constexpr std::string_view kOutboxTimerDelay  = "delay";
 inline constexpr std::string_view kOutboxTimerPeriod = "period";
@@ -235,6 +244,147 @@ inline constexpr std::string_view kTimerId     = "id";
 inline constexpr std::string_view kTimerDue    = "due";
 inline constexpr std::string_view kTimerPeriod = "period";
 inline constexpr std::string_view kTimerEvent  = "event";
+
+// -- Intentions, effects and the wake turn (§4.2, §5.3, §5.6, §6.5, §6.6)
+// ------------------------------------------------------------------------
+//
+// What the compiler implements against (iteration 4c), and what the adapter
+// does in return. Everything the adapter schedules is derived from cells, so
+// a resumed agent runs the same schedule.
+//
+// INTENTION CELLS. An intention is a cell on the agent's `d.intention` rank
+// (top level) or on the `d.subgoal` rank of its parent intention. Its fields
+// are the `kIntention*` names below, laid out as any field (§5.8). A field
+// the intention does not have is absent, or present with no value cell.
+// `id` is an Int scalar from `$next_id`; the adapter finds an intention by
+// it. `ready`, when present, is an Int: the `$turn_count` at which the
+// intention became ready.
+//
+// WAITING. `waiting` is a record cell with the `kWaiting*` fields. `kind` is a
+// `kWaitKind*` text, `key` names what is awaited (for an effect, the effect's
+// id), `deadline` is an absolute Int in milliseconds (§5.6) and is absent when
+// the wait has none. The adapter writes two more fields, both into the
+// record the compiler made, never replacing it:
+//  - `match`: for an effect, the outcome (`kEffectOutcomeRecord`).
+//  - `timed_out`: Bool true when the adapter found `deadline` elapsed and
+//    marked the intention ready (§6.6). The routine that resumes the
+//    statement fails it with cause "deadline" and, for a delegated `achieve`,
+//    stages the `cancel`; the adapter cancels an effect's binding itself.
+//
+// THE READY LIST AND THE WAKE TURN. After every turn, after `resume` and
+// after anything the adapter marks, the adapter lists the intentions that
+// have `ready`, oldest `ready` first, ties by walk order (each `d.intention`
+// cell, then its `d.subgoal` chain, depth first). For the first of them it
+// runs a wake turn: `$turn` is written with `time` and `intention` (its id),
+// the adapter unlinks that intention's `ready` field (so a routine that
+// needs another turn re-marks itself and a routine that fails hard cannot be
+// chosen forever), then runs `CompiledAgent::continueEntry` (§6.5
+// `continue(i)`) under the usual mark, fuel and base choice point. The
+// routine reads the id from `$turn.intention`, finds the intention, and runs
+// it to its next suspension point or its end. `vagent.ready_per_message`
+// bounds how many such turns run between two message turns. Until the
+// compiler provides `continueEntry`, no wake turn runs for an intention.
+//
+// HARD FAILURE IN AN INTENTION TURN (§4.2). The adapter undoes the turn, then
+// runs a second, short turn of `CompiledAgent::failStepEntry` with `$turn`
+// carrying `intention` and `cause` (one of "cycles", "fuel", "fail",
+// "unfinished"), the equivalent of `fail_step(id, cause)`. It records the
+// plan failure and marks the intention ready. If the recovery turn itself
+// fails, the adapter drops it and counts `kStatIntentionFailed`.
+//
+// EFFECTS. A call of a native skill's method stages one `kKindEffect` outbox
+// entry (fields `kOutboxEffect*`) and the calling intention then waits with
+// `waiting.kind = kWaitKindEffect`, `waiting.key = the effect's id`. The
+// adapter starts the effect at the drain (§4.2 step 9: effect cancels, then
+// effects whose entry or binding says `preempts`, then the others) and
+// returns at once. When the host reports the result the adapter, between
+// turns and never inside the binding's call:
+//  - for an intention-bound effect, writes `waiting.match` (an
+//    `kEffectOutcomeRecord`) and marks the intention ready; the routine reads
+//    `match`, and fails the statement with `match.cause` if `ok` is false;
+//  - for a handler-bound effect (no `intention` field), raises
+//    `EffectFailed{capacity, method, cause}` on failure and nothing on
+//    success;
+//  - drops a result whose effect was cancelled or whose intention is no
+//    longer waiting on that key, counted as `kStatEffectStale` (§6.6).
+// A `kKindEffectCancel` entry (field `id`) cancels an effect in flight. An
+// effect the adapter finds past `deadline` is cancelled and fails with cause
+// "deadline" as above. On `resume`, every intention waiting on an effect is
+// failed the same way with cause "migrated" (§4.5).
+
+// Intention cell fields (§5.6).
+inline constexpr std::string_view kIntentionId           = "id";
+inline constexpr std::string_view kIntentionKind         = "kind";
+inline constexpr std::string_view kIntentionGoal         = "goal";
+inline constexpr std::string_view kIntentionPlan         = "plan";
+inline constexpr std::string_view kIntentionTried        = "tried";
+inline constexpr std::string_view kIntentionStep         = "step";
+inline constexpr std::string_view kIntentionWaiting      = "waiting";
+inline constexpr std::string_view kIntentionReady        = "ready";
+inline constexpr std::string_view kIntentionDelegator    = "delegator";
+inline constexpr std::string_view kIntentionBlockedUntil = "blocked_until";
+inline constexpr std::string_view kIntentionFaulted      = "faulted";
+inline constexpr std::string_view kIntentionFrame        = "frame";
+
+/// `kIntentionKind` values.
+inline constexpr std::string_view kIntentionAchieve  = "achieve";
+inline constexpr std::string_view kIntentionPerform  = "perform";
+inline constexpr std::string_view kIntentionMaintain = "maintain";
+
+// The `waiting` record (§5.6, §6.6).
+inline constexpr std::string_view kWaitingKind     = "kind";
+inline constexpr std::string_view kWaitingKey      = "key";
+inline constexpr std::string_view kWaitingDeadline = "deadline";
+inline constexpr std::string_view kWaitingMatch    = "match";
+inline constexpr std::string_view kWaitingTimedOut = "timed_out";
+
+/// `kWaitingKind` values, one per row of the §6.6 table. Only
+/// `kWaitKindEffect` is interpreted by the adapter; the rest are the
+/// compiler's, listed so both sides spell them alike.
+inline constexpr std::string_view kWaitKindEffect      = "effect";
+inline constexpr std::string_view kWaitKindSubgoal     = "subgoal";
+inline constexpr std::string_view kWaitKindDelegate    = "delegate";
+inline constexpr std::string_view kWaitKindAsk         = "ask";
+inline constexpr std::string_view kWaitKindAwaitBelief = "await_belief";
+inline constexpr std::string_view kWaitKindAwaitEvent  = "await_event";
+inline constexpr std::string_view kWaitKindYield       = "yield";
+
+// Effect outbox entries (`kKindEffect`, `kKindEffectCancel`).
+/// The effect's id (Int, from `$next_id`): the intention's `waiting.key`, and
+/// the only field of a cancel entry.
+inline constexpr std::string_view kOutboxEffectId = "id";
+/// The native skill's qualified name, which the binding registry is keyed by;
+/// the capacity's name and the method's name; the arguments, copied, as a list.
+inline constexpr std::string_view kOutboxEffectSkill    = "skill";
+inline constexpr std::string_view kOutboxEffectCapacity = "capacity";
+inline constexpr std::string_view kOutboxEffectMethod   = "method";
+inline constexpr std::string_view kOutboxEffectArgs     = "args";
+/// Absolute Int milliseconds: the method's `within`, added to the turn time.
+inline constexpr std::string_view kOutboxEffectDeadline = "deadline";
+/// The calling intention's id; absent when a handler made the call.
+inline constexpr std::string_view kOutboxEffectIntention = "intention";
+/// Bool, true when the capacity's method is declared `effect preempts`.
+inline constexpr std::string_view kOutboxEffectPreempts = "preempts";
+
+/// The result written to `waiting.match`: `ok` (Bool), then `value` (any, on
+/// success) or `cause` (Str, on failure).
+inline constexpr std::string_view kEffectOutcomeRecord = "EffectOutcome";
+inline constexpr std::string_view kEffectOutcomeOk     = "ok";
+inline constexpr std::string_view kEffectOutcomeValue  = "value";
+inline constexpr std::string_view kEffectOutcomeCause  = "cause";
+
+/// `EffectFailed{capacity, method, cause}` (§10).
+inline constexpr std::string_view kEventEffectFailed    = "EffectFailed";
+inline constexpr std::string_view kEffectFailedCapacity = "capacity";
+inline constexpr std::string_view kEffectFailedMethod   = "method";
+inline constexpr std::string_view kEffectFailedCause    = "cause";
+
+/// The causes the adapter itself gives; a binding may report any other text.
+inline constexpr std::string_view kEffectCauseBusy      = "busy";
+inline constexpr std::string_view kEffectCausePreempted = "preempted";
+inline constexpr std::string_view kEffectCauseDeadline  = "deadline";
+inline constexpr std::string_view kEffectCauseMigrated  = "migrated";
+inline constexpr std::string_view kEffectCauseUnbound   = "unbound";
 
 // -- Wire (§5.5, §7.3)
 // --------------------------------------------------------- An `ActorSend`'s
@@ -296,6 +446,12 @@ struct CompiledAgent {
   zigzag::CellRef dispatchEntry{}; ///< reads `$turn.event`, runs handlers
   zigzag::CellRef haltOp{};
   zigzag::CellRef failOp{};
+  /// `continue(i)` (§6.5), run for the intention named by `$turn.intention`.
+  /// Absent until the compiler provides it; then no intention turn runs.
+  std::optional<zigzag::CellRef> continueEntry{};
+  /// `fail_step(id, cause)` (§4.2), run after a hard failure in an intention
+  /// turn, with `$turn.intention` and `$turn.cause`.
+  std::optional<zigzag::CellRef> failStepEntry{};
 };
 
 } // namespace xanadu::vagent

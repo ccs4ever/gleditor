@@ -8,7 +8,9 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <deque>
 #include <limits>
+#include <mutex>
 #include <ranges>
 #include <unordered_map>
 
@@ -82,6 +84,56 @@ constexpr std::string_view kFailStatement  = "fail";
 constexpr std::string_view kFailUnfinished = "unfinished";
 
 constexpr std::string_view kVmMaxCycles = "Exceeded max cycles";
+
+/// Intentions are cells; the adapter reads and marks them between turns.
+/// A top-level intention is on the agent's `d.intention` rank and its subgoal
+/// chain (a subgoal has at most one active subgoal, since a plan body is
+/// sequential) hangs off it along `d.subgoal`, so every walk is the top-level
+/// cell followed by its chain (§5.6).
+std::vector<CellRef> intentionCells(const ArenaManifold &arena,
+                                    const AgentDims &dims, CellRef agent) {
+  std::vector<CellRef> out;
+  for (const auto top : zigzag::rankAfter(arena, agent, dims.intention)) {
+    out.push_back(top);
+    for (const auto sub : zigzag::rankAfter(arena, top, dims.subgoal)) {
+      out.push_back(sub);
+    }
+  }
+  return out;
+}
+
+std::optional<std::int64_t> intFieldOf(const ArenaManifold &arena,
+                                       const ValueDims &vd, CellRef owner,
+                                       std::string_view name) {
+  const auto cell = fieldValue(arena, vd, owner, name);
+  if (!cell || arena.valueKindOf(*cell) != ValueKind::Int64) {
+    return std::nullopt;
+  }
+  return arena.asInt64(*cell);
+}
+
+std::optional<CellRef> findIntention(const ArenaManifold &arena,
+                                     const AgentDims &dims, const ValueDims &vd,
+                                     CellRef agent, std::int64_t id) {
+  for (const auto cell : intentionCells(arena, dims, agent)) {
+    if (intFieldOf(arena, vd, cell, kIntentionId) == id) return cell;
+  }
+  return std::nullopt;
+}
+
+/// The `kEffectOutcomeRecord` an intention reads from `waiting.match`.
+WireRecord outcomeRecord(const EffectResult &result) {
+  WireRecord outcome;
+  outcome.type = std::string(kEffectOutcomeRecord);
+  outcome.set(std::string(kEffectOutcomeOk), WireValue::boolean(result.ok));
+  if (result.ok) {
+    outcome.set(std::string(kEffectOutcomeValue), result.value);
+  } else {
+    outcome.set(std::string(kEffectOutcomeCause),
+                WireValue::text(result.cause));
+  }
+  return outcome;
+}
 
 std::string text(const ArenaManifold &arena, CellRef cell) {
   return arena.textOf(cell);
@@ -206,6 +258,8 @@ std::string_view toString(CheckpointRefusal refusal) noexcept {
     return "mailbox not empty";
   case CheckpointRefusal::SendsIncomplete:
     return "sends incomplete";
+  case CheckpointRefusal::EffectInFlight:
+    return "effect in flight";
   case CheckpointRefusal::NotQuiescent:
     return "not quiescent";
   case CheckpointRefusal::NoIdentity:
@@ -220,6 +274,15 @@ AgentClock AgentClock::system() {
   return AgentClock{.wall   = [] { return std::chrono::system_clock::now(); },
                     .steady = [] { return std::chrono::steady_clock::now(); }};
 }
+
+struct AgentExecutor::Flight {
+  std::uint64_t token{};
+  std::string skill;
+  std::string capacity;
+  std::string method;
+  std::optional<std::int64_t> intention;
+  std::int64_t deadline{};
+};
 
 struct AgentExecutor::State {
   identity::ActorPid pid;
@@ -255,11 +318,74 @@ struct AgentExecutor::State {
   std::int64_t turnMillis{0};
   /// Rebuilt by `resume`: the first executor call announces `Moved`.
   bool resumed{false};
+  /// Effects started and not yet reported, by the id the agent gave them.
+  std::map<std::int64_t, AgentExecutor::Flight> flights;
+  /// The intention the next wake turn continues, set by `wakeReady` just
+  /// before it asks the runtime for the wake.
+  std::optional<std::int64_t> wakeIntention;
+  /// Wake turns since the agent's last message turn (`ready_per_message`).
+  std::size_t wakesSinceMessage{0};
+
+  struct ReadyIntention {
+    std::int64_t id{};
+    std::int64_t since{};
+  };
+  enum class DeadlineKind : std::uint8_t { Waiting, Timer, Effect };
+  struct Deadline {
+    std::int64_t at{};
+    DeadlineKind kind{};
+    std::int64_t id{};
+  };
+  /// Functions of cells (§5.6): never trusted across a `resume`.
+  struct Schedule {
+    std::vector<ReadyIntention> ready;
+    /// A min-heap on `at`.
+    std::vector<Deadline> deadlines;
+  } schedule;
+};
+
+/// Where the host's threads leave what the owner thread will deliver: the
+/// percepts of §7.5 and the results of effects (§5.3).
+struct AgentExecutor::PostBox {
+  struct Item {
+    identity::ActorPid pid;
+    bool percept{false};
+    std::string type;
+    WireRecord fields;
+    std::int64_t effect{};
+    EffectResult result;
+  };
+  mutable std::mutex mutex;
+  std::deque<Item> items;
+
+  void push(Item item) {
+    const std::lock_guard lock(mutex);
+    items.push_back(std::move(item));
+  }
+  std::deque<Item> take() {
+    const std::lock_guard lock(mutex);
+    return std::exchange(items, {});
+  }
+  /// Put back, ahead of anything newer, what the owner could not yet place.
+  void putBack(std::vector<Item> kept) {
+    const std::lock_guard lock(mutex);
+    items.insert(items.begin(), std::make_move_iterator(kept.begin()),
+                 std::make_move_iterator(kept.end()));
+  }
+  bool pendingFor(const identity::ActorPid &pid) const {
+    const std::lock_guard lock(mutex);
+    return std::ranges::any_of(
+        items, [&](const Item &item) { return item.pid == pid; });
+  }
 };
 
 struct AgentExecutor::TurnSpec {
   /// Nullopt: no routine runs (a relay the host does not also handle).
   std::optional<CellRef> entry;
+  /// The intention a wake turn continues, or the one a recovery turn records
+  /// the failure of; `cause` is set for the recovery turn alone.
+  std::optional<std::int64_t> intention;
+  std::string cause;
   /// A received event to expose as `$turn.event`, and the space it came by.
   const Envelope *event{};
   std::string space;
@@ -298,6 +424,15 @@ struct AgentExecutor::OutboxItem {
   // log
   std::string level;
   std::string message;
+  // effect, effect_cancel
+  std::int64_t effectId{0};
+  std::string skill;
+  std::string capacity;
+  std::string method;
+  WireList effectArgs;
+  std::int64_t deadlineMs{0};
+  std::optional<std::int64_t> intention;
+  bool preempts{false};
 };
 
 AgentExecutor::AgentExecutor(zigzag::vortex::mesh::MeshActorRuntime &runtime,
@@ -308,6 +443,7 @@ AgentExecutor::AgentExecutor(zigzag::vortex::mesh::MeshActorRuntime &runtime,
     : runtime_(runtime), issuer_(issuer), program_(program), owner_(owner),
       localNode_(std::move(localNode)), epoch_(epoch),
       settings_(std::move(settings)), clock_(std::move(clock)),
+      posts_(std::make_shared<PostBox>()),
       hostPid_{localNode_, std::string(kHostCursor), epoch_, 1} {}
 
 AgentExecutor::~AgentExecutor() = default;
@@ -533,7 +669,9 @@ bool AgentExecutor::prepare(State &state, WorkerContext &context,
     const auto sound = [&](CellRef c) { return arena.contains(c); };
     if (!sound(compiled->agentCell) || !sound(compiled->initEntry) ||
         !sound(compiled->dispatchEntry) || !sound(compiled->haltOp) ||
-        !sound(compiled->failOp)) {
+        !sound(compiled->failOp) ||
+        (compiled->continueEntry && !sound(*compiled->continueEntry)) ||
+        (compiled->failStepEntry && !sound(*compiled->failStepEntry))) {
       GLEDITOR_LOG_DEBUG(kLog, "instantiate returned a cell the arena lacks");
       return false;
     }
@@ -650,11 +788,13 @@ bool AgentExecutor::prepare(State &state, WorkerContext &context,
         }
       }
     }
+    if (state.resumed) failMigrated(state);
   } catch (const std::exception &e) {
     GLEDITOR_LOG_DEBUG(kLog, "preparing an agent failed: {}", e.what());
     return false;
   }
   state.prepared = true;
+  deriveSchedule(state);
   return true;
 }
 
@@ -721,6 +861,7 @@ AgentExecutor::execute(const ActorExecution &execution,
   }
   state.grant  = execution.grant;
   state.cursor = execution.cursor;
+  if (execution.message) state.wakesSinceMessage = 0;
   flushStats(state);
 
   bool justInitialised = false;
@@ -737,10 +878,13 @@ AgentExecutor::execute(const ActorExecution &execution,
   if (!execution.message) {
     // A wake that only refreshes a lease or carries host events must not also
     // run a dispatch with no event.
-    const bool plain =
-        !justInitialised && !state.quietWake && state.hostEvents.empty();
+    const auto intention = std::exchange(state.wakeIntention, std::nullopt);
+    const bool plain     = !justInitialised && !state.quietWake &&
+                       state.hostEvents.empty() && !intention;
     state.quietWake = false;
-    if (plain) {
+    if (intention && state.agent.continueEntry) {
+      continueIntention(state, *intention, execution.grant, context);
+    } else if (plain) {
       TurnSpec spec;
       spec.entry = state.agent.dispatchEntry;
       runTurn(state, execution.cursor, execution.grant, context, spec);
@@ -759,6 +903,7 @@ AgentExecutor::execute(const ActorExecution &execution,
 std::expected<std::string, ActorError>
 AgentExecutor::fatal(State &state, std::string_view cause) {
   GLEDITOR_LOG_DEBUG(kLog, "agent {} stops: {}", state.name, cause);
+  cancelFlights(state);
   stageChildStopping(state, cause);
   // stop() frees the slot and tells monitors; erasure waits for pumpOne.
   (void)runtime_.stop(state.pid);
@@ -1110,6 +1255,7 @@ void AgentExecutor::orderlyStop(State &state, CellRef cursor,
   // (the default of `keepChildren`).
   std::uint64_t position = 0;
   if (state.context) releaseChildren(state, position, keepChildren);
+  cancelFlights(state);
   if (announce) stageChildStopping(state, cause, position);
   flushStats(state);
   // stop() frees the slot and tells monitors; erasure waits for the executor
@@ -1125,6 +1271,49 @@ AgentExecutor::TurnOutcome AgentExecutor::runTurn(State &state, CellRef cursor,
                                                   const ActorGrant &grant,
                                                   WorkerContext &context,
                                                   const TurnSpec &spec) {
+  auto outcome = runTurnOnce(state, cursor, grant, context, spec);
+  if (outcome.committed || !spec.intention || !spec.cause.empty() ||
+      !spec.entry) {
+    return outcome;
+  }
+  // §4.2: the intention's turn is undone, but the work that caused it is
+  // consumed. A short turn of `fail_step` records the plan failure; it runs no
+  // user code, so it is not itself recovered if it fails.
+  if (!state.context || !state.agent.failStepEntry) {
+    bumpStat(state, kStatIntentionFailed);
+    return outcome;
+  }
+  TurnSpec recovery;
+  recovery.entry     = state.agent.failStepEntry;
+  recovery.intention = spec.intention;
+  recovery.cause     = outcome.cause;
+  if (!runTurnOnce(state, cursor, grant, context, recovery).committed) {
+    bumpStat(state, kStatIntentionFailed);
+  }
+  return outcome;
+}
+
+void AgentExecutor::continueIntention(State &state, std::int64_t id,
+                                      const ActorGrant &grant,
+                                      WorkerContext &context) {
+  auto &arena = context.arena;
+  // Taken before the turn, so a routine that fails hard cannot be chosen
+  // again for ever; one that needs another turn marks itself ready again.
+  if (const auto cell = findIntention(arena, state.dims, state.vd,
+                                      state.agent.agentCell, id)) {
+    setField(arena, state.vd, *cell, kIntentionReady, std::nullopt);
+  }
+  TurnSpec spec;
+  spec.entry     = state.agent.continueEntry;
+  spec.intention = id;
+  runTurn(state, state.cursor, grant, context, spec);
+}
+
+AgentExecutor::TurnOutcome AgentExecutor::runTurnOnce(State &state,
+                                                      CellRef cursor,
+                                                      const ActorGrant &grant,
+                                                      WorkerContext &context,
+                                                      const TurnSpec &spec) {
   auto &arena              = context.arena;
   auto &vm                 = context.vm;
   const auto &agent        = state.agent;
@@ -1154,6 +1343,13 @@ AgentExecutor::TurnOutcome AgentExecutor::runTurn(State &state, CellRef cursor,
       state.turnMillis = millis;
       WireRecord turnRecord;
       turnRecord.set(std::string(kTurnTime), WireValue::integer(millis));
+      if (spec.intention) {
+        turnRecord.set(std::string(kTurnIntention),
+                       WireValue::integer(*spec.intention));
+      }
+      if (!spec.cause.empty()) {
+        turnRecord.set(std::string(kTurnCause), WireValue::text(spec.cause));
+      }
       const auto turnCell =
           writeValue(arena, state.vd, WireValue::record(turnRecord));
       if (spec.event) {
@@ -1162,6 +1358,9 @@ AgentExecutor::TurnOutcome AgentExecutor::runTurn(State &state, CellRef cursor,
         if (observer_) observer_(state.pid, context, event);
       }
       setField(arena, state.vd, agent.agentCell, kFieldTurn, turnCell);
+      if (spec.intention && spec.cause.empty() && intentionObserver_) {
+        intentionObserver_(state.pid, context, *spec.intention);
+      }
 
       // 4. Base: reset the path, then a choice point whose alternative is the
       //    failure routine.
@@ -1243,6 +1442,8 @@ AgentExecutor::TurnOutcome AgentExecutor::runTurn(State &state, CellRef cursor,
   // 10. Count the turn, and every compact_every turns drop dead link runs.
   setCounter(state, kFieldTurnCount, turn + 1);
   flushStats(state);
+  // 11. Derive the ready list and the deadline heap from the cells (§5.6).
+  deriveSchedule(state);
   if (++state.sinceCompact >= settings_.compactEvery &&
       arena.outstandingMarks() == 0) {
     state.sinceCompact = 0;
@@ -1415,6 +1616,44 @@ AgentExecutor::collectOutbox(State &state, WorkerContext &context) {
       }
       item.level   = *level;
       item.message = *message;
+    } else if (item.kind == kKindEffect || item.kind == kKindEffectCancel) {
+      const auto integer = [&](std::string_view field) {
+        const auto value = read(entry, field);
+        const auto *i =
+            value ? std::get_if<std::int64_t>(&value->data) : nullptr;
+        return i == nullptr ? std::optional<std::int64_t>{}
+                            : std::optional<std::int64_t>(*i);
+      };
+      const auto id = integer(kOutboxEffectId);
+      if (!id) {
+        bumpStat(state, kStatMalformed);
+        continue;
+      }
+      item.effectId = *id;
+      if (item.kind == kKindEffect) {
+        const auto skill    = textOf(read(entry, kOutboxEffectSkill));
+        const auto capacity = textOf(read(entry, kOutboxEffectCapacity));
+        const auto method   = textOf(read(entry, kOutboxEffectMethod));
+        const auto deadline = integer(kOutboxEffectDeadline);
+        const auto args     = read(entry, kOutboxEffectArgs);
+        const auto *list = args ? std::get_if<WireList>(&args->data) : nullptr;
+        if (!skill || !capacity || !method || !deadline ||
+            (args && list == nullptr)) {
+          bumpStat(state, kStatMalformed);
+          continue;
+        }
+        item.skill      = *skill;
+        item.capacity   = *capacity;
+        item.method     = *method;
+        item.deadlineMs = *deadline;
+        item.intention  = integer(kOutboxEffectIntention);
+        if (list != nullptr) item.effectArgs = *list;
+        if (const auto flag = read(entry, kOutboxEffectPreempts)) {
+          if (const auto *b = std::get_if<bool>(&flag->data)) {
+            item.preempts = *b;
+          }
+        }
+      }
     } else {
       bumpStat(state, kStatUnsupported);
       continue;
@@ -1451,6 +1690,23 @@ void AgentExecutor::drain(State &state, WorkerContext &context,
     if (item.kind == kKindStop) sendStop(state, turn, position, item);
   }
   if (spec.relayed) relay(state, context, turn, position, *spec.relayed);
+  // Effects (§4.2 step 9): cancels, then those that preempt, then the rest. A
+  // cancel goes first so the device is free for what follows, and a preempting
+  // effect first so it ends the one in flight before another is refused for
+  // being busy.
+  for (const auto &item : items) {
+    if (item.kind == kKindEffectCancel) cancelEffect(state, item.effectId);
+  }
+  const auto preempting = [&](const OutboxItem &item) {
+    return item.preempts || (bindings_ != nullptr &&
+                             bindings_->preempts(item.skill, item.method));
+  };
+  for (const auto &item : items) {
+    if (item.kind == kKindEffect && preempting(item)) startEffect(state, item);
+  }
+  for (const auto &item : items) {
+    if (item.kind == kKindEffect && !preempting(item)) startEffect(state, item);
+  }
   // Logging names the agent and carries the handler's own text, never an
   // event payload (§10).
   for (const auto &item : items) {
@@ -1846,6 +2102,7 @@ bool AgentExecutor::setDeliveryDeadline(
 }
 
 void AgentExecutor::tick(std::chrono::system_clock::time_point now) {
+  drainPosted();
   upkeepDeliveries(now);
   upkeepLeases(now);
   // The timer heap is a function of cells (§5.6): read `$timers` afresh rather
@@ -1857,6 +2114,7 @@ void AgentExecutor::tick(std::chrono::system_clock::time_point now) {
     if (!live(*state) || state->inTurn) continue;
     liftLimits(*state->context);
     (void)fireDueTimers(*state, nowMillis);
+    (void)expireDeadlines(*state, nowMillis);
   }
   // Events raised between turns need a turn to be heard in.
   for (auto &[key, state] : states_) {
@@ -1991,11 +2249,18 @@ std::size_t AgentExecutor::pumpUntilIdle(std::size_t maxTurns) {
         progressed = true;
       }
     }
+    drainPosted();
     while (turns < maxTurns && needsFirstTurn_.empty()) {
       const auto pumped = runtime_.pumpOne(wallNow());
       if (!pumped || !*pumped) break;
       ++turns;
       progressed = true;
+      drainPosted();
+      // The wake turns allowed between this message turn and the next
+      // (`vagent.ready_per_message`, §4.2).
+      for (auto &[key, state] : states_) {
+        if (wakeReady(*state, turns, maxTurns)) progressed = true;
+      }
     }
     for (auto &[key, state] : states_) {
       if (!state->hostEvents.empty() && live(*state) && turns < maxTurns) {
@@ -2007,9 +2272,328 @@ std::size_t AgentExecutor::pumpUntilIdle(std::size_t maxTurns) {
         }
       }
     }
+    for (auto &[key, state] : states_) {
+      if (wakeReady(*state, turns, maxTurns)) progressed = true;
+    }
     if (!progressed && needsFirstTurn_.empty()) break;
   }
   return turns;
+}
+
+// -- Percepts, effects, intentions and deadlines (§5.3, §5.6, §6.5, §7.5)
+// ----------------------------------------------------------------------
+
+namespace {
+
+/// Record how a wait ended and make the intention ready (§6.6). The stamp is
+/// `$turn_count` when the adapter marks it, the unit `ready` is ordered by.
+void settleWaiting(ArenaManifold &arena, const ValueDims &vd, CellRef intention,
+                   CellRef waiting, const EffectResult *outcome, bool timedOut,
+                   std::int64_t stamp) {
+  if (outcome != nullptr) {
+    setField(arena, vd, waiting, kWaitingMatch,
+             writeValue(arena, vd, WireValue::record(outcomeRecord(*outcome))));
+  }
+  if (timedOut) {
+    setField(arena, vd, waiting, kWaitingTimedOut, arena.makeScalarCell(true));
+  }
+  setField(arena, vd, intention, kIntentionReady, arena.makeScalarCell(stamp));
+}
+
+bool waitsOnEffect(const ArenaManifold &arena, const ValueDims &vd,
+                   CellRef waiting) {
+  const auto kind = fieldValue(arena, vd, waiting, kWaitingKind);
+  return kind && arena.textOf(*kind) == kWaitKindEffect;
+}
+
+} // namespace
+
+void AgentExecutor::percept(const identity::ActorPid &target, std::string type,
+                            WireRecord fields) {
+  PostBox::Item item;
+  item.pid     = target;
+  item.percept = true;
+  item.type    = std::move(type);
+  item.fields  = std::move(fields);
+  posts_->push(std::move(item));
+}
+
+void AgentExecutor::drainPosted() {
+  auto items = posts_->take();
+  std::vector<PostBox::Item> kept;
+  for (auto &item : items) {
+    // A pid the runtime has never heard of gets nothing; one posted between a
+    // launch and its first turn is kept for that turn.
+    if (!states_.contains(pidKey(item.pid)) &&
+        !runtime_.localCursor(item.pid)) {
+      GLEDITOR_LOG_DEBUG(kLog, "dropping a post for an unknown agent");
+      continue;
+    }
+    State &state = stateFor(item.pid);
+    if (!state.prepared) {
+      kept.push_back(std::move(item));
+      continue;
+    }
+    if (!live(state) || state.inTurn) {
+      GLEDITOR_LOG_DEBUG(kLog, "{} is gone; dropping a post", state.name);
+      continue;
+    }
+    liftLimits(*state.context);
+    if (item.percept) {
+      raise(state, item.type, std::move(item.fields));
+    } else {
+      finishEffect(state, item.effect, std::move(item.result), false);
+    }
+  }
+  if (!kept.empty()) posts_->putBack(std::move(kept));
+}
+
+void AgentExecutor::startEffect(State &state, const OutboxItem &item) {
+  if (state.flights.contains(item.effectId)) {
+    bumpStat(state, kStatMalformed);
+    return;
+  }
+  state.flights.emplace(item.effectId, Flight{.token     = 0,
+                                              .skill     = item.skill,
+                                              .capacity  = item.capacity,
+                                              .method    = item.method,
+                                              .intention = item.intention,
+                                              .deadline  = item.deadlineMs});
+  // The sink only posts: the binding may call it from inside `start`, or from
+  // a device's thread, and agent code must run in neither.
+  auto sink = [box = std::weak_ptr<PostBox>(posts_), pid = state.pid,
+               id = item.effectId](EffectResult result) {
+    if (const auto held = box.lock()) {
+      PostBox::Item posted;
+      posted.pid    = pid;
+      posted.effect = id;
+      posted.result = std::move(result);
+      held->push(std::move(posted));
+    }
+  };
+  if (bindings_ == nullptr) {
+    sink(EffectResult::failure(std::string(kEffectCauseUnbound)));
+    return;
+  }
+  const auto token = bindings_->start(item.skill, item.method, item.effectArgs,
+                                      item.preempts, std::move(sink));
+  if (const auto flight = state.flights.find(item.effectId);
+      flight != state.flights.end()) {
+    flight->second.token = token;
+  }
+  GLEDITOR_LOG_DEBUG(kLog, "{} starts effect {} ({}.{})", state.name,
+                     item.effectId, item.skill, item.method);
+}
+
+void AgentExecutor::cancelEffect(State &state, std::int64_t id) {
+  const auto flight = state.flights.find(id);
+  if (flight == state.flights.end()) return;
+  const auto token = flight->second.token;
+  state.flights.erase(flight);
+  if (bindings_ != nullptr) bindings_->cancel(token);
+}
+
+void AgentExecutor::cancelFlights(State &state) {
+  if (bindings_ != nullptr) {
+    for (const auto &[id, flight] : state.flights) {
+      bindings_->cancel(flight.token);
+    }
+  }
+  state.flights.clear();
+}
+
+void AgentExecutor::finishEffect(State &state, std::int64_t id,
+                                 EffectResult result, bool timedOut) {
+  const auto found = state.flights.find(id);
+  if (found == state.flights.end()) {
+    bumpStat(state, kStatEffectStale);
+    return;
+  }
+  Flight flight = std::move(found->second);
+  state.flights.erase(found);
+  if (timedOut && bindings_ != nullptr) bindings_->cancel(flight.token);
+
+  if (!flight.intention) {
+    // A handler made the call: nobody waits, so only a failure is news.
+    if (!result.ok) {
+      WireRecord fields;
+      fields.set(std::string(kEffectFailedCapacity),
+                 WireValue::text(flight.capacity));
+      fields.set(std::string(kEffectFailedMethod),
+                 WireValue::text(flight.method));
+      fields.set(std::string(kEffectFailedCause),
+                 WireValue::text(result.cause));
+      raise(state, kEventEffectFailed, std::move(fields));
+    }
+    return;
+  }
+  auto &arena     = state.context->arena;
+  const auto &vd  = state.vd;
+  const auto cell = findIntention(arena, state.dims, vd, state.agent.agentCell,
+                                  *flight.intention);
+  const auto waiting =
+      cell ? fieldValue(arena, vd, *cell, kIntentionWaiting) : std::nullopt;
+  if (!waiting || !waitsOnEffect(arena, vd, *waiting) ||
+      intFieldOf(arena, vd, *waiting, kWaitingKey) != id) {
+    // The intention ended, or moved on after a deadline (§6.6).
+    bumpStat(state, kStatEffectStale);
+    return;
+  }
+  settleWaiting(arena, vd, *cell, *waiting, &result, timedOut,
+                static_cast<std::int64_t>(counter(state, kFieldTurnCount)));
+  deriveSchedule(state);
+}
+
+bool AgentExecutor::expireDeadlines(State &state, std::int64_t nowMillis) {
+  bool changed = false;
+  std::vector<std::int64_t> late;
+  for (const auto &[id, flight] : state.flights) {
+    if (flight.deadline <= nowMillis) late.push_back(id);
+  }
+  for (const auto id : late) {
+    finishEffect(state, id,
+                 EffectResult::failure(std::string(kEffectCauseDeadline)),
+                 true);
+    changed = true;
+  }
+  auto &arena      = state.context->arena;
+  const auto &vd   = state.vd;
+  const auto stamp = static_cast<std::int64_t>(counter(state, kFieldTurnCount));
+  for (const auto cell :
+       intentionCells(arena, state.dims, state.agent.agentCell)) {
+    if (intFieldOf(arena, vd, cell, kIntentionReady)) continue;
+    const auto waiting = fieldValue(arena, vd, cell, kIntentionWaiting);
+    if (!waiting) continue;
+    const auto deadline = intFieldOf(arena, vd, *waiting, kWaitingDeadline);
+    if (!deadline || *deadline > nowMillis) continue;
+    const bool effect = waitsOnEffect(arena, vd, *waiting);
+    if (effect) {
+      // The wait's own deadline beat the flight's: end the flight with it.
+      if (const auto key = intFieldOf(arena, vd, *waiting, kWaitingKey)) {
+        if (state.flights.contains(*key)) {
+          finishEffect(state, *key,
+                       EffectResult::failure(std::string(kEffectCauseDeadline)),
+                       true);
+          changed = true;
+          continue;
+        }
+      }
+    }
+    const auto outcome =
+        EffectResult::failure(std::string(kEffectCauseDeadline));
+    settleWaiting(arena, vd, cell, *waiting, effect ? &outcome : nullptr, true,
+                  stamp);
+    changed = true;
+  }
+  if (changed) deriveSchedule(state);
+  return changed;
+}
+
+void AgentExecutor::failMigrated(State &state) {
+  auto &arena      = state.context->arena;
+  const auto &vd   = state.vd;
+  const auto stamp = static_cast<std::int64_t>(counter(state, kFieldTurnCount));
+  const auto outcome = EffectResult::failure(std::string(kEffectCauseMigrated));
+  for (const auto cell :
+       intentionCells(arena, state.dims, state.agent.agentCell)) {
+    // One already ready has its result; leave it be.
+    if (intFieldOf(arena, vd, cell, kIntentionReady)) continue;
+    const auto waiting = fieldValue(arena, vd, cell, kIntentionWaiting);
+    if (!waiting || !waitsOnEffect(arena, vd, *waiting)) continue;
+    settleWaiting(arena, vd, cell, *waiting, &outcome, false, stamp);
+    GLEDITOR_LOG_DEBUG(kLog, "{}: an intention waiting on an effect migrated",
+                       state.name);
+  }
+}
+
+void AgentExecutor::deriveSchedule(State &state) const {
+  state.schedule = {};
+  if (!state.prepared || !state.context) return;
+  const auto &arena = state.context->arena;
+  const auto &vd    = state.vd;
+  auto &schedule    = state.schedule;
+  using Kind        = State::DeadlineKind;
+  for (const auto cell :
+       intentionCells(arena, state.dims, state.agent.agentCell)) {
+    const auto id = intFieldOf(arena, vd, cell, kIntentionId);
+    if (!id) continue;
+    if (const auto since = intFieldOf(arena, vd, cell, kIntentionReady)) {
+      schedule.ready.push_back({*id, *since});
+      continue;
+    }
+    if (const auto waiting = fieldValue(arena, vd, cell, kIntentionWaiting)) {
+      if (const auto at = intFieldOf(arena, vd, *waiting, kWaitingDeadline)) {
+        schedule.deadlines.push_back({*at, Kind::Waiting, *id});
+      }
+    }
+  }
+  // Oldest ready first; the walk order of the cells breaks ties.
+  std::ranges::stable_sort(schedule.ready, {}, &State::ReadyIntention::since);
+  for (const auto &timer : readTimers(state)) {
+    const auto *record = std::get_if<WireRecord>(&timer.data);
+    if (record == nullptr) continue;
+    const auto id  = timerInt(*record, kTimerId);
+    const auto due = timerInt(*record, kTimerDue);
+    if (id && due) schedule.deadlines.push_back({*due, Kind::Timer, *id});
+  }
+  for (const auto &[id, flight] : state.flights) {
+    schedule.deadlines.push_back({flight.deadline, Kind::Effect, id});
+  }
+  std::ranges::make_heap(schedule.deadlines, std::greater<>{},
+                         &State::Deadline::at);
+}
+
+std::vector<std::int64_t>
+AgentExecutor::readyIntentions(const identity::ActorPid &pid) const {
+  const auto found = states_.find(pidKey(pid));
+  if (found == states_.end()) return {};
+  State &state = *found->second;
+  deriveSchedule(state);
+  return state.schedule.ready |
+         std::views::transform(&State::ReadyIntention::id) |
+         std::ranges::to<std::vector>();
+}
+
+std::optional<std::int64_t>
+AgentExecutor::nextDeadline(const identity::ActorPid &pid) const {
+  const auto found = states_.find(pidKey(pid));
+  if (found == states_.end()) return std::nullopt;
+  State &state = *found->second;
+  deriveSchedule(state);
+  if (state.schedule.deadlines.empty()) return std::nullopt;
+  return state.schedule.deadlines.front().at;
+}
+
+std::size_t
+AgentExecutor::effectsInFlight(const identity::ActorPid &pid) const {
+  const auto found = states_.find(pidKey(pid));
+  return found == states_.end() ? 0 : found->second->flights.size();
+}
+
+bool AgentExecutor::wakeReady(State &state, std::size_t &turns,
+                              std::size_t maxTurns) {
+  bool woke = false;
+  while (turns < maxTurns && live(state) && !state.inTurn &&
+         state.agent.continueEntry) {
+    // Cells are the truth (§5.6); a host may have marked one since the last
+    // turn.
+    deriveSchedule(state);
+    if (state.schedule.ready.empty()) break;
+    const bool backlog = runtime_.pending(state.pid) != 0;
+    if (backlog && state.wakesSinceMessage >= settings_.readyPerMessage) break;
+    state.wakeIntention = state.schedule.ready.front().id;
+    if (!runtime_.wake(state.pid, wallNow())) {
+      state.wakeIntention.reset();
+      break;
+    }
+    ++state.wakesSinceMessage;
+    ++turns;
+    woke = true;
+    // With nothing queued there is no message turn to be fair to: one wake per
+    // agent per round still lets the others run.
+    if (!backlog) break;
+  }
+  return woke;
 }
 
 // -- Checkpoint, resume and migration (§4.2, §4.4, §4.5)
@@ -2141,6 +2725,17 @@ void AgentExecutor::restoreState(State &state, CellRef saved) {
                  arena.makeCell(std::string_view(text(arena, child))));
   }
 
+  // Intentions are data (§5.6): the cell, its fields and its subgoal chain
+  // are copied under the new agent cell, keeping their order.
+  const std::array intentionFrom{oldVd.vars, oldVd.values, oldVd.grab,
+                                 oldVd.step, old("d.subgoal")};
+  const std::array intentionInto{vd.vars, vd.values, vd.grab, vd.step,
+                                 state.dims.subgoal};
+  for (const auto top : ranked(saved, old("d.intention"))) {
+    appendToRank(arena, ac, state.dims.intention,
+                 cloneGraph(arena, top, intentionFrom, intentionInto));
+  }
+
   // §5.5: request ids from this name must exceed any the old incarnation
   // sent, whose turn counter the checkpoint may be behind.
   const auto millis = static_cast<std::uint64_t>(
@@ -2207,7 +2802,7 @@ AgentExecutor::checkpoint(const identity::ActorPid &pid) {
   }
   State &state = *found->second;
   if (!live(state)) return std::unexpected(CheckpointRefusal::Stopped);
-  if (!state.hostEvents.empty()) {
+  if (!state.hostEvents.empty() || posts_->pendingFor(pid)) {
     return std::unexpected(CheckpointRefusal::HostDeliveryPending);
   }
   if (runtime_.pending(pid) != 0) {
@@ -2218,6 +2813,9 @@ AgentExecutor::checkpoint(const identity::ActorPid &pid) {
         return entry.second.ownerKey == owner;
       })) {
     return std::unexpected(CheckpointRefusal::SendsIncomplete);
+  }
+  if (!state.flights.empty()) {
+    return std::unexpected(CheckpointRefusal::EffectInFlight);
   }
   const auto view = runtime_.checkpointView(pid, state.agent.agentCell);
   if (!view) return std::unexpected(CheckpointRefusal::NotQuiescent);
@@ -2321,6 +2919,7 @@ bool AgentExecutor::retire(const identity::ActorPid &pid) {
   const auto found = states_.find(pidKey(pid));
   if (found == states_.end() || !live(*found->second)) return false;
   if (!runtime_.stop(pid)) return false;
+  cancelFlights(*found->second);
   found->second->context = nullptr;
   return true;
 }
