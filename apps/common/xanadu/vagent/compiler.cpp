@@ -158,6 +158,12 @@ struct HandlerInfo {
   std::size_t index{0};
   CellRef guardEntry{noCell};
   CellRef bodyEntry{noCell};
+  /// Belief triggers (`on +t` / `on -t`): the trigger term, the routine that
+  /// matches it against the pending event's fact, and the locals its `?`
+  /// variables declare for the guard and body.
+  const Term *beliefTerm{nullptr};
+  CellRef bindEntry{noCell};
+  std::vector<std::pair<std::string, Local>> beliefLocals;
 };
 
 // -- Child walker (call graph) ------------------------------------------------
@@ -201,6 +207,9 @@ template <typename F> void forEachChild(const Expr &e, F &&f) {
           opt(n.body);
         } else if constexpr (std::is_same_v<T, EFor>) {
           opt(n.iterable);
+          if (n.believesTerm) {
+            for (const auto &a : n.believesTerm->args) opt(a.expr);
+          }
           opt(n.body);
         } else if constexpr (std::is_same_v<T, EEmit>) {
           opt(n.event);
@@ -211,6 +220,14 @@ template <typename F> void forEachChild(const Expr &e, F &&f) {
           opt(n.space);
         } else if constexpr (std::is_same_v<T, EReturn>) {
           opt(n.value);
+        } else if constexpr (std::is_same_v<T, EBelieves>) {
+          for (const auto &a : n.term.args) opt(a.expr);
+          opt(n.from);
+        } else if constexpr (std::is_same_v<T, EFindall>) {
+          opt(n.templ.expr);
+          for (const auto &a : n.goal.args) opt(a.expr);
+        } else if constexpr (std::is_same_v<T, EBeliefChange>) {
+          for (const auto &a : n.fact.args) opt(a.expr);
         }
       },
       e.node);
@@ -230,9 +247,10 @@ void collectCallees(const Expr &e, std::set<std::string> &out) {
 class Gen {
 public:
   Gen(zigzag::vortex::VortexCore &core, zigzag::vortex::VortexVM &vm,
-      const Unit &unit, std::string_view agentType)
+      const Unit &unit, std::string_view agentType,
+      std::size_t beliefEventDepth)
       : core_(core), vm_(vm), arena_(core.arena()), unit_(unit),
-        agentType_(agentType) {}
+        agentType_(agentType), beliefEventDepth_(beliefEventDepth) {}
 
   CompiledAgent run();
 
@@ -598,6 +616,66 @@ private:
   void buildProgramStructure();
   std::vector<const HandlerInfo *> mergedFor(const std::string &type);
   void beginHandlerCtx(const HandlerInfo &h);
+
+  // -- beliefs (§6.1, §6.5)
+  // ----------------------------------------------------
+  /// A declared predicate: its cell on the agent's `d.belief` rank and the
+  /// argument types the checker already verified.
+  struct PredInfo {
+    CellRef cell{noCell};
+    std::vector<Ty> argTys;
+    std::size_t nkeys{0};
+  };
+  /// How one argument of a term participates in a match or a build.
+  struct ArgPlan {
+    enum class K : std::uint8_t { Value, Var, Dup, Wild } k{K::Wild};
+    CellRef reg{noCell};   ///< Value: the evaluated argument
+    std::size_t first{0};  ///< Dup: index of the variable it repeats
+    bool composite{false}; ///< Value: a list, compared and copied as a term
+  };
+  struct PlanVar {
+    CellRef cap{noCell};   ///< holds the ref of the clause argument it matched
+    CellRef local{noCell}; ///< the local the variable declares
+    std::string name;
+    Ty ty;
+  };
+  struct TermPlan {
+    const PredInfo *pred{nullptr};
+    std::string name;
+    std::vector<ArgPlan> args;
+    std::vector<PlanVar> vars;
+  };
+
+  std::size_t beliefEventDepth_;
+  std::unordered_map<std::string, PredInfo> preds_;
+  CellRef lastPred_{noCell};
+  CellRef a3_{noCell}, a4_{noCell}, roundsG_{noCell};
+  CellRef rtBRaise_{noCell}, rtHasSrc_{noCell}, rtBDrop_{noCell},
+      rtBSet_{noCell}, rtSettle_{noCell};
+
+  void mintPredicates();
+  const PredInfo &predOf(const Term &t);
+  void breakOp(Opd owner, DimRef dim);
+  void unlinkFromRank(CellRef xReg, DimRef dim);
+  void emitRtBRaise();
+  void emitRtHasSrc();
+  void emitRtBDrop();
+  void emitRtBSet();
+  void emitSettle();
+  TermPlan planTerm(const Term &t, bool allowVars);
+  void declarePlanVars(const TermPlan &pl);
+  CellRef buildTerm(const TermPlan &pl);
+  void requireTrue(CellRef cond, CellRef orElse);
+  void emitMatch(const TermPlan &pl, CellRef termReg, CellRef noMatch);
+  void bindVars(const TermPlan &pl);
+  CellRef snapshotClauses(const PredInfo &p);
+  void pushTail(CellRef listReg, CellRef tailReg, CellRef cell);
+  void selfName(CellRef out);
+  Ty believesExpr(const EBelieves &b, CellRef out);
+  Ty findallExpr(const EFindall &f, CellRef out, SourceLocation loc);
+  Ty forBelieves(const EFor &f, CellRef out);
+  Ty beliefChange(EBeliefChange::Kind kind, const Term &t, CellRef out);
+  void emitBeliefBind(HandlerInfo &h);
 };
 
 // ---------------------------------------------------------------------------
@@ -1056,6 +1134,12 @@ Ty Gen::expr(const Expr &e, CellRef out) {
         } else if constexpr (std::is_same_v<T, EFail>) {
           failNow();
           return tyOf(Ty::K::Unit);
+        } else if constexpr (std::is_same_v<T, EBelieves>) {
+          return believesExpr(n, out);
+        } else if constexpr (std::is_same_v<T, EFindall>) {
+          return findallExpr(n, out, loc);
+        } else if constexpr (std::is_same_v<T, EBeliefChange>) {
+          return beliefChange(n.kind, n.fact, out);
         } else {
           unsupported("this construct", loc);
         }
@@ -1550,7 +1634,7 @@ Ty Gen::whileExpr(const EWhile &w, CellRef out) {
 }
 
 Ty Gen::forExpr(const EFor &f, CellRef out, SourceLocation loc) {
-  if (!f.iterable) unsupported("for believes", loc);
+  if (!f.iterable) return forBelieves(f, out);
   pushScope();
   const CellRef x       = reg();
   const CellRef bodyOut = reg();
@@ -1686,6 +1770,657 @@ Ty Gen::spawnExpr(const ESpawn &s, CellRef out, SourceLocation loc) {
   emit(OpcodeKind::Add, "sc+", {S(cnt.valueCell), S(one_)}, {cnt.valueCell});
   mov(S(out), S(nm));
   return tyOf(Ty::K::Str);
+}
+
+// ---------------------------------------------------------------------------
+// Beliefs (design §5.1, §6.1, §6.5, §9.1)
+//
+// A predicate is a cell on the agent's `d.belief` rank, its facts clause cells
+// on `d.clause`. A fact's term is laid out as Vlog lays terms out: the
+// predicate name as content, the arguments on `+d.grab` and `d.step`, so
+// `#Unify` applies to it. A clause's sources are peer cells on `d.source`,
+// whose content is the asserting agent's name.
+//
+// Deviation from the §9.1 text ("copy `t`, `#Choice`, `#Unify`"): a query is
+// matched argument by argument. A value argument is compared with `#Eq`
+// (scalars) or `#Unify` (lists), and a `?v` captures the ref of the clause's
+// argument cell. A `?v` therefore never becomes a Vlog variable. `MakeVar`
+// appends to the rank headed by the `d.vars` dimension cell, so a variable
+// kept by a cut would stay on that rank for the life of the agent and make
+// every later `MakeVar` walk it; a captured ref costs nothing and is undone
+// by the same `release` that undoes the locals it is copied into.
+// ---------------------------------------------------------------------------
+
+void Gen::mintPredicates() {
+  for (const TopDecl &d : unit_.decls) {
+    const auto *pd = std::get_if<PredicateDecl>(&d);
+    if (pd == nullptr) continue;
+    PredInfo pi;
+    bool leadingKeys = true;
+    for (const PredParam &p : pd->params) {
+      Ty t = fromType(p.type, pd->loc);
+      if (t.k == Ty::K::Record || t.k == Ty::K::Unit) {
+        unsupported("a record or () belief argument", pd->loc);
+      }
+      if (p.key && leadingKeys) {
+        ++pi.nkeys;
+      } else {
+        leadingKeys = false;
+      }
+      pi.argTys.push_back(std::move(t));
+    }
+    pi.cell            = arena_.makeCell(pd->name);
+    const CellRef cell = pi.cell;
+    if (!preds_.emplace(pd->name, std::move(pi)).second) {
+      bail(CompileError::DuplicateName, "predicate " + pd->name, pd->loc);
+    }
+    zigzag::expectWritten(
+        arena_.link(lastPred_ == noCell ? agentCell_ : lastPred_, dims_.belief,
+                    DimVector::POS, cell));
+    lastPred_ = cell;
+  }
+}
+
+const Gen::PredInfo &Gen::predOf(const Term &t) {
+  const auto it = preds_.find(t.name);
+  if (it == preds_.end()) {
+    bail(CompileError::UnknownName, "unknown predicate " + t.name, t.loc);
+  }
+  if (it->second.argTys.size() != t.args.size()) {
+    bail(CompileError::BadArity,
+         t.name + " takes " + std::to_string(it->second.argTys.size()) +
+             " arguments",
+         t.loc);
+  }
+  return it->second;
+}
+
+void Gen::breakOp(Opd owner, DimRef dim) {
+  emit(OpcodeKind::Break, "brk", {owner, S(cInt(dim)), S(one_)});
+}
+
+/// Removal links a cell's predecessor to its successor (§5.1); the owner is
+/// the predecessor of a rank's first cell, so no case is special but the end.
+void Gen::unlinkFromRank(CellRef xReg, DimRef dim) {
+  const CellRef prev = rd(D(xReg), dim, true);
+  const CellRef nxt  = rd(D(xReg), dim);
+  const CellRef last = newLabel(), done = newLabel();
+  branchIfZero(nxt, last);
+  linkOp(D(prev), dim, D(nxt));
+  jump(done);
+  place(last);
+  breakOp(D(prev), dim);
+  place(done);
+}
+
+void Gen::requireTrue(CellRef cond, CellRef orElse) {
+  const CellRef good = newLabel();
+  branch(S(cond), good);
+  jump(orElse);
+  place(good);
+}
+
+void Gen::selfName(CellRef out) {
+  loadFieldInto(fields_.at(std::string(kFieldName)), out);
+}
+
+/// a0 = "+" or "-", a1 = the fact's term, a2 = the predicate cell.
+void Gen::emitRtBRaise() {
+  beginInternal(rtBRaise_);
+  const CellRef sign = reg(), term = reg(), pred = reg(), ev = reg(),
+                nm = reg(), cp = reg();
+  mov(S(sign), S(a0_));
+  mov(S(term), S(a1_));
+  mov(S(pred), S(a2_));
+  alloc(ev);
+  emit(OpcodeKind::Add, "evname", {S(sign), D(pred)}, {nm});
+  mov(D(ev), S(nm));
+  // The event owns a copy: the clause keeps its term on its own `+d.grab`, and
+  // a cell has one `-d.grab` neighbour.
+  callCopy(term, cp);
+  linkOp(D(ev), core_.dims().grab, D(cp));
+  emitAppendTail(S(agentCell_), dims_.pending, dims_.pending, ev);
+  ret();
+}
+
+/// a0 = clause, a1 = name; r0 = 1 when the clause has that source.
+void Gen::emitRtHasSrc() {
+  beginInternal(rtHasSrc_);
+  const CellRef cl = reg(), nm = reg(), s = reg(), eq = reg();
+  const CellRef loop = newLabel(), yes = newLabel(), no = newLabel();
+  mov(S(cl), S(a0_));
+  mov(S(nm), S(a1_));
+  mov(S(s), S(rd(D(cl), dims_.source)));
+  place(loop);
+  branchIfZero(s, no);
+  emit(OpcodeKind::Eq, "src?", {D(s), S(nm)}, {eq});
+  branch(S(eq), yes);
+  mov(S(s), S(rd(D(s), dims_.source)));
+  jump(loop);
+  place(yes);
+  movC(r0_, one_);
+  ret();
+  place(no);
+  movC(r0_, zero_);
+  ret();
+}
+
+/// a0 = predicate, a1 = clause, a2 = name: remove that source; when none is
+/// left, unlink the clause and raise `-pred`. r0 = 1 when the clause went.
+void Gen::emitRtBDrop() {
+  beginInternal(rtBDrop_);
+  const CellRef pred = reg(), cl = reg(), nm = reg(), s = reg(), eq = reg(),
+                left = reg(), ct = reg();
+  const CellRef loop = newLabel(), found = newLabel(), none = newLabel(),
+                kept = newLabel();
+  mov(S(pred), S(a0_));
+  mov(S(cl), S(a1_));
+  mov(S(nm), S(a2_));
+  mov(S(s), S(rd(D(cl), dims_.source)));
+  place(loop);
+  branchIfZero(s, none);
+  emit(OpcodeKind::Eq, "src?", {D(s), S(nm)}, {eq});
+  branch(S(eq), found);
+  mov(S(s), S(rd(D(s), dims_.source)));
+  jump(loop);
+  place(found);
+  unlinkFromRank(s, dims_.source);
+  mov(S(left), S(rd(D(cl), dims_.source)));
+  branchIfZero(left, kept);
+  movC(r0_, zero_);
+  ret();
+  place(kept);
+  unlinkFromRank(cl, core_.dims().clause);
+  mov(S(ct), S(rd(D(cl), core_.dims().grab)));
+  movC(a0_, cStr(std::string(kBeliefRemoved)));
+  mov(S(a1_), S(ct));
+  mov(S(a2_), S(pred));
+  callLabel(rtBRaise_);
+  movC(r0_, one_);
+  ret();
+  place(none);
+  movC(r0_, zero_);
+  ret();
+}
+
+/// a0 = predicate, a1 = a fresh ground term (adopted), a2 = source name,
+/// a3 = replace (keyed `believe`, `revise`), a4 = key count.
+///
+/// With replace, every other fact with the same key arguments that this source
+/// asserts loses the source first, so `-old` is raised before `+new`. Then the
+/// fact is added, or only its source is when it is already present.
+void Gen::emitRtBSet() {
+  beginInternal(rtBSet_);
+  const CellRef pred = reg(), term = reg(), src = reg(), repl = reg(),
+                nk = reg(), c = reg(), nx = reg(), ct = reg(), t1 = reg(),
+                t2 = reg(), i = reg(), u = reg(), cl = reg(), sc = reg();
+  const CellRef add = newLabel(), loop1 = newLabel(), next1 = newLabel(),
+                keyOk = newLabel(), keySame = newLabel(), kloop = newLabel(),
+                loop2 = newLabel(), exists = newLabel(), addSrc = newLabel(),
+                create = newLabel();
+  mov(S(pred), S(a0_));
+  mov(S(term), S(a1_));
+  mov(S(src), S(a2_));
+  mov(S(repl), S(a3_));
+  mov(S(nk), S(a4_));
+  branchIfZero(repl, add);
+  mov(S(c), S(rd(D(pred), core_.dims().clause)));
+  place(loop1);
+  branchIfZero(c, add);
+  mov(S(nx), S(rd(D(c), core_.dims().clause)));
+  mov(S(ct), S(rd(D(c), core_.dims().grab)));
+  mov(S(t1), S(rd(D(term), core_.dims().grab)));
+  mov(S(t2), S(rd(D(ct), core_.dims().grab)));
+  movC(i, zero_);
+  place(kloop);
+  emit(OpcodeKind::Gte, "i>=nk", {S(i), S(nk)}, {u});
+  branch(S(u), keySame);
+  emit(OpcodeKind::Unify, "key", {D(t1), D(t2)}, {u});
+  branch(S(u), keyOk);
+  jump(next1);
+  place(keyOk);
+  mov(S(t1), S(rd(D(t1), core_.dims().step)));
+  mov(S(t2), S(rd(D(t2), core_.dims().step)));
+  emit(OpcodeKind::Add, "i+", {S(i), S(one_)}, {i});
+  jump(kloop);
+  place(keySame);
+  emit(OpcodeKind::Unify, "same", {D(term), D(ct)}, {u});
+  branch(S(u), next1);
+  mov(S(a0_), S(c));
+  mov(S(a1_), S(src));
+  callLabel(rtHasSrc_);
+  branchIfZero(r0_, next1);
+  mov(S(a0_), S(pred));
+  mov(S(a1_), S(c));
+  mov(S(a2_), S(src));
+  callLabel(rtBDrop_);
+  place(next1);
+  mov(S(c), S(nx));
+  jump(loop1);
+
+  place(add);
+  mov(S(c), S(rd(D(pred), core_.dims().clause)));
+  place(loop2);
+  branchIfZero(c, create);
+  mov(S(ct), S(rd(D(c), core_.dims().grab)));
+  emit(OpcodeKind::Unify, "dup", {D(term), D(ct)}, {u});
+  branch(S(u), exists);
+  mov(S(c), S(rd(D(c), core_.dims().clause)));
+  jump(loop2);
+
+  place(exists);
+  mov(S(a0_), S(c));
+  mov(S(a1_), S(src));
+  callLabel(rtHasSrc_);
+  branchIfZero(r0_, addSrc);
+  movC(r0_, zero_);
+  ret();
+  place(addSrc);
+  alloc(sc);
+  mov(D(sc), S(src));
+  emitAppendTail(D(c), dims_.source, dims_.source, sc);
+  movC(r0_, zero_);
+  ret();
+
+  place(create);
+  alloc(cl);
+  mov(D(cl), D(pred));
+  linkOp(D(cl), core_.dims().grab, D(term));
+  alloc(sc);
+  mov(D(sc), S(src));
+  linkOp(D(cl), dims_.source, D(sc));
+  emitAppendTail(D(pred), core_.dims().clause, core_.dims().clause, cl);
+  movC(a0_, cStr(std::string(kBeliefAdded)));
+  mov(S(a1_), S(term));
+  mov(S(a2_), S(pred));
+  callLabel(rtBRaise_);
+  movC(r0_, one_);
+  ret();
+}
+
+/// The §4.2 settle loop: drain `d.pending` a round at a time. A round detaches
+/// the whole queue first, so events a handler raises start the next round and
+/// the walk is over cells nothing else touches. A round past
+/// `beliefEventDepth_` is a hard failure: `#Fail` reaches the adapter's base
+/// choice point, which lands on `failOp` and undoes the turn.
+void Gen::emitSettle() {
+  beginInternal(rtSettle_);
+  const CellRef h = reg(), e = reg(), ty = reg(), over = reg(), eq = reg();
+  const CellRef loop = newLabel(), inner = newLabel(), nextEv = newLabel(),
+                done = newLabel(), tooDeep = newLabel(), fine = newLabel();
+  movC(roundsG_, zero_);
+  place(loop);
+  mov(S(h), S(rd(S(agentCell_), dims_.pending)));
+  branchIfZero(h, done);
+  emit(OpcodeKind::Add, "round+", {S(roundsG_), S(one_)}, {roundsG_});
+  emit(OpcodeKind::Gt, "deep?",
+       {S(roundsG_), S(cInt(static_cast<std::int64_t>(beliefEventDepth_)))},
+       {over});
+  branch(S(over), tooDeep);
+  jump(fine);
+  place(tooDeep);
+  failNow();
+  place(fine);
+  breakOp(S(agentCell_), dims_.pending);
+  mov(S(e), S(h));
+  place(inner);
+  branchIfZero(e, loop);
+  mov(S(curEvent_), S(e));
+  mov(S(fields_.at(std::string(kFieldConsumed)).valueCell), S(false_));
+  mov(S(ty), D(e));
+  std::vector<std::pair<std::string, CellRef>> seqs;
+  std::set<std::string> types;
+  for (const HandlerInfo &hi : handlers_) {
+    if (hi.beliefTerm != nullptr) types.insert(hi.eventType);
+  }
+  for (const std::string &t : types) {
+    const CellRef seq = newLabel();
+    emit(OpcodeKind::Eq, "ty?", {S(ty), S(cStr(t))}, {eq});
+    branch(S(eq), seq);
+    seqs.emplace_back(t, seq);
+  }
+  jump(nextEv);
+  for (const auto &[t, seq] : seqs) {
+    place(seq);
+    for (const HandlerInfo *hp : mergedFor(t)) {
+      emitHandlerRun(*hp, true, nextEv);
+    }
+    jump(nextEv);
+  }
+  place(nextEv);
+  mov(S(e), S(rd(D(e), dims_.pending)));
+  jump(inner);
+  place(done);
+  ret();
+}
+
+Gen::TermPlan Gen::planTerm(const Term &t, bool allowVars) {
+  const PredInfo &p = predOf(t);
+  TermPlan pl;
+  pl.pred = &p;
+  pl.name = t.name;
+  for (std::size_t i = 0; i < t.args.size(); ++i) {
+    const TermArg &a = t.args[i];
+    const Ty &want   = p.argTys[i];
+    ArgPlan ap;
+    const auto asValue = [&](CellRef r, const Ty &got) {
+      if ((got.k == Ty::K::List) != (want.k == Ty::K::List)) {
+        bail(CompileError::TypeMismatch,
+             "argument " + std::to_string(i + 1) + " of " + t.name, t.loc);
+      }
+      ap.k         = ArgPlan::K::Value;
+      ap.reg       = r;
+      ap.composite = want.composite();
+      // A Float position holds a Float even when the program wrote `3`, so a
+      // later `#Eq` or `#Unify` compares like with like.
+      if (want.k == Ty::K::Float && got.k == Ty::K::Int) {
+        const CellRef conv = reg();
+        emit(OpcodeKind::Add, "tofloat", {S(r), S(cFloat(0.0))}, {conv});
+        ap.reg = conv;
+      }
+    };
+    if (a.logicVar) {
+      if (!allowVars) unsupported("a ?variable outside a query", t.loc);
+      const std::string &nm = *a.logicVar;
+      const auto dup        = std::ranges::find_if(
+          pl.vars, [&](const PlanVar &v) { return v.name == nm; });
+      if (dup != pl.vars.end()) {
+        ap.k     = ArgPlan::K::Dup;
+        ap.first = static_cast<std::size_t>(dup - pl.vars.begin());
+      } else if (const Local *l = findLocal(nm)) {
+        asValue(l->reg, l->ty);
+      } else {
+        PlanVar v;
+        v.cap   = reg();
+        v.local = reg();
+        v.name  = nm;
+        v.ty    = want;
+        pl.vars.push_back(std::move(v));
+        ap.k = ArgPlan::K::Var;
+      }
+    } else if (a.expr != nullptr) {
+      if (const auto *n = std::get_if<EName>(&a.expr->node);
+          n != nullptr && n->name == "_") {
+        if (!allowVars) unsupported("a wildcard outside a query", t.loc);
+        ap.k = ArgPlan::K::Wild;
+      } else {
+        const CellRef v = reg();
+        const Ty got    = valueInto(*a.expr, v);
+        asValue(v, got);
+      }
+    }
+    pl.args.push_back(ap);
+  }
+  declarePlanVars(pl);
+  return pl;
+}
+
+void Gen::declarePlanVars(const TermPlan &pl) {
+  for (const PlanVar &v : pl.vars) {
+    scopes_.back()[v.name] = Local{v.local, v.ty};
+  }
+}
+
+/// A fresh term in a new register: nothing in it is shared with a register or
+/// a clause, because each argument cell can sit on one `d.step` rank only.
+CellRef Gen::buildTerm(const TermPlan &pl) {
+  const CellRef tr = reg();
+  alloc(tr);
+  mov(D(tr), S(cStr(pl.name)));
+  CellRef prev = noCell;
+  for (const ArgPlan &ap : pl.args) {
+    const CellRef cell = reg();
+    if (ap.composite) {
+      callCopy(ap.reg, cell);
+    } else {
+      alloc(cell);
+      mov(D(cell), S(ap.reg));
+    }
+    if (prev == noCell) {
+      linkOp(D(tr), core_.dims().grab, D(cell));
+    } else {
+      linkOp(D(prev), core_.dims().step, D(cell));
+    }
+    prev = cell;
+  }
+  return tr;
+}
+
+/// Jump to `noMatch` unless the clause term in `termReg` fits the plan. On a
+/// match the `?v` captures hold the refs of the clause's argument cells.
+void Gen::emitMatch(const TermPlan &pl, CellRef termReg, CellRef noMatch) {
+  if (pl.args.empty()) return;
+  const CellRef a = reg(), t = reg();
+  mov(S(a), S(rd(D(termReg), core_.dims().grab)));
+  std::size_t varIndex = 0;
+  for (std::size_t i = 0; i < pl.args.size(); ++i) {
+    const ArgPlan &ap = pl.args[i];
+    switch (ap.k) {
+    case ArgPlan::K::Wild:
+      break;
+    case ArgPlan::K::Value:
+      if (ap.composite) {
+        emit(OpcodeKind::Unify, "match", {D(ap.reg), D(a)}, {t});
+      } else {
+        emit(OpcodeKind::Eq, "match", {S(ap.reg), D(a)}, {t});
+      }
+      requireTrue(t, noMatch);
+      break;
+    case ArgPlan::K::Var:
+      mov(S(pl.vars[varIndex++].cap), S(a));
+      break;
+    case ArgPlan::K::Dup:
+      emit(OpcodeKind::Unify, "same?", {D(pl.vars[ap.first].cap), D(a)}, {t});
+      requireTrue(t, noMatch);
+      break;
+    }
+    if (i + 1 < pl.args.size()) mov(S(a), S(rd(D(a), core_.dims().step)));
+  }
+}
+
+void Gen::bindVars(const TermPlan &pl) {
+  for (const PlanVar &v : pl.vars) {
+    if (v.ty.composite()) {
+      callCopy(v.cap, v.local);
+    } else {
+      mov(S(v.local), D(v.cap));
+    }
+  }
+}
+
+/// §6.1: a copy of the clause list taken first, so a body that believes or
+/// forgets does not change what the loop visits. Each element holds a clause
+/// ref.
+CellRef Gen::snapshotClauses(const PredInfo &p) {
+  const CellRef snap = reg(), c = reg(), tail = reg();
+  alloc(snap);
+  mov(D(snap), S(cStr(std::string(kListContent))));
+  movC(tail, zero_);
+  mov(S(c), S(rd(S(p.cell), core_.dims().clause)));
+  const CellRef loop = newLabel(), done = newLabel();
+  place(loop);
+  branchIfZero(c, done);
+  const CellRef cell = reg();
+  alloc(cell);
+  mov(D(cell), S(c));
+  pushTail(snap, tail, cell);
+  mov(S(c), S(rd(D(c), core_.dims().clause)));
+  jump(loop);
+  place(done);
+  return snap;
+}
+
+/// Append to a list through a tail register that starts at 0, so building n
+/// elements is O(n) and not the O(n^2) of `rtListPush_` walking to the tail.
+void Gen::pushTail(CellRef listReg, CellRef tailReg, CellRef cell) {
+  const CellRef first = newLabel(), done = newLabel();
+  branchIfZero(tailReg, first);
+  linkOp(D(tailReg), core_.dims().step, D(cell));
+  jump(done);
+  place(first);
+  linkOp(D(listReg), core_.dims().grab, D(cell));
+  place(done);
+  mov(S(tailReg), S(cell));
+}
+
+Ty Gen::believesExpr(const EBelieves &b, CellRef out) {
+  const TermPlan pl = planTerm(b.term, true);
+  CellRef fromReg   = noCell;
+  if (b.from) {
+    fromReg = reg();
+    expr(*b.from, fromReg);
+  }
+  const CellRef c = reg(), ct = reg();
+  const CellRef loop = newLabel(), noMatch = newLabel(), next = newLabel(),
+                after = newLabel(), exhausted = newLabel();
+  mov(S(c), S(rd(S(pl.pred->cell), core_.dims().clause)));
+  place(loop);
+  branchIfZero(c, exhausted);
+  mov(S(ct), S(rd(D(c), core_.dims().grab)));
+  emitMatch(pl, ct, noMatch);
+  if (fromReg != noCell) {
+    mov(S(a0_), S(c));
+    mov(S(a1_), S(fromReg));
+    callLabel(rtHasSrc_);
+    branchIfZero(r0_, noMatch);
+  }
+  // The alternative resumes with the next clause; the captures are copied into
+  // the locals after the choice point, so backtracking restores them.
+  emit(OpcodeKind::Choice, "bel", {S(opref(next))});
+  bindVars(pl);
+  jump(after);
+  place(noMatch);
+  place(next);
+  mov(S(c), S(rd(D(c), core_.dims().clause)));
+  jump(loop);
+  place(exhausted);
+  failNow();
+  place(after);
+  movC(out, unit_c_);
+  return tyOf(Ty::K::Unit);
+}
+
+Ty Gen::findallExpr(const EFindall &f, CellRef out, SourceLocation loc) {
+  pushScope();
+  const TermPlan pl = planTerm(f.goal, true);
+  const CellRef res = reg(), tail = reg();
+  alloc(res);
+  mov(D(res), S(cStr(std::string(kListContent))));
+  movC(tail, zero_);
+  const CellRef snap = snapshotClauses(*pl.pred);
+  Ty elemTy          = tyOf(Ty::K::Unit);
+  listWalk(snap, [&](CellRef e) {
+    const CellRef cl = reg(), ct = reg(), noMatch = newLabel();
+    mov(S(cl), D(e));
+    mov(S(ct), S(rd(D(cl), core_.dims().grab)));
+    emitMatch(pl, ct, noMatch);
+    bindVars(pl);
+    const CellRef v = reg(), cell = reg();
+    if (f.templ.logicVar) {
+      const Local *l = findLocal(*f.templ.logicVar);
+      if (l == nullptr) {
+        bail(CompileError::UnknownName,
+             "?" + *f.templ.logicVar + " does not occur in the goal", loc);
+      }
+      mov(S(v), S(l->reg));
+      elemTy = l->ty;
+    } else if (f.templ.expr != nullptr) {
+      elemTy = valueInto(*f.templ.expr, v);
+    } else {
+      unsupported("findall without a template", loc);
+    }
+    if (elemTy.composite()) {
+      callCopy(v, cell);
+    } else {
+      alloc(cell);
+      mov(D(cell), S(v));
+    }
+    pushTail(res, tail, cell);
+    place(noMatch);
+  });
+  popScope();
+  mov(S(out), S(res));
+  Ty t = tyOf(Ty::K::List);
+  t.args.push_back(elemTy);
+  return t;
+}
+
+Ty Gen::forBelieves(const EFor &f, CellRef out) {
+  pushScope();
+  const TermPlan pl     = planTerm(*f.believesTerm, true);
+  const CellRef snap    = snapshotClauses(*pl.pred);
+  const CellRef bodyOut = reg();
+  listWalk(snap, [&](CellRef e) {
+    const CellRef cl = reg(), ct = reg(), noMatch = newLabel();
+    mov(S(cl), D(e));
+    mov(S(ct), S(rd(D(cl), core_.dims().grab)));
+    emitMatch(pl, ct, noMatch);
+    bindVars(pl);
+    stmtWrap([&] { expr(*f.body, bodyOut); });
+    place(noMatch);
+  });
+  movC(out, unit_c_);
+  popScope();
+  return tyOf(Ty::K::Unit);
+}
+
+Ty Gen::beliefChange(EBeliefChange::Kind kind, const Term &t, CellRef out) {
+  using Kind        = EBeliefChange::Kind;
+  const PredInfo &p = predOf(t);
+  const CellRef who = reg();
+  selfName(who);
+  if (kind == Kind::Forget) {
+    pushScope();
+    const TermPlan pl  = planTerm(t, true);
+    const CellRef snap = snapshotClauses(p);
+    listWalk(snap, [&](CellRef e) {
+      const CellRef cl = reg(), ct = reg(), noMatch = newLabel();
+      mov(S(cl), D(e));
+      mov(S(ct), S(rd(D(cl), core_.dims().grab)));
+      emitMatch(pl, ct, noMatch);
+      movC(a0_, opref(p.cell));
+      mov(S(a1_), S(cl));
+      mov(S(a2_), S(who));
+      callLabel(rtBDrop_);
+      place(noMatch);
+    });
+    popScope();
+  } else {
+    const TermPlan pl = planTerm(t, false);
+    const CellRef tr  = buildTerm(pl);
+    const bool repl   = kind == Kind::Revise || p.nkeys > 0;
+    movC(a0_, opref(p.cell));
+    mov(S(a1_), S(tr));
+    mov(S(a2_), S(who));
+    movC(a3_, repl ? one_ : zero_);
+    movC(a4_, cInt(static_cast<std::int64_t>(p.nkeys)));
+    callLabel(rtBSet_);
+  }
+  movC(out, unit_c_);
+  return tyOf(Ty::K::Unit);
+}
+
+/// The routine a belief handler runs first, under the handler's choice point:
+/// match the trigger against the fact the pending event carries and declare
+/// the trigger's `?v` locals for the guard and body that follow.
+void Gen::emitBeliefBind(HandlerInfo &h) {
+  h.bindEntry = newLabel();
+  beginHandlerCtx(h);
+  place(h.bindEntry);
+  const CellRef noMatch = newLabel();
+  const TermPlan pl     = planTerm(*h.beliefTerm, true);
+  const CellRef ct      = reg();
+  mov(S(ct), S(rd(D(curEvent_), core_.dims().grab)));
+  emitMatch(pl, ct, noMatch);
+  bindVars(pl);
+  for (const PlanVar &v : pl.vars) {
+    h.beliefLocals.emplace_back(v.name, Local{v.local, v.ty});
+  }
+  jump(ctx_.epi);
+  place(noMatch);
+  failNow();
+  place(ctx_.epi);
+  ret();
 }
 
 // ---------------------------------------------------------------------------
@@ -1862,11 +2597,12 @@ void Gen::beginHandlerCtx(const HandlerInfo &h) {
   et.name        = h.eventType;
   ctx_.eventTy   = et;
   if (h.binder) scopes_.back()[*h.binder] = Local{curEvent_, et};
+  for (const auto &[n, l] : h.beliefLocals) scopes_.back()[n] = l;
 }
 
 void Gen::emitHandlerRoutines(HandlerInfo &h) {
-  if (!events_.contains(h.eventType) && h.eventType != kEventInitialize &&
-      h.eventType != kEventDestroy) {
+  if (h.beliefTerm == nullptr && !events_.contains(h.eventType) &&
+      h.eventType != kEventInitialize && h.eventType != kEventDestroy) {
     bail(CompileError::UnknownType, "unknown event " + h.eventType, h.def->loc);
   }
   const auto routine = [&](CellRef entry, const std::function<void()> &body) {
@@ -1878,6 +2614,7 @@ void Gen::emitHandlerRoutines(HandlerInfo &h) {
     place(ctx_.epi);
     ret();
   };
+  if (h.beliefTerm != nullptr) emitBeliefBind(h);
   if (h.def->guard) {
     h.guardEntry = newLabel();
     routine(h.guardEntry, [&] {
@@ -1917,6 +2654,7 @@ void Gen::emitHandlerRun(const HandlerInfo &h, bool checkConsumed,
   const CellRef hd   = global();
   emit(OpcodeKind::ChoiceDepth, "h", {}, {hd});
   emit(OpcodeKind::Choice, "next", {S(opref(next))});
+  if (h.bindEntry != noCell) callLabel(h.bindEntry);
   if (h.guardEntry != noCell) callLabel(h.guardEntry);
   callLabel(h.bodyEntry);
   emit(OpcodeKind::Cut, "cut", {S(hd)});
@@ -1953,11 +2691,18 @@ void Gen::emitInit(CellRef entryLabel) {
       storeField(f, val);
     });
   }
+  for (const Member &m : agent_->members) {
+    const auto *b = std::get_if<BeliefDecl>(&m);
+    if (b == nullptr) continue;
+    stmtWrap(
+        [&] { beliefChange(EBeliefChange::Kind::Believe, b->fact, reg()); });
+  }
   const CellRef end = newLabel();
   for (const HandlerInfo *h : mergedFor(std::string(kEventInitialize))) {
     emitHandlerRun(*h, false, end);
   }
   place(end);
+  callLabel(rtSettle_);
   ret();
 }
 
@@ -2007,6 +2752,7 @@ void Gen::emitDispatch(CellRef entryLabel) {
     jump(end);
   }
   place(end);
+  callLabel(rtSettle_);
   ret();
 }
 
@@ -2080,25 +2826,40 @@ CompiledAgent Gen::run() {
   rtListPush_     = newLabel();
   rtOutbox_       = newLabel();
   rtCopy_         = newLabel();
+  rtBRaise_       = newLabel();
+  rtHasSrc_       = newLabel();
+  rtBDrop_        = newLabel();
+  rtBSet_         = newLabel();
+  rtSettle_       = newLabel();
+  a3_             = global();
+  a4_             = global();
+  roundsG_        = global();
   copyPro_        = newLabel();
   copyEpi_        = newLabel();
   copyBody_       = newLabel();
   copyRoutine_.id = nextRoutineId_++;
 
   mintAgentCell();
+  mintPredicates();
 
   // Handlers and the members the iteration does not support.
   std::size_t index = 0;
   for (const Member &m : agent_->members) {
     if (const auto *h = std::get_if<HandlerDef>(&m)) {
-      const auto *trig = std::get_if<EventTrigger>(&h->trigger);
-      if (trig == nullptr) unsupported("belief triggers", h->loc);
       HandlerInfo hi;
-      hi.def       = h;
-      hi.eventType = trig->eventType;
-      hi.binder    = trig->binder;
-      hi.priority  = h->priority.value_or(0);
-      hi.index     = index++;
+      hi.def      = h;
+      hi.priority = h->priority.value_or(0);
+      hi.index    = index++;
+      if (const auto *bt = std::get_if<BeliefTrigger>(&h->trigger)) {
+        (void)predOf(bt->fact);
+        hi.eventType = std::string(bt->added ? kBeliefAdded : kBeliefRemoved) +
+                       bt->fact.name;
+        hi.beliefTerm = &bt->fact;
+      } else {
+        const auto &trig = std::get<EventTrigger>(h->trigger);
+        hi.eventType     = trig.eventType;
+        hi.binder        = trig.binder;
+      }
       handlers_.push_back(std::move(hi));
     } else if (const auto *u = std::get_if<UsesDecl>(&m)) {
       unsupported("uses", u->loc);
@@ -2107,7 +2868,6 @@ CompiledAgent Gen::run() {
                std::holds_alternative<PlanDecl>(m) ||
                std::holds_alternative<InstallDecl>(m) ||
                std::holds_alternative<BehaviorUse>(m) ||
-               std::holds_alternative<BeliefDecl>(m) ||
                std::holds_alternative<LifecycleDef>(m)) {
       unsupported("this member", agent_->loc);
     }
@@ -2119,6 +2879,10 @@ CompiledAgent Gen::run() {
   emitRtListPush();
   emitRtOutbox();
   emitRtCopy();
+  emitRtBRaise();
+  emitRtHasSrc();
+  emitRtBDrop();
+  emitRtBSet();
   for (auto &[n, mi] : methods_) emitMethod(mi);
   for (HandlerInfo &h : handlers_) emitHandlerRoutines(h);
 
@@ -2128,6 +2892,7 @@ CompiledAgent Gen::run() {
   out.dispatchEntry = newLabel();
   out.haltOp        = haltOp_;
   out.failOp        = failOp_;
+  emitSettle();
   emitInit(out.initEntry);
   emitDispatch(out.dispatchEntry);
   buildProgramStructure();
@@ -2138,10 +2903,15 @@ CompiledAgent Gen::run() {
 
 Compiler::Compiler(zigzag::vortex::VortexCore &core) : core_(core), vm_(core) {}
 
+Compiler *Compiler::setBeliefEventDepth(std::size_t rounds) noexcept {
+  beliefEventDepth_ = rounds;
+  return this;
+}
+
 std::expected<CompiledAgent, CompileFailure>
 Compiler::compileAgent(const Unit &unit, std::string_view agentType) {
   try {
-    Gen g(core_, vm_, unit, agentType);
+    Gen g(core_, vm_, unit, agentType, beliefEventDepth_);
     return g.run();
   } catch (const Bail &b) {
     return std::unexpected(b.failure);

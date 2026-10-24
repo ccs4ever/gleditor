@@ -2,7 +2,7 @@
 
 | field         | value                                                                                                                                                                                                                       |
 | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| version       | 3.8 (see [Appendix](#appendix-versioning-and-change-history))                                                                                                                                                               |
+| version       | 3.9 (see [Appendix](#appendix-versioning-and-change-history))                                                                                                                                                               |
 | status        | Specification only. Nothing here is built or wired into the gleditor build.                                                                                                                                                 |
 | compiles to   | Vortex opcode streams over an `ArenaManifold`, run one turn at a time by a Spool-Mesh actor executor                                                                                                                        |
 | rests on      | Vortex ([runtime](vortex-hyperstructural-runtime.md)), Vlog ([logic](vlog-logic-extension.md)), vicon ([goals](vicon-goal-directed-language.md)), the Spool-Mesh actor runtime (`apps/common/xanadu/vortex/mesh_actor.hpp`) |
@@ -435,6 +435,20 @@ An orderly stop (`stop`, `terminate`, or lease end without renewal) runs `on Des
 `ChildStopping{child, cause}` to the parent, with `cause` one of `"stop"`, `"terminate"`, `"lease"`
 or `"init"` (§4.2), and asks the runtime to stop and reap the actor (P7). The parent reports one
 `ChildStopping` even when the runtime's `ActorDown` follows it.
+
+**Children of a stopping agent.** Whether a holon's children outlive it is the programmer's choice,
+made at each stop, because both are useful: a coordinator's workers are pointless without it, while
+a supervisor that hands off long-running services must not take them down. `stop a` and `terminate`
+**reap** by default: after `on Destroy`, the stopping agent stages `stop` to every child on
+`d.holon`, so the stop cascades down the tree, each child running its own `on Destroy` and choosing
+for its own children in turn. `stop a keeping children` and `terminate keeping children` **keep**
+them: the stopping agent stages `Orphaned{former_parent}` to each child instead, and a child that
+receives it re-parents itself to the launcher, setting `$parent` to the launcher's pid and `$outer`
+to the launcher's space, so `emit` to `outer` and `ChildStopping` still reach a live host. A kept
+child keeps its own lease and is renewed through the launcher's issuer budget from then on. Lease
+end and a fatal initialisation failure have no statement to carry the choice, so they reap. The
+choice applies to children only; members of a hosted space that are not children are never stopped,
+and the space ends with its host.
 
 ______________________________________________________________________
 
@@ -900,7 +914,7 @@ ______________________________________________________________________
 | (staged when a delegated wait ends early) | `cancel`  | drop the intention adopted for that correlation id; if none yet, remember the id in `$cancelled` for `send_retries × send_retry_interval`   | no                    |
 | (staged when a delegated intention ends)  | `outcome` | `{correlation, status, cause}`; resumes the delegating `achieve`; dropped if cancelled                                                      | no                    |
 | (staged by `accepts` failing)             | `refuse`  | `{correlation}`; fails the delegating `achieve` with cause `refused`                                                                        | no                    |
-| `stop a`                                  | `stop`    | accepted from the parent only: run `on Destroy`, then stop (§4.5)                                                                           | no                    |
+| `stop a [keeping children]`               | `stop`    | accepted from the parent only: run `on Destroy`, reap or keep children, then stop (§4.5)                                                    | no                    |
 | `x := ask a.q(args) within d`             | `ask`     | run the receiver's `answer q`, read-only; its value is the turn result                                                                      | the answer            |
 
 Every `ActorSend` is answered by the runtime with an `ActorDeliverValue` carrying the receiver's
@@ -1009,12 +1023,12 @@ ______________________________________________________________________
   tell terminate then to uninstall unmount untell uses var where while within yield
   ```
 
-  Contextual, reserved only in the position that uses them: `as`, `ensures`, `from`, `holds`,
-  `inner`, `maintain`, `module`, `occurrence`, `outer`, `parent`, `perform`, `preempts`, `priority`,
-  `requires`, `succeed`, `when`. After `.`, in a field declaration and as a record-literal key, any
-  word is accepted, so `f.goal` and an event field named `to` work, and `import std:agent` parses.
-  Parameters and locals must be identifiers, because a parameter named with a keyword could never be
-  read.
+  Contextual, reserved only in the position that uses them: `as`, `children`, `ensures`, `from`,
+  `holds`, `inner`, `keeping`, `maintain`, `module`, `occurrence`, `outer`, `parent`, `perform`,
+  `preempts`, `priority`, `requires`, `succeed`, `when`. After `.`, in a field declaration and as a
+  record-literal key, any word is accepted, so `f.goal` and an event field named `to` work, and
+  `import std:agent` parses. Parameters and locals must be identifiers, because a parameter named
+  with a keyword could never be read.
 
 ### 8.2 Truth and failure
 
@@ -1168,8 +1182,8 @@ run when reached.
 | `drop i`                                     | `()`        | ends an intention as dropped (§6.4); on an id that is not live, does nothing and succeeds |
 | `install S(args)`, `uninstall S`             | `()`        | §5.3                                                                                      |
 | `mount B(args)`, `unmount B`                 | `()`        | adds or removes a behavior instance                                                       |
-| `stop a`                                     | `()`        | staged `stop` to a child                                                                  |
-| `terminate`                                  | `()`        | after this turn, run `on Destroy` and stop                                                |
+| `stop a [keeping children]`                  | `()`        | staged `stop` to a child; its children are reaped unless kept (§4.5)                      |
+| `terminate [keeping children]`               | `()`        | after this turn, run `on Destroy`, reap or keep the children, and stop (§4.5)             |
 | `return [e]`                                 | none        | leaves the method, answer or `def`                                                        |
 | `yield`, `consume`, `fail`                   |             | as §8.3                                                                                   |
 
@@ -1288,7 +1302,8 @@ Action        ::= 'emit' Postfix [ 'in' Postfix ] [ 'for' Postfix ]
                 | 'ask' Postfix 'within' Postfix [ 'else' Expr ]
                 | 'await' ( Term | Ident 'as' Ident ) [ '[' Expr ']' ] 'within' Postfix
                   [ 'else' Expr ]
-                | 'drop' Postfix | 'stop' Postfix | 'terminate'
+                | 'drop' Postfix | 'stop' Postfix [ 'keeping' 'children' ]
+                | 'terminate' [ 'keeping' 'children' ]
                 | 'install' Ident [ '(' [ ArgList ] ')' ] | 'uninstall' Ident
                 | 'mount' Ident [ '(' [ ArgList ] ')' ] | 'unmount' Ident
                 | 'return' [ Expr ] | 'yield' | 'consume' | 'fail' ;
@@ -1438,16 +1453,16 @@ import it for clarity. It reuses `std:logic` (unification, and the clause databa
 built), `std:goal` (scanning, once it registers vicon §6's functions), `std:collections` (lists) and
 `std:string`.
 
-| Part         | Contents                                                                                                                                                                                                                                                                                                                                                                     |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| genesis      | receives the thirteen dimensions of §5.1 from the adapter (V10); creates the reserved fields                                                                                                                                                                                                                                                                                 |
-| dispatcher   | handler merge (§5.7), the settle loop, `consume`, await matching and capture                                                                                                                                                                                                                                                                                                 |
-| deliberation | `adopt`, selection, `continue`, isolated reconsideration, maintain intentions, restorers and back-off, `fail_step`                                                                                                                                                                                                                                                           |
-| beliefs      | set-with-sources assert, retract and keyed revise; clause walk; `findall`                                                                                                                                                                                                                                                                                                    |
-| relay        | the host's fan-out into hosted spaces                                                                                                                                                                                                                                                                                                                                        |
-| capacities   | `Schedules` (`after(d: Duration, e: Event): Timer`, `periodic(d: Duration, e: Event): Timer`, `cancel(t: Timer)`); `Clock` (`now(): Time`); `Accepts` (`accepts(sender: Agent, goal_name: Str)`); `Logging` (`info(m: Str)`, `debug(m: Str)`)                                                                                                                                |
-| functions    | `intentions(): [Intention]` (top-level only; a drop covers their subgoals), `is_maintain(i: Intention)` (succeeds or fails), `restorers(i: Intention): [Intention]`, `members(s: Space): [Agent]`, `children(): [Agent]`, `text(x): Str` (built into the checker for every type); `Map<K, V>` operations                                                                     |
-| events       | `Initialize`, `Destroy`, `GoalAchieved{intention, goal}`, `GoalFailed{intention, goal, cause}`, `GoalDropped{intention, goal}`, `PlanFailed{intention, plan, cause}`, `EffectFailed{capacity, method, cause}`, `ConditionFault{intention, cause}`, `ChildDown{child}`, `ChildStopping{child, cause}`, `SpawnFailed{child}`, `DeliveryFailed{to, kind, cause}`, `Moved{name}` |
+| Part         | Contents                                                                                                                                                                                                                                                                                                                                                                                                |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| genesis      | receives the thirteen dimensions of §5.1 from the adapter (V10); creates the reserved fields                                                                                                                                                                                                                                                                                                            |
+| dispatcher   | handler merge (§5.7), the settle loop, `consume`, await matching and capture                                                                                                                                                                                                                                                                                                                            |
+| deliberation | `adopt`, selection, `continue`, isolated reconsideration, maintain intentions, restorers and back-off, `fail_step`                                                                                                                                                                                                                                                                                      |
+| beliefs      | set-with-sources assert, retract and keyed revise; clause walk; `findall`                                                                                                                                                                                                                                                                                                                               |
+| relay        | the host's fan-out into hosted spaces                                                                                                                                                                                                                                                                                                                                                                   |
+| capacities   | `Schedules` (`after(d: Duration, e: Event): Timer`, `periodic(d: Duration, e: Event): Timer`, `cancel(t: Timer)`); `Clock` (`now(): Time`); `Accepts` (`accepts(sender: Agent, goal_name: Str)`); `Logging` (`info(m: Str)`, `debug(m: Str)`)                                                                                                                                                           |
+| functions    | `intentions(): [Intention]` (top-level only; a drop covers their subgoals), `is_maintain(i: Intention)` (succeeds or fails), `restorers(i: Intention): [Intention]`, `members(s: Space): [Agent]`, `children(): [Agent]`, `text(x): Str` (built into the checker for every type); `Map<K, V>` operations                                                                                                |
+| events       | `Initialize`, `Destroy`, `GoalAchieved{intention, goal}`, `GoalFailed{intention, goal, cause}`, `GoalDropped{intention, goal}`, `PlanFailed{intention, plan, cause}`, `EffectFailed{capacity, method, cause}`, `ConditionFault{intention, cause}`, `ChildDown{child}`, `ChildStopping{child, cause}`, `Orphaned{former_parent}`, `SpawnFailed{child}`, `DeliveryFailed{to, kind, cause}`, `Moved{name}` |
 
 A timer is an entry in `$timers`: id, due time, period, and a copied event. When it falls due, the
 adapter asks for a wake turn and the event is dispatched to the agent itself. `Logging` writes
@@ -2078,6 +2093,11 @@ ______________________________________________________________________
 ______________________________________________________________________
 
 ## Appendix: Versioning and Change History
+
+**3.9 — Children of a stopping agent.** The owner ruled that whether children outlive their parent
+is chosen case by case: `stop a` and `terminate` reap by default, and `keeping children` re-parents
+the children to the launcher through a new `Orphaned` event; lease end and fatal initialisation
+reap.
 
 **3.8 — Implementation findings.** P15 (the executor sees the spawn request) is added and approved;
 a request id is 36 characters, its last field counting the turn's sends rather than outbox entries,

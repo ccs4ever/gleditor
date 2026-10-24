@@ -132,6 +132,16 @@ inline constexpr std::string_view kUnitContent = "()";
 /// The first name on every record cell's `+d.vars` rank. Readers skip it.
 inline constexpr std::string_view kRecordMarker = "";
 
+// -- Beliefs (§6.1, §6.5) -----------------------------------------------------
+
+/// A belief event on `d.pending` has content `+pred` or `-pred` and the fact's
+/// term (a copy) on `+d.grab`.
+inline constexpr std::string_view kBeliefAdded   = "+";
+inline constexpr std::string_view kBeliefRemoved = "-";
+
+/// `vagent.belief_event_depth` (§10): settle rounds per turn.
+inline constexpr std::size_t kDefaultBeliefEventDepth = 16;
+
 // -- Spaces (§5.4, §7.2) ------------------------------------------------------
 
 inline constexpr std::string_view kSpaceInner = "inner";
@@ -165,6 +175,8 @@ inline constexpr std::string_view kOutboxFor   = "for";
 inline constexpr std::string_view kOutboxAgentType = "agent";
 inline constexpr std::string_view kOutboxChildName = "name";
 inline constexpr std::string_view kOutboxArgs      = "args";
+/// `stop` entries: the child's name (text); the parent alone may stop a child.
+inline constexpr std::string_view kOutboxStopChild = "child";
 
 // -- Wire (§5.5, §7.3)
 // --------------------------------------------------------- An `ActorSend`'s
