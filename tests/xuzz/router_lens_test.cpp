@@ -12,14 +12,18 @@
 
 #include <unistd.h>
 
+#include <sqlite3.h>
+
 #include <gtest/gtest.h>
 
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 #include "common/xanadu/zigzag/filesystem_lens.hpp"
+#include "common/xanadu/zigzag/journal_lens.hpp"
 #include "common/xanadu/zigzag/lens_uri.hpp"
 #include "common/xanadu/zigzag/projection_session.hpp"
 #include "common/xanadu/zigzag/router_lens.hpp"
+#include "common/xanadu/zigzag/sql_lens.hpp"
 
 namespace {
 
@@ -370,6 +374,75 @@ TEST(RouterLensTest, OpenLensUriRoutesDirectoriesToTheRouter) {
   ASSERT_TRUE(bareFile.has_value());
   EXPECT_NE(dynamic_cast<FilesystemLens *>(bareFile->get()), nullptr);
   EXPECT_EQ(dynamic_cast<RouterLens *>(bareFile->get()), nullptr);
+}
+
+// A .db cell mounts a SqlLens already browsing the first base table --
+// the same projection a bare-path pick of the file produces.
+TEST(RouterLensTest, OpenDatabaseFileMountsSqlBrowseUnderItsCell) {
+  RouterFixture fix;
+  const fs::path dbFile = fix.dir / "data.db";
+  {
+    sqlite3 *db = nullptr;
+    ASSERT_EQ(sqlite3_open(dbFile.string().c_str(), &db), SQLITE_OK);
+    ASSERT_EQ(sqlite3_exec(db,
+                           "CREATE TABLE t(id INTEGER PRIMARY KEY, v TEXT);"
+                           "INSERT INTO t VALUES (1,'a'),(2,'b');",
+                           nullptr, nullptr, nullptr),
+              SQLITE_OK);
+    sqlite3_close_v2(db);
+  }
+  ProjectedRouter p{fix.dir};
+  const auto fileCell = p.childNamed(p.session->roots().front(), "data.db");
+  ASSERT_TRUE(fileCell.has_value());
+  const auto fileKey = p.session->keyFor(*fileCell);
+  ASSERT_TRUE(fileKey.has_value());
+
+  const auto opened = p.lens->open(*fileKey);
+  ASSERT_TRUE(opened.has_value()) << opened.error();
+  EXPECT_TRUE(opened->starts_with("sql:")) << *opened;
+  (void)p.session->refresh();
+
+  const auto sqlRoot = p.session->cellFor(*opened);
+  ASSERT_TRUE(sqlRoot.has_value());
+  EXPECT_EQ(p.attr(*sqlRoot, "d.role"), "sql.conn");
+  const auto head = p.child(*fileCell);
+  ASSERT_TRUE(head.has_value());
+  EXPECT_EQ(*head, *sqlRoot);
+  // The first base table is what a bare-file open browses: a query
+  // node with a live page under the connection root.
+  const auto query = [&] {
+    for (const auto c : p.children(*sqlRoot)) {
+      if (p.attr(c, "d.role") == "sql.query") return c;
+    }
+    return zigzag::CellRef{};
+  }();
+  EXPECT_NE(query, zigzag::CellRef{});
+}
+
+// A systemd-unit filename routes to a JournalLens of that unit -- or,
+// where no journal is readable, refuses rather than misclassifying.
+TEST(RouterLensTest, OpenServiceFileRoutesToTheUnitsJournal) {
+  RouterFixture fix;
+  zigzag::JournalLens probe;
+  if (!probe.isOpen()) {
+    GTEST_SKIP() << "no readable journal: " << probe.openError();
+  }
+  const fs::path unitFile = fix.dir / "dummy-unit.service";
+  {
+    std::ofstream f(unitFile);
+    f << "[Unit]\n";
+  }
+  ProjectedRouter p{fix.dir};
+  const auto fileCell =
+      p.childNamed(p.session->roots().front(), "dummy-unit.service");
+  ASSERT_TRUE(fileCell.has_value());
+  const auto fileKey = p.session->keyFor(*fileCell);
+  ASSERT_TRUE(fileKey.has_value());
+
+  const auto opened = p.lens->open(*fileKey);
+  ASSERT_TRUE(opened.has_value()) << opened.error();
+  EXPECT_EQ(*opened, "journal@dummy-unit.service");
+  EXPECT_TRUE(p.lens->isMounted(*fileKey));
 }
 
 } // namespace

@@ -2935,14 +2935,35 @@ int XuzzApp::run(const int argc, char **argv) {
             zigzagPresentation->adoptDocument(std::move(doc), sourcePath);
           });
         });
+    // Hand the slice view back to what was showing before the picker:
+    // the live lens's projection, or the bound xanadu store. Every finish
+    // path -- pick, failed pick, cancel -- runs this.
+    const auto restoreSliceView = [&] {
+      if (lensSurface != nullptr) {
+        lensSurface->resumeView();
+      } else {
+        renderer->runWithState([&bindZigzag, &session, &zigzagStoreIndex,
+                                &sliceHeads](RenderState &rState) {
+          const auto it = sliceHeads.find(zigzagStoreIndex);
+          bindZigzag(
+              rState, zigzagStoreIndex,
+              it != sliceHeads.end()
+                  ? it->second
+                  : session->store(zigzagStoreIndex).primaryCurrentVersion());
+        });
+      }
+    };
     // root is a local: the handler outlives this frame, so it takes a copy.
-    raw->setOnPick([&, root](const fs::path &path) {
+    raw->setOnPick([&, root, restoreSliceView](const fs::path &path) {
+      // The picker is already finished and deactivated here; its scope
+      // registration comes down first so no exit below can skip it.
+      lensPickerScope.reset();
       lensPickerDir = path.has_parent_path() ? path.parent_path() : root;
       auto lens     = zigzag::openLensUri(path.string());
       if (!lens) {
         GLEDITOR_LOG_WARN("xuzz.lens", "cannot open {} as a lens: {}",
                           path.string(), lens.error());
-        lensPickerScope.reset();
+        restoreSliceView();
         return;
       }
       const auto label = path.string();
@@ -2961,33 +2982,21 @@ int XuzzApp::run(const int argc, char **argv) {
       } catch (const std::exception &err) {
         GLEDITOR_LOG_WARN("xuzz.lens", "cannot project {}: {}", label,
                           err.what());
-        if (lensSurface != nullptr) {
-          lensSurface->resumeView(); // the old surface outlives a failed swap
-        }
+        restoreSliceView(); // the old surface outlives a failed swap
       }
-      lensPickerScope.reset();
     });
     raw->setOnCancel([&] {
       lensPickerScope.reset();
-      // Hand the slice view back to what was showing: the live lens's
-      // projection, or the bound xanadu store.
-      if (lensSurface != nullptr) {
-        lensSurface->resumeView();
-      } else {
-        renderer->runWithState([&bindZigzag, &session, &zigzagStoreIndex,
-                                &sliceHeads](RenderState &rState) {
-          const auto it = sliceHeads.find(zigzagStoreIndex);
-          bindZigzag(
-              rState, zigzagStoreIndex,
-              it != sliceHeads.end()
-                  ? it->second
-                  : session->store(zigzagStoreIndex).primaryCurrentVersion());
-        });
-      }
+      restoreSliceView();
     });
     if (lensSurface != nullptr) {
       lensSurface->suspendView();
     }
+    // A finished picker being replaced may still hold a live registration
+    // (a finish path that skipped its handler); it comes down while the
+    // scope it names is still alive, not after the unique_ptr swap below
+    // destroys it.
+    lensPickerScope.reset();
     lensPicker      = std::move(picker);
     lensPickerScope = state->focusManager.registerScope(
         *raw, {.allowedCommands = {"quit", "std:xuzz/quit"}});

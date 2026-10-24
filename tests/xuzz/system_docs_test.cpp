@@ -126,6 +126,29 @@ TEST(SystemDocsTest, DefaultKeymapGivesEachChordOneActionPerScope) {
   }
 }
 
+// The lens verbs ship with default chords in system://keymap so the
+// gestures are pressable out of the box (design/sql-to-zigzag.md rev 7).
+TEST(SystemDocsTest, LensVerbsHaveDefaultKeymapBindings) {
+  const std::map<std::string, std::string> want{
+      {std::string(xanadu::settings::kKeymapLensOpen), "O"},
+      {std::string(xanadu::settings::kKeymapLensBack), "B"},
+      {std::string(xanadu::settings::kKeymapLensNextPage), "P"},
+      {std::string(xanadu::settings::kKeymapLensCommit), "Ctrl+S"},
+      {std::string(xanadu::settings::kKeymapLensPromote), "Shift+P"},
+      {std::string(xanadu::settings::kKeymapLensOpenSource), "Shift+O"},
+  };
+  std::map<std::string, std::string> got;
+  for (const auto &spec : xanadu::defaultSettingSpecs(SystemDocKind::Keymap)) {
+    if (want.contains(spec.name)) {
+      ASSERT_FALSE(spec.schemas.empty()) << spec.name;
+      ASSERT_FALSE(spec.schemas.front().defaultValues.empty()) << spec.name;
+      got[spec.name] =
+          std::get<std::string>(spec.schemas.front().defaultValues.front());
+    }
+  }
+  EXPECT_EQ(got, want);
+}
+
 TEST(SystemDocsTest, KeymapScopesFollowTheActionFamily) {
   EXPECT_EQ(xanadu::keymapScope("std:nav/step_x_pos"), "zigzag");
   EXPECT_EQ(xanadu::keymapScope("std:zigzag/insert_cell_x_pos"), "zigzag");
