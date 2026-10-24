@@ -25,8 +25,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <functional>
+#include <map>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "common/xanadu/vagent/ast.hpp"
 #include "common/xanadu/vagent/runtime_abi.hpp"
@@ -54,6 +58,24 @@ struct CompileFailure {
   SourceLocation loc{};
 };
 
+/// A compiled method's body as a unit a host can run against any frame that
+/// has the method's layout, which is how a suspended plan body (iteration 4c)
+/// will resume with the locals it left on an intention's frame. Every entry is
+/// a stub that ends at the agent's halt op.
+struct FrameBody {
+  /// The handle the host points at a frame cell. `make` leaves it naming the
+  /// frame it built; `enter` runs the body against the frame it names.
+  zigzag::CellRef frame{zigzag::noCell};
+  /// Builds a frame, copies `args` into its parameters, and points `frame`
+  /// at it. The frame is left off the stack.
+  zigzag::CellRef make{zigzag::noCell};
+  /// Stacks the frame `frame` names, binds the body's handles to it, runs the
+  /// body and unstacks it. The result is in `result`.
+  zigzag::CellRef enter{zigzag::noCell};
+  std::vector<zigzag::CellRef> args;
+  zigzag::CellRef result{zigzag::noCell};
+};
+
 class Compiler {
 public:
   explicit Compiler(zigzag::vortex::VortexCore &core);
@@ -67,6 +89,10 @@ public:
   /// the turn fails hard. Applies to agents compiled afterwards.
   Compiler *setBeliefEventDepth(std::size_t rounds) noexcept;
 
+  /// The frame-run entries of the agent's method @p name, from the last
+  /// successful `compileAgent`.
+  [[nodiscard]] std::optional<FrameBody> frameBody(std::string_view name) const;
+
   [[nodiscard]] zigzag::vortex::VortexCore &core() noexcept { return core_; }
   [[nodiscard]] zigzag::vortex::VortexVM &vm() noexcept { return vm_; }
 
@@ -74,6 +100,7 @@ private:
   zigzag::vortex::VortexCore &core_;
   zigzag::vortex::VortexVM vm_;
   std::size_t beliefEventDepth_{kDefaultBeliefEventDepth};
+  std::map<std::string, FrameBody, std::less<>> frameBodies_;
 };
 
 } // namespace xanadu::vagent

@@ -8,9 +8,12 @@
  *  - The dispatcher is emitted as opcodes per event type here, not written in
  *    a `std:agent` prelude (§10). The program-side ranks of §5.7 are built
  *    anyway so iteration 3 can walk them.
- *  - Locals and arguments are registers of the routine, not cells on a frame
- *    (§5.8): no opcode addresses a cell minted at run time except through a
- *    slot poke, and `#Call`'s frame is not reachable that way.
+ *  - A frame is a cell the compiled code mints itself and keeps the top of in
+ *    a handle (`frameH_`), chained on `d.stack` like `#Call`'s, not the cell
+ *    `#Call` pushes: compiled code has no way to name the cursor, so it cannot
+ *    read that frame. Arguments and locals hang on it as §5.8 says, and every
+ *    write that moves the handle is trailed, so `backtrack` unwinds a failed
+ *    call by itself.
  *  - Scalar agent fields are read and written through their static value
  *    cell; record and list fields are looked up through their name cell on
  *    every access, so they may be replaced by relinking.
@@ -18,6 +21,7 @@
 #include "common/xanadu/vagent/compiler.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -32,6 +36,7 @@
 
 #include <gleditor/logging.hpp>
 
+#include "common/xanadu/foreign_op_handle.hpp"
 #include "common/xanadu/vagent/prelude.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
 
@@ -111,15 +116,18 @@ Ty tyOf(Ty::K k) {
 constexpr std::int64_t kPos                  = 1;
 constexpr std::int64_t kNeg                  = -1;
 constexpr std::string_view kEventFieldOfTurn = kTurnEvent;
-constexpr std::string_view kMergeLabelPrefix = "r";
 
 /// An operand: a static cell, or the cell whose ref is held in register `ptr`.
 struct Opd {
   CellRef cell{noCell};
   CellRef ptr{noCell};
+  /// The handle itself is meant, so a ref local's record is wanted as a cell
+  /// and not as a value.
+  bool raw{false};
 };
-Opd S(CellRef c) { return Opd{c, noCell}; }
-Opd D(CellRef p) { return Opd{noCell, p}; }
+Opd S(CellRef c) { return Opd{c, noCell, false}; }
+Opd D(CellRef p) { return Opd{noCell, p, false}; }
+Opd Hd(CellRef c) { return Opd{c, noCell, true}; }
 
 struct Local {
   CellRef reg{noCell};
@@ -132,9 +140,24 @@ struct FieldInfo {
   Ty ty;
 };
 
-struct Routine {
-  std::vector<CellRef> regs;
-  int id{0};
+/// The slots a routine's activation frame holds (§5.8). Locals are a name cell
+/// on the frame's `d.vars` with the value on `+d.values`; a temporary that has
+/// to survive a re-entrant call is one cell on the frame's `d.step` rank. Each
+/// slot is reached through a static handle, rebound whenever the frame it
+/// names changes.
+struct FramePlan {
+  struct LocalSlot {
+    CellRef handle{noCell};
+    std::string name;
+  };
+  std::vector<LocalSlot> locals;
+  std::vector<CellRef> temps;
+  /// A routine that can re-enter itself keeps its temporaries on the frame.
+  bool cyclic{false};
+  /// Temporaries created before the last re-entrant call site: the only ones
+  /// that can be live across it, so the only ones the push allocates.
+  std::size_t pushTemps{0};
+  [[nodiscard]] bool empty() const { return locals.empty() && pushTemps == 0; }
 };
 
 struct Container;
@@ -143,13 +166,13 @@ struct MethodInfo {
   /// The skill whose method this is; null for the agent's own.
   Container *owner{nullptr};
   const MethodDef *def{nullptr};
-  Routine rt;
+  FramePlan plan;
+  std::vector<CellRef> paramHandles;
   CellRef entry{noCell};
   CellRef bodyStart{noCell};
   CellRef pro{noCell};
   CellRef epi{noCell};
   CellRef retReg{noCell};
-  std::vector<CellRef> paramRegs;
   std::vector<CellRef> argRegs;
   std::vector<Ty> paramTys;
   Ty ret;
@@ -166,6 +189,10 @@ struct HandlerInfo {
   std::size_t index{0};
   CellRef guardEntry{noCell};
   CellRef bodyEntry{noCell};
+  /// The bind, guard and body routines share one frame (the belief variables
+  /// the first declares are read by the others), pushed by the dispatcher.
+  FramePlan plan;
+  CellRef pushEntry{noCell};
   /// Belief triggers (`on +t` / `on -t`): the trigger term, the routine that
   /// matches it against the pending event's fact, and the locals its `?`
   /// variables declare for the guard and body.
@@ -294,6 +321,9 @@ public:
         agentType_(agentType), beliefEventDepth_(beliefEventDepth) {}
 
   CompiledAgent run();
+  std::map<std::string, FrameBody, std::less<>> takeFrameBodies() {
+    return std::move(frameBodies_);
+  }
 
 private:
   // -- primitives ------------------------------------------------------------
@@ -305,8 +335,6 @@ private:
   AgentDims dims_{};
 
   CellRef tail_{noCell};
-  std::vector<CellRef> *curRegs_{nullptr};
-  int nextRoutineId_{0};
 
   std::map<std::int64_t, CellRef> intConsts_;
   std::map<std::string, CellRef> strConsts_;
@@ -314,14 +342,33 @@ private:
   CellRef zero_{noCell}, one_{noCell}, negOne_{noCell}, unit_c_{noCell},
       true_{noCell}, false_{noCell};
   CellRef a0_{noCell}, a1_{noCell}, a2_{noCell}, r0_{noCell}, r1_{noCell};
-  CellRef curEvent_{noCell}, depth_{noCell}, depthStr_{noCell},
-      nameTmp_{noCell}, scratchG_{noCell};
+  CellRef curEvent_{noCell}, scratchG_{noCell}, refTmp_{noCell};
   CellRef failStep_{noCell};
   CellRef haltOp_{noCell}, failOp_{noCell};
   CellRef rtFind_{noCell}, rtAppendField_{noCell}, rtListPush_{noCell},
       rtOutbox_{noCell}, rtCopy_{noCell};
-  Routine copyRoutine_;
-  CellRef copyPro_{noCell}, copyEpi_{noCell}, copyBody_{noCell};
+  FramePlan copyPlan_;
+  CellRef copyPro_{noCell}, copyBody_{noCell};
+
+  // -- activation frames (§5.8) ----------------------------------------------
+  /// What a handle cell stands for. A `Temp` and a `Local` read and write like
+  /// a register; a `RefLocal` is a composite local: its handle names the
+  /// record, which hangs on the frame's name cell by `+d.values` so promotion
+  /// remaps it, and reading it as a value yields the record's ref.
+  enum class Backing : std::uint8_t { Temp, Local, RefLocal };
+  std::unordered_map<CellRef, Backing> backed_;
+  FramePlan *frame_{nullptr};
+  CellRef frameH_{noCell}; ///< the handle naming the top frame
+  CellRef walkH_{noCell};  ///< a walker along a frame's name cells
+  static constexpr std::size_t kPoolSize    = 4;
+  static constexpr std::size_t kScratchSize = 3;
+  /// Handles an operand "pointer" (`D`) is bound to just before its use.
+  std::array<CellRef, kPoolSize> pool_{};
+  /// Where an op's output goes when the cell it was asked to fill is a handle
+  /// (outputs never follow handles, so the value is moved afterwards).
+  std::array<CellRef, kScratchSize> scratch_{};
+  /// Compiled bodies a host can run against a frame it names (iteration 4c).
+  std::map<std::string, FrameBody, std::less<>> frameBodies_;
 
   CellRef agentCell_{noCell};
   std::unordered_map<std::string, FieldInfo> fields_;
@@ -381,12 +428,42 @@ private:
     }
     return it->second;
   }
+  /// A static cell. In a routine that can re-enter itself it is a frame
+  /// temporary instead, so a recursive activation cannot overwrite it.
   CellRef reg() {
-    const CellRef c = arena_.makeCell();
-    if (curRegs_ != nullptr) curRegs_->push_back(c);
-    return c;
+    if (frame_ != nullptr && frame_->cyclic) {
+      const CellRef h = mintHandle();
+      frame_->temps.push_back(h);
+      backed_.emplace(h, Backing::Temp);
+      return h;
+    }
+    return arena_.makeCell();
   }
   CellRef global() { return arena_.makeCell(); }
+  /// A pipeline's parameter cell: written by a `Link` and read at once, so it
+  /// never lives across a call.
+  CellRef transient() { return arena_.makeCell(); }
+
+  /// A handle, marked for relocation so promotion remaps its target, naming a
+  /// private cell until it is first pointed.
+  CellRef mintHandle() {
+    const CellRef h      = arena_.makeCell();
+    const CellRef target = arena_.makeCell();
+    zigzag::expectWritten(
+        arena_.setValueBits(h, xanadu::ValueKind::OpHandle, target));
+    const CellRef marker = arena_.makeCell(xanadu::cellRelocationMarker);
+    zigzag::expectWritten(
+        arena_.link(h, arena_.ensureDimension(xanadu::cellRelocationDimension),
+                    DimVector::POS, marker));
+    return h;
+  }
+  [[nodiscard]] std::optional<Backing> backingOf(CellRef c) const {
+    const auto it = backed_.find(c);
+    return it == backed_.end() ? std::nullopt : std::optional{it->second};
+  }
+  [[nodiscard]] bool isRefLocal(CellRef c) const {
+    return backingOf(c) == Backing::RefLocal;
+  }
 
   void spin(CellRef from, CellRef to) {
     zigzag::expectWritten(
@@ -401,12 +478,25 @@ private:
   void kill() { tail_ = noCell; }
 
   struct Poke {
-    CellRef slot;
-    CellRef ptr;
+    CellRef handle; ///< the pool handle the operation reads through
+    CellRef ptr;    ///< the register holding the ref it is to name
   };
 
+  /// A pointer operand names the pool handle for its position; the handle is
+  /// pointed at the register's cell by `flushPokes`, one cycle, without
+  /// editing the program graph.
   CellRef addSlot(CellRef op, const Opd &o, bool input, std::vector<Poke> *pk) {
-    const CellRef target = o.ptr == noCell ? o.cell : unit_c_;
+    CellRef target = o.cell;
+    if (o.ptr != noCell) {
+      if (isRefLocal(o.ptr)) {
+        bail(CompileError::Unsupported,
+             "internal: a ref local used as a pointer");
+      }
+      target = pool_.at(pk != nullptr ? pk->size() : 0);
+      if (pk != nullptr) pk->push_back({target, o.ptr});
+    } else if (input && !o.raw && isRefLocal(o.cell)) {
+      bail(CompileError::Unsupported, "internal: a ref local read as a value");
+    }
     const CellRef slot =
         arena_.makeScalarCell(static_cast<std::int64_t>(target));
     const DimVector side = input ? DimVector::POS : DimVector::NEG;
@@ -418,22 +508,35 @@ private:
           arena_.link(zigzag::rankTail(arena_, first, core_.dims().step),
                       core_.dims().step, DimVector::POS, slot));
     }
-    if (o.ptr != noCell && pk != nullptr) pk->push_back({slot, o.ptr});
     return slot;
   }
 
-  /// A poke writes the ref held in `ptr` into `slot`, so the operation that
-  /// owns the slot reads that cell: the only way an opcode reaches a cell
-  /// minted at run time.
+  /// `#Point out, ref` where @p ref is a register holding a ref.
+  void pointOp(CellRef out, CellRef ref) {
+    const CellRef op = mkOp(OpcodeKind::Point, "pt");
+    std::vector<Poke> none;
+    addSlot(op, S(ref), true, &none);
+    core_.bindOutput(op, out);
+    append(op);
+  }
+
   void flushPokes(const std::vector<Poke> &pk) {
-    for (const Poke &p : pk) {
-      const CellRef op = mkOp(OpcodeKind::Value, "poke");
-      core_.bindInput(op, p.slot);
-      core_.bindInput(op, zero_);
-      core_.bindInput(op, negOne_);
-      core_.bindInput(op, p.ptr);
-      append(op);
-    }
+    for (const Poke &p : pk) pointOp(p.handle, p.ptr);
+  }
+
+  /// Point @p out at the neighbour of @p owner along @p dim: the `Link` read
+  /// is the pipeline of the `Point`, so it costs one cycle.
+  void pointAtLink(CellRef out, Opd owner, DimRef dim, bool negward = false) {
+    std::vector<Poke> pk;
+    const CellRef lk = mkOp(OpcodeKind::Link, "pl");
+    const CellRef p  = transient();
+    addSlot(lk, owner, true, &pk);
+    addSlot(lk, S(cInt(dim)), true, &pk);
+    addSlot(lk, S(cInt(negward ? kNeg : kPos)), true, &pk);
+    flushPokes(pk);
+    zigzag::expectWritten(
+        arena_.link(p, core_.dims().spin, DimVector::POS, lk));
+    pointOp(out, p);
   }
 
   CellRef emit(OpcodeKind k, std::string_view label,
@@ -442,13 +545,50 @@ private:
     const CellRef op = mkOp(k, label);
     std::vector<Poke> pk;
     for (const Opd &o : ins) addSlot(op, o, true, &pk);
-    for (const CellRef o : outs) core_.bindOutput(op, o);
+    std::vector<std::pair<CellRef, CellRef>> after;
+    for (const CellRef o : outs) {
+      if (backed_.contains(o)) {
+        const CellRef sc = scratch_.at(after.size());
+        core_.bindOutput(op, sc);
+        after.emplace_back(o, sc);
+      } else {
+        core_.bindOutput(op, o);
+      }
+    }
     flushPokes(pk);
     append(op);
+    for (const auto &[handle, sc] : after) store(handle, sc);
     return op;
   }
 
+  /// Write the value in @p src to a register that may be a handle.
+  void store(CellRef dst, CellRef src) {
+    if (isRefLocal(dst)) {
+      assignRef(dst, src, false);
+    } else {
+      emit(OpcodeKind::Value, "mov", {S(dst), S(zero_), S(negOne_), S(src)});
+    }
+  }
+
   void mov(Opd dst, Opd src) {
+    if (dst.ptr == noCell && isRefLocal(dst.cell)) {
+      if (src.ptr != noCell) {
+        emit(OpcodeKind::Value, "mov", {S(refTmp_), S(zero_), S(negOne_), src});
+        assignRef(dst.cell, refTmp_, false);
+      } else {
+        assignRef(dst.cell, src.cell, false);
+      }
+      return;
+    }
+    if (src.ptr == noCell && isRefLocal(src.cell)) {
+      if (dst.ptr == noCell) {
+        emit(OpcodeKind::Deref, "ref", {Hd(src.cell)}, {dst.cell});
+      } else {
+        emit(OpcodeKind::Deref, "ref", {Hd(src.cell)}, {refTmp_});
+        emit(OpcodeKind::Value, "mov", {dst, S(zero_), S(negOne_), S(refTmp_)});
+      }
+      return;
+    }
     emit(OpcodeKind::Value, "mov", {dst, S(zero_), S(negOne_), src});
   }
   void movC(CellRef dst, CellRef constant) { mov(S(dst), S(constant)); }
@@ -477,7 +617,7 @@ private:
   /// Read the neighbour of `owner` along `dim` through a parameter pipeline.
   /// The result is a fresh register holding the neighbour's ref, or 0.
   CellRef rd(Opd owner, DimRef dim, bool negward = false) {
-    const CellRef p  = reg();
+    const CellRef p  = transient();
     const CellRef lk = mkOp(OpcodeKind::Link, "rd");
     std::vector<Poke> pk;
     addSlot(lk, owner, true, &pk);
@@ -486,8 +626,125 @@ private:
     flushPokes(pk);
     zigzag::expectWritten(
         arena_.link(p, core_.dims().spin, DimVector::POS, lk));
-    emit(OpcodeKind::Nop, "rd", {S(p)});
-    return p;
+    // The copy runs the pipeline once and leaves a cell with none: `p` would
+    // read the neighbour again at every later use, through a pool handle that
+    // has been pointed elsewhere by then.
+    const CellRef r = transient();
+    emit(OpcodeKind::Value, "rd", {S(r), S(zero_), S(negOne_), S(p)});
+    return r;
+  }
+
+  // -- activation frames (§5.8) ---------------------------------------------
+  /// Store the ref held in @p src as the value of the ref local @p h: the
+  /// record hangs on the frame's name cell by `+d.values`, which a promotion
+  /// remaps, unlike a ref kept as an integer. A value cell has one `-d.values`
+  /// neighbour, so a record some other name already owns is copied first.
+  void assignRef(CellRef h, CellRef src, bool fresh) {
+    if (src != refTmp_) {
+      emit(OpcodeKind::Value, "mov",
+           {S(refTmp_), S(zero_), S(negOne_), S(src)});
+    }
+    if (!fresh) {
+      const CellRef owned = newLabel();
+      branchIfZero(rd(D(refTmp_), core_.dims().values, true), owned);
+      callCopy(refTmp_, refTmp_);
+      place(owned);
+    }
+    const CellRef name = rd(Hd(h), core_.dims().values, true);
+    linkOp(D(name), core_.dims().values, D(refTmp_));
+    pointOp(h, refTmp_);
+  }
+
+  /// A local of the routine being emitted: a slot on its frame, reached
+  /// through a handle. Outside a framed routine it is a plain register.
+  CellRef declareLocal(const std::string &name, const Ty &ty) {
+    if (frame_ == nullptr) return reg();
+    const CellRef h = mintHandle();
+    frame_->locals.push_back({h, name});
+    backed_.emplace(h, ty.composite() ? Backing::RefLocal : Backing::Local);
+    return h;
+  }
+
+  /// A routine that runs under a frame of its own and returns with `#Return`.
+  struct Framed {
+    FramePlan plan;
+    CellRef pro{noCell}, bodyStart{noCell}, epi{noCell};
+  };
+  /// The frame is built last, once the body has said how many slots it needs.
+  void openFramed(Framed &f, CellRef entry) {
+    f.pro       = newLabel();
+    f.bodyStart = newLabel();
+    f.epi       = newLabel();
+    frame_      = &f.plan;
+    place(entry);
+    jump(f.pro);
+    place(f.bodyStart);
+  }
+  void closeFramed(Framed &f) {
+    place(f.epi);
+    if (!f.plan.empty()) emitFramePop();
+    ret();
+    place(f.pro);
+    if (!f.plan.empty()) emitFramePush(f.plan);
+    jump(f.bodyStart);
+    frame_ = nullptr;
+  }
+
+  /// Mint the frame and its slots and point every handle at them.
+  void emitFramePush(const FramePlan &p) {
+    const DimRef stack = core_.dims().stack;
+    const DimRef vars  = core_.dims().vars;
+    const DimRef vals  = core_.dims().values;
+    const DimRef step  = core_.dims().step;
+    emit(OpcodeKind::New, "fnew", {S(frameH_), S(cInt(stack)), S(negOne_)});
+    pointAtLink(frameH_, S(frameH_), stack, true);
+    for (std::size_t k = 0; k < p.pushTemps; ++k) {
+      const CellRef owner = k == 0 ? frameH_ : p.temps[k - 1];
+      emit(OpcodeKind::New, "tnew", {S(owner), S(cInt(step)), S(one_)});
+      pointAtLink(p.temps[k], S(owner), step);
+    }
+    for (std::size_t i = 0; i < p.locals.size(); ++i) {
+      const CellRef owner = i == 0 ? frameH_ : walkH_;
+      emit(OpcodeKind::New, "vnew", {S(owner), S(cInt(vars)), S(one_)});
+      pointAtLink(walkH_, S(owner), vars);
+      if (!p.locals[i].name.empty()) {
+        mov(S(walkH_), S(cStr(p.locals[i].name)));
+      }
+      emit(OpcodeKind::New, "wnew", {S(walkH_), S(cInt(vals)), S(one_)});
+      pointAtLink(p.locals[i].handle, S(walkH_), vals);
+    }
+  }
+
+  void emitFramePop() {
+    pointAtLink(frameH_, S(frameH_), core_.dims().stack);
+    emit(OpcodeKind::Break, "fbrk",
+         {S(frameH_), S(cInt(core_.dims().stack)), S(negOne_)});
+  }
+
+  /// Point the handles of the first @p nLocals locals and @p nTemps
+  /// temporaries at the frame `frameH_` names: after a call that may have
+  /// re-entered this routine, and when a body is resumed on a frame.
+  void emitFrameBind(const FramePlan &p, std::size_t nLocals,
+                     std::size_t nTemps) {
+    const DimRef vars = core_.dims().vars;
+    const DimRef vals = core_.dims().values;
+    const DimRef step = core_.dims().step;
+    for (std::size_t i = 0; i < nLocals; ++i) {
+      pointAtLink(walkH_, S(i == 0 ? frameH_ : walkH_), vars);
+      pointAtLink(p.locals[i].handle, S(walkH_), vals);
+    }
+    for (std::size_t k = 0; k < nTemps; ++k) {
+      pointAtLink(p.temps[k], S(k == 0 ? frameH_ : p.temps[k - 1]), step);
+    }
+  }
+
+  /// A call to code that may run this routine again.
+  void callUser(CellRef label) {
+    callLabel(label);
+    if (frame_ != nullptr && frame_->cyclic) {
+      frame_->pushTemps = frame_->temps.size();
+      emitFrameBind(*frame_, frame_->locals.size(), frame_->temps.size());
+    }
   }
 
   CellRef boolReg() { return reg(); }
@@ -522,34 +779,10 @@ private:
     place(done);
   }
 
-  // -- save/restore of a recursive routine's registers ----------------------
-  std::string nameFor(const Routine &r, std::size_t i) {
-    return std::string(kMergeLabelPrefix) + std::to_string(r.id) + "." +
-           std::to_string(i) + "#";
-  }
-  void saveRegs(const Routine &r) {
-    emit(OpcodeKind::Add, "d+", {S(depth_), S(one_)}, {depth_});
-    emit(OpcodeKind::Trim, "ds", {S(depth_)}, {depthStr_});
-    for (std::size_t i = 0; i < r.regs.size(); ++i) {
-      emit(OpcodeKind::Add, "nm", {S(cStr(nameFor(r, i))), S(depthStr_)},
-           {nameTmp_});
-      emit(OpcodeKind::Bind, "save", {S(nameTmp_), S(r.regs[i])});
-    }
-  }
-  void restoreRegs(const Routine &r) {
-    emit(OpcodeKind::Trim, "ds", {S(depth_)}, {depthStr_});
-    for (std::size_t i = 0; i < r.regs.size(); ++i) {
-      emit(OpcodeKind::Add, "nm", {S(cStr(nameFor(r, i))), S(depthStr_)},
-           {nameTmp_});
-      emit(OpcodeKind::Resolve, "rest", {S(nameTmp_)}, {r.regs[i]});
-    }
-    emit(OpcodeKind::Sub, "d-", {S(depth_), S(one_)}, {depth_});
-  }
-
   // -- shared runtime routines ------------------------------------------------
   void beginInternal(CellRef label) {
-    tail_    = noCell;
-    curRegs_ = nullptr;
+    tail_  = noCell;
+    frame_ = nullptr;
     place(label);
   }
   void ret() {
@@ -675,11 +908,13 @@ private:
   void emitMethod(MethodInfo &m);
   void emitHandlerRoutines(HandlerInfo &h);
   void emitHandlerRun(const HandlerInfo &h, bool checkConsumed, CellRef end);
+  void emitHandlerFrame(HandlerInfo &h);
+  void emitFrameBody(MethodInfo &m);
   void emitInit(CellRef entryLabel);
   void emitDispatch(CellRef entryLabel);
   void buildProgramStructure();
   std::vector<const HandlerInfo *> mergedFor(const std::string &type);
-  void beginHandlerCtx(const HandlerInfo &h);
+  void beginHandlerCtx(HandlerInfo &h);
 
   // -- beliefs (§6.1, §6.5)
   // ----------------------------------------------------
@@ -772,7 +1007,7 @@ private:
   void emitContainerRoutines();
   void emitLifecycle(Container &c, bool uninstall);
   void emitContainerInits(Container &c);
-  void beginRoutine(CellRef label, Container *owner);
+  void beginRoutine(CellRef label, Container *owner, Framed *fr = nullptr);
   Ty installByName(EInstall::Kind kind, const std::string &name,
                    const std::vector<ExprPtr> &args, CellRef out,
                    SourceLocation loc);
@@ -1020,10 +1255,11 @@ void Gen::emitRtOutbox() {
 }
 
 void Gen::emitRtCopy() {
-  // Recursive through list elements and field values, so its registers are
-  // saved per activation like a cyclic method's.
-  tail_    = noCell;
-  curRegs_ = &copyRoutine_.regs;
+  // Recursive through list elements and field values, so its temporaries live
+  // on a frame per activation like a cyclic method's.
+  tail_            = noCell;
+  copyPlan_.cyclic = true;
+  frame_           = &copyPlan_;
   place(rtCopy_);
   jump(copyPro_);
   place(copyBody_);
@@ -1044,7 +1280,7 @@ void Gen::emitRtCopy() {
   mov(S(v), S(rd(D(n), core_.dims().values)));
   branchIfZero(v, novalue);
   mov(S(a0_), S(v));
-  callLabel(rtCopy_);
+  callUser(rtCopy_);
   mov(S(vv), S(r0_));
   linkOp(D(nn), core_.dims().values, D(vv));
   place(novalue);
@@ -1055,7 +1291,7 @@ void Gen::emitRtCopy() {
   mov(S(e), S(rd(D(s), core_.dims().grab)));
   branchIfZero(e, ldone);
   mov(S(a0_), S(e));
-  callLabel(rtCopy_);
+  callUser(rtCopy_);
   mov(S(nv), S(r0_));
   linkOp(D(y), core_.dims().grab, D(nv));
   mov(S(prevE), S(nv));
@@ -1064,7 +1300,7 @@ void Gen::emitRtCopy() {
   place(lloop);
   branchIfZero(e, ldone);
   mov(S(a0_), S(e));
-  callLabel(rtCopy_);
+  callUser(rtCopy_);
   mov(S(nv), S(r0_));
   linkOp(D(prevE), core_.dims().step, D(nv));
   mov(S(prevE), S(nv));
@@ -1072,14 +1308,12 @@ void Gen::emitRtCopy() {
   jump(lloop);
   place(ldone);
   mov(S(r0_), S(y));
-  jump(copyEpi_);
-  curRegs_ = nullptr;
-  place(copyPro_);
-  saveRegs(copyRoutine_);
-  jump(copyBody_);
-  place(copyEpi_);
-  restoreRegs(copyRoutine_);
+  emitFramePop();
   ret();
+  place(copyPro_);
+  emitFramePush(copyPlan_);
+  jump(copyBody_);
+  frame_ = nullptr;
 }
 
 // ---------------------------------------------------------------------------
@@ -1644,9 +1878,9 @@ Ty Gen::call(const ECall &c, CellRef out, SourceLocation loc) {
     bail(CompileError::UnknownName, "unknown method " + callee->name, loc);
   }
   MethodInfo &mi = *own;
-  if (c.args.size() != mi.paramRegs.size()) {
+  if (c.args.size() != mi.paramTys.size()) {
     bail(CompileError::BadArity,
-         callee->name + " takes " + std::to_string(mi.paramRegs.size()) +
+         callee->name + " takes " + std::to_string(mi.paramTys.size()) +
              " arguments",
          loc);
   }
@@ -1659,7 +1893,7 @@ Ty Gen::call(const ECall &c, CellRef out, SourceLocation loc) {
   for (std::size_t i = 0; i < temps.size(); ++i) {
     mov(S(mi.argRegs[i]), S(temps[i]));
   }
-  callLabel(mi.entry);
+  callUser(mi.entry);
   mov(S(out), S(mi.retReg));
   return mi.ret;
 }
@@ -1871,10 +2105,12 @@ Ty Gen::block(const EBlock &b, CellRef out) {
     const Stmt &s     = b.stmts[i];
     const bool isLast = i + 1 == b.stmts.size();
     if (s.isLet) {
-      const CellRef r = reg();
+      const CellRef tmp = reg();
       Ty t;
-      stmtWrap([&] { t = valueInto(*s.value, r); });
+      stmtWrap([&] { t = valueInto(*s.value, tmp); });
       if (s.type) t = fromType(*s.type, s.loc);
+      const CellRef r = declareLocal(s.name, t);
+      mov(S(r), S(tmp));
       scopes_.back()[s.name] = Local{r, t};
       if (isLast) movC(out, unit_c_);
       last = tyOf(Ty::K::Unit);
@@ -1933,10 +2169,10 @@ Ty Gen::whileExpr(const EWhile &w, CellRef out) {
 Ty Gen::forExpr(const EFor &f, CellRef out, SourceLocation loc) {
   if (!f.iterable) return forBelieves(f, out);
   pushScope();
-  const CellRef x       = reg();
   const CellRef bodyOut = reg();
   const CellRef loop = newLabel(), done = newLabel();
   if (const auto *r = std::get_if<ERange>(&f.iterable->node)) {
+    const CellRef x  = declareLocal(f.binder, tyOf(Ty::K::Int));
     const CellRef lo = reg(), hi = reg(), by = reg(), cur = reg();
     bounded([&] {
       expr(*r->lo, lo);
@@ -1962,10 +2198,15 @@ Ty Gen::forExpr(const EFor &f, CellRef out, SourceLocation loc) {
     bounded([&] { lt = expr(*f.iterable, l); });
     if (lt.k != Ty::K::List) unsupported("iterating a non-list", loc);
     const Ty et              = lt.args.empty() ? tyOf(Ty::K::Unit) : lt.args[0];
+    const CellRef x          = declareLocal(f.binder, et);
     scopes_.back()[f.binder] = Local{x, et};
     listWalk(l, [&](CellRef el) {
       if (et.composite()) {
-        mov(S(x), S(el));
+        // A loop variable is a copy, like every stored value (V11): its record
+        // hangs on the frame, and the list's element is already owned.
+        const CellRef own = reg();
+        callCopy(el, own);
+        assignRef(x, own, true);
       } else {
         mov(S(x), D(el));
       }
@@ -2425,13 +2666,19 @@ Gen::TermPlan Gen::planTerm(const Term &t, bool allowVars) {
         ap.k     = ArgPlan::K::Dup;
         ap.first = static_cast<std::size_t>(dup - pl.vars.begin());
       } else if (const Local *l = findLocal(nm)) {
-        asValue(l->reg, l->ty);
+        if (l->ty.composite()) {
+          const CellRef held = reg();
+          mov(S(held), S(l->reg));
+          asValue(held, l->ty);
+        } else {
+          asValue(l->reg, l->ty);
+        }
       } else {
         PlanVar v;
         v.cap   = reg();
-        v.local = reg();
         v.name  = nm;
         v.ty    = want;
+        v.local = declareLocal(nm, want);
         pl.vars.push_back(std::move(v));
         ap.k = ArgPlan::K::Var;
       }
@@ -2518,7 +2765,9 @@ void Gen::emitMatch(const TermPlan &pl, CellRef termReg, CellRef noMatch) {
 void Gen::bindVars(const TermPlan &pl) {
   for (const PlanVar &v : pl.vars) {
     if (v.ty.composite()) {
-      callCopy(v.cap, v.local);
+      const CellRef cp = reg();
+      callCopy(v.cap, cp);
+      assignRef(v.local, cp, true);
     } else {
       mov(S(v.local), D(v.cap));
     }
@@ -3019,15 +3268,10 @@ void Gen::prepareMethodSet(std::map<std::string, MethodInfo> &set,
     if (!mi.cyclic && mi.def->body && hasDynamicCall(*mi.def->body, set)) {
       mi.cyclic = true;
     }
-    mi.rt.id = nextRoutineId_++;
-    curRegs_ = &mi.rt.regs;
+    mi.plan.cyclic = mi.cyclic;
     for (const Param &p : mi.def->sig.params) {
-      mi.paramRegs.push_back(reg());
       mi.paramTys.push_back(fromType(p.type, p.loc));
-    }
-    curRegs_ = nullptr;
-    for (std::size_t i = 0; i < mi.paramRegs.size(); ++i) {
-      mi.argRegs.push_back(mi.cyclic ? global() : mi.paramRegs[i]);
+      mi.argRegs.push_back(global());
     }
     mi.ret = mi.def->sig.result ? fromType(*mi.def->sig.result, mi.def->sig.loc)
                                 : tyOf(Ty::K::Unit);
@@ -3040,19 +3284,21 @@ void Gen::prepareMethodSet(std::map<std::string, MethodInfo> &set,
 }
 
 void Gen::emitMethod(MethodInfo &m) {
-  own_     = m.owner;
-  tail_    = noCell;
-  curRegs_ = &m.rt.regs;
+  own_   = m.owner;
+  tail_  = noCell;
+  frame_ = &m.plan;
   scopes_.clear();
   dRegs_.clear();
   stmtDepth_ = 0;
   pushScope();
   place(m.entry);
-  if (m.cyclic) jump(m.pro);
+  jump(m.pro);
   place(m.bodyStart);
-  for (std::size_t i = 0; i < m.paramRegs.size(); ++i) {
-    scopes_.back()[m.def->sig.params[i].name] =
-        Local{m.paramRegs[i], m.paramTys[i]};
+  for (std::size_t i = 0; i < m.paramTys.size(); ++i) {
+    const Param &p  = m.def->sig.params[i];
+    const CellRef h = declareLocal(p.name, m.paramTys[i]);
+    m.paramHandles.push_back(h);
+    scopes_.back()[p.name] = Local{h, m.paramTys[i]};
   }
   ctx_        = Ctx{};
   ctx_.retReg = m.retReg;
@@ -3065,24 +3311,69 @@ void Gen::emitMethod(MethodInfo &m) {
     movC(m.retReg, unit_c_);
   }
   popScope();
-  curRegs_ = nullptr;
   place(m.epi);
-  if (m.cyclic) restoreRegs(m.rt);
+  if (!m.plan.empty()) emitFramePop();
   ret();
-  if (m.cyclic) {
-    place(m.pro);
-    saveRegs(m.rt);
-    for (std::size_t i = 0; i < m.paramRegs.size(); ++i) {
-      mov(S(m.paramRegs[i]), S(m.argRegs[i]));
-    }
-    jump(m.bodyStart);
+  // The frame is built last, once the body has said how many slots it needs.
+  place(m.pro);
+  if (!m.plan.empty()) emitFramePush(m.plan);
+  for (std::size_t i = 0; i < m.paramHandles.size(); ++i) {
+    mov(S(m.paramHandles[i]), S(m.argRegs[i]));
   }
+  jump(m.bodyStart);
+  frame_ = nullptr;
+  if (m.owner == nullptr) emitFrameBody(m);
 }
 
-void Gen::beginHandlerCtx(const HandlerInfo &h) {
-  own_     = h.owner;
-  tail_    = noCell;
-  curRegs_ = nullptr;
+/// The method's body as a unit a host can run against a frame it names. The
+/// frame is adopted onto the stack top for the run and unstacked after it, so
+/// the body's own epilogue is unchanged; between runs the frame is just a cell
+/// holding the locals.
+void Gen::emitFrameBody(MethodInfo &m) {
+  FrameBody fb;
+  fb.frame               = mintHandle();
+  fb.args                = m.argRegs;
+  fb.result              = m.retReg;
+  fb.make                = newLabel();
+  fb.enter               = newLabel();
+  const CellRef makeBody = newLabel(), enterBody = newLabel();
+
+  tail_ = noCell;
+  place(fb.make);
+  callLabel(makeBody);
+  jump(haltOp_);
+  tail_ = noCell;
+  place(makeBody);
+  emitFramePush(m.plan);
+  for (std::size_t i = 0; i < m.paramHandles.size(); ++i) {
+    mov(S(m.paramHandles[i]), S(m.argRegs[i]));
+  }
+  emit(OpcodeKind::Deref, "fref", {S(frameH_)}, {refTmp_});
+  pointOp(fb.frame, refTmp_);
+  emitFramePop();
+  ret();
+
+  tail_ = noCell;
+  place(fb.enter);
+  callLabel(enterBody);
+  jump(haltOp_);
+  tail_ = noCell;
+  place(enterBody);
+  emit(OpcodeKind::Deref, "fref", {S(fb.frame)}, {refTmp_});
+  emit(OpcodeKind::Link, "fadopt",
+       {S(fb.frame), S(cInt(core_.dims().stack)), S(one_), S(frameH_)});
+  pointOp(frameH_, refTmp_);
+  frame_ = &m.plan;
+  emitFrameBind(m.plan, m.plan.locals.size(), m.plan.pushTemps);
+  frame_ = nullptr;
+  jump(m.bodyStart);
+  frameBodies_.emplace(m.def->sig.name, std::move(fb));
+}
+
+void Gen::beginHandlerCtx(HandlerInfo &h) {
+  own_   = h.owner;
+  tail_  = noCell;
+  frame_ = &h.plan;
   scopes_.clear();
   dRegs_.clear();
   stmtDepth_ = 0;
@@ -3128,6 +3419,19 @@ void Gen::emitHandlerRoutines(HandlerInfo &h) {
       expr(*h.def->body, o);
     }
   });
+  emitHandlerFrame(h);
+}
+
+/// The routine that builds the frame bind, guard and body share. It is
+/// emitted once the three have said how many slots they need.
+void Gen::emitHandlerFrame(HandlerInfo &h) {
+  frame_ = nullptr;
+  if (h.plan.empty()) return;
+  h.pushEntry = newLabel();
+  tail_       = noCell;
+  place(h.pushEntry);
+  emitFramePush(h.plan);
+  ret();
 }
 
 std::vector<const HandlerInfo *> Gen::mergedFor(const std::string &type) {
@@ -3157,9 +3461,11 @@ void Gen::emitHandlerRun(const HandlerInfo &h, bool checkConsumed,
   }
   emit(OpcodeKind::ChoiceDepth, "h", {}, {hd});
   emit(OpcodeKind::Choice, "next", {S(opref(next))});
+  if (h.pushEntry != noCell) callLabel(h.pushEntry);
   if (h.bindEntry != noCell) callLabel(h.bindEntry);
   if (h.guardEntry != noCell) callLabel(h.guardEntry);
   callLabel(h.bodyEntry);
+  if (h.pushEntry != noCell) emitFramePop();
   emit(OpcodeKind::Cut, "cut", {S(hd)});
   if (checkConsumed) {
     branch(S(fields_.at(std::string(kFieldConsumed)).valueCell), end);
@@ -3170,19 +3476,21 @@ void Gen::emitHandlerRun(const HandlerInfo &h, bool checkConsumed,
 void Gen::emitInit(CellRef entryLabel) {
   const CellRef body = newLabel();
   tail_              = noCell;
-  curRegs_           = nullptr;
+  frame_             = nullptr;
   place(entryLabel);
   callLabel(body);
   jump(haltOp_);
   // The body runs under a frame so a failure unwinds the stack with it.
   tail_ = noCell;
-  place(body);
+  Framed fr;
+  openFramed(fr, body);
   scopes_.clear();
   dRegs_.clear();
   stmtDepth_ = 0;
   pushScope();
   ctx_        = Ctx{};
   ctx_.retReg = scratchG_;
+  ctx_.epi    = fr.epi;
   own_        = nullptr;
   mov(S(curEvent_), S(zero_));
   for (const Member &m : agent_->members) {
@@ -3217,13 +3525,13 @@ void Gen::emitInit(CellRef entryLabel) {
   }
   place(end);
   callLabel(rtSettle_);
-  ret();
+  closeFramed(fr);
 }
 
 void Gen::emitDispatch(CellRef entryLabel) {
   const CellRef body = newLabel();
   tail_              = noCell;
-  curRegs_           = nullptr;
+  frame_             = nullptr;
   place(entryLabel);
   callLabel(body);
   jump(haltOp_);
@@ -3642,7 +3950,7 @@ Ty Gen::capacityCall(const std::string &cap, const std::string &method,
     for (std::size_t j = 0; j < temps.size(); ++j) {
       mov(S(mi.argRegs[j]), S(temps[j]));
     }
-    callLabel(mi.entry);
+    callUser(mi.entry);
     mov(S(out), S(mi.retReg));
     jump(end);
   }
@@ -3683,17 +3991,22 @@ void Gen::emitRtCapFind() {
   ret();
 }
 
-void Gen::beginRoutine(CellRef label, Container *owner) {
-  own_     = owner;
-  tail_    = noCell;
-  curRegs_ = nullptr;
+void Gen::beginRoutine(CellRef label, Container *owner, Framed *fr) {
+  own_   = owner;
+  tail_  = noCell;
+  frame_ = nullptr;
   scopes_.clear();
   dRegs_.clear();
   stmtDepth_ = 0;
   pushScope();
   ctx_        = Ctx{};
   ctx_.retReg = scratchG_;
-  place(label);
+  if (fr != nullptr) {
+    openFramed(*fr, label);
+    ctx_.epi = fr->epi;
+  } else {
+    place(label);
+  }
 }
 
 void Gen::emitContainerInits(Container &c) {
@@ -3733,7 +4046,8 @@ void Gen::emitContainerRoutines() {
     }
     ret();
 
-    beginRoutine(c.installLabel, &c);
+    Framed inst;
+    beginRoutine(c.installLabel, &c, &inst);
     emitContainerInits(c);
     for (const CellRef cell : cellsOf(c)) {
       const CellRef r = reg();
@@ -3741,9 +4055,10 @@ void Gen::emitContainerRoutines() {
       emitAppendTail(S(agentCell_), dims_.skill, dims_.skill, r);
     }
     emitLifecycle(c, false);
-    ret();
+    closeFramed(inst);
 
-    beginRoutine(c.uninstallLabel, &c);
+    Framed uninst;
+    beginRoutine(c.uninstallLabel, &c, &uninst);
     const CellRef gone = newLabel();
     branchIfZero(rd(S(c.member), dims_.skill, true), gone);
     emitLifecycle(c, true);
@@ -3753,10 +4068,11 @@ void Gen::emitContainerRoutines() {
       unlinkFromRank(r, dims_.skill);
     }
     place(gone);
-    ret();
+    closeFramed(uninst);
   }
   for (auto &[name, c] : behaviors_) {
-    beginRoutine(c.installLabel, &c);
+    Framed inst;
+    beginRoutine(c.installLabel, &c, &inst);
     emitContainerInits(c);
     const CellRef doLink = newLabel(), done = newLabel();
     branchIfZero(rd(S(c.cell), dims_.behavior, true), doLink);
@@ -3766,7 +4082,7 @@ void Gen::emitContainerRoutines() {
     movC(r, opref(c.cell));
     emitAppendTail(S(agentCell_), dims_.behavior, dims_.behavior, r);
     place(done);
-    ret();
+    closeFramed(inst);
 
     beginRoutine(c.uninstallLabel, &c);
     const CellRef off = newLabel();
@@ -3807,13 +4123,13 @@ Ty Gen::installByName(EInstall::Kind kind, const std::string &name,
       valueInto(*a, t);
       temps.push_back(t);
     }
-    if (skill) callLabel(c.prepLabel);
+    if (skill) callUser(c.prepLabel);
     for (std::size_t i = 0; i < temps.size(); ++i) {
       storeField(c.fields.at((*c.params)[i].name), temps[i]);
     }
-    callLabel(c.installLabel);
+    callUser(c.installLabel);
   } else {
-    callLabel(c.uninstallLabel);
+    callUser(c.uninstallLabel);
   }
   movC(out, unit_c_);
   return tyOf(Ty::K::Unit);
@@ -3823,43 +4139,43 @@ CompiledAgent Gen::run() {
   dims_ = registerDimensions(arena_);
   collect();
 
-  zero_           = cInt(0);
-  one_            = cInt(1);
-  negOne_         = cInt(-1);
-  unit_c_         = arena_.makeCell(std::string(kUnitContent));
-  true_           = arena_.makeScalarCell(true);
-  false_          = arena_.makeScalarCell(false);
-  a0_             = global();
-  a1_             = global();
-  a2_             = global();
-  r0_             = global();
-  r1_             = global();
-  curEvent_       = global();
-  depth_          = arena_.makeScalarCell(std::int64_t{0});
-  depthStr_       = global();
-  nameTmp_        = global();
-  scratchG_       = global();
-  failStep_       = mkOp(OpcodeKind::Fail, "SFAIL");
-  haltOp_         = mkOp(OpcodeKind::Halt, "HALT");
-  failOp_         = mkOp(OpcodeKind::Halt, "FAIL");
-  rtFind_         = newLabel();
-  rtAppendField_  = newLabel();
-  rtListPush_     = newLabel();
-  rtOutbox_       = newLabel();
-  rtCopy_         = newLabel();
-  rtBRaise_       = newLabel();
-  rtHasSrc_       = newLabel();
-  rtBDrop_        = newLabel();
-  rtBSet_         = newLabel();
-  rtSettle_       = newLabel();
-  rtCapFind_      = newLabel();
-  a3_             = global();
-  a4_             = global();
-  roundsG_        = global();
-  copyPro_        = newLabel();
-  copyEpi_        = newLabel();
-  copyBody_       = newLabel();
-  copyRoutine_.id = nextRoutineId_++;
+  zero_     = cInt(0);
+  one_      = cInt(1);
+  negOne_   = cInt(-1);
+  unit_c_   = arena_.makeCell(std::string(kUnitContent));
+  true_     = arena_.makeScalarCell(true);
+  false_    = arena_.makeScalarCell(false);
+  a0_       = global();
+  a1_       = global();
+  a2_       = global();
+  r0_       = global();
+  r1_       = global();
+  curEvent_ = global();
+  refTmp_   = global();
+  frameH_   = mintHandle();
+  walkH_    = mintHandle();
+  for (CellRef &h : pool_) h = mintHandle();
+  for (CellRef &c : scratch_) c = global();
+  scratchG_      = global();
+  failStep_      = mkOp(OpcodeKind::Fail, "SFAIL");
+  haltOp_        = mkOp(OpcodeKind::Halt, "HALT");
+  failOp_        = mkOp(OpcodeKind::Halt, "FAIL");
+  rtFind_        = newLabel();
+  rtAppendField_ = newLabel();
+  rtListPush_    = newLabel();
+  rtOutbox_      = newLabel();
+  rtCopy_        = newLabel();
+  rtBRaise_      = newLabel();
+  rtHasSrc_      = newLabel();
+  rtBDrop_       = newLabel();
+  rtBSet_        = newLabel();
+  rtSettle_      = newLabel();
+  rtCapFind_     = newLabel();
+  a3_            = global();
+  a4_            = global();
+  roundsG_       = global();
+  copyPro_       = newLabel();
+  copyBody_      = newLabel();
 
   mintAgentCell();
   mintPredicates();
@@ -3918,6 +4234,12 @@ CompiledAgent Gen::run() {
 
 Compiler::Compiler(zigzag::vortex::VortexCore &core) : core_(core), vm_(core) {}
 
+std::optional<FrameBody> Compiler::frameBody(std::string_view name) const {
+  const auto it = frameBodies_.find(name);
+  if (it == frameBodies_.end()) return std::nullopt;
+  return it->second;
+}
+
 Compiler *Compiler::setBeliefEventDepth(std::size_t rounds) noexcept {
   beliefEventDepth_ = rounds;
   return this;
@@ -3927,7 +4249,9 @@ std::expected<CompiledAgent, CompileFailure>
 Compiler::compileAgent(const Unit &unit, std::string_view agentType) {
   try {
     Gen g(core_, vm_, unit, agentType, beliefEventDepth_);
-    return g.run();
+    auto out     = g.run();
+    frameBodies_ = g.takeFrameBodies();
+    return out;
   } catch (const Bail &b) {
     return std::unexpected(b.failure);
   }
