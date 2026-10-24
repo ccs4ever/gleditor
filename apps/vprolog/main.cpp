@@ -29,6 +29,7 @@
 #include "common/xanadu/vprolog/parser.hpp"
 #include "common/xanadu/vql/ascii_visualizer.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
+#include "common/xanadu/zigzag/lens_repl.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
 
 namespace {
@@ -51,6 +52,7 @@ void printREPLHelp() {
          "slice\n"
       << "  :grid                 Display ASCII lattice topology of logic "
          "cells\n"
+      << zigzag::LensRepl::helpText
       << "  :help / help.         Show this help message\n"
       << "  :quit / :exit / halt. Exit the REPL\n";
 }
@@ -178,6 +180,7 @@ void runREPL(Compiler &compiler, std::vector<Clause> &clauses,
   std::vector<xanadu::ResultRow> lastResults;
   bool hasQuery = false;
   std::string inputProvenance;
+  zigzag::LensRepl lensRepl;
   while (true) {
     if (buffer.empty()) {
       std::cout << "?- " << std::flush;
@@ -204,6 +207,12 @@ void runREPL(Compiler &compiler, std::vector<Clause> &clauses,
       }
       if (line == ":help" || line == "help." || line == "help") {
         printREPLHelp();
+        continue;
+      }
+      if (zigzag::LensRepl::handles(line)) {
+        // vprolog's :open consumes the store it loads, so meta: has no
+        // fold to bind -- it reports that itself.
+        lensRepl.run(line, std::cout);
         continue;
       }
       if (line == ":listing" || line == "listing." || line == "listing") {
@@ -472,6 +481,10 @@ int main(int argc, char *argv[]) {
       .default_value(false)
       .implicit_value(true);
 
+  program.add_argument("--lens")
+      .help("Open a lens URI (path, dir:, git:, sql:, cfg:, log:, journal:, "
+            "union:) and print its projected tree")
+      .default_value(std::string{});
   program.add_argument("--headless")
       .help("Run without touching display devices")
       .default_value(false)
@@ -503,6 +516,13 @@ int main(int argc, char *argv[]) {
           ? xanadu::PermascrollRegistry::instance().defaultUser()
           : std::make_shared<xanadu::UserPermascroll>(
                 xanadu::UserPermascroll::Config{.storageDir = permascrollPath});
+  {
+    const auto lensUri = program.get<std::string>("--lens");
+    if (!lensUri.empty()) {
+      return zigzag::runLensRaster(lensUri, std::cout);
+    }
+  }
+
   std::unique_ptr<xanadu::TemporaryStreamStore> stdinStore;
   std::string inputProvenance;
   const auto outputStore  = program.get<std::string>("--output-store");

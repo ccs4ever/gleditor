@@ -35,6 +35,7 @@
 #include "common/xanadu/vpl/vpl_engine.hpp"
 #include "common/xanadu/vql/ascii_visualizer.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
+#include "common/xanadu/zigzag/lens_repl.hpp"
 
 namespace {
 
@@ -221,6 +222,7 @@ void printREPLHelp() {
       << "  :ast <expr>           Dump abstract syntax tree for expression\n"
       << "  :asm <expr>           Dump compiled Vortex bytecode disassembly\n"
       << "  :time                 Inspect current hypertime microversion\n"
+      << zigzag::LensRepl::helpText
       << "  :help                 Show this help message\n"
       << "  :quit / :exit / )off  Exit the REPL\n";
 }
@@ -310,6 +312,10 @@ int main(int argc, char *argv[]) {
       .help("Path to result store to create or update")
       .default_value(std::string(""));
 
+  program.add_argument("--lens")
+      .help("Open a lens URI (path, dir:, git:, sql:, cfg:, log:, journal:, "
+            "union:, meta:<label>) and print its projected tree")
+      .default_value(std::string{});
   program.add_argument("--store")
       .help("Path to input store directory to load")
       .default_value(std::string(""));
@@ -435,6 +441,37 @@ int main(int argc, char *argv[]) {
             "data", VplView(arena.proxyFor(currentStore->spaceId, first),
                             {DirectedDim{axis, DimVector::POS}}));
       }
+    }
+  }
+
+  // meta:<label> binds the coordinator's matching store -- or its
+  // primary when the label is empty -- as a frozen fold for MetaLens.
+  const zigzag::LensRepl::MetaSource lensMeta =
+      [&coordinator](std::string_view label)
+      -> std::expected<std::pair<zigzag::Manifold, const xanadu::SpanReader *>,
+                       std::string> {
+    const auto info = label.empty() ? coordinator.primaryStore()
+                                    : coordinator.findStore(label);
+    if (!info || info->store == nullptr) {
+      return std::unexpected("no store named '" + std::string{label} + "'");
+    }
+    const auto &store = info->store;
+    return std::pair{store->rebuildManifold(store->primaryCurrentVersion()),
+                     store.get()};
+  };
+  zigzag::LensRepl lensRepl;
+
+  // --lens is the programmatic surface: print the projection and exit.
+  {
+    const auto lensUri = program.get<std::string>("--lens");
+    if (!lensUri.empty()) {
+      if (lensUri.starts_with("meta:")) {
+        std::ostringstream buf;
+        lensRepl.run(":lens " + lensUri, buf, lensMeta);
+        std::cout << buf.str();
+        return buf.str().contains(" cells,") ? 0 : 1;
+      }
+      return zigzag::runLensRaster(lensUri, std::cout);
     }
   }
 
@@ -622,6 +659,10 @@ int main(int argc, char *argv[]) {
     }
     if (trimmed == ":help") {
       printREPLHelp();
+      continue;
+    }
+    if (zigzag::LensRepl::handles(trimmed)) {
+      lensRepl.run(trimmed, std::cout, lensMeta);
       continue;
     }
     if (trimmed.starts_with(":open ")) {
