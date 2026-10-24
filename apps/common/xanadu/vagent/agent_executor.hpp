@@ -156,6 +156,19 @@ public:
   launch(std::string_view agentType, std::string_view name,
          WireRecord args = {});
 
+  /// Where a launched agent's `emit ... in outer` goes: the launcher hosts
+  /// that space, so there is no parent actor to relay it. Without a sink such
+  /// an emission is counted unroutable.
+  using HostSink = std::function<void(const Envelope &)>;
+  AgentExecutor *setHostSink(HostSink sink) {
+    hostSink_ = std::move(sink);
+    return this;
+  }
+  /// Deliver an event to a launched agent as the host: an `ActorSend` from
+  /// the host pid, received like any peer's. Run `pumpUntilIdle` to process it.
+  [[nodiscard]] std::expected<void, zigzag::vortex::mesh::ActorError>
+  deliver(const identity::ActorPid &target, Envelope envelope);
+
   /// Delivery upkeep (§7.3): redeliver what is overdue, abandon what has
   /// exhausted `sendRetries`, forget what completed.
   void tick();
@@ -275,6 +288,8 @@ private:
   AgentClock clock_;
   identity::ActorPid hostPid_;
   std::uint64_t launches_{0};
+  std::uint64_t hostSends_{0};
+  HostSink hostSink_;
   std::map<std::string, std::unique_ptr<State>> states_;
   std::map<std::string, Outstanding> outstanding_;
   std::vector<identity::ActorPid> needsFirstTurn_;

@@ -957,7 +957,11 @@ void AgentExecutor::routeEvent(State &state, WorkerContext &,
   }
   if (item.space == kSpaceOuter) {
     if (!state.parentPid) {
-      bumpStat(state, kStatUnroutable);
+      if (hostSink_) {
+        hostSink_(envelope);
+      } else {
+        bumpStat(state, kStatUnroutable);
+      }
       return;
     }
     // The parent hosts the space; it fans the emission out to its members.
@@ -1066,6 +1070,23 @@ AgentExecutor::launch(std::string_view agentType, std::string_view name,
   if (!pid) return std::unexpected(pid.error());
   needsFirstTurn_.push_back(*pid);
   return pid;
+}
+
+std::expected<void, ActorError>
+AgentExecutor::deliver(const identity::ActorPid &target, Envelope envelope) {
+  // The lowest possible floor: a host delivery declares nothing complete.
+  const auto prefix = senderPrefix(std::string(kHostName) + "/send");
+  envelope.kind     = std::string(kKindEvent);
+  envelope.floor    = requestId(prefix, 0, 0);
+  const auto bytes  = encodeEnvelope(envelope);
+  if (!bytes) return std::unexpected(ActorError::InvalidMessage);
+  ActorMessage message;
+  message.type      = MessageType::ActorSend;
+  message.requestId = requestId(prefix, hostSends_++, 0);
+  message.source    = hostPid_;
+  message.target    = target;
+  message.value     = *bytes;
+  return runtime_.receive(owner_, message, clock_.steady(), wallNow());
 }
 
 void AgentExecutor::tick() { tick(wallNow()); }

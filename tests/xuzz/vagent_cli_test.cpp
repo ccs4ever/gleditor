@@ -134,11 +134,70 @@ TEST(VagentCli, MissingFileExitsTwo) {
   EXPECT_EQ(res.exitCode, 2) << res.output;
 }
 
-TEST(VagentCli, RunIsReservedAndExitsTwo) {
+// Section 12.1's scatter and gather with fields where it has beliefs.
+constexpr const char *scatterGatherFields = R"vagent(
+event SearchQuery { query_id: Str, pattern: Str }
+event SubTask { query_id: Str, partition: Int, pattern: Str }
+event PartitionResult { query_id: Str, partition: Int, weight: Int }
+event SearchCompleted { query_id: Str, total: Int }
+
+agent Worker {
+  on SubTask as t {
+    emit PartitionResult{query_id: t.query_id, partition: t.partition,
+                         weight: (t.partition + 1) * 10} for t.source
+  }
+}
+
+agent SearchCoordinator(partitions: Int) {
+  var workers: [Agent] := []
+  var received: Int := 0
+  var total: Int := 0
+
+  on Initialize {
+    for _ in 1 to partitions do workers := workers ++ [spawn Worker() in inner]
+  }
+
+  on SearchQuery as q [q.space == outer] {
+    for i in 0 to partitions - 1 do
+      emit SubTask{query_id: q.query_id, partition: i, pattern: q.pattern} in inner for workers[i]
+  }
+
+  on PartitionResult as r [r.space == inner] {
+    received := received + 1
+    total := total + r.weight
+    if received == partitions then {
+      emit SearchCompleted{query_id: r.query_id, total: total} in outer
+    }
+  }
+}
+)vagent";
+
+TEST(VagentCli, RunPrintsTheEmissionsReachingTheLauncher) {
   REQUIRE_VAGENT(bin);
-  const auto res = runProcess(bin + " run x.vagent --agent A");
+  const auto path = writeSource("vagent_cli_run.vagent", scatterGatherFields);
+  const auto res =
+      runProcess(bin + " run " + path.string() +
+                 " --agent SearchCoordinator --arg partitions=3"
+                 " --send 'SearchQuery{query_id: \"q1\", pattern: \"x\"}'");
+  EXPECT_EQ(res.exitCode, 0) << res.output;
+  EXPECT_EQ(res.output, "SearchCompleted {query_id: \"q1\", total: 60}\n");
+  fs::remove(path);
+}
+
+TEST(VagentCli, RunRefusesAnUnknownAgentAndMalformedArguments) {
+  REQUIRE_VAGENT(bin);
+  const auto path =
+      writeSource("vagent_cli_run_bad.vagent", scatterGatherFields);
+  auto res = runProcess(bin + " run " + path.string() + " --agent Missing");
+  EXPECT_EQ(res.exitCode, 1) << res.output;
+  EXPECT_NE(res.output.find("Missing"), std::string::npos) << res.output;
+  res = runProcess(bin + " run " + path.string() +
+                   " --agent SearchCoordinator --arg partitions");
   EXPECT_EQ(res.exitCode, 2) << res.output;
-  EXPECT_NE(res.output.find("not built yet"), std::string::npos);
+  res = runProcess(bin + " run " + path.string() +
+                   " --agent SearchCoordinator --arg partitions=1 --send oops");
+  EXPECT_EQ(res.exitCode, 2) << res.output;
+  fs::remove(path);
 }
 
 TEST(VagentCli, HelpListsBothCommands) {

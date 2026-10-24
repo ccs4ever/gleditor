@@ -641,6 +641,7 @@ std::vector<std::pair<CellRef, std::optional<CellRef>>>
 fieldsOf(const ArenaManifold &arena, const ValueDims &dims, CellRef owner) {
   std::vector<std::pair<CellRef, std::optional<CellRef>>> out;
   for (const auto nameCell : zigzag::rankAfter(arena, owner, dims.vars)) {
+    if (arena.textOf(nameCell) == kRecordMarker) continue;
     out.emplace_back(nameCell, arena.linked(nameCell, dims.values));
   }
   return out;
@@ -663,7 +664,9 @@ CellRef writeValue(ArenaManifold &arena, const ValueDims &dims,
     CellRef operator()(std::int64_t v) const { return arena.makeScalarCell(v); }
     CellRef operator()(double v) const { return arena.makeScalarCell(v); }
     CellRef operator()(bool v) const { return arena.makeScalarCell(v); }
-    CellRef operator()(std::monostate) const { return arena.makeCell(); }
+    CellRef operator()(std::monostate) const {
+      return arena.makeCell(kUnitContent);
+    }
     CellRef operator()(const std::string &v) const {
       return arena.makeCell(std::string_view(v));
     }
@@ -687,6 +690,7 @@ CellRef writeValue(ArenaManifold &arena, const ValueDims &dims,
       const auto cell = v.type.empty()
                             ? arena.makeCell()
                             : arena.makeCell(std::string_view(v.type));
+      setField(arena, dims, cell, kRecordMarker, std::nullopt);
       for (std::size_t i = 0; i < v.names.size() && i < v.values.size(); ++i) {
         setField(arena, dims, cell, v.names[i],
                  writeValue(arena, dims, v.values[i]));
@@ -739,7 +743,7 @@ std::expected<WireValue, WireError> readAt(const ArenaManifold &arena,
     }
     return WireValue::list(std::move(items));
   }
-  if (text.empty() && arena.contentOf(cell).empty()) return WireValue::unit();
+  if (text == kUnitContent) return WireValue::unit();
   return WireValue::text(text);
 }
 } // namespace
