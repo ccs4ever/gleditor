@@ -14,10 +14,15 @@
  *    `+d.values` (§5.8). The owner is the agent cell, an activation frame, an
  *    event cell, a record cell or an outbox entry.
  *  - **Value** (§5.9). `Int`, `Float`, `Bool`: one scalar cell.
- *    `Str`, names: one text cell. `()`: a bare cell. Record: a cell whose
- *    content is the record type's name (empty for an anonymous record), with
- *    fields as above. List: a cell whose content is `kListContent`, first
- *    element on `+d.grab`, the rest chained on `+d.step`.
+ *    `Str`, names: one text cell (the empty string is an empty cell). `()`: a
+ *    cell whose content is `kUnitContent`. Record: a cell whose content is the
+ *    record type's name (empty for an anonymous record), headed on `+d.vars`
+ *    by the marker field `kRecordMarker` (an empty name no user field can
+ *    have) so a record with no fields is still a record, then its fields as
+ *    above. List: a cell whose content is `kListContent`, first element on
+ *    `+d.grab`, the rest chained on `+d.step`. Unit and list are told apart
+ *    by their reserved content, so the strings "()" and "[]" read back as
+ *    those values; a record is told apart by its `+d.vars` link and is exact.
  *  - **Event cell** (§5.5). Content is the event type's name; declared fields
  *    plus the four implicit ones of `kEventImplicit*`.
  *  - **Outbox entry.** Content is one of the `kKind*` strings; fields named by
@@ -120,8 +125,12 @@ inline constexpr std::string_view kEventImplicitOrdinal = "ordinal";
 inline constexpr std::string_view kEventInitialize = "Initialize";
 inline constexpr std::string_view kEventDestroy    = "Destroy";
 
-/// Content of a list value cell; distinguishes `[]` from a bare `()` cell.
+/// Content of a list value cell; distinguishes `[]` from the empty string.
 inline constexpr std::string_view kListContent = "[]";
+/// Content of the `()` value cell; distinguishes it from the empty string.
+inline constexpr std::string_view kUnitContent = "()";
+/// The first name on every record cell's `+d.vars` rank. Readers skip it.
+inline constexpr std::string_view kRecordMarker = "";
 
 // -- Beliefs (§6.1, §6.5) -----------------------------------------------------
 

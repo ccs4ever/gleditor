@@ -513,6 +513,8 @@ private:
   void emitRtCopy();
   void callFind(CellRef owner, const std::string &name, CellRef &vp,
                 CellRef &np);
+  /// Heads a freshly allocated record's `+d.vars` rank with `kRecordMarker`.
+  void markRecord(CellRef record);
   void callAppendField(CellRef owner, const std::string &name,
                        std::optional<CellRef> existing, CellRef &vc);
   void callListPush(CellRef list, CellRef elem);
@@ -799,6 +801,11 @@ void Gen::callAppendField(CellRef owner, const std::string &fname,
   mov(S(vc), S(r0_));
 }
 
+void Gen::markRecord(CellRef record) {
+  CellRef ignored;
+  callAppendField(record, std::string(kRecordMarker), std::nullopt, ignored);
+}
+
 void Gen::callListPush(CellRef listReg, CellRef elem) {
   mov(S(a0_), S(listReg));
   mov(S(a1_), S(elem));
@@ -954,12 +961,17 @@ CellRef Gen::initialValueCell(const Ty &t) {
     return arena_.makeCell("");
   case Ty::K::List:
     return arena_.makeCell(std::string(kListContent));
-  case Ty::K::Record:
-    return arena_.makeCell(t.name);
-  case Ty::K::Unit:
-    return arena_.makeCell();
+  case Ty::K::Record: {
+    const CellRef record = arena_.makeCell(t.name);
+    const CellRef marker = arena_.makeCell(std::string(kRecordMarker));
+    zigzag::expectWritten(
+        arena_.link(record, core_.dims().vars, DimVector::POS, marker));
+    return record;
   }
-  return arena_.makeCell();
+  case Ty::K::Unit:
+    return arena_.makeCell(std::string(kUnitContent));
+  }
+  return arena_.makeCell(std::string(kUnitContent));
 }
 
 void Gen::addField(const std::string &fname, const Ty &ty) {
@@ -1530,6 +1542,7 @@ Ty Gen::record(const ERecord &r, CellRef out, SourceLocation loc) {
   const CellRef res = reg();
   alloc(res);
   mov(D(res), S(cStr(r.type)));
+  markRecord(res);
   for (const auto &rf : r.fields) {
     const auto it = std::ranges::find_if(
         decl, [&](const auto &p) { return p.first == rf.name; });
@@ -1728,6 +1741,7 @@ Ty Gen::spawnExpr(const ESpawn &s, CellRef out, SourceLocation loc) {
   }
   const CellRef args = reg();
   alloc(args);
+  markRecord(args);
   for (std::size_t i = 0; i < params.size(); ++i) {
     const CellRef v = reg();
     const Ty t      = valueInto(*s.args[i], v);
@@ -2791,7 +2805,7 @@ CompiledAgent Gen::run() {
   zero_           = cInt(0);
   one_            = cInt(1);
   negOne_         = cInt(-1);
-  unit_c_         = arena_.makeCell("");
+  unit_c_         = arena_.makeCell(std::string(kUnitContent));
   true_           = arena_.makeScalarCell(true);
   false_          = arena_.makeScalarCell(false);
   a0_             = global();

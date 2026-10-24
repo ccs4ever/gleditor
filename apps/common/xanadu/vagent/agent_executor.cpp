@@ -5,6 +5,8 @@
 #include "common/xanadu/zigzag/cell_views.hpp"
 
 #include <algorithm>
+#include <array>
+#include <bit>
 #include <limits>
 #include <ranges>
 
@@ -399,13 +401,41 @@ bool AgentExecutor::prepare(State &state, WorkerContext &context,
     // Dewey path would only be copied into every choice point (P12).
     context.vm.setDeweyTracking(false);
 
-    const auto ac     = state.agent.agentCell;
-    const auto &vd    = state.vd;
-    const bool fresh  = !fieldNameCell(arena, vd, ac, kFieldName);
-    const auto ensure = [&](std::string_view field, const WireValue &value) {
-      if (!fieldNameCell(arena, vd, ac, field)) {
+    const auto ac  = state.agent.agentCell;
+    const auto &vd = state.vd;
+    // A compiled agent already holds every reserved field, empty, so a fresh
+    // one is told by its name never having been written.
+    const auto nameValue = fieldValue(arena, vd, ac, kFieldName);
+    const bool fresh     = !nameValue || arena.textOf(*nameValue).empty();
+    // Compiled code reads a scalar or text field through its static value
+    // cell, so a fresh agent's values are written into that cell; a list or a
+    // record is reached through its name cell and may be replaced.
+    const auto assign = [&](std::string_view field, const WireValue &value) {
+      const auto existing = fieldValue(arena, vd, ac, field);
+      if (!existing) {
+        setField(arena, vd, ac, field, writeValue(arena, vd, value));
+        return;
+      }
+      if (const auto *i = std::get_if<std::int64_t>(&value.data)) {
+        zigzag::expectWritten(
+            arena.setValueBits(*existing, xanadu::ValueKind::Int64,
+                               std::bit_cast<std::uint64_t>(*i)));
+      } else if (const auto *d = std::get_if<double>(&value.data)) {
+        zigzag::expectWritten(
+            arena.setValueBits(*existing, xanadu::ValueKind::Double,
+                               xanadu::canonicalDoubleBits(*d)));
+      } else if (const auto *b = std::get_if<bool>(&value.data)) {
+        zigzag::expectWritten(
+            arena.setValueBits(*existing, xanadu::ValueKind::Bool, *b ? 1 : 0));
+      } else if (const auto *t = std::get_if<std::string>(&value.data)) {
+        const std::array spans{arena.intern(*t)};
+        zigzag::expectWritten(arena.setContent(*existing, spans));
+      } else {
         setField(arena, vd, ac, field, writeValue(arena, vd, value));
       }
+    };
+    const auto ensure = [&](std::string_view field, const WireValue &value) {
+      if (!fieldNameCell(arena, vd, ac, field) || fresh) assign(field, value);
     };
     WireRecord outer;
     outer.type = std::string(kSpaceRecordType);
@@ -456,8 +486,7 @@ bool AgentExecutor::prepare(State &state, WorkerContext &context,
       }
       if (info) {
         for (std::size_t i = 0; i < info->args.names.size(); ++i) {
-          setField(arena, vd, ac, info->args.names[i],
-                   writeValue(arena, vd, info->args.values[i]));
+          assign(info->args.names[i], info->args.values[i]);
         }
       }
     }
@@ -718,7 +747,9 @@ AgentExecutor::handleSend(State &state, const ActorExecution &execution,
   if (relayed) {
     spec.space   = *envelope.relaySpace;
     spec.relayed = &envelope;
-  } else if (state.parentPid && message.source == state.parentPid) {
+  } else if ((state.parentPid && message.source == state.parentPid) ||
+             message.source == hostPid_) {
+    // The launcher hosts a top-level agent's outer space.
     spec.space = std::string(kSpaceOuter);
   } else {
     spec.space = std::string(kSpaceInner);
@@ -941,14 +972,11 @@ CellRef AgentExecutor::mintEvent(State &state, const Envelope &envelope,
   declared.values = envelope.fields.values;
   const auto cell =
       writeValue(arena, vd, WireValue::record(std::move(declared)));
-  const auto optText = [&](std::string_view value) {
-    return makeOpt(arena, vd,
-                   value.empty()
-                       ? std::nullopt
-                       : std::optional<CellRef>(arena.makeCell(value)));
-  };
-  setField(arena, vd, cell, kEventImplicitSource, optText(envelope.from));
-  setField(arena, vd, cell, kEventImplicitSpace, optText(space));
+  // The compiler types `source` and `space` as Str, so an absent source is
+  // the empty string rather than an empty Opt.
+  setField(arena, vd, cell, kEventImplicitSource,
+           arena.makeCell(envelope.from));
+  setField(arena, vd, cell, kEventImplicitSpace, arena.makeCell(space));
   setField(arena, vd, cell, kEventImplicitTime, arena.makeScalarCell(millis));
   setField(arena, vd, cell, kEventImplicitOrdinal,
            arena.makeScalarCell(static_cast<std::int64_t>(envelope.ordinal)));
@@ -1182,7 +1210,11 @@ void AgentExecutor::routeEvent(State &state, WorkerContext &,
   }
   if (item.space == kSpaceOuter) {
     if (!state.parentPid) {
-      bumpStat(state, kStatUnroutable);
+      if (hostSink_) {
+        hostSink_(envelope);
+      } else {
+        bumpStat(state, kStatUnroutable);
+      }
       return;
     }
     // The parent hosts the space; it fans the emission out to its members.
@@ -1292,6 +1324,23 @@ AgentExecutor::launch(std::string_view agentType, std::string_view name,
   if (!pid) return std::unexpected(pid.error());
   needsFirstTurn_.push_back(*pid);
   return pid;
+}
+
+std::expected<void, ActorError>
+AgentExecutor::deliver(const identity::ActorPid &target, Envelope envelope) {
+  // The lowest possible floor: a host delivery declares nothing complete.
+  const auto prefix = senderPrefix(std::string(kHostName) + "/send");
+  envelope.kind     = std::string(kKindEvent);
+  envelope.floor    = requestId(prefix, 0, 0);
+  const auto bytes  = encodeEnvelope(envelope);
+  if (!bytes) return std::unexpected(ActorError::InvalidMessage);
+  ActorMessage message;
+  message.type      = MessageType::ActorSend;
+  message.requestId = requestId(prefix, hostSends_++, 0);
+  message.source    = hostPid_;
+  message.target    = target;
+  message.value     = *bytes;
+  return runtime_.receive(owner_, message, clock_.steady(), wallNow());
 }
 
 void AgentExecutor::tick() { tick(wallNow()); }
