@@ -3,18 +3,20 @@
  * @brief Lowers one vagent agent type to Vortex opcode graphs and the agent
  *        cell the executor adapter drives (design §5.2, §5.5, §5.7-§5.9, §9).
  *
- * What the existing opcode set can and cannot do shapes every choice here:
- * an operand is a *slot* cell whose value names the cell to read, so an
- * operation reaches a cell minted at run time only if the compiler first
- * writes that cell's ref into the operation's slot (a "poke"), and a
- * neighbour can be read only through a parameter pipeline. The compiler
- * therefore emits a small pointer machine: registers are static cells,
- * records, lists and events are held as refs in registers, and shared
- * routines (field lookup, append, deep copy, outbox push) are called with
- * `#Call` and globals for arguments. Locals live in per-routine registers; a
- * routine in a call cycle saves and restores its whole register set around
- * each activation (name-keyed, by call depth), which is the design's "spill
- * across the call" realised without an addressable frame cell.
+ * An operand is a *slot* cell whose value names the cell to read. Since P16 a
+ * slot may name a handle (`#Point`), which an input operand follows to its
+ * target, so code reaches a cell minted at run time without editing the
+ * program graph. Locals and arguments live on an activation frame, a cell
+ * hung with name cells on `d.vars` and values on `+d.values` (design §5.8);
+ * each is reached through a static handle that the routine's prologue points
+ * at the frame's cell. A routine in a call cycle also keeps its temporaries
+ * there, and re-points its handles after each call that could have re-entered
+ * it. Registers that need no frame (a non-recursive routine's temporaries,
+ * outputs of opcodes) stay static cells: an opcode's output is always a
+ * static cell, and a value that must outlive a call is moved to the frame.
+ * Records, lists and events are held as refs in registers, and shared routines
+ * (field lookup, append, deep copy, outbox push) are called with `#Call` and
+ * globals for arguments.
  *
  * Refuses by returning std::expected<_, CompileFailure>; user input never
  * throws out of this API.
@@ -25,8 +27,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <functional>
+#include <map>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "common/xanadu/vagent/ast.hpp"
 #include "common/xanadu/vagent/runtime_abi.hpp"
@@ -54,6 +60,24 @@ struct CompileFailure {
   SourceLocation loc{};
 };
 
+/// A compiled method's body as a unit a host can run against any frame that
+/// has the method's layout, which is how a suspended plan body (iteration 4c)
+/// will resume with the locals it left on an intention's frame. Every entry is
+/// a stub that ends at the agent's halt op.
+struct FrameBody {
+  /// The handle the host points at a frame cell. `make` leaves it naming the
+  /// frame it built; `enter` runs the body against the frame it names.
+  zigzag::CellRef frame{zigzag::noCell};
+  /// Builds a frame, copies `args` into its parameters, and points `frame`
+  /// at it. The frame is left off the stack.
+  zigzag::CellRef make{zigzag::noCell};
+  /// Stacks the frame `frame` names, binds the body's handles to it, runs the
+  /// body and unstacks it. The result is in `result`.
+  zigzag::CellRef enter{zigzag::noCell};
+  std::vector<zigzag::CellRef> args;
+  zigzag::CellRef result{zigzag::noCell};
+};
+
 class Compiler {
 public:
   explicit Compiler(zigzag::vortex::VortexCore &core);
@@ -67,6 +91,10 @@ public:
   /// the turn fails hard. Applies to agents compiled afterwards.
   Compiler *setBeliefEventDepth(std::size_t rounds) noexcept;
 
+  /// The frame-run entries of the agent's method @p name, from the last
+  /// successful `compileAgent`.
+  [[nodiscard]] std::optional<FrameBody> frameBody(std::string_view name) const;
+
   [[nodiscard]] zigzag::vortex::VortexCore &core() noexcept { return core_; }
   [[nodiscard]] zigzag::vortex::VortexVM &vm() noexcept { return vm_; }
 
@@ -74,6 +102,7 @@ private:
   zigzag::vortex::VortexCore &core_;
   zigzag::vortex::VortexVM vm_;
   std::size_t beliefEventDepth_{kDefaultBeliefEventDepth};
+  std::map<std::string, FrameBody, std::less<>> frameBodies_;
 };
 
 } // namespace xanadu::vagent
