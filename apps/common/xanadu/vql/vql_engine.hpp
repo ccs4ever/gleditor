@@ -20,7 +20,6 @@
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vql/ast.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
-#include "common/xanadu/zigzag/lens_repl.hpp"
 
 namespace xanadu::vql {
 
@@ -219,24 +218,6 @@ private:
       perspectiveClones_;
   std::unordered_map<std::string, MountDeclaration> sessionMounts_;
   std::unordered_map<std::string, DefDeclaration> userDefs_;
-  /// The query's lens session: `lens("uri")` and the `lens*` generator
-  /// ops act on it, projecting into `core_`'s arena so results are
-  /// ordinary cells. An injected session outlives one-shot engines --
-  /// vquery binds its REPL's LensRepl so `lens()` and `:lens` share
-  /// state; standalone engines lazily own one.
-  zigzag::LensRepl *lensSession_{nullptr};
-  std::optional<zigzag::LensRepl> ownedLens_{};
-  /// The session the lens* ops act on (injected or owned).
-  [[nodiscard]] zigzag::LensRepl &lens();
-  /// meta:<label> via the coordinator, for `lens("meta:...")`.
-  [[nodiscard]] zigzag::LensRepl::MetaSource lensMetaSource();
-
-public:
-  /// Give the engine the caller's long-lived lens session -- REPLs and
-  /// embeddings do this so `lens()` sees the session `:lens` opened.
-  void setLensSession(zigzag::LensRepl &session) noexcept {
-    lensSession_ = &session;
-  }
 };
 
 } // namespace xanadu::vql

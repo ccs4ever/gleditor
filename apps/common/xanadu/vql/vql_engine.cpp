@@ -462,8 +462,8 @@ std::vector<zigzag::CellRef> VQLEngine::bindLet(const LetClause &let) {
     return {};
   }
   functors_.erase(let.varName);
-  auto cells = path != nullptr ? evaluatePath(*path)
-                               : cellsOfValueExpr(*value, zigzag::noCell);
+  auto cells        = path != nullptr ? evaluatePath(*path)
+                                      : cellsOfValueExpr(*value, zigzag::noCell);
   env_[let.varName] = cells;
   return cells;
 }
@@ -842,34 +842,6 @@ std::vector<zigzag::CellRef> VQLEngine::evaluatePerspectiveStep(
   return results;
 }
 
-zigzag::LensRepl &VQLEngine::lens() {
-  if (lensSession_ != nullptr) {
-    return *lensSession_;
-  }
-  if (!ownedLens_.has_value()) {
-    ownedLens_.emplace(coordinator_.core());
-  }
-  return *ownedLens_;
-}
-
-zigzag::LensRepl::MetaSource VQLEngine::lensMetaSource() {
-  // meta:<label> binds the coordinator's matching store -- or its
-  // primary when the label is empty -- as a frozen fold for MetaLens.
-  return [this](std::string_view label)
-             -> std::expected<
-                 std::pair<zigzag::Manifold, const xanadu::SpanReader *>,
-                 std::string> {
-    const auto info = label.empty() ? coordinator_.primaryStore()
-                                    : coordinator_.findStore(label);
-    if (!info || info->store == nullptr) {
-      return std::unexpected("no store named '" + std::string{label} + "'");
-    }
-    const auto &store = info->store;
-    return std::pair{store->rebuildManifold(store->primaryCurrentVersion()),
-                     store.get()};
-  };
-}
-
 std::vector<zigzag::CellRef>
 VQLEngine::resolveAnchor(const AnchorNode &anchor,
                          const std::vector<zigzag::CellRef> &contextCells) {
@@ -965,53 +937,9 @@ VQLEngine::resolveAnchor(const AnchorNode &anchor,
   }
   case AnchorKind::StoreGenerator: {
     if (anchor.generator) {
-      const auto &op = anchor.generator->opName;
-      if (op == "current") {
+      if (anchor.generator->opName == "current") {
         if (const auto h = coordinator_.homeAnchor()) {
           results.push_back(*h);
-        }
-      } else if (op.starts_with("lens")) {
-        // The in-code lens session: `lens("uri")` opens, `lensmount`/
-        // `lensunmount` swap a delegate lens under a cell's key,
-        // `lensnext`/`lenscommit`/`lensclose` run the remaining verbs.
-        // The session is the caller-injected one (or a lazily owned one
-        // for one-shot engines) so it survives across queries; its cells
-        // are ordinary arena cells the path steps traverse as usual. A
-        // refused op yields an empty anchor set.
-        auto &ls           = lens();
-        const auto argText = [&]() {
-          return textOfValue(evaluateValueExpr(anchor.generator->args.front(),
-                                               zigzag::noCell));
-        };
-        const auto pushRoot = [&]() {
-          if (const auto r = ls.root(); r.has_value()) {
-            results.push_back(*r);
-          }
-        };
-        if (op == "lens" && !anchor.generator->args.empty()) {
-          if (ls.openUri(argText(), lensMetaSource())) {
-            pushRoot();
-          }
-        } else if (op == "lensmount" && !anchor.generator->args.empty()) {
-          if (ls.mountKey(argText())) {
-            pushRoot();
-          }
-        } else if (op == "lensunmount" && !anchor.generator->args.empty()) {
-          if (ls.unmountKey(argText())) {
-            pushRoot();
-          }
-        } else if (op == "lensnext") {
-          if (ls.nextPage()) {
-            pushRoot();
-          }
-        } else if (op == "lenscommit") {
-          if (ls.commit()) {
-            pushRoot();
-          }
-        } else if (op == "lensclose") {
-          ls.close();
-        } else {
-          // Unknown lens* op: same refusal shape as other anchors.
         }
       } else if (!anchor.generator->args.empty()) {
         std::string storeKey = textOfValue(
@@ -2117,9 +2045,9 @@ VQLEngine::evaluateValueExpr(const ValueExpr &expr, zigzag::CellRef context) {
 
   if (std::holds_alternative<std::shared_ptr<PathExpression>>(expr.kind)) {
     const auto &path = *std::get<std::shared_ptr<PathExpression>>(expr.kind);
-    auto cells = evaluatePath(path, context != zigzag::noCell
-                                        ? std::vector<zigzag::CellRef>{context}
-                                        : std::vector<zigzag::CellRef>{});
+    auto cells       = evaluatePath(path, context != zigzag::noCell
+                                              ? std::vector<zigzag::CellRef>{context}
+                                              : std::vector<zigzag::CellRef>{});
     if (!cells.empty()) {
       return core_->render(cells[0]);
     }

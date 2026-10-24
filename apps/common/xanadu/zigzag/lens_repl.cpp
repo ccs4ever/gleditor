@@ -146,108 +146,6 @@ bool LensRepl::open(const std::string_view uri, std::ostream &out,
   return true;
 }
 
-std::expected<void, std::string> LensRepl::openUri(const std::string_view uri,
-                                                   const MetaSource &meta) {
-  if (uri.starts_with("meta:")) {
-    if (!meta) {
-      return std::unexpected("meta: needs an open store");
-    }
-    auto src = meta(uri.substr(5));
-    if (!src) {
-      return std::unexpected(src.error());
-    }
-    // The old session dies before the fold it could be borrowing, then
-    // the new fold moves in and the lens borrows it.
-    session_.reset();
-    metaFold_ = std::move(src->first);
-    auto lens = std::make_unique<MetaLens>(std::string{uri.substr(5)},
-                                           *metaFold_, *src->second);
-    session_  = std::make_unique<ProjectionSession>(std::move(lens), *core_);
-    label_    = std::string{uri};
-    return {};
-  }
-  auto lens = openLensUri(uri);
-  if (!lens) {
-    return std::unexpected("cannot open " + std::string{uri} + ": " +
-                           lens.error());
-  }
-  session_.reset();
-  metaFold_.reset();
-  session_ = std::make_unique<ProjectionSession>(std::move(*lens), *core_);
-  label_   = std::string{uri};
-  return {};
-}
-
-std::expected<void, std::string>
-LensRepl::mountKey(const std::string_view key) {
-  auto *router = session_ != nullptr
-                     ? dynamic_cast<RouterLens *>(session_->lensMut())
-                     : nullptr;
-  if (router == nullptr) {
-    return std::unexpected("no router at the root -- mount needs a dir: view");
-  }
-  const auto opened = router->open(keyArg(key));
-  if (!opened) {
-    return std::unexpected("mount refused: " + opened.error());
-  }
-  (void)session_->refresh();
-  return {};
-}
-
-std::expected<void, std::string>
-LensRepl::unmountKey(const std::string_view key) {
-  auto *router = session_ != nullptr
-                     ? dynamic_cast<RouterLens *>(session_->lensMut())
-                     : nullptr;
-  if (router == nullptr) {
-    return std::unexpected("no router at the root");
-  }
-  const auto boundary = router->mountBoundary(keyArg(key));
-  if (!boundary) {
-    return std::unexpected("no mount at or above " + std::string{key});
-  }
-  if (!router->unmount(*boundary)) {
-    return std::unexpected("unmount refused");
-  }
-  (void)session_->refresh();
-  return {};
-}
-
-std::expected<void, std::string> LensRepl::nextPage() {
-  auto *w = session_ != nullptr
-                ? dynamic_cast<WindowedLens *>(session_->lensMut())
-                : nullptr;
-  if (w == nullptr) {
-    return std::unexpected("not a windowed lens");
-  }
-  const auto stub = w->nextStub();
-  if (!stub) {
-    return std::unexpected("no deferred page");
-  }
-  if (const auto r = w->materializePage(*stub); !r) {
-    return std::unexpected("materialize failed");
-  }
-  (void)session_->refresh();
-  return {};
-}
-
-std::expected<void, std::string> LensRepl::commit() {
-  if (session_ == nullptr) {
-    return std::unexpected("nothing open");
-  }
-  const auto r = session_->commit();
-  if (!r) {
-    return std::unexpected("commit refused: " + r.error());
-  }
-  return {};
-}
-
-void LensRepl::close() {
-  session_.reset();
-  metaFold_.reset();
-  label_.clear();
-}
-
 bool LensRepl::run(const std::string_view line, std::ostream &out,
                    const MetaSource &metaSource) {
   const auto arg = line.size() > 5 ? line.substr(6) : std::string_view{};
@@ -264,7 +162,9 @@ bool LensRepl::run(const std::string_view line, std::ostream &out,
     return open(arg.substr(5), out, metaSource);
   }
   if (arg == "close") {
-    close();
+    session_.reset();
+    metaFold_.reset();
+    label_.clear();
     out << "lens: closed\n";
     return true;
   }
@@ -274,18 +174,36 @@ bool LensRepl::run(const std::string_view line, std::ostream &out,
     return open(arg, out, metaSource);
   }
   if (arg.starts_with("mount ")) {
-    if (const auto r = mountKey(arg.substr(6)); !r) {
-      out << "lens: " << r.error() << "\n";
+    auto *router = dynamic_cast<RouterLens *>(session_->lensMut());
+    if (router == nullptr) {
+      out << "lens: no router at the root -- mount needs a dir: view\n";
       return true;
     }
+    const auto opened = router->open(keyArg(arg.substr(6)));
+    if (!opened) {
+      out << "lens: mount refused: " << opened.error() << "\n";
+      return true;
+    }
+    (void)session_->refresh();
     printLensTree(*session_, *core_, *arena_, label_, out, /*withKeys=*/true);
     return true;
   }
   if (arg.starts_with("unmount ")) {
-    if (const auto r = unmountKey(arg.substr(8)); !r) {
-      out << "lens: " << r.error() << "\n";
+    auto *router = dynamic_cast<RouterLens *>(session_->lensMut());
+    if (router == nullptr) {
+      out << "lens: no router at the root\n";
       return true;
     }
+    const auto boundary = router->mountBoundary(keyArg(arg.substr(8)));
+    if (!boundary) {
+      out << "lens: no mount at or above " << arg.substr(8) << "\n";
+      return true;
+    }
+    if (!router->unmount(*boundary)) {
+      out << "lens: unmount refused\n";
+      return true;
+    }
+    (void)session_->refresh();
     printLensTree(*session_, *core_, *arena_, label_, out, /*withKeys=*/true);
     return true;
   }
@@ -295,20 +213,23 @@ bool LensRepl::run(const std::string_view line, std::ostream &out,
       out << "lens: not a windowed lens\n";
       return true;
     }
-    if (!w->nextStub()) {
+    const auto stub = w->nextStub();
+    if (!stub) {
       out << "lens: no deferred page\n";
       return true;
     }
-    if (const auto r = nextPage(); !r) {
-      out << "lens: " << r.error() << "\n";
+    if (const auto r = w->materializePage(*stub); !r) {
+      out << "lens: materialize failed\n";
       return true;
     }
+    (void)session_->refresh();
     printLensTree(*session_, *core_, *arena_, label_, out, /*withKeys=*/true);
     return true;
   }
   if (arg == "commit") {
-    if (const auto r = commit(); !r) {
-      out << "lens: commit failed: " << r.error() << "\n";
+    const auto c = session_->commit();
+    if (!c) {
+      out << "lens: commit failed: " << c.error() << "\n";
     } else {
       out << "lens: committed\n";
     }

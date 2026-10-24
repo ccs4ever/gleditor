@@ -199,81 +199,6 @@ void runREPL(Compiler &compiler, std::vector<Clause> &clauses,
         metaStore->rebuildManifold(metaStore->primaryCurrentVersion()),
         metaStore.get()};
   };
-  // The projection enters the term space as facts so goals unify over
-  // the lens: lens_entry(Key, Text). Shared by ':lens' and the lens_*
-  // goals; a malformed source cell's text can't break the REPL.
-  const auto seedLensFacts = [&]() {
-    std::cout << "% lens: " << lensRepl.entries().size()
-              << " entries seeded as lens_entry(Key, Text)\n";
-    for (const auto &[key, text] : lensRepl.entries()) {
-      auto quoted = [](std::string_view s) {
-        std::string q;
-        for (const char ch : s) {
-          if (ch == '\'')
-            q += "''";
-          else if (ch == '\\')
-            q += "\\\\";
-          else
-            q += ch;
-        }
-        return q;
-      };
-      const auto fact =
-          "lens_entry('" + quoted(key) + "', '" + quoted(text) + "').";
-      try {
-        Parser fp(fact);
-        for (const auto &c : fp.parseProgram().clauses) {
-          compiler.compileClause(c);
-          clauses.push_back(c);
-        }
-      } catch (const std::exception &ex) {
-        std::cout << "% seed failed on " << fact << " : " << ex.what() << "\n";
-      }
-    }
-  };
-  // Lens verbs as goals, evaluated like builtins (not unified):
-  //   lens_open(URI).  lens_mount(Key).  lens_unmount(Key).
-  //   lens_next.  lens_commit.  lens_close.
-  const auto evalLensGoal = [&](const std::string &q) -> std::optional<bool> {
-    const auto arg = [&]() {
-      const auto lp = q.find('(');
-      std::string_view a{q};
-      a = a.substr(lp + 1, q.size() - lp - 3);
-      if (a.size() >= 2 && ((a.front() == '\'' && a.back() == '\'') ||
-                            (a.front() == '"' && a.back() == '"'))) {
-        a = a.substr(1, a.size() - 2);
-      }
-      return std::string{a};
-    };
-    if (q.starts_with("lens_open(") && q.ends_with(").")) {
-      const auto r = lensRepl.openUri(arg(), meta);
-      if (r) seedLensFacts();
-      return r.has_value();
-    }
-    if (q.starts_with("lens_mount(") && q.ends_with(").")) {
-      const auto r = lensRepl.mountKey(arg());
-      if (r) seedLensFacts();
-      return r.has_value();
-    }
-    if (q.starts_with("lens_unmount(") && q.ends_with(").")) {
-      const auto r = lensRepl.unmountKey(arg());
-      if (r) seedLensFacts();
-      return r.has_value();
-    }
-    if (q == "lens_next.") {
-      const auto r = lensRepl.nextPage();
-      if (r) seedLensFacts();
-      return r.has_value();
-    }
-    if (q == "lens_commit.") {
-      return lensRepl.commit().has_value();
-    }
-    if (q == "lens_close.") {
-      lensRepl.close();
-      return true;
-    }
-    return std::nullopt;
-  };
   while (true) {
     if (buffer.empty()) {
       std::cout << "?- " << std::flush;
@@ -306,7 +231,37 @@ void runREPL(Compiler &compiler, std::vector<Clause> &clauses,
         const auto before = std::string{lensRepl.label()};
         lensRepl.run(line, std::cout, meta);
         if (lensRepl.label() != before && !lensRepl.label().empty()) {
-          seedLensFacts();
+          std::cout << "% lens: " << lensRepl.entries().size()
+                    << " entries seeded as lens_entry(Key, Text)\n";
+          // The projection enters the term space as facts, so goals
+          // unify over the lens: lens_entry(Key, Text). A malformed
+          // source cell's text can't break the REPL.
+          for (const auto &[key, text] : lensRepl.entries()) {
+            auto quoted = [](std::string_view s) {
+              std::string q;
+              for (const char ch : s) {
+                if (ch == '\'')
+                  q += "''";
+                else if (ch == '\\')
+                  q += "\\\\";
+                else
+                  q += ch;
+              }
+              return q;
+            };
+            const auto fact =
+                "lens_entry('" + quoted(key) + "', '" + quoted(text) + "').";
+            try {
+              Parser fp(fact);
+              for (const auto &c : fp.parseProgram().clauses) {
+                compiler.compileClause(c);
+                clauses.push_back(c);
+              }
+            } catch (const std::exception &ex) {
+              std::cout << "% seed failed on " << fact << " : " << ex.what()
+                        << "\n";
+            }
+          }
         }
         continue;
       }
@@ -412,14 +367,6 @@ void runREPL(Compiler &compiler, std::vector<Clause> &clauses,
     if (!buffer.empty() && buffer.back() == '.') {
       std::string input = buffer;
       buffer.clear();
-
-      // lens_* goals run the lens ops on the session -- evaluated like
-      // builtins rather than unified. A compound goal's lens_* conjunct
-      // stays engine-side for now.
-      if (const auto r = evalLensGoal(input); r.has_value()) {
-        std::cout << (*r ? "true." : "false.") << "\n";
-        continue;
-      }
 
       try {
         CompiledQuery q = compiler.compileQuery(input);

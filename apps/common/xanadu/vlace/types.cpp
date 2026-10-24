@@ -145,18 +145,6 @@ TypeChecker::TypeChecker() {
   // openLens :: String -> IO Cell  (§7.4): project a source, return its root.
   builtins_["openLens"] =
       Scheme{.vars = {}, .body = tyFun(tyStr(), tyIO(tyCell))};
-  // The rest of the lens verb set (§7.4), all on the program's one
-  // session: mount/unmount by fs: key or path, next/commit/close as
-  // bare effects, lensKey naming a cell's ExternalKey.
-  builtins_["lensMount"] =
-      Scheme{.vars = {}, .body = tyFun(tyStr(), tyIO(tyBool()))};
-  builtins_["lensUnmount"] =
-      Scheme{.vars = {}, .body = tyFun(tyStr(), tyIO(tyBool()))};
-  builtins_["lensNext"]   = Scheme{.vars = {}, .body = tyIO(tyBool())};
-  builtins_["lensCommit"] = Scheme{.vars = {}, .body = tyIO(tyBool())};
-  builtins_["lensClose"]  = Scheme{.vars = {}, .body = tyIO(tyBool())};
-  builtins_["lensKey"] =
-      Scheme{.vars = {}, .body = tyFun(tyCell, tyIO(tyStr()))};
   // childrenAll :: Cell -> List Cell  -- a cell's contained children (§7.4).
   builtins_["childrenAll"] =
       Scheme{.vars = {}, .body = tyFun(tyCell, tyList(tyCell))};

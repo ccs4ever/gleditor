@@ -91,27 +91,6 @@ public:
   [[nodiscard]] std::vector<std::pair<std::string, std::string>>
   entries() const;
 
-  // -- Programmatic surface ---------------------------------------------------
-  // The same ops the verbs drive, for language bindings: a frontend's
-  // openLens/lens_mount/lensOpen builtins call these, not run().
-  /// The live session, or null -- languages walk roots()/dims through it.
-  [[nodiscard]] ProjectionSession *session() noexcept { return session_.get(); }
-  /// Open `uri` (openLensUri, or meta:<label> via @p meta); the old
-  /// session is released first. Errors are the refused reason.
-  std::expected<void, std::string> openUri(std::string_view uri,
-                                           const MetaSource &meta = {});
-  /// Mount the delegate lens under the cell for @p key (or a path).
-  /// Needs a RouterLens at the root.
-  std::expected<void, std::string> mountKey(std::string_view key);
-  /// Unmount the delegate at or above @p key (or a path).
-  std::expected<void, std::string> unmountKey(std::string_view key);
-  /// Materialize the next deferred page; needs a WindowedLens.
-  std::expected<void, std::string> nextPage();
-  /// Write dirty cells back to the source.
-  std::expected<void, std::string> commit();
-  /// Drop the projection; a no-op when nothing is open.
-  void close();
-
 private:
   /// Swap in a fresh projection over `uri` and print its tree.
   bool open(std::string_view uri, std::ostream &out,
