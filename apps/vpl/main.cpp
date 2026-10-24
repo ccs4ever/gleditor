@@ -459,9 +459,9 @@ int main(int argc, char *argv[]) {
     return std::pair{store->rebuildManifold(store->primaryCurrentVersion()),
                      store.get()};
   };
-  // The coordinator's core: lens cells are cells VPL can rank and
-  // calculate over, not a private projection.
-  zigzag::LensRepl lensRepl(coordinator.core());
+  // The engine's own arena core: lens cells land where bindRank and
+  // directEngine already look -- a projected rank is a native VPL rank.
+  zigzag::LensRepl lensRepl(core);
 
   // --lens is the programmatic surface: print the projection and exit.
   {
@@ -601,15 +601,38 @@ int main(int argc, char *argv[]) {
   std::string line;
 
   const auto bindRank = [&](const std::string_view name) -> bool {
-    if (!currentStore) {
-      std::cerr << "Open a store first with :open <path>.\n";
-      return false;
+    std::optional<DimRef> dim;
+    if (currentStore) {
+      dim = currentStore->manifold->dimensionNamed(name, *currentStore->store);
     }
-    const auto dim =
-        currentStore->manifold->dimensionNamed(name, *currentStore->store);
     if (!dim) {
-      std::cerr << "No dimension named " << name << " in the open store.\n";
-      return false;
+      // A lens projects into `arena` (the engine's own core), not a
+      // store fold: bind the rank its root holds on the named dim,
+      // walking d.seq between the siblings that dim's links reach.
+      CellRef first = noCell;
+      if (const auto lroot = lensRepl.root()) {
+        const auto ldim = directEngine.resolveDimension(name);
+        if (ldim != noCell) {
+          first = arena.linked(*lroot, ldim, DimVector::POS).value_or(noCell);
+        }
+        if (first == noCell) {
+          const auto cont = directEngine.resolveDimension("d.contains");
+          if (cont != noCell) {
+            first = arena.linked(*lroot, cont, DimVector::POS).value_or(noCell);
+          }
+        }
+      }
+      if (first == noCell) {
+        std::cerr << "No dimension named " << name
+                  << " in the open store or lens.\n";
+        return false;
+      }
+      const auto axis = directEngine.resolveDimension("d.seq");
+      lastView        = VplView(first, {DirectedDim{axis, DimVector::POS}});
+      directEngine.setVariable("data", lastView);
+      hasView = true;
+      std::cout << "data: " << formatView(lastView, arena) << "\n";
+      return true;
     }
     const auto first = currentStore->manifold->linked(
         currentStore->manifold->home(), *dim, DimVector::POS);

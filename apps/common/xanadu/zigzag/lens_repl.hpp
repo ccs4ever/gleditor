@@ -86,6 +86,11 @@ public:
     return session_->roots().front();
   }
 
+  /// Every projected cell as (ExternalKey, text) pairs in tree order --
+  /// what a language without a cell term (vprolog) seeds as facts.
+  [[nodiscard]] std::vector<std::pair<std::string, std::string>>
+  entries() const;
+
 private:
   /// Swap in a fresh projection over `uri` and print its tree.
   bool open(std::string_view uri, std::ostream &out,

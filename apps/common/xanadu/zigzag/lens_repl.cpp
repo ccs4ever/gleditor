@@ -38,6 +38,34 @@ LensRepl::LensRepl()
 LensRepl::LensRepl(vortex::VortexCore &core)
     : core_{&core}, arena_{&core.arena()} {}
 
+std::vector<std::pair<std::string, std::string>> LensRepl::entries() const {
+  std::vector<std::pair<std::string, std::string>> out;
+  if (session_ == nullptr) {
+    return out;
+  }
+  // Iterative DFS like printLensTree: contains down, seq across. Deep
+  // projections must not land on the call stack.
+  const auto contains = core_->findOrMintDimension("d.contains");
+  const auto seq      = core_->findOrMintDimension("d.seq");
+  std::vector<CellRef> stack{session_->roots().rbegin(),
+                             session_->roots().rend()};
+  while (!stack.empty()) {
+    const auto cell = stack.back();
+    stack.pop_back();
+    out.emplace_back(session_->keyFor(cell).value_or(""), arena_->textOf(cell));
+    // Push the children reversed so they pop in seq order.
+    std::vector<CellRef> kids;
+    for (auto child               = arena_->linked(cell, contains, Posward);
+         child.has_value(); child = arena_->linked(*child, seq, Posward)) {
+      kids.push_back(*child);
+    }
+    for (auto it = kids.rbegin(); it != kids.rend(); ++it) {
+      stack.push_back(*it);
+    }
+  }
+  return out;
+}
+
 void printLensTree(ProjectionSession &session, vortex::VortexCore &core,
                    ArenaManifold &arena, const std::string_view label,
                    std::ostream &out, const bool withKeys) {

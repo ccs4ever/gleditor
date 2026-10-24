@@ -228,7 +228,41 @@ void runREPL(Compiler &compiler, std::vector<Clause> &clauses,
         continue;
       }
       if (zigzag::LensRepl::handles(line)) {
+        const auto before = std::string{lensRepl.label()};
         lensRepl.run(line, std::cout, meta);
+        if (lensRepl.label() != before && !lensRepl.label().empty()) {
+          std::cout << "% lens: " << lensRepl.entries().size()
+                    << " entries seeded as lens_entry(Key, Text)\n";
+          // The projection enters the term space as facts, so goals
+          // unify over the lens: lens_entry(Key, Text). A malformed
+          // source cell's text can't break the REPL.
+          for (const auto &[key, text] : lensRepl.entries()) {
+            auto quoted = [](std::string_view s) {
+              std::string q;
+              for (const char ch : s) {
+                if (ch == '\'')
+                  q += "''";
+                else if (ch == '\\')
+                  q += "\\\\";
+                else
+                  q += ch;
+              }
+              return q;
+            };
+            const auto fact =
+                "lens_entry('" + quoted(key) + "', '" + quoted(text) + "').";
+            try {
+              Parser fp(fact);
+              for (const auto &c : fp.parseProgram().clauses) {
+                compiler.compileClause(c);
+                clauses.push_back(c);
+              }
+            } catch (const std::exception &ex) {
+              std::cout << "% seed failed on " << fact << " : " << ex.what()
+                        << "\n";
+            }
+          }
+        }
         continue;
       }
       if (line == ":listing" || line == "listing." || line == "listing") {
