@@ -124,6 +124,62 @@ Watch for: a frontend where the verb is missing or spells differently;
 a mount that works in xuzz but not the REPL; a close that leaves the
 session printing lens output.
 
+### J-L7. Bridge a lens into VQL (vquery)
+
+1. `vquery` on a store, then `:lens /path/to/dir`.
+1. The projection lands in the coordinator's own arena, so the lens
+   root is a cell the language can bind: `$lens/d.contains` walks the
+   projected tree, `$lens/d.contains/d.seq` its siblings,
+   `$lens/d.contains/d.role` its attribute rank — the same query
+   strings that walk authored cells.
+
+Evidence: a REPL transcript where `:lens` prints the tree and a VQL
+query over `$lens` returns the projected names (gate:
+`LensVqlGate.*`, plus the live run).
+
+Watch for: a private second arena (the classic second-CellID-space
+bug); `$lens` bound to a cell that dies on the next `:lens` swap.
+
+### J-L8. Bridge a lens into VPL (vpl)
+
+1. `vpl` on a store, then `:lens /path/to/dir`.
+1. `:rank d.<dim>` binds a rank of the projected cells as data; VPL
+   verbs (`+`, `⌽`, reshape) calculate over them.
+
+Evidence: transcript — the lens tree, a bound rank echoing the lens
+cells' values, a calculation over it.
+
+Watch for: `:rank` reading the store's own manifold (a lens projects
+into the arena, not a store fold — if `:rank` only sees store folds,
+the bridge is a finding, not a pass).
+
+### J-L9. Bridge a lens into vprolog
+
+1. `vprolog`, `:open <store>` then `:lens /path` (or `:lens meta:`).
+1. The projected cells live in the compiler's VortexCore — goals can
+   unify over them once a term names a cell; `:lens meta:` projects
+   the consulted store itself.
+
+Evidence: transcript of `:open`, `:lens`, and a goal that reaches a
+projected cell or the meta fold.
+
+Watch for: no way for a goal term to name a projected CellRef (a
+`lensroot(X)` or `extkey(K,C)` builtin may be the missing affordance);
+`meta:` binding a store `:open` discarded.
+
+### J-L10. vlace's lens surface (no store)
+
+1. `vlace`, `:lens /path` prints the projected tree at the prompt;
+   `--lens <uri>` prints it and exits.
+
+Evidence: transcript + raster. vlace evaluates expressions over its
+own Driver with no store or VortexCore seam — the REPL surface is the
+affordance; a `lens("uri")` builtin returning a record of cells would
+be the idiomatic bridge if one is added.
+
+Watch for: the verb silently absent where the other three frontends
+have it.
+
 ## Findings taxonomy
 
 As in the real-work contract: **Pass**, **Fail**, **No affordance**

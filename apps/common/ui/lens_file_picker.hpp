@@ -149,6 +149,13 @@ public:
   [[nodiscard]] zigzag::ZzStructureDocument document();
   /// The live projection, for hosts that drive session verbs.
   [[nodiscard]] zigzag::ProjectionSession &session() { return *session_; }
+  /// Typed text narrows the listing to basenames containing it;
+  /// Backspace edits the filter while one is typed, else ascends.
+  void textTyped(std::string_view utf8) override;
+  /// The active text filter, for the host's status line or a11y.
+  [[nodiscard]] const std::string &filterText() const noexcept {
+    return filterText_;
+  }
 
 private:
   struct Item {
@@ -181,6 +188,8 @@ private:
 
   std::filesystem::path root_;
   Filter filter_;
+  /// Typed text filter over entry basenames; composes with filter_.
+  std::string filterText_;
   std::string label_;
   PickHandler onPick_;
   CancelHandler onCancel_;

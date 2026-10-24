@@ -459,7 +459,9 @@ int main(int argc, char *argv[]) {
     return std::pair{store->rebuildManifold(store->primaryCurrentVersion()),
                      store.get()};
   };
-  zigzag::LensRepl lensRepl;
+  // The coordinator's core: lens cells are cells VPL can rank and
+  // calculate over, not a private projection.
+  zigzag::LensRepl lensRepl(coordinator.core());
 
   // --lens is the programmatic surface: print the projection and exit.
   {

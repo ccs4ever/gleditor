@@ -31,6 +31,13 @@ std::string keyArg(const std::string_view arg) {
 
 } // namespace
 
+LensRepl::LensRepl()
+    : ownCore_{std::in_place, ownArena_}, core_{&*ownCore_},
+      arena_{&ownArena_} {}
+
+LensRepl::LensRepl(vortex::VortexCore &core)
+    : core_{&core}, arena_{&core.arena()} {}
+
 void printLensTree(ProjectionSession &session, vortex::VortexCore &core,
                    ArenaManifold &arena, const std::string_view label,
                    std::ostream &out, const bool withKeys) {
@@ -73,9 +80,9 @@ void LensRepl::adopt(std::unique_ptr<ProjectionLens> lens, std::string label,
   // released.
   session_.reset();
   metaFold_.reset();
-  session_ = std::make_unique<ProjectionSession>(std::move(lens), core_);
+  session_ = std::make_unique<ProjectionSession>(std::move(lens), *core_);
   label_   = std::move(label);
-  printLensTree(*session_, core_, arena_, label_, out, /*withKeys=*/true);
+  printLensTree(*session_, *core_, *arena_, label_, out, /*withKeys=*/true);
 }
 
 bool LensRepl::open(const std::string_view uri, std::ostream &out,
@@ -97,9 +104,9 @@ bool LensRepl::open(const std::string_view uri, std::ostream &out,
     metaFold_ = std::move(src->first);
     auto lens = std::make_unique<MetaLens>(std::string{uri.substr(5)},
                                            *metaFold_, *src->second);
-    session_  = std::make_unique<ProjectionSession>(std::move(lens), core_);
+    session_  = std::make_unique<ProjectionSession>(std::move(lens), *core_);
     label_    = std::string{uri};
-    printLensTree(*session_, core_, arena_, label_, out, /*withKeys=*/true);
+    printLensTree(*session_, *core_, *arena_, label_, out, /*withKeys=*/true);
     return true;
   }
   auto lens = openLensUri(uri);
@@ -119,7 +126,7 @@ bool LensRepl::run(const std::string_view line, std::ostream &out,
     if (session_ == nullptr) {
       out << "lens: nothing open\n";
     } else {
-      printLensTree(*session_, core_, arena_, label_, out, /*withKeys=*/true);
+      printLensTree(*session_, *core_, *arena_, label_, out, /*withKeys=*/true);
     }
     return true;
   }
@@ -150,7 +157,7 @@ bool LensRepl::run(const std::string_view line, std::ostream &out,
       return true;
     }
     (void)session_->refresh();
-    printLensTree(*session_, core_, arena_, label_, out, /*withKeys=*/true);
+    printLensTree(*session_, *core_, *arena_, label_, out, /*withKeys=*/true);
     return true;
   }
   if (arg.starts_with("unmount ")) {
@@ -169,7 +176,7 @@ bool LensRepl::run(const std::string_view line, std::ostream &out,
       return true;
     }
     (void)session_->refresh();
-    printLensTree(*session_, core_, arena_, label_, out, /*withKeys=*/true);
+    printLensTree(*session_, *core_, *arena_, label_, out, /*withKeys=*/true);
     return true;
   }
   if (arg == "next") {
@@ -188,7 +195,7 @@ bool LensRepl::run(const std::string_view line, std::ostream &out,
       return true;
     }
     (void)session_->refresh();
-    printLensTree(*session_, core_, arena_, label_, out, /*withKeys=*/true);
+    printLensTree(*session_, *core_, *arena_, label_, out, /*withKeys=*/true);
     return true;
   }
   if (arg == "commit") {

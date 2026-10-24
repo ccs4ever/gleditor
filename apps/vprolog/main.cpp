@@ -180,7 +180,25 @@ void runREPL(Compiler &compiler, std::vector<Clause> &clauses,
   std::vector<xanadu::ResultRow> lastResults;
   bool hasQuery = false;
   std::string inputProvenance;
-  zigzag::LensRepl lensRepl;
+  // The compiler's core: projected cells are cells goals can unify over.
+  zigzag::LensRepl lensRepl(compiler.core());
+  // :open consumes the store it loads, so meta: opens its own on first
+  // use -- the shared_ptr keeps the SpanReader alive for the session.
+  std::shared_ptr<xanadu::Store> metaStore;
+  const zigzag::LensRepl::MetaSource meta =
+      [&metaStore, &inputProvenance, &permascroll](const std::string_view label)
+      -> std::expected<std::pair<zigzag::Manifold, const xanadu::SpanReader *>,
+                       std::string> {
+    const auto path = label.empty() ? inputProvenance : std::string{label};
+    if (!std::filesystem::exists(path)) {
+      return std::unexpected("meta: needs an open store -- :open one first");
+    }
+    metaStore = std::make_shared<xanadu::Store>(permascroll);
+    metaStore->load(path);
+    return std::pair{
+        metaStore->rebuildManifold(metaStore->primaryCurrentVersion()),
+        metaStore.get()};
+  };
   while (true) {
     if (buffer.empty()) {
       std::cout << "?- " << std::flush;
@@ -210,9 +228,7 @@ void runREPL(Compiler &compiler, std::vector<Clause> &clauses,
         continue;
       }
       if (zigzag::LensRepl::handles(line)) {
-        // vprolog's :open consumes the store it loads, so meta: has no
-        // fold to bind -- it reports that itself.
-        lensRepl.run(line, std::cout);
+        lensRepl.run(line, std::cout, meta);
         continue;
       }
       if (line == ":listing" || line == "listing." || line == "listing") {

@@ -57,6 +57,15 @@ public:
       "  :lens commit          write dirty cells back to the source\n"
       "  :lens close           drop the projection\n";
 
+  /// Own fold: projections land in an internal arena+core -- the
+  /// standalone surface (--lens, tests, vlace).
+  LensRepl();
+  /// Shared fold: projections land in `core`'s arena, so the lens's
+  /// cells are cells the frontend's own language can reach -- VQL
+  /// queries them by dimension, VPL ranks them, goals unify over them.
+  /// The caller's core (and its arena) must outlive this object.
+  explicit LensRepl(vortex::VortexCore &core);
+
   /// Run one :lens command, writing the reply to `out`. @p metaSource
   /// resolves meta: URIs; pass {} where the frontend holds no store.
   /// Always returns true -- a line that reaches here is a :lens
@@ -67,6 +76,16 @@ public:
   /// The currently-open URI/label, or empty.
   [[nodiscard]] std::string_view label() const noexcept { return label_; }
 
+  /// The projection's first root -- what a language binds as its entry
+  /// variable ($lens, a rank head, a goal term). Nothing when no lens
+  /// is open.
+  [[nodiscard]] OptionalCell root() const noexcept {
+    if (session_ == nullptr || session_->roots().empty()) {
+      return std::nullopt;
+    }
+    return session_->roots().front();
+  }
+
 private:
   /// Swap in a fresh projection over `uri` and print its tree.
   bool open(std::string_view uri, std::ostream &out,
@@ -76,9 +95,12 @@ private:
              std::ostream &out);
 
   // metaFold_ precedes session_ so the session -- which holds a
-  // MetaLens borrowing the fold -- is destroyed first.
-  ArenaManifold arena_;
-  vortex::VortexCore core_{arena_};
+  // MetaLens borrowing the fold -- is destroyed first. core_/arena_
+  // point at ownCore_/ownArena_ or at the caller's shared fold.
+  ArenaManifold ownArena_;
+  std::optional<vortex::VortexCore> ownCore_;
+  vortex::VortexCore *core_;
+  ArenaManifold *arena_;
   std::optional<Manifold> metaFold_;
   std::unique_ptr<ProjectionSession> session_;
   std::string label_;

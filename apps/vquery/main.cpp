@@ -418,7 +418,10 @@ int main(int argc, char *argv[]) {
     return std::pair{store->rebuildManifold(store->primaryCurrentVersion()),
                      store.get()};
   };
-  zigzag::LensRepl lensRepl;
+  // The coordinator's core, not an internal fold: lens cells land in the
+  // same arena VQL queries, so ':lens' projects directly into the query
+  // space.
+  zigzag::LensRepl lensRepl(coordinator.core());
 
   // --lens is the programmatic surface: print the projection and exit.
   {
@@ -517,6 +520,11 @@ int main(int argc, char *argv[]) {
     } else {
       // Direct fast-path execution
       xanadu::vql::VQLEngine engine(coordinator);
+      // An open lens enters the query space as $lens: '$lens/d.contains'
+      // walks the projected tree exactly as if the cells were authored.
+      if (const auto root = lensRepl.root()) {
+        engine.setVariable("lens", *root);
+      }
       try {
         results = engine.execute(ast);
       } catch (const std::runtime_error &err) {

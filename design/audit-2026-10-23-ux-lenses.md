@@ -7,7 +7,7 @@ transcripts inline below.
 
 | Journey | Step | Affordance used | Outcome | Evidence |
 | ------- | ---- | --------------- | ------- | -------- |
-| J-L1 | open picker | `Shift+O` keymap default | **Finding F1** | jl1.log |
+| J-L1 | open picker | `Shift+O` keymap default | Pass (after F1 fix) | jl1.log |
 | J-L1 | open picker | `lens_open_source` action | Pass | jl1_picker.png |
 | J-L1 | navigate + pick dir | arrows, `Ctrl+Return` | Pass | jl1_opened.png, `/tmp/lensj/data.db -> 14 cells adopted` |
 | J-L2 | mount GitLens | `lens_open` action | Pass | jl2.log: `git.repo`, `git.ref`, `git.page`, `c3..c1` cells |
@@ -21,44 +21,44 @@ transcripts inline below.
 
 ## Findings
 
-**F1 — lens keymap chords do not reach their verbs through the real
-keypath.** `--chord shift+o`, `--chord O`, `--chord o` and `--chord b`
-never fired `lens_open_source` / `lens_open` / `lens_back` in any
-focus state I drove. Printable keys are consumed by whichever scope
-holds keyboard focus (the document pane takes them as text — `repo`
-was visibly typed into a document during one run). `F6`
-(`std:xuzz/focus_toggle`) is presumably the intended gate to move the
-keyboard to the slice, but after `f6` the `o` chord still did not
-mount and the slice view reverted to the bound xanadoc store — worth a
-dedicated pass on what `focus_toggle` does to an adopted lens view.
-The actions themselves are reachable via the command table (`--do`),
-and every default chord is present in `system://keymap` (test:
-`SystemDocsTest.LensVerbsHaveDefaultKeymapBindings`). Proposed fix:
-decide whether lens chords should fire while a document holds focus —
-probably no — and make `focus_toggle` route the keyboard to the
-adopted-lens scope so `O`/`B`/`P`/`Ctrl+S`/`Shift+P`/`Shift+O` work
-there. Lands in `apps/xuzz/xuzz_app.cpp` (focus_toggle handler) and the
-`ZigzagVisualizer::keyPressed` fallthrough.
+**F1 — FIXED (`b89abe11`).** `bindZigzag` ran `bindXanaduStore` on every
+keyboard hand-off into the pane (F6), view-mode switch and document
+activation — wiping the adopted lens document; `adopted_` stayed set so
+the contributor never re-adopted. The chords were always fine; the view
+they operated on was gone. `bindZigzag` now skips the rebind while a
+lens surface (or the picker's transient doc) owns the view. Verified:
+`F6` → `O` mounts GitLens under the repo cell through the real keypath;
+`B` unmounts and lands focus on the mount cell.
 
-**F2 — REPL `unmount` accepts only ExternalKeys, not paths.**
-`:lens mount fs:52:794498` mounts GitLens under `repo`; a natural
-`:lens unmount /tmp/lensj/repo` replies "no mount at or above" because
-paths are not keys. Working as designed, but the round trip trips
-users: accept path-shaped args by resolving them to the cell's fs key
-in `LensRepl::run` (`apps/common/xanadu/zigzag/lens_repl.cpp`).
+**F2 — FIXED (`87cff41b`).** `:lens mount`/`unmount` resolve
+path-shaped args to `fs:<dev>:<ino>` keys via `stat()`.
 
-**F3 — picker has no text-input affordance for filtering.** `--type`
-routes to the document pane, not the picker's filter (the picker is a
-FocusScope, not a text scope). Filtering probably works through
-per-letter key events a person produces; the harness can't type them
-today — small harness gap, not a product defect.
+**F3 — FIXED (this commit).** The picker now takes text: `textTyped`
+appends to a basename filter composed into `FilteredFilesystemLens`
+(dirs always survive so the listing stays navigable); `Backspace`
+edits the filter while one is typed, else ascends.
 
-**F4 — vprolog/vlace have no `meta:` source.** Their `:open` consumes
-the store it loads, so `:lens meta:` reports "needs an open store".
-URI lenses work everywhere; the meta fold exists only where a
-coordinator holds a store (vquery, vpl). If vprolog is meant to
-introspect the store it consulted, `openFactStore` would need to keep
-a live `Store` for the fold.
+**F4 — FIXED (this commit).** `vprolog`'s `:lens meta:` lazily opens a
+`Store` from the last `:open` path and keeps it alive for the fold;
+URI lenses project into `compiler.core()` so projected cells are cells
+goals can unify over.
+
+**F5 — NEW: `vpl :rank` cannot reach lens cells.** `bindRank` resolves
+dimensions only on the open store's manifold; a lens projects into the
+coordinator's arena. `:rank d.contains` with a lens open replies "No
+dimension named". The idiomatic VPL bridge is a rank bound over
+`coordinator.arena()` — needs the federation/proxy seam wired, left as
+a follow-up.
+
+**F6 — NEW: vprolog goals cannot name a lens cell.** Cells are
+first-class terms, but no builtin (`lensroot/1`, `extkey/2`) binds the
+projection's root or maps keys to refs, so a goal cannot reach the
+projected cells unaided. Small compiler addition when wanted.
+
+**F7 — NEW: vlace has no core seam.** Its Driver holds no store or
+VortexCore; `:lens`/`--lens` project into a private fold. A
+`lens("uri")` builtin returning a cell record is the idiomatic bridge
+if vlace should introspect sources.
 
 ## Transcripts
 

@@ -222,6 +222,12 @@ LensFilePicker *LensFilePicker::setFilter(Filter filter) {
   return this;
 }
 
+void LensFilePicker::textTyped(const std::string_view utf8) {
+  if (!active() || finished_.load()) return;
+  filterText_ += utf8;
+  project();
+}
+
 LensFilePicker *LensFilePicker::open() {
   activate();
   markDirty();
@@ -229,8 +235,18 @@ LensFilePicker *LensFilePicker::open() {
 }
 
 void LensFilePicker::project() {
+  // The typed filter composes with the host's Filter at this seam: dirs
+  // always survive (FilteredFilesystemLens keeps them so the listing
+  // stays navigable), files must pass both.
   session_ = std::make_unique<zigzag::ProjectionSession>(
-      std::make_unique<FilteredFilesystemLens>(root_, filter_), core_);
+      std::make_unique<FilteredFilesystemLens>(
+          root_,
+          [this](const std::filesystem::path &p) {
+            if (filter_ && !filter_(p)) return false;
+            return filterText_.empty() ||
+                   p.filename().string().find(filterText_) != std::string::npos;
+          }),
+      core_);
   // Resolve the dims through the core, exactly as the session minted them --
   // findOrMintDimension is idempotent, so this never creates a second cell.
   dContains_ = core_.findOrMintDimension("d.contains");
@@ -443,8 +459,17 @@ bool LensFilePicker::keyPressed(const gleditor::Key key,
     descend();
     return true;
   case gleditor::Key::Left:
-  case gleditor::Key::Backspace:
     ascend();
+    return true;
+  case gleditor::Key::Backspace:
+    // A typed filter eats Backspace first; only once it is empty does the
+    // key go back to climbing out of the directory.
+    if (!filterText_.empty()) {
+      filterText_.pop_back();
+      project();
+    } else {
+      ascend();
+    }
     return true;
   case gleditor::Key::Return:
     // Ctrl+Return picks even a directory: the one gesture for "open this
