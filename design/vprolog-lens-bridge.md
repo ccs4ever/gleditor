@@ -1,4 +1,4 @@
-# vprolog Lens Bridge: Lenses as Builtin Predicates in a Backtracking Logic Engine (v1.7)
+# vprolog Lens Bridge: Lenses as Builtin Predicates in a Backtracking Logic Engine (v1.8)
 
 A design specification for how a **vprolog program** — not the `vprolog` REPL's `:lens` verbs —
 opens, enumerates, mounts, writes back, and releases projection lenses. Design deliverable only:
@@ -200,7 +200,7 @@ truncates it — the open-containing path dies mid-query. The repair is the shar
 
 - `ArenaManifold` bumps `releaseEpoch()` on every `release()` truncation;
 - session `keyToCell_`/`cellToKey_`/`roots_`/`presentKeys_`/`managedDims_` (DimRefs are `ephemeralBit|dense` — `ownsCell`'s negward-hop + `tombstone`'s `managedDims_.contains` wrong-positive on a re-minted dim, `projection_session.cpp:75-80`/`:418`/`:437`)/`mintOrder_`/`mintCount_` (rewind's foreign-mint delta + recomputeRoots)/`cps_` (checkpoints hold `Mark`s — a stale `Checkpoint` can *equal* the post-re-mint arena state and `rewind` releases a mark that isn't that boundary, `:485-496`); `pins_`/`refKeys_` survive (ExternalKey-keyed) and the registry entries stamp the
-  epoch at record time; a stamped read at a different epoch **wholesale-invalidates** — the
+  epoch at record time; a stamped read at a different epoch **selectively-invalidates** — a per-holder `minFreedIndex` watermark (the same fix vicon took, `vicon-lens-bridge.md` D5: a global epoch bumps on every `release()` — including each yielding builtin's per-alternative release of its own answer mints — and wholesale-invalidates a session whose cells all survived; the honest rule is invalidate only entries whose dense index intersects a post-stamp freed range) — and stale `keyToCell_` entries are retained by design (`projection_session.cpp:283-294` — a delegate's map survives an unmount so held handles still resolve; probes read them until the next epoch boundary) — the
   session clears its maps and re-projects on the next `refresh()` (same key → deterministic
   re-mint); `cellToKey_` re-mint uses insert-or-assign (the `emplace` sites keep stale reverse
   bindings otherwise — `projection_session.cpp:121-122`,`:239-240`,`:397-399`);
