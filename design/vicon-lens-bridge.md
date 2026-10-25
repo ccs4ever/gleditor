@@ -1,4 +1,4 @@
-# vicon Lens Bridge: Lenses as Suspended Host Requests in a Goal-Directed Language (v1.25)
+# vicon Lens Bridge: Lenses as Suspended Host Requests in a Goal-Directed Language (v1.26)
 
 A design specification for how a **vicon program** — not a `vicon` REPL verb — opens, traverses,
 mounts, writes back, and releases projection lenses. Design deliverable only: the signatures are
@@ -112,8 +112,7 @@ On `expected`-refusal the Driver writes `ok := 0` and records the reason in Driv
 the call **fails** (D3).
 
 `lens(path)`/`lens("kw","spec")`/`dirLens`/`sqlLens`/`gitLens`/`logLens`/`journalLens`/`cfgLens`/`unionLens(spec,…)`, `kids(c)`, and `lroots(c)` produce **several** results: the Driver holds a per-site
-answer queue (`unordered_map<(site, request-seq), deque<CellRef>>` — the request carries a compile-minted site
-scalar plus a runtime request-seq the `NEXT` re-send carries back; a displaced activation's `NEXT` fails with `&lenserr` — same-site recursion is the canonical tree-walk idiom). Queue discipline: **a fresh request at a site REPLACES the queue** — a re-fired
+answer queue (`unordered_map<ChoicePoint*, deque<CellRef>>` — keyed by the request site's own choice-point pointer, not the site scalar: a nested activation pushes a *new* site CP, and its `NEXT` re-send lands back at exactly that CP after backtrack, so each activation resolves its own queue — same-site recursion (the canonical `every k := kids(c) do walk(k)` tree-walk) works without a `seq` token; a popped CP's queue is freed with the frame). Queue discipline: **a fresh request at a site REPLACES the queue** — a re-fired
 `kids(c)`/`lens(path)`/`lens("kw","spec")`/`dirLens`/`sqlLens`/`gitLens`/`logLens`/`journalLens`/`cfgLens`/`unionLens(spec,…)` with a different arg must not serve the old arg's stale answers, and a
 re-drive must not append duplicates. The fragment's `altOp` re-sends `NEXT site` — wrapped through
 `guardedAlt` (`compiler.cpp:125-136`) like every other resume path, so a `\n` kill-gate poisons the
