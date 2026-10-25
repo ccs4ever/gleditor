@@ -1,4 +1,4 @@
-# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v4.0)
+# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v4.1)
 
 A design specification for how a **VQL program** — not the `vquery` REPL — opens, traverses, mounts,
 writes back, and releases projection lenses. Design deliverable only: the signatures are proposals;
@@ -45,13 +45,13 @@ the REPL's `LensRepl` owns the one session `$lens` binds.
 
 ## 3. Design decisions
 
-### D1 — `lens("uri")` is the sole-anchor generator; gestures are step functions
+### D1 — a `*Lens` generator is the sole-anchor generator; gestures are step functions
 
-`lens("uri")` is a `StoreGeneratorCall` anchor — `resolveAnchor` calls `openLensUri` (all schemes;
+a `*Lens` generator is a `StoreGeneratorCall` anchor — `resolveAnchor` calls `openLensUri` (all schemes;
 P6's guard refuses `meta:`/unrecognized `scheme:`), projects into the engine's `core_`, yields the
 session's projected roots, and binds `$lens` (the `setVariable` vector overload for `union:` forests).
 `lens()` is itself session-mutating (it opens a session) but as an anchor it's the query's source —
-`lens("u")/d.contains` is the natural open+traverse.
+`fsLens("/x")/d.contains` is the natural open+traverse.
 
 Every gesture on a *cell* is a **step function** — `path/lensMount()`, `$cell/lensNext()`, `path/lensEdit("text")` — mapping over the relation: `$cells/lensMount()` mounts under each cell (N mounts, per-cell yield; a per-cell refusal drops that cell, not the whole relation — `Err`-per-cell → empty for that cell). **Session-scoped ops dedupe**: `lensCommit`/`lensBrowse`/`lensUnmount` resolve each input cell to its (session[, mount]) and run once per distinct target (`lensNext`/`lensStub` are deliberately **not** deduped — N cells in one mount materialize N pages (`lensStub` is const — N probes of the same stub, dedupe at the relation level)) — arg-taking variants (`$cells/lensBrowse($c)`) take the arg from the first cell of each distinct target group (per-cell arg variance is silently first-wins — noted) — `$cells/lensCommit()` over N cells of one session commits once, not N times (yielding `[n]` not `[n,0,0…]`) — dispatched in `evaluateStep`'s `FunctionInvocation` arm (`vql_engine.cpp:1390+`), which already receives `currentCells` and already mutates (`link(...)` at `:1466-1540`); cell-typed *args* resolve via `cellsOfValueExpr` (`:362-381`), not `evaluateValueExpr` (which renders cells to `CellValue`, destroying the identity `cellEq` tests). The arg is the relation it filters — the "pipe" semantics without a pipe token (`|` is union-type-only, `parser.cpp:1603`). A step function needs no keyword — it's an `Identifier + '('` step (`parser.cpp:912-915`), so `lensMount`/`lensNext`/etc. stay *unreserved* names, not `Kw*` tokens.
 
@@ -67,7 +67,7 @@ the coordinator's registry (or a `vector<shared_ptr<ProjectionSession>>` the fro
 owns and injects (the `LensRepl` session joins as a `shared_ptr` — `unique_ptr` anywhere in the
 type loses the non-owning join)); `sessionFor(cell)` scans it calling `ownsCell` (the P3 pattern).
 
-`$lens` auto-binds on `lens()` open — and re-injects per query from the **coordinator registry's
+`$lens` auto-binds on a `*Lens` open — and re-injects per query from the **coordinator registry's
 most recent *live* open** (expired `weak_ptr` entries are skipped — a `:lens close` leaves no stale
 `$lens`; today `lensRepl.root()` → `nullopt` after close unbinds correctly, `main.cpp:525-526`); the
 vector `setVariable` overload (`vql_engine.hpp:61`) binds all roots. A bare integer anchor (`AnchorKind::LiteralCellId`, `parser.cpp:641-658`) reaches a projected cell only
@@ -86,13 +86,13 @@ a mutating step inside a `where`/join/predicate could evaluate multiple times or
 follow it** (`path/lensMount()/d.contains` is allowed; `path/lensMount()/d.contains/lensCommit()`
 and `…/lensEdit("99")/lensCommit()` are refused — commit is a separate statement; `where
 lensMount($c)`, mid-join, or any nested evaluation is a `TypeContractError`). The single rule: **a mutating construct may appear only where it evaluates exactly once at
-statement level** — the statement's sole top-level path anchor (`lens("u")`), a flat `for`-`in`
+statement level** — the statement's sole top-level path anchor (`fsLens("/x")`), a flat `for`-`in`
 path (`inPath` evaluates once, `:2277`) or a `let` target **in the pre-`for` binding prefix**
-(`let $x := lens("u")` — `:=` — allowed; a `let` *inside* a `for` recursion re-evaluates per
-binding, `evaluateBindings` `:2294` — same leak as `return lens("x")`; and `let $f :=` binds a
+(`let $x := fsLens("/x")` — `:=` — allowed; a `let` *inside* a `for` recursion re-evaluates per
+binding, `evaluateBindings` `:2294` — same leak as `return fsLens("/x")`; and `let $f :=` binds a
 *functor* evaluated per application via `functorOf`/`functors_`, `:392-432`/`:453-462` — both banned), or **one step in a top-level path containing at most one mutating step**
 (`path/lensMount()/d.contains` allowed; `…/lensCommit()` after any earlier mutation refused).
-`lens("u")/lensMount()` = mutating anchor + mutating step = two mutations → refused. Nested `for`
+`fsLens("/x")/lensMount()` = mutating anchor + mutating step = two mutations → refused. Nested `for`
 in-paths, `return`, `def`, `watch`, `until`, predicates, clone/shape/morphism/create/destructure
 targets — all refused (the depth flag catches them as nested). The **indirection channel** is
 covered too: the static check scans `def` bodies and functor-bound `let` targets for mutating
@@ -100,7 +100,7 @@ constructs (a `def` re-enters `executeScriptBody`/`evaluatePath`, `:617-642`; `a
 `evaluateStep` directly, `:435-441`; an untyped param accepts a functor arg — `f(/lensMount())`
 smuggles a step), and the runtime flag is a *depth counter* incremented across `callUserDef`/
 `applyFunctor`/`executeScriptBody` re-entry, never reset per statement — a mutating step reached
-through a def or functor is refused. `watch lens("u")` is banned too (`targetPath` evaluates once,
+through a def or functor is refused. `watch fsLens("/x")` is banned too (`targetPath` evaluates once,
 `:685`, but the body re-fires per target cell — and `executeWatch`'s `dDelta` write now refuses
 under D7 anyway). Enforcement is two-layered: **(i)** a statement-level static rule in the parser/type-contract
 pass (a mutating construct legal only where it evaluates exactly once — top-level path, for-in, outermost-let, sole anchor —
@@ -111,12 +111,12 @@ nested, via an evaluation-depth/`topLevelStatement` flag threaded through `evalu
 effect/`let`/`link`/`count` — call `evaluatePath` with `{}` context, `:2277`/`:2310`/`:2346`/`:2357`/
 `:465`/`:1509`, indistinguishable from a top-level path). Covers predicate/lambda/
 macro-dim/`PerspectiveStep`/`PerspectiveBlock`/`PathLambda` multiplicities (`:1373-1388`/
-`:1756-1761`/`:1910-1921`/`:2213-2219`/`:2278-2365`). `lens()` itself mints a session — it's **session-mutating**, legal only as the anchor of a
+`:1756-1761`/`:1910-1921`/`:2213-2219`/`:2278-2365`). a `*Lens` generator itself mints a session — it's **session-mutating**, legal only as the anchor of a
 top-level statement `PathExpression` that evaluates exactly once (not inside `return`, `for`,
 `let`, `def`, `watch`, `until`, predicates, clone/shape/morphism/create/destructure targets —
-`return lens("x")` over N rows would leak N sessions into append-only `sessions_`, and `lensClose`
-is deferred U-V2). The mutating set is `{lens, lensMount, lensUnmount, lensNext, lensCommit,
-lensEdit, lensRevert, lensBrowse, lensClose}`; the exempt const probes are `{lensStub, lensDirty}`.
+`return fsLens("/x")` over N rows would leak N sessions into append-only `sessions_`, and `lensClose`
+is deferred U-V2). The mutating set is `{fsLens, gitLens, sqlLens, logLens, journalLens, cfgLens, unionLens, lensMount,
+lensUnmount, lensNext, lensCommit, lensEdit, lensRevert, lensBrowse, lensClose}`; the exempt const probes are `{lensStub, lensDirty}`.
 
 `cellKey`/`cellEq`/`cellScalar` are pure **value expressions** — `where cellKey($c) = "fs:52:794498"` filters; `cellEq($a,$b)` identity-compares (the real motivation: `=` compares renders, not identity). Note `?fn(...)` produces `PredicateTest::ValueExpr` (`parser.cpp:1404-1407`) and routes into
 `evaluateValueExpr`'s function table (`:2057-2116`) — an unknown fn returns `""` (falsy, silent
@@ -205,7 +205,7 @@ session's to maintain (Q7B).
 
 | generator | args | yields | notes |
 |---|---|---|---|
-| `lens(uri)` | `String` | session's root cells | `openLensUri`; binds `$lens`; refusal → empty relation (a session projecting zero roots still registers — `lensDirty`/`lensClose` can reach it; an empty source is not a refusal) |
+| `fsLens(path)` `gitLens(path)` `sqlLens(dsn)` `logLens(path)` `journalLens(path)` `cfgLens(path)` `unionLens(spec…)` | args | session's root cells | `openLensUri` underneath; binds `$lens`; refusal → empty relation (a session projecting zero roots still registers — `lensDirty`/`lensClose` can reach it; an empty source is not a refusal) |
 
 ### Step functions (`path/fn(...)`, mutating = last-step only)
 
@@ -294,7 +294,7 @@ must check `currentCells.empty()` first).
 
 | Q | files | change | why not caller/vql |
 |---|---|---|---|
-| Q1 | `vql_engine.{hpp,cpp}` | `StoreGenerator` `lens` dispatch → `openLensUri` (intercepted **before** the silent named-store→home fallback at `:944-954`) + `List` roots + `$lens` auto-bind; step-function dispatch for `lensMount`/`lensUnmount`/`lensNext`/`lensStub`/`lensCommit`/`lensEdit`/`lensRevert`/`lensBrowse`/`lensDirty`/`lensClose` in `evaluateStep`'s `FunctionInvocation` arm; mutating-step single-eval check (parser/type-contract) | The generator + step seams live only here. |
+| Q1 | `vql_engine.{hpp,cpp}` | the `*Lens` generator dispatch → `openLensUri` (intercepted **before** the silent named-store→home fallback at `:944-954`) + `List` roots + `$lens` auto-bind; step-function dispatch for `lensMount`/`lensUnmount`/`lensNext`/`lensStub`/`lensCommit`/`lensEdit`/`lensRevert`/`lensBrowse`/`lensDirty`/`lensClose` in `evaluateStep`'s `FunctionInvocation` arm; mutating-step single-eval check (parser/type-contract) | The generator + step seams live only here. |
 | Q2 | `vql_engine.{hpp,cpp}` | `cellKey`/`cellEq`/`cellScalar` as `FunctionInvocation` value-expr builtins + `?fn()`/bare-predicate function resolution through `evaluateValueExpr`'s table for all names | Same engine, different surface. |
 | Q3 | `vql/{lexer,parser,token}.{hpp,cpp}` | `lens` joins `parseAnchorNode`'s generator keywords (`:523-528`); the step names stay unreserved `Identifier`-steps | `KwLens` is lexed but unreachable today. |
 | Q4 | `vql_engine.{hpp,cpp}` + coordinator | `sessions_`/`sessionFor` on the coordinator's session registry (per-query engine sees it); `$lens` vector-bind; `LensRepl` exposes `session()` so the REPL's session joins the registry | The session-outlives-engine requirement + shared `:lens`/`lens()` recency. |
