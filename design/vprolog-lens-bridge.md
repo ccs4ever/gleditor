@@ -1,4 +1,4 @@
-# vprolog Lens Bridge: Lenses as Builtin Predicates in a Backtracking Logic Engine (v1.1)
+# vprolog Lens Bridge: Lenses as Builtin Predicates in a Backtracking Logic Engine (v1.2)
 
 A design specification for how a **vprolog program** — not the `vprolog` REPL's `:lens` verbs —
 opens, enumerates, mounts, writes back, and releases projection lenses. Design deliverable only:
