@@ -263,6 +263,14 @@ public:
   ArenaManifold *
   setDefaultSpanReader(const xanadu::SpanReader *reader) noexcept {
     defaultReader_ = reader;
+    if (base_ != nullptr && reader != nullptr) {
+      for (const auto dim : base_->dimensions()) {
+        std::string name = base_->textOf(dim, *reader);
+        if (!name.empty() && !arenaDims_.contains(name)) {
+          arenaDims_.emplace(std::move(name), dim);
+        }
+      }
+    }
     return this;
   }
   [[nodiscard]] const Manifold *base() const noexcept { return base_; }
@@ -834,6 +842,19 @@ private:
 [[nodiscard]] std::optional<Promoted>
 promote(xanadu::Store &store, const xanadu::MicroversionId &parent,
         const ArenaManifold &from, CellRef root, PromotionBudget budget = {});
+
+/**
+ * @brief Write only the overlay cells reachable from @p root into @p
+ * targetStore, seeding canonical dimensions in segment 0 so all intra-state
+ * links validate locally.
+ */
+[[nodiscard]] std::optional<Promoted> promoteOverlay(
+    const ArenaManifold &arena, CellRef root, xanadu::Store *targetStore,
+    const xanadu::MicroversionId &parent = {}, PromotionBudget budget = {});
+
+[[nodiscard]] std::optional<Promoted> promoteOverlay(
+    const ArenaManifold &arena, CellRef root, xanadu::Store &targetStore,
+    const xanadu::MicroversionId &parent = {}, PromotionBudget budget = {});
 
 [[nodiscard]] std::string
 encodeArenaPrefix(const ArenaManifold::PrefixSnapshot &snapshot);

@@ -28,6 +28,7 @@
 #include "common/xanadu/ops.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
+#include "common/xanadu/zigzag/dimension_registry.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
 
 namespace {
@@ -38,6 +39,7 @@ using xanadu::Store;
 using xanadu::ValueKind;
 using zigzag::ArenaManifold;
 using zigzag::CellRef;
+using zigzag::DimensionRegistry;
 using zigzag::DimRef;
 using zigzag::DimVector;
 using zigzag::DirectedDim;
@@ -654,6 +656,64 @@ TEST(ArenaManifoldTest, promotingAnOverlayMintsOnlyWhatTheEvaluationInvented) {
             promoted->cells.front());
   EXPECT_EQ(after.textOf(promoted->cells.front(), doc.store), "answer");
   EXPECT_EQ(after.refusedOps(), 0U);
+}
+
+TEST(ArenaManifoldTest, arenaManifoldSeedsBaseDimensionsInConstructor) {
+  Document doc;
+  const auto base = doc.manifold();
+  ArenaManifold arena{&base};
+
+  // Base dimensions are seeded into arenaDims_
+  const auto stepDim = arena.dimensionNamed("d.step");
+  EXPECT_NE(stepDim, noCell);
+  EXPECT_EQ(stepDim, doc.dim);
+  EXPECT_FALSE(isEphemeral(stepDim));
+
+  // ensureDimension on a base dimension does not mint an ephemeral cell
+  const auto ensured = arena.ensureDimension("d.step");
+  EXPECT_EQ(ensured, doc.dim);
+  EXPECT_FALSE(isEphemeral(ensured));
+}
+
+TEST(ArenaManifoldTest,
+     promoteOverlaySeedsCanonicalDimensionsAndPromotesDelta) {
+  Document doc;
+  const auto base = doc.manifold();
+  ArenaManifold arena{&base};
+
+  // Ensure an agent dimension in the arena
+  const auto intentionDim = arena.ensureDimension("d.intention");
+
+  // Create an ephemeral state graph
+  const auto agentRoot = arena.makeCell("agent_state");
+  const auto planCell  = arena.makeCell("plan_1");
+  ASSERT_TRUE(arena.link(agentRoot, intentionDim, DimVector::POS, planCell));
+
+  // Promote into an independent target store (not doc.store)
+  Store targetStore;
+  const auto promoted = zigzag::promoteOverlay(arena, agentRoot, targetStore);
+  ASSERT_TRUE(promoted.has_value());
+
+  const auto manifold = targetStore.rebuildManifold(promoted->version);
+  EXPECT_EQ(manifold.refusedOps(), 0U);
+
+  // Check canonical dimensions are in targetStore
+  EXPECT_NE(targetStore.dimsDimension(), noCell);
+  EXPECT_TRUE(
+      DimensionRegistry::instance().get(targetStore, "d.vars").has_value());
+  EXPECT_TRUE(DimensionRegistry::instance()
+                  .get(targetStore, "d.intention")
+                  .has_value());
+
+  // Check state links in targetStore
+  const auto realRoot = promoted->cells.front();
+  EXPECT_EQ(manifold.textOf(realRoot, targetStore), "agent_state");
+  const auto targetIntention =
+      *DimensionRegistry::instance().get(targetStore, "d.intention");
+  const auto linkedPlan =
+      manifold.linked(realRoot, targetIntention, DimVector::POS);
+  ASSERT_TRUE(linkedPlan.has_value());
+  EXPECT_EQ(manifold.textOf(*linkedPlan, targetStore), "plan_1");
 }
 
 } // namespace
