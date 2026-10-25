@@ -1,4 +1,4 @@
-# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v5.2)
+# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v5.3)
 
 A design specification for how a **VQL program** — not the `vquery` REPL — opens, traverses, mounts,
 writes back, and releases projection lenses. Design deliverable only: the signatures are proposals;
@@ -62,7 +62,7 @@ between `fsLens("…")` (query N) and `lensMount($cell)` (query N+1). The sessio
 the **coordinator's core** — the same place `LensRepl`'s session lives (`main.cpp:424`), so
 REPL-verb sessions and code-opened sessions coexist. The registry is `shared_ptr`-backed —
 `unique_ptr` can't hold the non-owning `LensRepl` session Q4 injects (vlace uses `shared_ptr`,
-`compiler.hpp:225`). The engine gets a `sessions()` accessor over
+`compiler.hpp:227`). The engine gets a `sessions()` accessor over
 the coordinator's registry (or a `vector<shared_ptr<ProjectionSession>>` the frontend
 owns and injects (the `LensRepl` session joins as a `shared_ptr` — `unique_ptr` anywhere in the
 type loses the non-owning join)); `sessionFor(cell)` scans it calling `ownsCell` (the P3 pattern).
@@ -70,7 +70,7 @@ type loses the non-owning join)); `sessionFor(cell)` scans it calling `ownsCell`
 `$lens` auto-binds on a `*Lens` open — and re-injects per query from the **coordinator registry's
 most recent *live* open** (expired `weak_ptr` entries are skipped — a `:lens close` leaves no stale
 `$lens`; today `lensRepl.root()` → `nullopt` after close unbinds correctly, `main.cpp:525-526`); the
-vector `setVariable` overload (`vql_engine.hpp:61`) binds all roots. A bare integer anchor (`AnchorKind::LiteralCellId`, `parser.cpp:641-658`) reaches a projected cell only
+vector `setVariable` overload (`vql_engine.hpp:61`) binds all roots. A bare integer anchor (`AnchorKind::LiteralCellId`, `parser.cpp:640-657`) reaches a projected cell only
 by typing the full ephemeral value (`denseOf` *accepts* ephemeral refs — `arena_manifold.cpp:
 267-269` unmasks the bit — `--format cells` prints them, `main.cpp:558`); a bare dense number
 resolves in the base/overlay namespace, and an ephemeral id is meaningless and unstable across
@@ -205,7 +205,7 @@ session's to maintain (Q7B).
 
 | generator | args | yields | notes |
 |---|---|---|---|
-| `fsLens(path)` `gitLens(path)` `sqlLens(dsn)` `logLens(path)` `journalLens(path)` `cfgLens(path)` `unionLens(spec…)` | args | session's root cells | `openLensUri` underneath; binds `$lens`; refusal → empty relation (a session projecting zero roots still registers — `lensDirty`/`lensClose` can reach it; an empty source is not a refusal) |
+| `lens("keyword", …)` — the generic varargs form (a custom lens registers its keyword); `fsLens(path)` ≡ `lens("fs",path)`, `gitLens(path)` ≡ `lens("git",path)`, `sqlLens(dsn)` ≡ `lens("sql",dsn)`, `logLens(path)` ≡ `lens("log",path)`, `journalLens(path)` ≡ `lens("journal",path)`, `cfgLens(path)` ≡ `lens("cfg",path)`, `unionLens(spec…)` ≡ `lens("union",spec…)` | typed args | session's root cells | `openLensUri` underneath; binds `$lens`; refusal → empty relation (a session projecting zero roots still registers — `lensDirty`/`lensClose` can reach it; an empty source is not a refusal) |
 
 ### Step functions (`path/fn(...)`, mutating = last-step only)
 
@@ -228,7 +228,7 @@ session's to maintain (Q7B).
 |---|---|---|---|
 | `cellKey(cell)` | `Cell` | `String`/empty | (arg resolves to exactly one cell — N≠1 → `TypeContractError`) `ExternalKey` if a projected node cell; empty/`""` yield for attr/authored (VQL has no `NULL` — `CellValue` is `{string,double,int64_t,bool}`; note `cellKey($c) = ""` is *true* for attr cells — a residual wrong-answer comparison, the `cellKey`-vs-`""` collision) |
 | `cellEq(a, b)` | `Cell, Cell` | `Bool` | identity on `CellRef` — `=` compares rendered text; each arg must resolve to exactly one cell (`cellsOfValueExpr` N≠1 → `TypeContractError`) |
-| `cellScalar(cell)` | `Cell` | `Int`/`Float`/`Bool`/empty | (arg resolves to exactly one cell) | scalar `valueBits`; empty yield on span-cells and non-lens kinds (`Timestamp`/handle kinds — scope: lens-minted kinds only) |
+| `cellScalar(cell)` | `Cell` | `Int`/`Float`/`Bool`/empty | scalar `valueBits` — arg resolves to exactly one cell; empty yield on span-cells and non-lens kinds |
 
 ## 5. Worked example
 
@@ -296,10 +296,10 @@ must check `currentCells.empty()` first).
 |---|---|---|---|
 | Q1 | `vql_engine.{hpp,cpp}` | the `*Lens` generator dispatch → `openLensUri` (intercepted **before** the silent named-store→home fallback at `:944-954`) + `List` roots + `$lens` auto-bind; step-function dispatch for `lensMount`/`lensUnmount`/`lensNext`/`lensStub`/`lensCommit`/`lensEdit`/`lensRevert`/`lensBrowse`/`lensDirty`/`lensClose` in `evaluateStep`'s `FunctionInvocation` arm; mutating-step single-eval check (parser/type-contract) | The generator + step seams live only here. |
 | Q2 | `vql_engine.{hpp,cpp}` | `cellKey`/`cellEq`/`cellScalar` as `FunctionInvocation` value-expr builtins + `?fn()`/bare-predicate function resolution through `evaluateValueExpr`'s table for all names | Same engine, different surface. |
-| Q3 | `vql/{lexer,parser,token}.{hpp,cpp}` | `lens` joins `parseAnchorNode`'s generator keywords (`:523-528`); the step names stay unreserved `Identifier`-steps | `KwLens` is lexed but unreachable today. |
-| Q4 | `vql_engine.{hpp,cpp}` + coordinator | `sessions_`/`sessionFor` on the coordinator's session registry (per-query engine sees it); `$lens` vector-bind; `LensRepl` exposes `session()` so the REPL's session joins the registry | The session-outlives-engine requirement + shared `:lens`/`*Lens` recency. |
+| Q3 | `vql/{lexer,parser,token}.{hpp,cpp}` | `KwLens` joins `parseAnchorNode`'s generator keywords (`:523-528`) **plus** `KwFsLens`/`KwGitLens`/`KwSqlLens`/`KwLogLens`/`KwJournalLens`/`KwCfgLens`/`KwUnionLens` (the `*Lens` helpers — plain `Identifier`s never reach the anchor); the spec fns `dir`/`sql`/`git`/`log`/`journal`/`cfg` stay `Identifier` value-fns; step names stay unreserved `Identifier`-steps | `KwLens` is lexed but unreachable today. |
+| Q4 | `vql_engine.{hpp,cpp}` + `multi_store.{hpp,cpp}` + `lens_repl.{hpp,cpp}` | `lensSessions()` registry on `MultiStoreCoordinator` (`vector<weak_ptr>` membership + owning `vector<shared_ptr>`); `LensRepl::session_` migrates `unique_ptr`→`shared_ptr` + `session()` accessor; `ProjectionSession` gains `core()`; `sessionFor` arena-scoped (per-query engine sees it); `$lens` vector-bind; `LensRepl` exposes `session()` so the REPL's session joins the registry | The session-outlives-engine requirement + shared `:lens`/`*Lens` recency. |
 | Q5 | `vql/compiler.cpp` OR doc-scope | `StoreGenerator` `lens` under `--engine vortex` maps to `home()` — either compile it or scope the design to the direct engine | The compiler path is a separate surface. |
-| Q6 | `session_ops.{hpp,cpp}` + `sql_lens.{hpp,cpp}` | `sessionBrowseAt(session, key, table)` — mount-scoped resolver + `browse` + `refresh()`; a `SqlLens` accessor (or browse-returns-key) to yield the new query's root; `sessionUnmountAt` pre-resolves `mountBoundary`→`cellFor`; new `session_ops.cpp` keeps `SqlLens` out of the header | The browse resolver shared between vlace and VQL. |
+| Q6 | `session_ops.{hpp,cpp}` + `sql_lens.{hpp,cpp}` | `sessionBrowseAt(session, key, table)` — mount-scoped resolver + `browse` + `refresh()`; `sessionMountScopeAt(session, key)` — the cell→`keyFor`→`mountBoundary`→`windowedFor` preamble shared by next/stub/browse/unmount; a `SqlLens` accessor (or browse-returns-key) to yield the new query's root; `sessionUnmountAt` pre-resolves `mountBoundary`→`cellFor`; new `session_ops.cpp` keeps `SqlLens` out of the header | The browse + scope resolvers shared between vlace and VQL. |
 | Q7B | `vql_engine.cpp` + `vquery/main.cpp` | `sessionFor` guard at every link-writing site: `link(...)` step + `cloneGenerator`, `performCreates` (both `in` and `attachPoint`), `PathMorphism`, `cloneTail`/perspective clones, `shapeProjection`, `executeWatch`; **and** on the `promote`/`--in-place`/`writeResultSlice`/`:save` result-persistence path | D7 — the provenance guard no other row owns. |
 | Q7 | `tests/` (new) | VQL lens journey — `fsLens` → traverse → `lensMount` → back → `lensCommit`/`lensRevert`/`lensNext`/`lensStub`/`lensBrowse`; sole-anchor refusal (mutating step inside a `where`) | A test sits with its code — the acceptance artifact. |
 
