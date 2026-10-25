@@ -49,10 +49,11 @@ sessionDirty(const ProjectionSession &session) {
 }
 
 /// Mount the delegate lens under @p key's cell and refresh() so the
-/// projection shows it. Re-opening an already-mounted cell is
+/// projection shows it; Ok carries the delegate's root key (the cell
+/// the reader lands under). Re-opening an already-mounted cell is
 /// idempotent and wins over the dirty-gate: it mutates nothing, so it
 /// is refused only by RouterLens::open itself.
-[[nodiscard]] inline std::expected<void, std::string>
+[[nodiscard]] inline std::expected<ExternalKey, std::string>
 sessionMountAt(ProjectionSession &session, const ExternalKey &key) {
   auto *router = dynamic_cast<RouterLens *>(session.lensMut());
   if (router == nullptr) {
@@ -60,7 +61,7 @@ sessionMountAt(ProjectionSession &session, const ExternalKey &key) {
   }
   if (!router->isMounted(key)) {
     if (const auto gate = sessionDirty(session); !gate.has_value()) {
-      return gate;
+      return std::unexpected(gate.error());
     }
   }
   const auto opened = router->open(key);
@@ -68,7 +69,7 @@ sessionMountAt(ProjectionSession &session, const ExternalKey &key) {
     return std::unexpected("mount refused: " + opened.error());
   }
   (void)session.refresh();
-  return {};
+  return *opened;
 }
 
 /// Drop the mount at-or-above @p key (mountBoundary resolves "one hop

@@ -93,7 +93,11 @@ private:
   std::expected<TyPtr, TypeError>
   inferPattern(const PatternNode &p, const EnvPtr &env, TyPtr expected,
                std::unordered_map<std::string, Scheme> &binds);
-  void registerData(const DataDecl &dd);
+  // Register a data decl's ctors; refuses a ctor name the runtime
+  // reserves (isReservedCtorTag, §7 P1) since redeclaring e.g. `Some`
+  // would overwrite the prelude scheme a program already typechecks
+  // against.
+  std::expected<void, TypeError> registerData(const DataDecl &dd);
 
   // Convenience constructors for ground types.
   TyPtr tycon(std::string name, std::vector<TyPtr> args = {});

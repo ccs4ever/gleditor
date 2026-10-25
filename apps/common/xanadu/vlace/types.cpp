@@ -83,6 +83,13 @@ TypeChecker::TypeChecker() {
     ctors_["Ok"] =
         Scheme{.vars = {ev, av}, .body = tyFun(avt, tyResult(evt, avt))};
   }
+
+  // Unit -- an arity-0 ctor the runtime alone constructs (ECtor refuses
+  // it, P1), registered so `Ok Unit` typechecks and `Unit =>` patterns
+  // match a runtime-minted value.
+  dataCtors_["Unit"] = {"Unit"};
+  ctorData_["Unit"]  = "Unit";
+  ctors_["Unit"]     = Scheme{.vars = {}, .body = tyUnit()};
   // Scalar = SInt Int | SFloat Float | SBool Bool -- the scalar payload a
   // projected cell can carry (Int64/Double/Bool kinds), surfaced by
   // cellScalar (vlace-lens-bridge §4). The evaluator owns the ctor tags
@@ -420,7 +427,19 @@ std::string TypeChecker::renderType(const TyPtr &tIn) {
   return out;
 }
 
-void TypeChecker::registerData(const DataDecl &dd) {
+std::expected<void, TypeError>
+TypeChecker::registerData(const DataDecl &dd) {
+  for (const auto &c : dd.ctors) {
+    // A ctor name the runtime itself interprets may not be redeclared
+    // (§7 P1): `data W = Some` would overwrite the prelude scheme a
+    // program already typechecks against.
+    if (isReservedCtorTag(c.name)) {
+      return terr(CompileError::TypeMismatch,
+                  "data constructor '" + c.name +
+                      "' is reserved by the runtime",
+                  {});
+    }
+  }
   // Build the result type Tname a b ... with fresh vars for the params.
   std::unordered_map<std::string, TyPtr> paramVars;
   std::vector<int> schemeVars;
@@ -483,6 +502,7 @@ void TypeChecker::registerData(const DataDecl &dd) {
     }
   }
   dataCtors_[dd.name] = names;
+  return {};
 }
 
 std::expected<TyPtr, TypeError>
@@ -992,7 +1012,8 @@ std::expected<std::string, TypeError>
 TypeChecker::checkProgram(const Program &prog) {
   for (const auto &d : prog.decls) {
     if (std::holds_alternative<DataDecl>(d)) {
-      registerData(std::get<DataDecl>(d));
+      auto r = registerData(std::get<DataDecl>(d));
+      if (!r) return std::unexpected(r.error());
     }
   }
   // Bind top-level value decls letrec-style, then generalize.

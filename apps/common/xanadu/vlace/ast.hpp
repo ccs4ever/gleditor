@@ -16,6 +16,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -225,6 +226,31 @@ enum class CompileError : std::uint8_t {
 };
 
 [[nodiscard]] std::string_view compileErrorName(CompileError err) noexcept;
+
+/// Ctor tags the runtime itself interprets -- a `data` decl may not
+/// redeclare any of them (design/vlace-lens-bridge.md §7 P1): Cell/Dim
+/// wrap live arena refs, IO.* describes effects runIO performs, and the
+/// rest are the prelude ADT tags whose redeclaration would collide with
+/// values the runtime mints.
+[[nodiscard]] inline bool isReservedCtorTag(std::string_view tag) noexcept {
+  if (tag.starts_with("IO.")) return true;
+  for (const std::string_view t :
+       {"Cell",   "Dim",  "Nil", "Cons",  "Unit",  "Tuple", "Ok", "Err",
+        "Some",   "None", "True", "False", "SInt", "SFloat", "SBool"}) {
+    if (tag == t) return true;
+  }
+  return false;
+}
+
+/// The opaque subset of the reserved tags: values a program may match
+/// on but never construct, since only the runtime mints them (a forged
+/// `Cell n` would alias a real arena cell; a forged `IO.*` node would
+/// smuggle an effect into runIO). Some/Ok/Nil/Cons/True/False/Tuple
+/// stay constructible -- they are ordinary ADT tags.
+[[nodiscard]] inline bool isOpaqueCtorTag(std::string_view tag) noexcept {
+  return tag.starts_with("IO.") || tag == "Cell" || tag == "Dim" ||
+         tag == "Unit";
+}
 
 } // namespace xanadu::vlace
 

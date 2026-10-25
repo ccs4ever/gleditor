@@ -118,6 +118,11 @@ public:
   [[nodiscard]] std::expected<void, std::string>
   browse(std::string_view tableName);
 
+  /// Is @p tableName already browsed? Browse emits one t:-scoped query
+  /// per table; a second browse of it would stack a duplicate query node
+  /// over the same cells, so callers (vlace's lensBrowse) refuse it.
+  [[nodiscard]] bool isBrowsed(std::string_view tableName) const;
+
   /// Query mode (spec section 5.1): run arbitrary read-only SQL as an
   /// ordinal-paged query. Rows are hashed subjects under q:<qhash> (pk
   /// attribution needs SQLITE_ENABLE_COLUMN_METADATA, absent here), and

@@ -465,6 +465,12 @@ std::expected<void, std::string> SqlLens::browse(std::string_view tableName) {
   return {};
 }
 
+bool SqlLens::isBrowsed(const std::string_view tableName) const {
+  const std::string tk = "t:" + sqlKeyEncode(tableName);
+  return std::ranges::any_of(
+      queries_, [&](const SqlQuery &q) { return q.tableKey == tk; });
+}
+
 std::expected<void, std::string>
 SqlLens::query(std::string_view sql, std::span<const SqlValue> params) {
   auto q = planQuery(sql, params);
