@@ -1,4 +1,4 @@
-# vprolog Lens Bridge: Lenses as Builtin Predicates in a Backtracking Logic Engine (v1.4)
+# vprolog Lens Bridge: Lenses as Builtin Predicates in a Backtracking Logic Engine (v1.5)
 
 A design specification for how a **vprolog program** — not the `vprolog` REPL's `:lens` verbs —
 opens, enumerates, mounts, writes back, and releases projection lenses. Design deliverable only:
@@ -384,7 +384,7 @@ the mesh there is no MetaSource to inject, and it fails the same way.
 |---|---|---|
 | `lens_step(C, Dim, To)` | the posward-linked cell's handle | **single-produce**; `Dim` an atom like `'d.contains'` via `findDimension` — no mint, so no gate-time dim cell above live marks; negward deferred (§6) |
 | `lens_mount(C, Root)` | the delegate root's handle | `sessionMountAt`; idempotent re-mount |
-| `lens_unmount(C)` | the mount-point cell's handle | `mountBoundary→cellFor` resolved *before* `sessionUnmountAt` (`expected<void>` — Q6) |
+| `lens_unmount(C, MountPoint)` — arity-2 (the boundary is at-or-above `C` — a delegate-interior `C` mounts out to a *different* cell, so the mount-point handle must be bindable) | the mount-point cell's handle | `mountBoundary→cellFor` resolved *before* `sessionUnmountAt` (`expected<void>` — Q6) |
 | `lens_next(C, Stub)` | the materialized stub's handle; fails at exhaustion | `sessionNextPage`, mount-scoped — plain `WindowedLens` sessions scope to themselves |
 | `lens_stub(C, Stub)` | the pending stub's handle; fails when none | `nextStubAt` — const, not dirty-gated |
 | `lens_browse(C, Table, Root)` | the new query's root cell's handle | `sessionBrowseAt` — sql-only, mount-scoped; needs the Q6 `isBrowsed` gate or re-fire duplicates |
