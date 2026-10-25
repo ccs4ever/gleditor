@@ -1,4 +1,4 @@
-# vprolog Lens Bridge: Lenses as Builtin Predicates in a Backtracking Logic Engine (v1.13)
+# vprolog Lens Bridge: Lenses as Builtin Predicates in a Backtracking Logic Engine (v1.14)
 
 A design specification for how a **vprolog program** — not the `vprolog` REPL's `:lens` verbs —
 opens, enumerates, mounts, writes back, and releases projection lenses. Design deliverable only:
@@ -470,22 +470,22 @@ fix_row(Db, Applied) :-
 
 ```text
 ?- child_text('/tmp/lensj', C, T).
-C = 2147483657, T = 'a.txt' ;
+C = 2147483657, T = a.txt ;
 C = 2147483662, T = 'b.txt' ;
 C = 2147483667, T = 'sub' ;
 C = 2147483670, T = 'repo'.
 
 ?- commit_text('/tmp/lensj', 'fs:52:794498', T).
-T = 'HEAD' ;
-T = 'commit a1b2c3' ;
+T = HEAD ;
+T = commit a1b2c3 ;
 T = 'commit d4e5f6'.
 
 % cross-query resumption: the key is the durable name, the handle is per-arena
 ?- lens_open(dir('/tmp/lensj'), R), lens_children(R, C), lens_key(C, K), !.
-R = 2147483650, C = 2147483670, K = 'fs:52:794498'.
+R = 2147483650, C = 2147483670, K = fs:52:794498.
 
 ?- lens_cell('fs:52:794498', C), mount_or(C, G), lens_children(G, K), lens_text(K, T).
-C = 2147483670, G = 2147483712, K = 2147483720, T = 'HEAD' ; …
+C = 2147483670, G = 2147483712, K = 2147483720, T = HEAD ; …
 
 ?- fix_row('sqlite:///tmp/lensj/data.db?write=1', N).
 N = 1.
