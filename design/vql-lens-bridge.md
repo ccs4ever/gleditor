@@ -1,4 +1,4 @@
-# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v2.6)
+# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v2.7)
 
 A design specification for how a **VQL program** — not the `vquery` REPL — opens, traverses, mounts,
 writes back, and releases projection lenses. Design deliverable only: the signatures are proposals;
@@ -82,13 +82,15 @@ a mutating step inside a `where`/join/predicate could evaluate multiple times or
 **at most one session-mutating step per top-level statement `PathExpression`; read steps may
 follow it** (`path/lensmount()/d.contains` is allowed; `path/lensmount()/d.contains/lenscommit()`
 and `…/lensedit("99")/lenscommit()` are refused — commit is a separate statement; `where
-lensmount($c)`, mid-join, or any nested evaluation is a `TypeContractError`). A `let $x := lens("u")` (note `:=`) or flat `for $c in lens("u")/d.contains` **target path**
-evaluates exactly once (`bindLet` `evaluatePath(*path)` `:507`, `evaluatePath(fc.inPath)` `:2538`) —
-allowed **iff the target binds cells at bind time**: `let $f := /d.contains/lensmount()` binds a
-*functor* (`functorOf` → `functors_`, `:495-505`) evaluated at every `$f` application — banned.
-Nested `for`-`in` paths re-evaluate per outer row — banned (the depth flag catches it as nested).
-Everywhere else (`return`, `def`, `watch`, `until`, predicates, clone/shape/morphism/create/
-destructure targets) remains refused. Enforcement is two-layered: **(i)** a statement-level static rule in the parser/type-contract
+lensmount($c)`, mid-join, or any nested evaluation is a `TypeContractError`). The single rule: **a mutating construct may appear only where it evaluates exactly once at
+statement level** — the statement's sole top-level path anchor (`lens("u")`), a `let`/flat
+`for`-`in` **target path that binds cells at bind time** (`let $x := lens("u")` — `:=` — allowed;
+`let $f :=` binds a *functor* evaluated per application via `functorOf`/`functors_`, `:495-505` —
+banned), or **one step in a top-level path containing at most one mutating step**
+(`path/lensmount()/d.contains` allowed; `…/lenscommit()` after any earlier mutation refused).
+`lens("u")/lensmount()` = mutating anchor + mutating step = two mutations → refused. Nested `for`
+in-paths, `return`, `def`, `watch`, `until`, predicates, clone/shape/morphism/create/destructure
+targets — all refused (the depth flag catches them as nested). Enforcement is two-layered: **(i)** a statement-level static rule in the parser/type-contract
 pass (a mutating step/generator legal only as a top-level statement path's last transform —
 nested inside `for`/`let`/`def`/`watch`/predicates it's a `TypeContractError`); **(ii)** a runtime
 backstop in `evaluateStep`/`resolveAnchor` — a mutating dispatch refuses when the evaluation is
@@ -142,9 +144,13 @@ would pull `sql_lens.hpp`/`sql_backend.hpp` into the generic header otherwise).
 counter).
 
 `lensnext`/`lensstub` scope: cell → `keyFor` → `mountBoundary` → mount key → `windowedFor`/
-`nextStubAt` (mount-scoped); `mountBoundary` → `nullopt` (a RouterLens cell outside all mounts,
-or a plain `WindowedLens` session — `sql:`/`log:`/`journal:`/`git:` opened directly) → the
-session-level `WindowedLens::nextStub`/`materializePage`; exhaustion → empty relation.
+`nextStubAt` (mount-scoped). `mountBoundary` → `nullopt` on a RouterLens cell means *outside all
+mounts* → **`Err`** (session-level `RouterLens::nextStub()` is first-wins across mounts — the
+hazard `session_ops.hpp:100-104` documents; vlace refuses the same way); a plain `WindowedLens`
+session (`sql:`/`log:`/`journal:`/`git:` opened directly) → the session-level
+`nextStub`/`materializePage`; exhaustion → empty relation. `session_ops::sessionMountScopeAt
+(session, key)` holds the cell→keyFor→router→mountBoundary preamble once (triplicated today
+across vlace's `IO.LensNext`/`mountedLens` and VQL's next/stub/browse/unmount).
 
 ### D6 — `meta:` refused; `union:` and `sql:` boundaries documented
 
@@ -273,7 +279,7 @@ must check `currentCells.empty()` first).
 | Q4 | `vql_engine.{hpp,cpp}` + coordinator | `sessions_`/`sessionFor` on the coordinator's session registry (per-query engine sees it); `$lens` vector-bind; `LensRepl` exposes `session()` so the REPL's session joins the registry | The session-outlives-engine requirement + shared `:lens`/`lens()` recency. |
 | Q5 | `vql/compiler.cpp` OR doc-scope | `StoreGenerator` `lens` under `--engine vortex` maps to `home()` — either compile it or scope the design to the direct engine | The compiler path is a separate surface. |
 | Q6 | `session_ops.{hpp,cpp}` + `sql_lens.{hpp,cpp}` | `sessionBrowseAt(session, key, table)` — mount-scoped resolver + `browse` + `refresh()`; a `SqlLens` accessor (or browse-returns-key) to yield the new query's root; `sessionUnmountAt` pre-resolves `mountBoundary`→`cellFor`; new `session_ops.cpp` keeps `SqlLens` out of the header | The browse resolver shared between vlace and VQL. |
-| Q8 | `vql_engine.cpp` | `sessionFor` guard at every link-writing site: `link(...)` step + `cloneGenerator`, `performCreates` (both `in` and `attachPoint`), `PathMorphism`, `cloneTail`/perspective clones, `shapeProjection`, `executeWatch` — refuse on session-owned cells | D7 — the provenance guard no other row owns. |
+| Q8 | `vql_engine.cpp` + `vquery/main.cpp` | `sessionFor` guard at every link-writing site: `link(...)` step + `cloneGenerator`, `performCreates` (both `in` and `attachPoint`), `PathMorphism`, `cloneTail`/perspective clones, `shapeProjection`, `executeWatch`; **and** on the `promote`/`--in-place`/`writeResultSlice`/`:save` result-persistence path | D7 — the provenance guard no other row owns. |
 | Q7 | `tests/` (new) | VQL lens journey — `lens()` → traverse → `lensmount` → back → `lenscommit`/`lensrevert`/`lensnext`/`lensstub`/`lensbrowse`; sole-anchor refusal (mutating step inside a `where`) | A test sits with its code — the acceptance artifact. |
 
 The session machinery (`session_ops`, `ownsCell`, `canApply`, `revertKey`, `commit()`→`expected<int>`,
