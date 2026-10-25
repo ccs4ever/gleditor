@@ -1,4 +1,4 @@
-# VPL Lens Bridge: Lenses as System Verbs in an Array Language (v1.9)
+# VPL Lens Bridge: Lenses as System Verbs in an Array Language (v1.10)
 
 A design specification for how a **VPL program** — not the `vpl` REPL's `:lens` verbs — opens,
 traverses, mounts, writes back, and releases projection lenses. Design deliverable only: the
