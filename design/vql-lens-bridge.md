@@ -1,4 +1,4 @@
-# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v6.0)
+# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v6.1)
 
 A design specification for how a **VQL program** — not the `vquery` REPL — opens, traverses, mounts,
 writes back, and releases projection lenses. Design deliverable only: the signatures are proposals;
@@ -47,14 +47,16 @@ the REPL's `LensRepl` owns the one session `$lens` binds.
 
 ### D1 — a `*Lens` generator is the sole-anchor generator; gestures are step functions
 
-a `*Lens` generator is a `StoreGeneratorCall` anchor — a **normal generator** (`parseAnchorNode` parses `Kw*` + comma-separated `ValueExpr` args, `:523-545` — variadic by construction; `lens("union",a,b,c)` parses today, same seam as `current`/`local`/`topic`). `resolveAnchor` calls `openLensUri` (all schemes;
+a `*Lens` generator is a `StoreGeneratorCall` anchor — a **normal generator** (`parseAnchorNode` parses `Kw*` + comma-separated `ValueExpr` args, `:523-545` — variadic by construction; `lens("union",a,b,c)` parses under the Q3 grammar, same seam as `current`/`local`/`topic`). `resolveAnchor` calls `openLensUri` (all schemes;
 P6's guard refuses `meta:`/unrecognized `scheme:`), projects into the engine's `core_`, yields the
 session's projected roots, and binds `$lens` (the `setVariable` vector overload for `union:` forests).
 a `*Lens` generator is itself session-mutating (it opens a session) but as an anchor it's the query's source —
-`fsLens("/x")/d.contains` is the natural open+traverse. **Open dedupe**: a `(keyword, args)` already
-open in the registry re-binds to the live session's roots — two sessions over one writable source
-would split `dirty_` and cross-clobber on `commit()` (`keyToCell_` is per-session); a *different*
-`(keyword, args)` mints its own projection.
+`fsLens("/x")/d.contains` is the natural open+traverse. **Open dedupe**: a source already open in the registry re-binds to the live session's roots —
+two sessions over one writable source would split `dirty_` and cross-clobber on `commit()`
+(`keyToCell_` is per-session). The dedupe key is the **canonical source identity** (normalized
+URI/resolved path recorded at open on *every* path — `*Lens` generators, `lens("kw",…)`, AND
+`LensRepl::adopt`/`open` — so `:lens dir:/x` and `fsLens("/x")` dedupe to one session); a
+*different* source mints its own projection.
 
 Every gesture on a *cell* is a **step function** — `path/lensMount()`, `$cell/lensNext()`, `path/lensEdit("text")` — mapping over the relation: `$cells/lensMount()` mounts under each cell (N mounts, per-cell yield; a per-cell refusal drops that cell, not the whole relation — `Err`-per-cell → empty for that cell). **Session-scoped ops dedupe**: `lensCommit`/`lensBrowse`/`lensUnmount` resolve each input cell to its (session[, mount]) and run once per distinct target (`lensNext` is deliberately **not** deduped — N cells in one mount materialize N pages; `lensStub`/`lensDirty` **are** deduped — one probe per session) — arg-taking variants (`$cells/lensBrowse("t")`) take the arg from the first cell of each distinct target group (per-cell arg variance is silently first-wins — noted) — `$cells/lensCommit()` over N cells of one session commits once, not N times (yielding `[n]` not `[n,0,0…]`) — dispatched in `evaluateStep`'s `FunctionInvocation` arm (`vql_engine.cpp:1390+`), which already receives `currentCells` and already mutates (`link(...)` at `:1466-1540`); cell-typed *args* resolve via `cellsOfValueExpr` (`:362-381`), not `evaluateValueExpr` (which renders cells to `CellValue`, destroying the identity `cellEq` tests). The arg is the relation it filters — the "pipe" semantics without a pipe token (`|` is union-type-only, `parser.cpp:1603`). A user `def lensMount()` does NOT shadow the builtin (the step dispatch checks builtin names before `userDefs_` — stated precedence) — a step function needs no keyword — it's an `Identifier + '('` step (`parser.cpp:912-915`), so `lensMount`/`lensNext`/etc. stay *unreserved* names, not `Kw*` tokens.
 
@@ -78,7 +80,7 @@ by typing the full ephemeral value (`denseOf` *accepts* ephemeral refs — `aren
 267-269` unmasks the bit — `--format cells` prints them, `main.cpp:558`); a bare dense number
 resolves in the base/overlay namespace, and an ephemeral id is meaningless and unstable across
 runs. Write-guarded by D7 regardless. The stable cross-line handle is the **ExternalKey** `cellKey`
-exposes (`fs:52:794498`); a `cellFor(key)`-style resolution is deferred (U-V3).
+exposes (`fs:52:794498`); 
 
 ### D3 — Step-function mutations are query-time side effects, sequenced by the relation
 
@@ -316,7 +318,7 @@ must check `currentCells.empty()` first).
 | Q4 | `vql_engine.{hpp,cpp}` + `vortex_core.{hpp,cpp}` + `lens_repl.{hpp,cpp}` + `union_lens.{hpp,cpp}` | `lensSessions()` registry on `VortexCore` (arena-level; `weak_ptr` membership + owning `vector<shared_ptr>`); `UnionLens` `claimedBy` probe (`vector<weak_ptr>` membership + owning `vector<shared_ptr>`); `LensRepl::session_` migrates `unique_ptr`→`shared_ptr` + `session()` accessor; `ProjectionSession` gains `core()`; `sessionFor` arena-scoped (per-query engine sees it); `$lens` vector-bind; `LensRepl` exposes `session()` so the REPL's session joins the registry | The session-outlives-engine requirement + shared `:lens`/`*Lens` recency. |
 | Q5 | `vql/compiler.cpp` OR doc-scope | `StoreGenerator` `lens` under `--engine vortex` maps to `home()` — either compile it or scope the design to the direct engine | The compiler path is a separate surface. |
 | Q6 | `session_ops.{hpp,cpp}` + `sql_lens.{hpp,cpp}` | `sessionBrowseAt(session, key, table)` — mount-scoped resolver + `browse` + `refresh()`; `sessionMountScopeAt(session, key)` — the cell→`keyFor`→`mountBoundary`→`windowedFor` preamble shared by next/stub/browse/unmount; a `SqlLens` accessor (or browse-returns-key) to yield the new query's root; `sessionUnmountAt` pre-resolves `mountBoundary`→`cellFor`; new `session_ops.cpp` keeps `SqlLens` out of the header | The browse + scope resolvers shared between vlace and VQL. |
-| Q7B | `vql_engine.cpp` + `vquery/main.cpp` | `sessionFor` guard at every link-writing site: `link(...)` step + `cloneGenerator`, `performCreates` (both `in` and `attachPoint`), `PathMorphism`, `cloneTail`/perspective clones, `shapeProjection`, `executeWatch`; **and** on the `promote`/`--in-place`/`writeResultSlice`/`:save` result-persistence path | D7 — the provenance guard no other row owns — **`--engine vortex` included**: `compilePathStep` emits `Link`/`Clone` ops (`vql/compiler.cpp:452-526`) `VortexVM` runs as raw `arena().link` (`vortex_vm.cpp:526`/`:540`) — mutating paths **refuse at compile time** when sessions are live (`VortexVM` holds only `VortexCore&` — a runtime funnel needs arena-level `sessionFor` plumbing the row doesn't name; compile-time is the honest boundary). |
+| Q7B | `vql_engine.cpp` + `vquery/main.cpp` | `sessionFor` guard at every link-writing site: `link(...)` step + `cloneGenerator`, `performCreates` (both `in` and `attachPoint`), `PathMorphism`, `cloneTail`/perspective clones, `shapeProjection`, `executeWatch`; **and** on the `promote`/`--in-place`/`writeResultSlice`/`:save` result-persistence path | D7 — the provenance guard no other row owns — **`--engine vortex` included**: `compilePathStep` emits `Link`/`Clone` ops (`vql/compiler.cpp:452-526`) `VortexVM` runs as raw `arena().link` (`vortex_vm.cpp:526`/`:540`) — `VortexVM`'s `Link`/`Clone` ops (`vortex_vm.cpp:526-546`) go through the **same arena-level `sessionFor` funnel** — `VortexVM` holds `VortexCore&` (`vortex_vm.hpp:175`), so `core_.arena().sessionFor(c)` is one call, not missing plumbing; compile-time refusal would over-refuse (blocks `link()` whenever any session is open). |
 | Q7 | `tests/` (new) | VQL lens journey — `fsLens` → traverse → `lensMount` → back → `lensCommit`/`lensRevert`/`lensNext`/`lensStub`/`lensBrowse`; sole-anchor refusal (mutating step inside a `where`) | A test sits with its code — the acceptance artifact. |
 
 The session machinery (`session_ops`, `ownsCell`, `canApply`, `revertKey`, `commit()`→`expected<int>`,
