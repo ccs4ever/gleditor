@@ -42,3 +42,22 @@ folded when it lands). Consensus on mechanism gaps, all ACCEPTED:
   resolveAnchor :846 cite; ref-aliasing order-dependence;
   casing lowercase; ast.hpp:176/shapeProjection/main.cpp cite fixes;
   vql/vlace compiler.cpp disambiguation; Q4-vs-Q5 cross-ref.
+
+## Ergo R3 (7686a502) — folded into v2.6
+
+- let/for self-contradiction (B1): reconciled — single-eval let/for-in
+  targets allowed iff they bind CELLS at bind time; `let $f :=`
+  functor-bound paths banned; `:=` not `=`; everywhere else refused.
+- Wrong dispatch table (B2): comparison operands route through
+  cellsOfValueExpr -> evaluateStep, not evaluateValueExpr; the probes
+  register in BOTH the step arm and the value arm (contains/count/
+  delta precedent) + mutating-name refusal in both.
+- same_cell (M1): does NOT exist in this worktree — the critic read
+  the main tree; cellEq remains needed.
+- M3 wrong-tree read: projection_session.cpp is 556 lines here (not
+  114); session_ops.hpp 175 lines exists; main.cpp:526 IS
+  setVariable("lens"). Cite corrections from main discarded.
+- "at most one mutating step per path; reads may follow" rule.
+- # is Root not LiteralCellId (bare IntegerLiteral); let uses :=;
+  path/lensmount mints `lensmount` not `d.lensmount`; dedupe arg
+  variance first-wins; prose parens drift.
