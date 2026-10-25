@@ -1,4 +1,4 @@
-# vprolog Lens Bridge: Lenses as Builtin Predicates in a Backtracking Logic Engine (v1.15)
+# vprolog Lens Bridge: Lenses as Builtin Predicates in a Backtracking Logic Engine (v1.16)
 
 A design specification for how a **vprolog program** — not the `vprolog` REPL's `:lens` verbs —
 opens, enumerates, mounts, writes back, and releases projection lenses. Design deliverable only:
@@ -153,7 +153,7 @@ Inside an arm:
   `lens_cell`, `lens_error`, `lens_current`) mint only their answer cells under the mark.
 
 The mutating set is `{lens_open, lens_mount, lens_unmount, lens_next, lens_browse, lens_edit,
-lens_commit, lens_revert, lens_close}`; the exempt probes are everything else. There is no
+lens_commit, lens_revert, lens_refresh, lens_close}`; the exempt probes are everything else. There is no
 positional multiplicity rule to write — VQL needed one because its relation re-evaluates
 *silently*; Prolog re-fires a goal only by re-entering it through the clause machinery (a
 re-dispatched arm, an alternation arm, a recursive call — a written generator behind every fire,
