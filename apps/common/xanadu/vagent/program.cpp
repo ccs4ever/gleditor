@@ -55,7 +55,9 @@ CompiledProgram::instantiate(zigzag::vortex::WorkerContext &context,
         std::format("unknown agent type '{}' in program", agentType));
   }
   Compiler compiler(context.core);
-  compiler.setBeliefEventDepth(beliefEventDepth_);
+  compiler.setBeliefEventDepth(beliefEventDepth_)
+      ->setConditionFuel(conditionFuel_)
+      ->setMaintainBackoffMs(maintainBackoffMs_);
   auto compiled = compiler.compileAgent(unit_, agentType);
   if (!compiled) {
     return std::unexpected(std::format(
@@ -149,7 +151,9 @@ LocalHost::LocalHost(CompiledProgram program, Options options)
   }
   const auto owner = *identity::Fingerprint::fromString(kLocalOwner);
   const auto life  = options.clock.wall() + kLocalGrantLife;
-  program_.setBeliefEventDepth(options.settings.beliefEventDepth);
+  program_.setBeliefEventDepth(options.settings.beliefEventDepth)
+      ->setConditionFuel(options.settings.conditionFuel)
+      ->setMaintainBackoffMs(options.settings.maintainBackoff.count());
   runtime_->setAuthorizer(
       [this, instructions = options.maxInstructions,
        life](const identity::Fingerprint &, const ActorMessage &request)
