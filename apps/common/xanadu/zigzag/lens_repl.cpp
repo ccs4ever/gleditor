@@ -231,7 +231,7 @@ bool LensRepl::run(const std::string_view line, std::ostream &out,
     if (!c) {
       out << "lens: commit failed: " << c.error() << "\n";
     } else {
-      out << "lens: committed\n";
+      out << "lens: committed " << *c << " edit(s)\n";
     }
     return true;
   }

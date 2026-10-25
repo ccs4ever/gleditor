@@ -62,6 +62,25 @@ ProjectionSession::keyFor(CellRef cell) const noexcept {
   return it->second;
 }
 
+bool ProjectionSession::ownsCell(const CellRef cell) const noexcept {
+  if (cellToKey_.contains(cell)) {
+    return true;
+  }
+  // Attribute cells carry no key; writeAttribute hangs each exactly one
+  // negward hop off its node on the attribute's rank. Read the cell's
+  // own link run (dimensionsOf) rather than probing every managed dim,
+  // and take exactly one step: an iterative climb loops on authored
+  // 2-cycles, and an authored cell holding a node's negward slot steps
+  // further negward -- away from the node -- so it never owns.
+  for (const DimLink &dl : core_.arena().dimensionsOf(cell)) {
+    if (dl.neg != noCell && managedDims_.contains(dl.dim) &&
+        cellToKey_.contains(dl.neg)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // -- small write helpers -----------------------------------------------------
 
 DimRef ProjectionSession::dimFor(std::string_view name) {
@@ -123,36 +142,61 @@ void ProjectionSession::writeAttribute(CellRef cell, std::string_view rank,
 void ProjectionSession::restateContent(CellRef cell,
                                        const NodeContent &content) {
   auto &arena = core_.arena();
+  // The restate is TOTAL: every branch restores both halves -- valueKind
+  // takes the alternative's kind AND the span run takes the rendered
+  // text or {}. Writing one without the other is how a type-changing
+  // source value (or a reverted text edit on a scalar cell) left dead
+  // scalar bits and stale edit text behind.
+  const auto clearSpans = [&] {
+    if (!arena.contentOf(cell).empty()) {
+      const std::span<const xanadu::PrimediaSpan> empty{};
+      zigzag::expectWritten(arena.setContent(cell, empty));
+    }
+  };
   std::visit(
       [&](const auto &c) {
         using T = std::remove_cvref_t<decltype(c)>;
         if constexpr (std::is_same_v<T, std::monostate>) {
-          if (!arena.contentOf(cell).empty()) {
-            const std::span<const xanadu::PrimediaSpan> empty{};
-            zigzag::expectWritten(arena.setContent(cell, empty));
+          if (arena.valueKindOf(cell) != xanadu::ValueKind::None ||
+              !arena.contentOf(cell).empty()) {
+            zigzag::expectWritten(
+                arena.setValueBits(cell, xanadu::ValueKind::None, 0));
+            clearSpans();
           }
         } else if constexpr (std::is_same_v<T, std::string>) {
-          if (arena.textOf(cell) != c) {
+          if (arena.valueKindOf(cell) != xanadu::ValueKind::None ||
+              arena.textOf(cell) != c) {
+            zigzag::expectWritten(
+                arena.setValueBits(cell, xanadu::ValueKind::None, 0));
             const xanadu::PrimediaSpan span = arena.intern(std::string_view{c});
             const std::span<const xanadu::PrimediaSpan> spans{&span, 1};
             zigzag::expectWritten(arena.setContent(cell, spans));
           }
         } else if constexpr (std::is_same_v<T, double>) {
-          if (!scalarEquals(arena, cell, c)) {
+          if (arena.valueKindOf(cell) != xanadu::ValueKind::Double ||
+              !scalarEquals(arena, cell, c) ||
+              !arena.contentOf(cell).empty()) {
             zigzag::expectWritten(
                 arena.setValueBits(cell, xanadu::ValueKind::Double,
                                    xanadu::canonicalDoubleBits(c)));
+            clearSpans();
           }
         } else if constexpr (std::is_same_v<T, bool>) {
-          if (!scalarEquals(arena, cell, c)) {
+          if (arena.valueKindOf(cell) != xanadu::ValueKind::Bool ||
+              !scalarEquals(arena, cell, c) ||
+              !arena.contentOf(cell).empty()) {
             zigzag::expectWritten(
                 arena.setValueBits(cell, xanadu::ValueKind::Bool, c ? 1 : 0));
+            clearSpans();
           }
         } else if constexpr (std::is_same_v<T, std::int64_t>) {
-          if (!scalarEquals(arena, cell, c)) {
+          if (arena.valueKindOf(cell) != xanadu::ValueKind::Int64 ||
+              !scalarEquals(arena, cell, c) ||
+              !arena.contentOf(cell).empty()) {
             zigzag::expectWritten(
                 arena.setValueBits(cell, xanadu::ValueKind::Int64,
                                    std::bit_cast<std::uint64_t>(c)));
+            clearSpans();
           }
         }
       },
@@ -200,7 +244,12 @@ std::size_t ProjectionSession::refresh() {
       return;
     }
     if (const auto it = keyToCell_.find(node.key); it != keyToCell_.end()) {
-      restateContent(it->second, node.content);
+      // A dirty cell's arena content IS the pending edit -- restating
+      // the source's emission over it would clobber what commit() is
+      // about to send (and what the reader sees pre-commit).
+      if (!dirty_.contains(node.key)) {
+        restateContent(it->second, node.content);
+      }
     } else {
       mintNode(node);
       ++minted;
@@ -246,6 +295,7 @@ std::size_t ProjectionSession::refresh() {
 
   tombstone(present, keepPos);
   recomputeRoots(present, containedTargets);
+  presentKeys_ = present; // revertKey's source-vanished signal
 
   arena.discard(guard);
   return minted;
@@ -269,7 +319,17 @@ ProjectionSession::editContent(const ExternalKey &key,
   if (!cell) {
     return std::unexpected("unknown projected key: " + key);
   }
-  auto &arena                     = core_.arena();
+  if (!lens_->canApply(key)) {
+    return std::unexpected("the lens reports " + key + " as not writable");
+  }
+  auto &arena = core_.arena();
+  // A scalar-kind cell goes text-typed while dirty: the pending edit is
+  // a span run, and commit()/revertKey()'s restate puts the source's
+  // kind and content back over it.
+  if (arena.valueKindOf(*cell) != xanadu::ValueKind::None) {
+    zigzag::expectWritten(
+        arena.setValueBits(*cell, xanadu::ValueKind::None, 0));
+  }
   const xanadu::PrimediaSpan span = arena.intern(text);
   const std::span<const xanadu::PrimediaSpan> spans{&span, 1};
   zigzag::expectWritten(arena.setContent(*cell, spans));
@@ -277,32 +337,70 @@ ProjectionSession::editContent(const ExternalKey &key,
   return {};
 }
 
-std::expected<void, std::string> ProjectionSession::commit() {
-  const auto dirty = std::move(dirty_);
-  dirty_.clear();
-  for (const auto &key : dirty) {
-    const auto cell = cellFor(key);
-    if (!cell) {
-      continue; // unwound or removed between edit and commit
-    }
-    auto applied = lens_->applyContentChange(key, core_.arena().textOf(*cell));
-    if (!applied) {
-      dirty_.insert(key); // unapplied keys stay dirty -- a retry sees
-                          // them; the caller decides what to drop.
-      return std::unexpected(key + ": " + applied.error());
-    }
-    // A relocated key rebinds the same cell: union identity keeps the
-    // cell, the source item's new name points at it.
-    if (*applied != key) {
-      const auto it = keyToCell_.find(key);
-      keyToCell_.erase(it);
-      keyToCell_.emplace(*applied, *cell);
-      cellToKey_.erase(*cell);
-      cellToKey_.emplace(*cell, *applied);
-    }
+std::expected<void, std::string>
+ProjectionSession::revertKey(const ExternalKey &key) {
+  if (dirty_.erase(key) == 0) {
+    return {}; // never dirtied -- a true no-op
+  }
+  // A key the source stopped emitting only stale-marks on refresh();
+  // restateContent runs for present keys alone, so the edit text would
+  // stay visible with nothing left to put back.
+  if (!presentKeys_.contains(key)) {
+    return std::unexpected("nothing to restate: " + key);
   }
   (void)refresh();
   return {};
+}
+
+std::expected<int, std::string> ProjectionSession::commit() {
+  // Move the dirty set out, and guard it: every key the loop never
+  // attempts goes back to dirty_ when this scope exits -- on a refusal
+  // AND if applyContentChange throws, where the moved-out set would
+  // otherwise destroy the rest. A key leaves `pending` only once its
+  // apply succeeded (or its cell unwound); the guard re-inserts
+  // whatever remains.
+  auto pending = std::move(dirty_);
+  dirty_.clear();
+  struct ReinsertPending {
+    ~ReinsertPending() { dst->insert(src->begin(), src->end()); }
+    std::unordered_set<ExternalKey> *src;
+    std::unordered_set<ExternalKey> *dst;
+  } guard{&pending, &dirty_};
+
+  int applied = 0;
+  for (auto it = pending.begin(); it != pending.end();) {
+    const auto key  = *it;
+    const auto cell = cellFor(key);
+    if (!cell) {
+      // Unwound or removed between edit and commit: nothing to apply,
+      // and re-dirtying a key with no cell would wedge the session.
+      it = pending.erase(it);
+      continue;
+    }
+    auto res = lens_->applyContentChange(key, core_.arena().textOf(*cell));
+    if (!res) {
+      // The refusing key stays dirty (it never left `pending`) and so
+      // does the un-attempted tail -- a retry sees them all; the
+      // caller decides what to drop.
+      return std::unexpected(key + ": " + res.error());
+    }
+    it = pending.erase(it);
+    ++applied;
+    // A relocated key rebinds the same cell: union identity keeps the
+    // cell, the source item's new name points at it. NOTE: the rebind
+    // leaves a RouterLens's Mount::mountKey/roots/owns stale -- the
+    // mount stays keyed on the old name until P8 remaps it; no lens
+    // relocates today.
+    if (*res != key) {
+      const auto kit = keyToCell_.find(key);
+      keyToCell_.erase(kit);
+      keyToCell_.emplace(*res, *cell);
+      cellToKey_.erase(*cell);
+      cellToKey_.emplace(*cell, *res);
+    }
+  }
+  (void)refresh();
+  return applied;
 }
 
 void ProjectionSession::tombstone(

@@ -1025,6 +1025,37 @@ std::optional<int> SqlLens::waitableFd() const noexcept {
   return watch_.waitableFd();
 }
 
+bool SqlLens::canApply(const ExternalKey &node) const {
+  // The same gate applyContentChange applies, minus the write: a
+  // <row>:v:<col> key on a materialized subject produced by a browsed
+  // (t:-scoped), pk/rid-addressed query, naming a column it carries.
+  const auto vpos = node.rfind(":v:");
+  if (vpos == std::string::npos || vpos + 3 == node.size()) {
+    return false;
+  }
+  const auto sit = subjects_.find(node.substr(0, vpos));
+  if (sit == subjects_.end()) {
+    return false;
+  }
+  const SqlSubject &s = sit->second;
+  const SqlQuery *q   = nullptr;
+  for (const auto &cand : queries_) {
+    if (cand.key == s.queryKey) {
+      q = &cand;
+      break;
+    }
+  }
+  if (q == nullptr || q->tableKey.empty() || q->cls == SqlKeyClass::Hash) {
+    return false;
+  }
+  for (const auto &vname : s.vnames) {
+    if (sqlKeyEncode(vname) == node.substr(vpos + 3)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 std::expected<ExternalKey, std::string>
 SqlLens::applyContentChange(const ExternalKey &node,
                             const std::string_view newContent) {

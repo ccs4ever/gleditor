@@ -295,6 +295,18 @@ std::optional<int> RouterLens::waitableFd() const noexcept {
   return std::nullopt;
 }
 
+bool RouterLens::canApply(const ExternalKey &node) const {
+  if (base_.pathFor(node).has_value()) {
+    return base_.canApply(node); // fs cells stay read-only today
+  }
+  for (const auto &m : mounts_) {
+    if (m.owns(node)) {
+      return m.lens->canApply(node);
+    }
+  }
+  return false;
+}
+
 std::expected<ExternalKey, std::string>
 RouterLens::applyContentChange(const ExternalKey &node,
                                const std::string_view newContent) {

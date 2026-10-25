@@ -98,6 +98,9 @@ public:
   [[nodiscard]] bool pollChanged() const override;
   /// The first mount's waitable descriptor, else -1.
   [[nodiscard]] std::optional<int> waitableFd() const noexcept override;
+  /// Routed by ownership, the same paths applyContentChange takes:
+  /// an fs key asks the base, a delegate key asks the owning mount.
+  [[nodiscard]] bool canApply(const ExternalKey &node) const override;
   /// Routed by ownership: a delegate's cell edits through its own lens.
   [[nodiscard]] std::expected<ExternalKey, std::string>
   applyContentChange(const ExternalKey &node,

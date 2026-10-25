@@ -46,6 +46,19 @@ public:
   /// cell). Backs the extkey/2 predicate (§9A.3).
   [[nodiscard]] std::optional<ExternalKey> keyFor(CellRef cell) const noexcept;
 
+  /// Is @p cell one this session projected? A node cell resolves through
+  /// cellToKey_ in O(1); an attribute cell carries no key and sits
+  /// exactly one negward hop off its node on the attribute's rank
+  /// (writeAttribute links node -(rank,pos)-> attr), so ONE negward
+  /// step on a managed dim landing on a node cell counts too. The hop
+  /// is bounded on purpose: an iterative climb loops on authored
+  /// 2-cycles, and an authored cell holding a node's negward slot on a
+  /// managed dim steps further negward -- away from the node -- and is
+  /// never owned. Session-resolution ops (lensEdit/lensRevert, the
+  /// arena-verb provenance guard) answer "the session's cell" through
+  /// this rather than re-specifying the climb.
+  [[nodiscard]] bool ownsCell(CellRef cell) const noexcept;
+
   /// The root cells the lens projected, in mint order (a source may be a
   /// forest). The first is the natural entry point for a walk.
   [[nodiscard]] const std::vector<CellRef> &roots() const noexcept {
@@ -97,15 +110,32 @@ public:
   /// Set a projected cell's text content and mark its key dirty. The
   /// arena write is local -- commit() is what crosses back through the
   /// lens's unproject half. Ref-cells (U-L5, the source's own) refuse:
-  /// writing them would mutate a store the session does not own.
+  /// writing them would mutate a store the session does not own. A key
+  /// the lens's canApply() probe refuses is refused here too, before
+  /// anything dirties. A scalar-kind cell (Int64/Double/Bool) goes
+  /// text-typed while dirty -- the edit IS a span run; commit()/
+  /// revertKey()'s restate restores the source's kind and spans.
   [[nodiscard]] std::expected<void, std::string>
   editContent(const ExternalKey &key, std::string_view text);
 
+  /// Drop one dirty edit without committing it: erase the key from
+  /// dirty_ and, only when it WAS dirty, refresh() so the source's
+  /// content restates over the edit text. Non-dirty keys -- including
+  /// unknown ones -- are a true no-op. Errs when the key was dirty but
+  /// the source no longer emits it: refresh() only stale-marks absent
+  /// cells (restateContent runs for present keys alone), so nothing
+  /// would put the pre-edit content back.
+  [[nodiscard]] std::expected<void, std::string>
+  revertKey(const ExternalKey &key);
+
   /// Push every dirty cell's text through applyContentChange and
   /// refresh() so the session restates what the source reports back.
-  /// A refusing lens surfaces its error; a key the source relocated
-  /// rebinds (the cell follows the source item).
-  [[nodiscard]] std::expected<void, std::string> commit();
+  /// Returns the count of edits applied. A refusing lens surfaces its
+  /// error with >= 0 already applied (per-cell, non-atomic); a key the
+  /// source relocated rebinds (the cell follows the source item).
+  /// Every key the loop never attempted -- behind a refusal or an
+  /// applyContentChange throw -- goes back into dirty_ on scope exit.
+  [[nodiscard]] std::expected<int, std::string> commit();
 
   /// Dirty edits waiting on commit() -- the number the write gesture
   /// reports, so "committed" is honest about what it carried.
@@ -176,6 +206,10 @@ private:
   /// Keys whose arena cells the app edited since the last commit() --
   /// the write path's diff set.
   std::unordered_set<ExternalKey> dirty_;
+  /// The keys the last refresh() enumeration emitted. revertKey reads
+  /// it to tell "source no longer emits the key" (nothing to restate)
+  /// from "present and restatable".
+  std::unordered_set<ExternalKey> presentKeys_;
   std::vector<CellRef> roots_;
   /// Node keys in mint order: the map-repair log rewind() truncates by.
   std::vector<ExternalKey> mintOrder_;

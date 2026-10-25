@@ -73,6 +73,17 @@ bool UnionLens::pollChanged() const {
   return false;
 }
 
+bool UnionLens::canApply(const ExternalKey &node) const {
+  // Any child that claims the key makes the union writable for it --
+  // the first-success rule applyContentChange uses.
+  for (const auto &child : children_) {
+    if (child->canApply(node)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 std::expected<ExternalKey, std::string>
 UnionLens::applyContentChange(const ExternalKey &node,
                               const std::string_view newContent) {

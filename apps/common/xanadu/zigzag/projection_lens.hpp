@@ -167,6 +167,17 @@ public:
 
   // -- cells -> source (unproject); default = refuse -------------------------
 
+  /// Would applyContentChange even attempt @p node? The cheap probe
+  /// ProjectionSession::editContent calls so a non-writable cell
+  /// refuses at the edit gesture rather than at commit. Composite
+  /// lenses follow the same routing their applyContentChange does.
+  /// Default false (read-only lens); true is no guarantee -- the
+  /// apply can still refuse on the content (a value that fails to
+  /// parse, a row that vanished).
+  [[nodiscard]] virtual bool canApply(const ExternalKey & /*node*/) const {
+    return false;
+  }
+
   /// Apply a content change back to the source. Returns the (possibly
   /// relocated) ExternalKey, or an error. Default: refuse (read-only lens).
   [[nodiscard]] virtual std::expected<ExternalKey, std::string>

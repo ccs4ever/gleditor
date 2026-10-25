@@ -128,6 +128,12 @@ public:
   // -- promotion (spec section 6)
   // -------------------------------------------------
 
+  /// The writable probe: a `<row>:v:<col>` value key whose row is
+  /// materialized by a browsed (t:-scope), pk/rid-addressed query and
+  /// names a column the row carries -- applyContentChange's gate
+  /// without the write.
+  [[nodiscard]] bool canApply(const ExternalKey &node) const override;
+
   /// Value-cell writeback (the spec's write phase): a `<row>:v:<col>`
   /// key -> `UPDATE <table> SET <col>=? WHERE <pk-address>` on
   /// pk/rid-addressed rows. Row cells, h:-keyed rows, and q:-scoped

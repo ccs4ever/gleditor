@@ -846,8 +846,11 @@ TEST(SqlLensTest, RowCellAndReadOnlyBackendRefuseWrites) {
   ASSERT_TRUE(l->browse("invoices").has_value());
   ProjectionSession session(std::move(lens), core);
   const auto rowKey = "sql:sqlite:" + l->dbid() + ":t:invoices:pk:i:1";
-  ASSERT_TRUE(session.editContent(rowKey, "x").has_value());
-  EXPECT_FALSE(session.commit().has_value());
+  // The refusal lands at the edit: a row key isn't a :v: value cell,
+  // so canApply says no and nothing dirties.
+  EXPECT_FALSE(session.editContent(rowKey, "x").has_value());
+  EXPECT_EQ(session.dirtyCount(), 0u);
+  EXPECT_TRUE(session.commit().has_value()); // nothing dirty: Ok(0)
   // And the read-only backend refuses at the port: execWrite declines.
   auto ro = zigzag::openSqliteBackend(db.path.string());
   ASSERT_TRUE(ro.has_value());

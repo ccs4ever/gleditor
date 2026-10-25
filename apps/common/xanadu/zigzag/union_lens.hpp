@@ -45,6 +45,9 @@ public:
   [[nodiscard]] std::vector<std::pair<std::string, std::string>>
   staleAttributes(const ExternalKey &key) const override;
   [[nodiscard]] bool pollChanged() const override;
+  /// First-success, matching applyContentChange's routing: any child
+  /// that would attempt the key makes the union writable for it.
+  [[nodiscard]] bool canApply(const ExternalKey &node) const override;
   /// First child that takes the edit wins; a refusal tries the next
   /// (a lens that doesn't own the key refuses by contract).
   [[nodiscard]] std::expected<ExternalKey, std::string>

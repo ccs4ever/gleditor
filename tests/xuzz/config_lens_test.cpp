@@ -213,10 +213,12 @@ TEST(ConfigLensTest, CommitRefusesContainerAndBadScalars) {
       std::make_unique<ConfigLens>(path.string()), core);
   const auto objKey   = "cfg:" + path.string() + ":/render";
   const auto widthKey = "cfg:" + path.string() + ":/ui/fontSize";
-  // A container cell's content is a rendered label -- not writable.
-  ASSERT_TRUE(session->editContent(objKey, "{}").has_value());
-  EXPECT_FALSE(session->commit().has_value());
-  // A non-integer on an int field refuses too.
+  // A container cell's content is a rendered label -- not writable;
+  // canApply refuses it at editContent, before anything dirties.
+  EXPECT_FALSE(session->editContent(objKey, "{}").has_value());
+  EXPECT_EQ(session->dirtyCount(), 0u);
+  // A non-integer on an int field is a writable cell with an
+  // unwritable value -- the refusal waits for commit.
   ASSERT_TRUE(session->editContent(widthKey, "abc").has_value());
   EXPECT_FALSE(session->commit().has_value());
   fs::remove(path);

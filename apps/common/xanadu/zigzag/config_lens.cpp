@@ -6,6 +6,7 @@
 
 #include "common/xanadu/zigzag/config_lens.hpp"
 
+#include <algorithm>
 #include <charconv>
 #include <cmath>
 #include <cstring>
@@ -721,6 +722,24 @@ std::expected<void, std::string> coerceScalar(JsonValue &v,
 }
 
 } // namespace
+
+bool ConfigLens::canApply(const ExternalKey &node) const {
+  // A seeded document has no file to write. Otherwise the last
+  // enumeration's snapshot says which keys are scalar members: only
+  // "cfg.val" cells are editable -- a container's content is a
+  // rendered label, and the file root is the document, not a member.
+  if (seed_.has_value()) {
+    return false;
+  }
+  for (const auto &n : nodes_) {
+    if (n.key == node) {
+      return std::ranges::any_of(n.attrs, [](const auto &attr) {
+        return attr.first == "d.role" && attr.second == "cfg.val";
+      });
+    }
+  }
+  return false;
+}
 
 std::expected<ExternalKey, std::string>
 ConfigLens::applyContentChange(const ExternalKey &node,

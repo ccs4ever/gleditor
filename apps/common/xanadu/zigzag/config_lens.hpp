@@ -69,6 +69,11 @@ public:
   [[nodiscard]] std::optional<int> waitableFd() const noexcept override {
     return watch_.waitableFd();
   }
+  /// The writable probe: a scalar ("cfg.val") member of an unseeded
+  /// document -- container cells and the file root refuse at the edit
+  /// gesture, not at commit.
+  [[nodiscard]] bool canApply(const ExternalKey &node) const override;
+
   /// Write a scalar edit back to the file at the key's JSON pointer --
   /// the unproject half. Container cells refuse (their content is a
   /// rendered label, not an editable member); the value's JSON type
