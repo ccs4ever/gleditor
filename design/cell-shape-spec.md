@@ -1,4 +1,4 @@
-# Cell-Shape Specification: One Neighborhood-Match Kernel for the Vortex Frontends (v1.4)
+# Cell-Shape Specification: One Neighborhood-Match Kernel for the Vortex Frontends (v1.5)
 
 A design specification for the **shared cell-shape kernel** — `zigzag/cell_shape.{hpp,cpp}`, beside
 `session_ops.hpp` (`apps/common/xanadu/zigzag/`) in the "one copy of the protocol" role — and for how
@@ -181,6 +181,8 @@ struct ShapeExpr {
   ShapeBase base{ShapeBase::Open};
   std::size_t minValence{0};          // `*` asserts ≥1 (the spec's "has any connection")
   std::vector<ShapeField> fields;
+  std::vector<std::shared_ptr<ShapeExpr>> subShapes;   // same-cell conjunction — a bare nested `{…}`
+                                                        // has no dim to hang a field on; `$shape`/`func(.)`/`d.x = expr`/`d.a<=>d.b` rules also land here (shape-level, not field-level — the `std::function` arm can't carry them since they have no hop and no neighbor)
 };
 
 /// Flat name → bound cells; nested binds merge into the same map (D3).
@@ -528,7 +530,7 @@ bindName := "$" ident | ident
 value    := scalar | "$" ident | "{" shape "}"
 ```
 
-`{ }` = Closed/valence-0, `{*}` = valence>=1, `{!*}` = forbidden-wildcard; a bare nested `{...}` re-matches the SAME cell (conjunction — a new semantics for the same syntax, since the spec'd `{$a,$b}` composition is rule-union not conjunction); `dir dim: {...}` descends to the neighbor. (a neutral parser producing `std::expected<ShapeExpr, …>` through an injected dim resolver; the VQL `ShapeLiteral` parser can't be a dependency — it's frontend-specific — so each frontend lowers its own syntax through the shared parse or its own) — `field := dir? dim (":" value | bindName nestedShape? | "!" )` where `bindName` is a `$`-sigil identifier (VQL/vicon) or a bare identifier (VPL/vprolog — the sigil is frontend-lexical, the *shape* is shared; the VQL surface needs the S2 grammar addition for `+d.dim: $name {…}` — after `targetValue = $name`, the `{` doesn't parse today) | `⌿` copies — a mask preserving identity needs the cell-list mode first |
+`{ }` = Closed/valence-0, `{*}` = valence>=1, `{!*}` = forbidden-wildcard; a bare nested `{...}` re-matches the SAME cell (conjunction — a new semantics for the same syntax, since the spec'd `{$a,$b}` composition is rule-union not conjunction); `dir dim: {...}` descends to the neighbor. (a neutral parser producing `std::expected<ShapeExpr, …>` through an injected dim resolver; the VQL `ShapeLiteral` parser can't be a dependency — it's frontend-specific — so each frontend lowers its own syntax through the shared parse or its own) — `field := dir? dim (":" value | bindName nestedShape? | "!" )` where `bindName` is a `$`-sigil identifier (VQL/vicon) or a bare identifier (VPL/vprolog — the sigil is frontend-lexical, the *shape* is shared; the VQL surface needs the S2 grammar addition for `+d.dim: $name {…}` — no AST home today (`DimensionShapeRule.targetValue` is one `ValueExpr` — can't hold both a bind name AND a nested `ShapeLiteral`, `ast.hpp:139`); the lowering needs `ShapeField{mode=Bind, expected=nested}` — S2's grammar row must extend the rule shape (a `bindName` + `targetValue` pair, or `bindName` on the field carrying the nested `ShapeExpr`)) | `⌿` copies — a mask preserving identity needs the cell-list mode first |
 | S4 | `vicon/compiler.{hpp,cpp}` + `vicon/driver.{hpp,cpp}` | `match`/`descendants` builtins on the V1 request/`V2` gate rows — `match` produces subject-then-binds through the site queue; `descendants` BFS over `neighbours` under `traversalBound` | The second-`Halt` protocol is the only host channel |
 | S5 | `vortex_stdlib.{hpp,cpp}` | `lens_shape(C, Pattern)` arm — term→`ShapeExpr` lowering, `bind`/`sub` vars unified with `makeScalarCell(int64(…))` under mark/unify/release; dims via `findDimension` (no mint) | A builtin keeps cells out of `unify` (vlog.cpp:86-94's clone-tail hazard) |
 | S6 | `vlace/compiler.{hpp,cpp}` | `shapeOf`/`matchShape` natives + `Shape`/`ShapeSpec`/`Constraint`/`Field`/`ShapeBase` ctor registration under P1's reserved-tag discipline; lazy `List (String,Cell)` result | The ADT surface lives only in `installXanadu` |
