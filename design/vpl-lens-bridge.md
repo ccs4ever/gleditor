@@ -1,4 +1,4 @@
-# VPL Lens Bridge: Lenses as System Verbs in an Array Language (v1.12)
+# VPL Lens Bridge: Lenses as System Verbs in an Array Language (v1.13)
 
 A design specification for how a **VPL program** — not the `vpl` REPL's `:lens` verbs — opens,
 traverses, mounts, writes back, and releases projection lenses. Design deliverable only: the
@@ -251,7 +251,7 @@ only through `LensRepl`'s `MetaLens` over a `MetaSource` fold. `vpl` already bui
 the coordinator (`main.cpp:449-461`), so `⎕META 'x'` is supportable: `VPLEngine` holds an **owned**
 fold slot — the `MetaLens` *borrows* `metaFold_`, so the fold must outlive the session
 (`lens_repl.hpp:102-110` orders the members for exactly this; the engine needs the same
-`std::optional<Manifold>` slot, injected from `main.cpp`); absent one it refuses like any unknown
+`std::optional<Manifold>` slot **per session** (the registry entry or the session/`MetaLens` owns it — a second `⎕META` open can't overwrite a live session's fold; injected from `main.cpp`); absent one it refuses like any unknown
 scheme.
 
 ### D7 — every VPL write site on an existing cell checks `sessionFor` — at both layers
@@ -279,7 +279,7 @@ Rule — same as VQL D7, **two layers**:
    half-writes a mixed rank. Refusal throws → `Error:` at `main.cpp:871-874`, not per-cell drop: a
    `⍴`/`↑` over a mixed rank aborts loudly rather than relinking a subset.
 1. The compiled path: `VortexVM` runs `core_.link` (`vortex_vm.cpp:526-546`), so the funnel *inside
-   `VortexCore`'s write methods* — VQL's Q7B row, shared — covers `--engine vortex` whole.
+   `ArenaManifold`'s write methods* — VQL's Q7B row, shared (the `sessionFor` funnel inside `shadow()` — every existing-cell mutator: `link`/`linkChain`/`unlink`/`insertIntoRank`/`setValueBits`/`setContent`; `VortexCore::link` is a thin wrapper over `arena_.link` and `VortexVM`/`VPLCompiler` write the arena directly) — covers `--engine vortex` whole.
    `guardWritable` is still required in the interpreter: its writes never cross `VortexCore::link` — and the `ArenaManifold` funnel needs `masterOf(cell)` (a clone *of* a session cell lands its writes on the master).
 
 The correct content write is `⎕EDIT`; projected structure is the session's to maintain.
@@ -318,7 +318,7 @@ of session-unowned space as ordinary cells. `⎕UNION` (D6) is the *content* uni
 | `⎕LOG` (`log.`)         | path or rank                                                    | roots rank                  | `log:`                                                                                                                                                                                                              |
 | `⎕JOURNAL` (`journal.`) | unit spec or rank                                               | roots rank                  | `journal:` / `journal:<unit>`                                                                                                                                                                                       |
 | `⎕CFG` (`cfg.`)         | path or rank                                                    | roots rank                  | `cfg:`                                                                                                                                                                                                              |
-| `⎕UNION` (`union.`)     | rank of child specs — `('dir:/a' 'cfg:/b')`                     | union roots rank            | one `openLensUri` input per element — no pipe-delimited sub-grammar; children dedupe per child source identity                                                                                                        |
+| `⎕UNION` (`union.`)     | rank of `('kw' 'spec')` pairs — `⎕UNION (('dir' '/a') ('cfg' '/b'))`                     | union roots rank            | one `openLensUri` input per element — no pipe-delimited sub-grammar; children dedupe per child source identity                                                                                                        |
 | `⎕META` (`meta.`)       | spec string                                                     | roots rank                  | the `LensRepl`/`MetaSource` path (D6) — `meta:` is **not** a `kSchemes` scheme                                                                                                                                      |
 | `⎕LENS` (`lens.`)       | monadic: bare path — auto-detect; dyadic `'kw' ⎕LENS 'spec'`    | roots rank                  | monadic keeps `lens_uri.cpp:108-124`'s dir/file/delegate sniff (`'foo.db'` → `SqlLens`); a `scheme:`-prefixed operand refuses; dyadic serves `registerLensScheme` keywords — `'sql' ⎕LENS '/x.db'` ≡ `⎕SQL '/x.db'` |
 | `⎕STORE` (`store.`)     | path string, or rank of paths — dyadic: `'label' ⎕STORE 'path'` | rank-0 view of the rep cell | `loadAndAddStore` + `proxyFor`/NameMatch sweep + `setStore` for `⍫` (D8); dedupe by canonical path; needs the coordinator injected (Q6)                                                                             |
