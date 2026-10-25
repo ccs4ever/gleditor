@@ -1,4 +1,4 @@
-# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v2.2)
+# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v2.3)
 
 A design specification for how a **VQL program** — not the `vquery` REPL — opens, traverses, mounts,
 writes back, and releases projection lenses. Design deliverable only: the signatures are proposals;
@@ -35,7 +35,7 @@ materialize a page → query ends`.
 | `--lens <uri>` | programmatic raster — `runLensRaster` |
 | `$lens` | `setVariable("lens", *lensRepl.root())` — the open lens's root bound in `env_` (`vquery/main.cpp:525-526`) — binds `roots().front()` only (`lens_repl.hpp:82-86`) |
 | `path/fn(...)` | step-function dispatch — `evaluateStep` applies builtins to `currentCells` (`vql_engine.cpp:1466-1540`); the mutating `link(...)` is the precedent |
-| `StoreGeneratorCall` | `anchor.generator` in `resolveAnchor` (`vql_engine.cpp:938-957`) — the open seam |
+| `StoreGeneratorCall` | `anchor.generator` in `resolveAnchor` (`vql_engine.cpp:938-957`, inside `resolveAnchor` at `:846`) — the open seam |
 | `KwLens` | reserved token (`token.hpp:106`, `lexer.cpp:779-780`) — lexed but parser-unreachable (`parseAnchorNode` :523-528 has no `lens` keyword entry) |
 
 VQL has **no cell-identity predicate** (`cellEq` — `=` on cells stringifies operands and compares
@@ -60,7 +60,9 @@ Every gesture on a *cell* is a **step function** — `path/lensmount`, `$cell/le
 `vquery` builds a fresh `VQLEngine` per query (`main.cpp:522`) — an engine-owned `sessions_` dies
 between `lens("…")` (query N) and `lensmount($cell)` (query N+1). The session registry belongs on
 the **coordinator's core** — the same place `LensRepl`'s session lives (`main.cpp:424`), so
-REPL-verb sessions and code-opened sessions coexist. The engine gets a `sessions()` accessor over
+REPL-verb sessions and code-opened sessions coexist. The registry is `shared_ptr`-backed —
+`unique_ptr` can't hold the non-owning `LensRepl` session Q5 injects (vlace uses `shared_ptr`,
+`compiler.hpp:225`). The engine gets a `sessions()` accessor over
 the coordinator's registry (or a `shared_ptr<vector<unique_ptr<ProjectionSession>>>` the frontend
 owns and injects); `sessionFor(cell)` scans it calling `ownsCell` (the P3 pattern).
 
@@ -176,27 +178,34 @@ session's to maintain (Q8).
 // open a dir lens; $lens binds the root
 lens("/tmp/lensj")
 
-// walk the listing
-$lens/d.contains/d.seq
+// walk the listing -- /d.seq::rank re-seeks the head, reaching ALL
+// children (d.contains alone yields only the firstborn link's target)
+$lens/d.contains/d.seq::rank
 
 // mount git under the repo cell (find it first)
-$lens/d.contains[cellkey(.) = "fs:52:794498"]/lensmount
+$lens/d.contains/d.seq::rank[cellkey(.) = "fs:52:794498"]/lensmount
 
 // query commits under the delegate root
-$lens/d.contains[cellkey(.) = "fs:52:794498"]/d.contains/d.contains
+$lens/d.contains/d.seq::rank[cellkey(.) = "fs:52:794498"]/d.contains/d.seq::rank
 
 // back out: unmount under the repo cell
-$lens/d.contains[cellkey(.) = "fs:52:794498"]/lensunmount
+$lens/d.contains/d.seq::rank[cellkey(.) = "fs:52:794498"]/lensunmount
 
 // a sql: lens: schema-only until browsed
 lens("sql:/tmp/lensj/data.db")
 $lens/d.contains/lensbrowse("t")
-$lens/d.contains/d.contains/d.contains
+$lens/d.contains/d.seq::rank/d.contains/d.seq::rank
 
 // edit + commit a cell
-$lens/d.contains/d.contains/d.contains[cellscalar(.) = 1]/lensedit("99")
+$lens/d.contains/d.seq::rank/d.contains/d.seq::rank[cellscalar(.) = 1]/lensedit("99")
 $lens/d.contains/lenscommit
 ```
+
+**The `d.contains`/`d.seq` asymmetry**: `d.contains` is the single firstborn link; siblings chain
+on `d.seq`, and `traverseDimension` starts *after* the start cell — so `/d.contains/d.seq` yields
+children 2..N only. `/d.contains/d.seq::rank` (a `Placement::Rank` suffix, `parser.cpp:963`,
+`traverseDimension` re-seeks the head, `vql_engine.cpp:1142-1153`) yields the whole run. Every
+"all children" example needs the `::rank` form.
 
 A step function takes no arg when the relation *is* the arg — `path/lensmount` mounts every cell in
 the relation. `lensedit("99")` takes the new text. `lensbrowse("t")` takes the table name.
@@ -220,7 +229,7 @@ the relation. `lensedit("99")` takes the new text. `lensbrowse("t")` takes the t
 
 | Q | files | change | why not caller/vql |
 |---|---|---|---|
-| Q1 | `vql_engine.{hpp,cpp}` | `StoreGenerator` `lens` dispatch → `openLensUri` + `List` roots + `$lens` auto-bind; step-function dispatch for `lensmount`/`lensunmount`/`lensnext`/`lensstub`/`lenscommit`/`lensedit`/`lensrevert`/`lensbrowse`/`lensdirty`/`lensclose` in `evaluateStep`'s `FunctionInvocation` arm; mutating-step last-position check (parser/type-contract) | The generator + step seams live only here. |
+| Q1 | `vql_engine.{hpp,cpp}` | `StoreGenerator` `lens` dispatch → `openLensUri` (intercepted **before** the silent named-store→home fallback at `:944-954`) + `List` roots + `$lens` auto-bind; step-function dispatch for `lensmount`/`lensunmount`/`lensnext`/`lensstub`/`lenscommit`/`lensedit`/`lensrevert`/`lensbrowse`/`lensdirty`/`lensclose` in `evaluateStep`'s `FunctionInvocation` arm; mutating-step last-position check (parser/type-contract) | The generator + step seams live only here. |
 | Q2 | `vql_engine.{hpp,cpp}` | `cellkey`/`celleq`/`cellscalar` as `FunctionInvocation` value-expr builtins + `PredicateTest::FunctionInvocation` dispatch for `?fn()` | Same engine, different surface. |
 | Q3 | `vql/{lexer,parser,token}.{hpp,cpp}` | `lens` joins `parseAnchorNode`'s generator keywords (`:523-528`); the step names stay unreserved `Identifier`-steps | `KwLens` is lexed but unreachable today. |
 | Q4 | `vql_engine.{hpp,cpp}` + coordinator | `sessions_`/`sessionFor` on the coordinator's session registry (per-query engine sees it); `$lens` vector-bind; `LensRepl` exposes `session()` so the REPL's session joins the registry | The session-outlives-engine requirement + shared `:lens`/`lens()` recency. |
