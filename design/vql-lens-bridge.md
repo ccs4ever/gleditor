@@ -1,4 +1,4 @@
-# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v5.9)
+# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v6.0)
 
 A design specification for how a **VQL program** — not the `vquery` REPL — opens, traverses, mounts,
 writes back, and releases projection lenses. Design deliverable only: the signatures are proposals;
@@ -47,7 +47,7 @@ the REPL's `LensRepl` owns the one session `$lens` binds.
 
 ### D1 — a `*Lens` generator is the sole-anchor generator; gestures are step functions
 
-a `*Lens` generator is a `StoreGeneratorCall` anchor — `resolveAnchor` calls `openLensUri` (all schemes;
+a `*Lens` generator is a `StoreGeneratorCall` anchor — a **normal generator** (`parseAnchorNode` parses `Kw*` + comma-separated `ValueExpr` args, `:523-545` — variadic by construction; `lens("union",a,b,c)` parses today, same seam as `current`/`local`/`topic`). `resolveAnchor` calls `openLensUri` (all schemes;
 P6's guard refuses `meta:`/unrecognized `scheme:`), projects into the engine's `core_`, yields the
 session's projected roots, and binds `$lens` (the `setVariable` vector overload for `union:` forests).
 a `*Lens` generator is itself session-mutating (it opens a session) but as an anchor it's the query's source —
@@ -242,6 +242,7 @@ session's to maintain (Q7B).
 | `cellKey(cell)` | `Cell` | `String`/empty | (arg resolves to exactly one cell — N≠1 → `TypeContractError`) `ExternalKey` if a projected node cell; empty/`""` yield for attr/authored (VQL has no `NULL` — `CellValue` is `{string,double,int64_t,bool}`; note `cellKey($c) = ""` is *true* for attr cells — a residual wrong-answer comparison, the `cellKey`-vs-`""` collision) |
 | `cellEq(a, b)` | `Cell, Cell` | `Bool` | identity on `CellRef` — `=` compares rendered text; each arg must resolve to exactly one cell (`cellsOfValueExpr` N≠1 → `TypeContractError`) |
 | `cellScalar(cell)` | `Cell` | `Int`/`Float`/`Bool`/empty | scalar `valueBits` — arg resolves to exactly one cell; empty yield on span-cells and non-lens kinds |
+| `keyCell(key)` | `String` | `Cell`/empty | `cellFor(ExternalKey)` — the `cellKey` inverse; the stable cross-line handle (literal anchors can't reach ephemeral cells); resolves through `sessionFor`-style scan of the registry |
 
 ## 5. Worked example
 
