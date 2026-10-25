@@ -1,4 +1,4 @@
-# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v2.9)
+# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v3.0)
 
 A design specification for how a **VQL program** — not the `vquery` REPL — opens, traverses, mounts,
 writes back, and releases projection lenses. Design deliverable only: the signatures are proposals;
@@ -53,7 +53,7 @@ session's projected roots, and binds `$lens` (the `setVariable` vector overload 
 `lens()` is itself session-mutating (it opens a session) but as an anchor it's the query's source —
 `lens("u")/d.contains` is the natural open+traverse.
 
-Every gesture on a *cell* is a **step function** — `path/lensmount()`, `$cell/lensnext()`, `path/lensedit("text")` — mapping over the relation: `$cells/lensmount()` mounts under each cell (N mounts, per-cell yield; a per-cell refusal drops that cell, not the whole relation — `Err`-per-cell → empty for that cell). **Session-scoped ops dedupe**: `lenscommit`/`lensbrowse`/`lensunmount` resolve each input cell to its (session[, mount]) and run once per distinct target — arg-taking variants (`$cells/lensbrowse($c)`) take the arg from the first cell of each distinct target group (per-cell arg variance is silently first-wins — noted) — `$cells/lenscommit()` over N cells of one session commits once, not N times (yielding `[n]` not `[n,0,0…]`) — dispatched in `evaluateStep`'s `FunctionInvocation` arm (`vql_engine.cpp:1390+`), which already receives `currentCells` and already mutates (`link(...)` at `:1466-1540`); cell-typed *args* resolve via `cellsOfValueExpr` (`:362-381`), not `evaluateValueExpr` (which renders cells to `CellValue`, destroying the identity `celleq` tests). The arg is the relation it filters — the "pipe" semantics without a pipe token (`|` is union-type-only, `parser.cpp:1603`). A step function needs no keyword — it's an `Identifier + '('` step (`parser.cpp:912-915`), so `lensmount`/`lensnext`/etc. stay *unreserved* names, not `Kw*` tokens.
+Every gesture on a *cell* is a **step function** — `path/lensmount()`, `$cell/lensnext()`, `path/lensedit("text")` — mapping over the relation: `$cells/lensmount()` mounts under each cell (N mounts, per-cell yield; a per-cell refusal drops that cell, not the whole relation — `Err`-per-cell → empty for that cell). **Session-scoped ops dedupe**: `lenscommit`/`lensbrowse`/`lensunmount` resolve each input cell to its (session[, mount]) and run once per distinct target (`lensnext`/`lensstub` are deliberately **not** deduped — N cells in one mount materialize N pages, the intended per-cell paging) — arg-taking variants (`$cells/lensbrowse($c)`) take the arg from the first cell of each distinct target group (per-cell arg variance is silently first-wins — noted) — `$cells/lenscommit()` over N cells of one session commits once, not N times (yielding `[n]` not `[n,0,0…]`) — dispatched in `evaluateStep`'s `FunctionInvocation` arm (`vql_engine.cpp:1390+`), which already receives `currentCells` and already mutates (`link(...)` at `:1466-1540`); cell-typed *args* resolve via `cellsOfValueExpr` (`:362-381`), not `evaluateValueExpr` (which renders cells to `CellValue`, destroying the identity `celleq` tests). The arg is the relation it filters — the "pipe" semantics without a pipe token (`|` is union-type-only, `parser.cpp:1603`). A step function needs no keyword — it's an `Identifier + '('` step (`parser.cpp:912-915`), so `lensmount`/`lensnext`/etc. stay *unreserved* names, not `Kw*` tokens.
 
 ### D2 — Sessions live on the coordinator, not the per-query engine
 
@@ -146,7 +146,9 @@ calls `SqlLens::browse(tableName)` (`sql_lens.cpp:442`) through a new
 `session_ops::sessionBrowseAt(session, key, table)` helper — the key does the mount-scoped routing
 (`mountBoundary` → `windowedFor` → delegate, vlace's `mountedLens` resolver at `compiler.cpp:
 1441-1470`, inlined today) → `dynamic_cast<SqlLens*>` → `isBrowsed` → `browse` → `refresh()`;
-the yield needs the new query's root cell — `browse` returns `expected<void>` (`sql_lens.cpp:442`)
+`sessionBrowseAt` is dirty-gated like the other mutating gestures (vlace's `lensBrowse` has no
+gate today — VQL's goes through `session_ops`, so it inherits one; consistent). The yield needs
+the new query's root cell — `browse` returns `expected<void>` (`sql_lens.cpp:442`)
 and `queries_` keys are private, so the helper needs a browse-returns-key or a `SqlLens` root-key
 accessor (registered in Q6). `session_ops` gains a `.cpp` for this (a `SqlLens` complete type
 would pull `sql_lens.hpp`/`sql_backend.hpp` into the generic header otherwise).
@@ -217,7 +219,7 @@ session's to maintain (Q7B).
 
 | fn | args | returns | notes |
 |---|---|---|---|
-| `cellkey(cell)` | `Cell` | `String`/empty | `ExternalKey` if a projected node cell; empty yield for attr/authored (VQL has no `NULL` — `CellValue` is `{string,double,int64_t,bool}`) |
+| `cellkey(cell)` | `Cell` | `String`/empty | `ExternalKey` if a projected node cell; empty/`""` yield for attr/authored (VQL has no `NULL` — `CellValue` is `{string,double,int64_t,bool}`; note `cellkey($c) = ""` is *true* for attr cells — a residual wrong-answer comparison, the `cellkey`-vs-`""` collision) |
 | `celleq(a, b)` | `Cell, Cell` | `Bool` | identity on `CellRef` — `=` compares rendered text; each arg must resolve to exactly one cell (`cellsOfValueExpr` N≠1 → `TypeContractError`) |
 | `cellscalar(cell)` | `Cell` | `Int`/`Float`/`Bool`/empty | scalar `valueBits`; empty yield on span-cells and non-lens kinds (`Timestamp`/handle kinds — scope: lens-minted kinds only) |
 
@@ -250,11 +252,13 @@ $lens/d.contains/d.seq::rank/d.contains/d.seq::rank[cellscalar(.) = 1]/lensedit(
 $lens/d.contains/lenscommit()
 ```
 
-**The `d.contains`/`d.seq` asymmetry**: `d.contains` is the single firstborn link; siblings chain
-on `d.seq`, and `traverseDimension` starts *after* the start cell — so `/d.contains/d.seq` yields
-children 2..N only. `/d.contains/d.seq::rank` (a `Placement::Rank` suffix, `parser.cpp:963`,
-`traverseDimension` re-seeks the head, `vql_engine.cpp:1142-1153`) yields the whole run. Every
-"all children" example needs the `::rank` form.
+**The `d.contains` spine**: `d.contains` is the single firstborn link and `traverseDimension`'s
+Default arm walks it *transitively* (`linkedMinting` iterated, `:1104-1112`) — `/d.contains` from a
+dir root yields the whole left spine (firstborn, its firstborn, …), not just the firstborn, whenever
+a firstborn has children. `/d.contains/d.seq::rank` (a `Placement::Rank` suffix, `parser.cpp:963`,
+re-seeks the head then streams, `:1142-1153`) yields the sibling runs at *every* spine level —
+root's children ∪ firstborn-dir's children ∪ … — a multi-level union when dirs nest (the common
+case). The `[cellkey(.) = …]` filters in §5 are what scope each example back to one level.
 
 A step function takes no arg when the relation *is* the arg — `path/lensmount()` mounts every cell in
 the relation. **The parens are mandatory**: a bare `path/lensmount` parses as a `SignedDimensionStep`
