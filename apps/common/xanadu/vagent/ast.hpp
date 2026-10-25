@@ -380,7 +380,10 @@ struct VarDecl {
   SourceLocation loc{};
 };
 struct LifecycleDef {
+  enum class Kind { Install, Uninstall, Upgrade };
+  Kind kind{Kind::Install};
   bool uninstall{false};
+  std::optional<std::string> param;
   ExprPtr body;
   SourceLocation loc{};
 };

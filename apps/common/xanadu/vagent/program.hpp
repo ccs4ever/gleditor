@@ -23,6 +23,13 @@
 #include "common/xanadu/vagent/ast.hpp"
 #include "common/xanadu/vagent/checker.hpp"
 
+namespace xanadu {
+class Store;
+}
+namespace zigzag {
+class Manifold;
+}
+
 namespace xanadu::vagent {
 
 /// Bumped when the compiled shape of a program changes meaning, so a ref made
@@ -40,6 +47,17 @@ public:
   [[nodiscard]] std::expected<CompiledAgent, std::string>
   instantiate(zigzag::vortex::WorkerContext &context,
               std::string_view agentType) override;
+
+  [[nodiscard]] const zigzag::Manifold *programManifold() const noexcept {
+    return programManifold_.get();
+  }
+  [[nodiscard]] const xanadu::Store *programStore() const noexcept {
+    return programStore_.get();
+  }
+  [[nodiscard]] const std::map<std::string, CompiledAgent> &
+  agents() const noexcept {
+    return agents_;
+  }
 
   /// `vagent.belief_event_depth` for agents instantiated afterwards.
   CompiledProgram *setBeliefEventDepth(std::size_t rounds) noexcept {
@@ -61,13 +79,21 @@ public:
   [[nodiscard]] bool declares(std::string_view agentType) const;
 
 private:
-  CompiledProgram(Unit unit, CheckedUnit checked, std::string ref)
+  CompiledProgram(Unit unit, CheckedUnit checked, std::string ref,
+                  std::shared_ptr<xanadu::Store> programStore       = nullptr,
+                  std::shared_ptr<zigzag::Manifold> programManifold = nullptr,
+                  std::map<std::string, CompiledAgent> agents       = {})
       : unit_(std::move(unit)), checked_(std::move(checked)),
-        ref_(std::move(ref)) {}
+        ref_(std::move(ref)), programStore_(std::move(programStore)),
+        programManifold_(std::move(programManifold)),
+        agents_(std::move(agents)) {}
 
   Unit unit_;
   CheckedUnit checked_;
   std::string ref_;
+  std::shared_ptr<xanadu::Store> programStore_;
+  std::shared_ptr<zigzag::Manifold> programManifold_;
+  std::map<std::string, CompiledAgent> agents_;
   std::size_t beliefEventDepth_{kDefaultBeliefEventDepth};
   std::size_t conditionFuel_{kDefaultConditionFuel};
   std::int64_t maintainBackoffMs_{kDefaultMaintainBackoffMs};

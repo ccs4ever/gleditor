@@ -36,6 +36,7 @@ constexpr std::array kDelivery     = {PreludeField{"to", "Agent"},
                                       PreludeField{"cause", "Str"}};
 constexpr std::array kOrphaned     = {PreludeField{"former_parent", "Agent"}};
 constexpr std::array kMoved        = {PreludeField{"name", "Agent"}};
+constexpr std::array kUpgrade      = {PreludeField{"from_version", "Str"}};
 
 constexpr std::array kEvents = {
     PreludeEvent{"Initialize", {}},
@@ -52,6 +53,7 @@ constexpr std::array kEvents = {
     PreludeEvent{"SpawnFailed", kChild},
     PreludeEvent{"DeliveryFailed", kDelivery},
     PreludeEvent{"Moved", kMoved},
+    PreludeEvent{"Upgrade", kUpgrade},
 };
 
 } // namespace

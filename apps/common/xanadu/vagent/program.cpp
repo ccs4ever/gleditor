@@ -4,8 +4,12 @@
 #include <random>
 
 #include "common/xanadu/merkle_ledger.hpp"
+#include "common/xanadu/store.hpp"
 #include "common/xanadu/vagent/compiler.hpp"
 #include "common/xanadu/vagent/parser.hpp"
+#include "common/xanadu/vortex/worker_context.hpp"
+#include "common/xanadu/zigzag/arena_manifold.hpp"
+#include "common/xanadu/zigzag/manifold.hpp"
 
 namespace xanadu::vagent {
 
@@ -40,7 +44,65 @@ CompiledProgram::fromSource(std::string_view source, std::string_view name) {
     }
     return std::unexpected(std::move(message));
   }
-  return CompiledProgram(std::move(*unit), std::move(*checked), refOf(source));
+
+  auto programStore = std::make_shared<xanadu::Store>();
+  auto curHead      = programStore->sliceGenesis(xanadu::MicroversionId{});
+  zigzag::vortex::WorkerContext stagingContext;
+  Compiler compiler(stagingContext.core);
+  std::map<std::string, CompiledAgent> stagingAgents;
+  for (const auto &[agentName, _] : checked->agents) {
+    auto compiled = compiler.compileAgent(*unit, agentName);
+    if (compiled) {
+      stagingAgents[agentName] = *compiled;
+    }
+  }
+
+  const auto dVars = stagingContext.arena.ensureDimension("d.vars");
+  auto prevCell    = stagingContext.core.home();
+  for (const auto &[agentName, compiled] : stagingAgents) {
+    (void)stagingContext.arena.link(prevCell, dVars, zigzag::DimVector::POS,
+                                    compiled.agentCell);
+    prevCell = compiled.agentCell;
+  }
+
+  const auto promoted = zigzag::promote(
+      *programStore, curHead, stagingContext.arena, stagingContext.core.home());
+  if (!promoted) {
+    return std::unexpected(
+        std::format("{}: failed to promote program store", name));
+  }
+
+  auto programManifold = std::make_shared<zigzag::Manifold>(
+      programStore->rebuildManifold(promoted->version));
+
+  std::map<std::string, CompiledAgent> persistentAgents;
+  for (const auto &[agentName, stagingAgent] : stagingAgents) {
+    CompiledAgent persistentAgent;
+    const auto remap = [&](zigzag::CellRef cell) -> zigzag::CellRef {
+      if (cell == zigzag::noCell) return zigzag::noCell;
+      auto it = promoted->mapping.find(cell);
+      return it != promoted->mapping.end() ? it->second : cell;
+    };
+    persistentAgent.agentCell     = remap(stagingAgent.agentCell);
+    persistentAgent.initEntry     = remap(stagingAgent.initEntry);
+    persistentAgent.dispatchEntry = remap(stagingAgent.dispatchEntry);
+    persistentAgent.haltOp        = remap(stagingAgent.haltOp);
+    persistentAgent.failOp        = remap(stagingAgent.failOp);
+    if (stagingAgent.continueEntry) {
+      persistentAgent.continueEntry = remap(*stagingAgent.continueEntry);
+    }
+    if (stagingAgent.failStepEntry) {
+      persistentAgent.failStepEntry = remap(*stagingAgent.failStepEntry);
+    }
+    if (stagingAgent.answerEntry) {
+      persistentAgent.answerEntry = remap(*stagingAgent.answerEntry);
+    }
+    persistentAgents[agentName] = persistentAgent;
+  }
+
+  return CompiledProgram(std::move(*unit), std::move(*checked), refOf(source),
+                         std::move(programStore), std::move(programManifold),
+                         std::move(persistentAgents));
 }
 
 bool CompiledProgram::declares(std::string_view agentType) const {
@@ -154,6 +216,15 @@ LocalHost::LocalHost(CompiledProgram program, Options options)
   program_.setBeliefEventDepth(options.settings.beliefEventDepth)
       ->setConditionFuel(options.settings.conditionFuel)
       ->setMaintainBackoffMs(options.settings.maintainBackoff.count());
+  if (program_.programManifold()) {
+    runtime_->setProgramResolver(
+        [this](std::string_view ref) -> const zigzag::Manifold * {
+          if (ref == program_.programRef()) {
+            return program_.programManifold();
+          }
+          return nullptr;
+        });
+  }
   runtime_->setAuthorizer(
       [this, instructions = options.maxInstructions,
        life](const identity::Fingerprint &, const ActorMessage &request)

@@ -42,8 +42,9 @@ using SourceLocation = ::xanadu::SourceLocation;
   X(Spawn, "spawn")           X(Stop, "stop")           X(Tell, "tell")        \
   X(Terminate, "terminate")   X(Then, "then")           X(To, "to")            \
   X(Uninstall, "uninstall")   X(Unmount, "unmount")     X(Untell, "untell")    \
-  X(Uses, "uses")             X(Var, "var")             X(Where, "where")      \
-  X(While, "while")           X(Within, "within")       X(Yield, "yield")
+  X(Upgrade, "upgrade")       X(Uses, "uses")           X(Var, "var")          \
+  X(Where, "where")           X(While, "while")         X(Within, "within")    \
+  X(Yield, "yield")
 // clang-format on
 
 enum class TokenKind : std::uint8_t {

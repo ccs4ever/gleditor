@@ -238,6 +238,7 @@ struct PromotionBudget {
 struct Promoted {
   xanadu::MicroversionId version;
   std::vector<CellRef> cells;
+  std::unordered_map<CellRef, CellRef> mapping{};
 };
 
 /**

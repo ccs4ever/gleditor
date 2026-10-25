@@ -743,12 +743,32 @@ Member Parser::parseMember(Container c) {
   }
   case TokenKind::On:
     if (c == Container::Skill && (peek(1).kind == TokenKind::Install ||
-                                  peek(1).kind == TokenKind::Uninstall)) {
+                                  peek(1).kind == TokenKind::Uninstall ||
+                                  peek(1).kind == TokenKind::Upgrade)) {
       advance();
       LifecycleDef l;
-      l.loc       = loc;
-      l.uninstall = advance().kind == TokenKind::Uninstall;
-      l.body      = parseBlockBody();
+      l.loc = loc;
+      if (cur().kind == TokenKind::Uninstall) {
+        l.kind      = LifecycleDef::Kind::Uninstall;
+        l.uninstall = true;
+        advance();
+      } else if (cur().kind == TokenKind::Upgrade) {
+        l.kind = LifecycleDef::Kind::Upgrade;
+        advance();
+        if (at(TokenKind::OpenParen)) {
+          advance();
+          l.param = expectName("a parameter name");
+          if (at(TokenKind::Colon)) {
+            advance();
+            (void)parseType();
+          }
+          expectClose(TokenKind::CloseParen);
+        }
+      } else {
+        l.kind = LifecycleDef::Kind::Install;
+        advance();
+      }
+      l.body = parseBlockBody();
       return l;
     }
     if (c == Container::Skill) {

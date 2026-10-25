@@ -227,4 +227,59 @@ TEST(VagentCli, HelpListsBothCommands) {
   EXPECT_NE(res.output.find("run"), std::string::npos);
 }
 
+TEST(VagentCli, CheckUpgradeAcceptsCompatibleChanges) {
+  REQUIRE_VAGENT(bin);
+  constexpr const char *v1 = R"vagent(
+module demo:compat
+agent A {
+  var x: Int := 1
+  var y: Str := "hello"
+}
+)vagent";
+  constexpr const char *v2 = R"vagent(
+module demo:compat
+agent A {
+  var x: Int := 10
+  var z: Float := 3.14
+}
+)vagent";
+  const auto p1            = writeSource("vagent_upgrade_v1.vagent", v1);
+  const auto p2            = writeSource("vagent_upgrade_v2.vagent", v2);
+  const auto res =
+      runProcess(bin + " check --upgrade " + p1.string() + " " + p2.string());
+  EXPECT_EQ(res.exitCode, 0) << res.output;
+  fs::remove(p1);
+  fs::remove(p2);
+}
+
+TEST(VagentCli, CheckUpgradeRejectsBreakingFieldTypeAndPredicateChanges) {
+  REQUIRE_VAGENT(bin);
+  constexpr const char *v1 = R"vagent(
+module demo:break
+predicate known(id: Str)
+agent A {
+  var x: Int := 1
+}
+)vagent";
+  constexpr const char *v2 = R"vagent(
+module demo:break
+predicate known(id: Int)
+agent A {
+  var x: Str := "now a string"
+}
+)vagent";
+  const auto p1            = writeSource("vagent_upgrade_break_v1.vagent", v1);
+  const auto p2            = writeSource("vagent_upgrade_break_v2.vagent", v2);
+  const auto res =
+      runProcess(bin + " check --upgrade " + p1.string() + " " + p2.string());
+  EXPECT_EQ(res.exitCode, 1) << res.output;
+  EXPECT_NE(res.output.find("field 'x' changed type"), std::string::npos)
+      << res.output;
+  EXPECT_NE(res.output.find("predicate 'known' parameter 'id' changed type"),
+            std::string::npos)
+      << res.output;
+  fs::remove(p1);
+  fs::remove(p2);
+}
+
 } // namespace

@@ -112,6 +112,9 @@ inline constexpr std::string_view kFieldConsumed = "$consumed";
 /// Set with `$terminating` by `terminate keeping children` (§4.5): the orderly
 /// stop then stages `Orphaned` to the children instead of `stop`.
 inline constexpr std::string_view kFieldKeepChildren = "$keep_children";
+/// Transient record of fields present in V1 but dropped in V2, accessible via
+/// dropped_field().
+inline constexpr std::string_view kFieldDroppedFields = "$dropped_fields";
 
 /// `$turn`'s value is a record with these fields: the turn time (Int,
 /// milliseconds since the epoch) and, for a message turn or host delivery,
@@ -133,6 +136,7 @@ inline constexpr std::string_view kEventImplicitOrdinal = "ordinal";
 
 inline constexpr std::string_view kEventInitialize = "Initialize";
 inline constexpr std::string_view kEventDestroy    = "Destroy";
+inline constexpr std::string_view kEventUpgrade    = "Upgrade";
 
 /// Content of a list value cell; distinguishes `[]` from the empty string.
 inline constexpr std::string_view kListContent = "[]";

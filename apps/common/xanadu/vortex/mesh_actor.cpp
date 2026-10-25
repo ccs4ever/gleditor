@@ -127,6 +127,11 @@ MeshActorRuntime *MeshActorRuntime::setSender(Sender sender) {
   return this;
 }
 MeshActorRuntime *
+MeshActorRuntime::setProgramResolver(ProgramManifoldResolver resolver) {
+  programResolver_ = std::move(resolver);
+  return this;
+}
+MeshActorRuntime *
 MeshActorRuntime::trustNode(std::string node,
                             xanadu::identity::Fingerprint identity) {
   trustedNodes_.insert_or_assign(std::move(node), identity);
@@ -185,7 +190,9 @@ MeshActorRuntime::spawn(const xanadu::identity::Fingerprint &identity,
   actor->owner        = identity;
   actor->grant        = *grant;
   actor->spawnRequest = request;
-  actor->context      = std::make_unique<WorkerContext>();
+  const zigzag::Manifold *baseManifold =
+      programResolver_ ? programResolver_(request.programRef) : nullptr;
+  actor->context = std::make_unique<WorkerContext>(baseManifold);
   // The opaque handle is derived from immutable spawn identity, never from
   // an arena address. Restart epoch and monotonic sequence prevent ABA reuse.
   actor->pid         = ActorPid{node_, content, epoch_, nextSpawn_++};
@@ -668,6 +675,57 @@ MeshActorRuntime::renew(const ActorPid &pid,
           grant->maxInstructions, std::numeric_limits<std::size_t>::max())),
       grant->maxOutputBytes);
   actor->grant        = *grant;
+  actor->stopped      = false;
+  actor->leaseExpired = false;
+  return {};
+}
+
+std::expected<void, ActorError>
+MeshActorRuntime::upgrade(const ActorPid &pid, const ActorGrant &newGrant,
+                          std::chrono::system_clock::time_point wallNow,
+                          const StateReconciler &reconciler) {
+  auto *actor = find(pid);
+  if (!actor || (actor->stopped && !actor->leaseExpired)) {
+    return std::unexpected(ActorError::UnknownProcess);
+  }
+  if (actor->running) {
+    return std::unexpected(ActorError::NotQuiescent);
+  }
+  if (newGrant.programRef.empty() || newGrant.baseRef.empty() ||
+      newGrant.maxInstructions == 0 || newGrant.maxCells == 0 ||
+      newGrant.maxOutputBytes == 0 || newGrant.maxOutputBytes > 32768 ||
+      newGrant.maxSolutions == 0 || newGrant.maxMailboxBytes == 0 ||
+      wallNow >= newGrant.expiresAt) {
+    return std::unexpected(ActorError::NotAuthorized);
+  }
+
+  const zigzag::Manifold *newBaseManifold =
+      programResolver_ ? programResolver_(newGrant.programRef) : nullptr;
+  auto newContext = std::make_unique<WorkerContext>(newBaseManifold);
+  if (actor->sourceLease && actor->checkpoint && actor->checkpoint->store) {
+    newContext->arena.setDefaultSpanReader(actor->checkpoint->store.get());
+  }
+  const auto initial = newContext->arena.cellCount();
+  if (newGrant.maxCells >= ephemeralBit - initial) {
+    return std::unexpected(ActorError::ResourceLimit);
+  }
+  newContext->arena.setExecutionLimits(
+      static_cast<std::uint32_t>(initial) + newGrant.maxCells,
+      static_cast<std::size_t>(std::min<std::uint64_t>(
+          newGrant.maxInstructions, std::numeric_limits<std::size_t>::max())),
+      newGrant.maxOutputBytes);
+
+  auto newStateRoot = reconciler(actor->pid, actor->context->arena,
+                                 actor->stateRoot, *newContext);
+  if (!newStateRoot) {
+    return std::unexpected(newStateRoot.error());
+  }
+
+  const auto entry    = newContext->arena.makeCell("actor:await-message");
+  actor->cursor       = newContext->vm.spawnCursor(entry, actor->pid.cursor);
+  actor->stateRoot    = *newStateRoot;
+  actor->context      = std::move(newContext);
+  actor->grant        = newGrant;
   actor->stopped      = false;
   actor->leaseExpired = false;
   return {};

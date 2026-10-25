@@ -135,6 +135,11 @@ public:
   using Executor   = std::function<std::expected<std::string, ActorError>(
       const ActorExecution &, WorkerContext &)>;
   using Sender = std::function<bool(std::string_view, const ActorMessage &)>;
+  using ProgramManifoldResolver =
+      std::function<const zigzag::Manifold *(std::string_view programRef)>;
+  using StateReconciler = std::function<std::expected<CellRef, ActorError>(
+      const ActorPid &pid, const ArenaManifold &oldArena,
+      std::optional<CellRef> oldStateRoot, WorkerContext &newContext)>;
 
   MeshActorRuntime(std::string node, std::uint64_t epoch,
                    ActorOptions options = {});
@@ -145,6 +150,7 @@ public:
   MeshActorRuntime *setAuthorizer(Authorizer authorizer);
   MeshActorRuntime *setExecutor(Executor executor);
   MeshActorRuntime *setSender(Sender sender);
+  MeshActorRuntime *setProgramResolver(ProgramManifoldResolver resolver);
   /// Install only after verifying the node's device delegation to this master.
   MeshActorRuntime *trustNode(std::string node,
                               xanadu::identity::Fingerprint identity);
@@ -191,6 +197,14 @@ public:
   renew(const ActorPid &pid, const xanadu::identity::Fingerprint &identity,
         const ActorMessage &request,
         std::chrono::system_clock::time_point wallNow);
+
+  /// Live upgrade: atomically validates newGrant and transitions an actor
+  /// in-place at a quiescent turn boundary to the new program manifold,
+  /// executing reconciler to migrate state into newContext.
+  [[nodiscard]] std::expected<void, ActorError>
+  upgrade(const ActorPid &pid, const ActorGrant &newGrant,
+          std::chrono::system_clock::time_point wallNow,
+          const StateReconciler &reconciler);
 
   /// Marks the actor stopped, tells its monitors, and erases it once its
   /// outstanding deliveries have drained. Safe from inside its own executor.
@@ -260,6 +274,7 @@ private:
   Authorizer authorizer_;
   Executor executor_;
   Sender sender_;
+  ProgramManifoldResolver programResolver_;
   std::map<std::string, std::unique_ptr<Actor>> actors_;
   std::map<std::string, std::pair<std::string, ActorPid>> spawns_;
   std::map<std::string, Monitor> monitors_;

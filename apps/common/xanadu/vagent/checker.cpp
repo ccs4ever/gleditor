@@ -1341,9 +1341,13 @@ private:
                               checkTerm(b.fact);
                             },
                             [&](const LifecycleDef &l) {
+                              ScopeGuard scope(*this);
                               const Restore body(body_, Body::Lifecycle);
                               DefFacts facts;
                               const Restore ff(curFacts_, &facts);
+                              if (l.param) {
+                                put(*l.param, basic(K::Str), SymKind::Local);
+                              }
                               (void)infer(*l.body, Pos{true, false, false});
                             },
                             [&](const auto &) {}},
@@ -2176,6 +2180,10 @@ private:
       for (const auto &a : n.args) {
         (void)infer(*a, operandPos);
       }
+      return basic(K::Str);
+    }
+    if (name == "dropped_field") {
+      args({{"name", basic(K::Str)}});
       return basic(K::Str);
     }
     if (name == "intentions") {

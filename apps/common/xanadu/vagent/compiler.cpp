@@ -295,6 +295,7 @@ struct Container {
   CellRef prepLabel{noCell};      ///< uninstalls what shares a capacity
   CellRef installLabel{noCell};   ///< install / mount body
   CellRef uninstallLabel{noCell}; ///< uninstall / unmount body
+  CellRef upgradeLabel{noCell};   ///< upgrade body
   bool native{false};
 };
 
@@ -1197,6 +1198,7 @@ private:
   void emitContainerRoutines();
   void forEachInstanceRef(Container &c, const std::function<void(CellRef)> &fn);
   void emitLifecycle(Container &c, bool uninstall);
+  void emitUpgradeLifecycle(Container &c);
   void emitContainerInits(Container &c);
   void beginRoutine(CellRef label, Container *owner, Framed *fr = nullptr);
   Ty installByName(EInstall::Kind kind, const std::string &name,
@@ -2710,6 +2712,29 @@ Ty Gen::call(const ECall &c, CellRef out, SourceLocation loc) {
     Ty t = tyOf(Ty::K::List);
     t.args.push_back(tyOf(Ty::K::Str));
     return t;
+  }
+  if (callee->name == "dropped_field") {
+    if (c.args.size() != 1) {
+      bail(CompileError::BadArity, "dropped_field takes 1 argument", loc);
+    }
+    const CellRef fname = reg();
+    expr(*c.args[0], fname);
+    const CellRef ag = reg();
+    loadRef(ag, agentCell_);
+    CellRef vp, np;
+    callFind(ag, std::string(kFieldDroppedFields), vp, np);
+    const CellRef noDropped = newLabel(), done = newLabel();
+    branchIfZero(vp, noDropped);
+    mov(S(a0_), S(vp));
+    mov(S(a1_), S(fname));
+    callLabel(rtFind_);
+    branchIfZero(r0_, noDropped);
+    mov(S(out), S(r0_));
+    jump(done);
+    place(noDropped);
+    movC(out, cStr(""));
+    place(done);
+    return tyOf(Ty::K::Str);
   }
   MethodInfo *own = findMethod(callee->name);
   if (own == nullptr) {
@@ -5426,6 +5451,7 @@ Container &Gen::makeContainer(Container::K k, const std::string &name,
   c.prepLabel      = newLabel();
   c.installLabel   = newLabel();
   c.uninstallLabel = newLabel();
+  c.upgradeLabel   = newLabel();
   auto &table      = k == Container::K::Skill ? skills_ : behaviors_;
   return table.emplace(name, std::move(c)).first->second;
 }
@@ -5637,7 +5663,23 @@ void Gen::emitContainerInits(Container &c) {
 void Gen::emitLifecycle(Container &c, bool uninstall) {
   for (const Member &m : *c.members) {
     const auto *l = std::get_if<LifecycleDef>(&m);
-    if (l == nullptr || l->uninstall != uninstall || !l->body) continue;
+    if (l == nullptr || l->kind == LifecycleDef::Kind::Upgrade ||
+        l->uninstall != uninstall || !l->body)
+      continue;
+    expr(*l->body, global());
+  }
+}
+
+void Gen::emitUpgradeLifecycle(Container &c) {
+  for (const Member &m : *c.members) {
+    const auto *l = std::get_if<LifecycleDef>(&m);
+    if (l == nullptr || l->kind != LifecycleDef::Kind::Upgrade || !l->body)
+      continue;
+    if (l->param) {
+      const CellRef p           = declareLocal(*l->param, tyOf(Ty::K::Str));
+      scopes_.back()[*l->param] = Local{p, tyOf(Ty::K::Str)};
+      mov(S(p), S(a0_));
+    }
     expr(*l->body, global());
   }
 }
@@ -5691,6 +5733,11 @@ void Gen::emitContainerRoutines() {
     forEachInstanceRef(c, [&](CellRef r) { unlinkFromRank(r, dims_.skill); });
     place(gone);
     closeFramed(uninst);
+
+    Framed upg;
+    beginRoutine(c.upgradeLabel, &c, &upg);
+    emitUpgradeLifecycle(c);
+    closeFramed(upg);
   }
   for (auto &[name, c] : behaviors_) {
     Framed inst;
@@ -5713,6 +5760,9 @@ void Gen::emitContainerRoutines() {
     loadRef(u, c.cell);
     unlinkFromRank(u, dims_.behavior);
     place(off);
+    ret();
+
+    beginRoutine(c.upgradeLabel, &c);
     ret();
   }
   own_ = nullptr;

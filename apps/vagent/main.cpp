@@ -71,7 +71,151 @@ int checkFile(const std::string &path, const std::string &source) {
   return 0;
 }
 
+int checkUpgrade(const std::string &oldPath, const std::string &newPath,
+                 const std::string &oldSource, const std::string &newSource) {
+  auto u1 = Parser(oldSource).parseUnit();
+  if (!u1) {
+    std::cerr << oldPath << ':' << formatParseError(u1.error()) << '\n';
+    return exitError;
+  }
+  auto u2 = Parser(newSource).parseUnit();
+  if (!u2) {
+    std::cerr << newPath << ':' << formatParseError(u2.error()) << '\n';
+    return exitError;
+  }
+  auto c1 = check(*u1);
+  if (!c1) {
+    for (const auto &err : c1.error()) {
+      std::cerr << oldPath << ':' << formatCheckError(err) << '\n';
+    }
+    return exitError;
+  }
+  auto c2 = check(*u2);
+  if (!c2) {
+    for (const auto &err : c2.error()) {
+      std::cerr << newPath << ':' << formatCheckError(err) << '\n';
+    }
+    return exitError;
+  }
+
+  int failures = 0;
+
+  auto checkContainers = [&](const auto &oldMap, const auto &newMap,
+                             const char *kind) {
+    for (const auto &[name, oldCont] : oldMap) {
+      auto it = newMap.find(name);
+      if (it == newMap.end()) continue;
+      const auto &newCont = it->second;
+      std::unordered_map<std::string, const FieldInfo *> newFields;
+      for (const auto &f : newCont.fields) newFields[f.name] = &f;
+      for (const auto &f1 : oldCont.fields) {
+        auto fit = newFields.find(f1.name);
+        if (fit != newFields.end()) {
+          const auto *f2 = fit->second;
+          if (f1.type != f2->type) {
+            std::cerr << newPath << ':' << f2->loc.line << ':' << f2->loc.column
+                      << ": error: " << kind << " '" << name << "': field '"
+                      << f1.name << "' changed type from " << typeName(f1.type)
+                      << " to " << typeName(f2->type)
+                      << " (breaking upgrade)\n";
+            ++failures;
+          }
+        }
+      }
+    }
+  };
+
+  checkContainers(c1->agents, c2->agents, "agent");
+  checkContainers(c1->skills, c2->skills, "skill");
+  checkContainers(c1->behaviors, c2->behaviors, "behavior");
+
+  for (const auto &[pname, pred1] : c1->predicates) {
+    auto pit = c2->predicates.find(pname);
+    if (pit == c2->predicates.end()) continue;
+    const auto &pred2 = pit->second;
+    if (pred1.params.size() != pred2.params.size()) {
+      std::cerr << newPath << ':' << pred2.loc.line << ':' << pred2.loc.column
+                << ": error: predicate '" << pname << "' arity changed from "
+                << pred1.params.size() << " to " << pred2.params.size()
+                << " (breaking upgrade)\n";
+      ++failures;
+    } else {
+      for (std::size_t i = 0; i < pred1.params.size(); ++i) {
+        if (pred1.params[i].type != pred2.params[i].type) {
+          std::cerr << newPath << ':' << pred2.loc.line << ':'
+                    << pred2.loc.column << ": error: predicate '" << pname
+                    << "' parameter '" << pred2.params[i].name
+                    << "' changed type from " << typeName(pred1.params[i].type)
+                    << " to " << typeName(pred2.params[i].type)
+                    << " (breaking upgrade)\n";
+          ++failures;
+        }
+      }
+    }
+  }
+
+  for (const auto &[rname, rec1] : c1->records) {
+    auto rit = c2->records.find(rname);
+    if (rit == c2->records.end()) continue;
+    const auto &rec2 = rit->second;
+    std::unordered_map<std::string, const FieldInfo *> newFields;
+    for (const auto &f : rec2.fields) newFields[f.name] = &f;
+    for (const auto &f1 : rec1.fields) {
+      auto fit = newFields.find(f1.name);
+      if (fit != newFields.end() && f1.type != fit->second->type) {
+        std::cerr << newPath << ':' << fit->second->loc.line << ':'
+                  << fit->second->loc.column << ": error: record '" << rname
+                  << "': field '" << f1.name << "' changed type from "
+                  << typeName(f1.type) << " to " << typeName(fit->second->type)
+                  << " (breaking upgrade)\n";
+        ++failures;
+      }
+    }
+  }
+
+  for (const auto &[ename, ev1] : c1->events) {
+    if (ev1.builtin) continue;
+    auto eit = c2->events.find(ename);
+    if (eit == c2->events.end()) continue;
+    const auto &ev2 = eit->second;
+    std::unordered_map<std::string, const FieldInfo *> newFields;
+    for (const auto &f : ev2.fields) newFields[f.name] = &f;
+    for (const auto &f1 : ev1.fields) {
+      auto fit = newFields.find(f1.name);
+      if (fit != newFields.end() && f1.type != fit->second->type) {
+        std::cerr << newPath << ':' << fit->second->loc.line << ':'
+                  << fit->second->loc.column << ": error: event '" << ename
+                  << "': field '" << f1.name << "' changed type from "
+                  << typeName(f1.type) << " to " << typeName(fit->second->type)
+                  << " (breaking upgrade)\n";
+        ++failures;
+      }
+    }
+  }
+
+  return failures > 0 ? exitError : exitOk;
+}
+
 int runCheck(const argparse::ArgumentParser &command) {
+  if (command.get<bool>("--upgrade")) {
+    const auto &files = command.get<std::vector<std::string>>("files");
+    if (files.size() != 2) {
+      std::cerr << "vagent: check --upgrade requires exactly two files: "
+                   "<old.vagent> <new.vagent>\n";
+      return exitUsage;
+    }
+    auto oldSrc = readFile(files[0]);
+    if (!oldSrc) {
+      std::cerr << "vagent: cannot read " << files[0] << '\n';
+      return exitUsage;
+    }
+    auto newSrc = readFile(files[1]);
+    if (!newSrc) {
+      std::cerr << "vagent: cannot read " << files[1] << '\n';
+      return exitUsage;
+    }
+    return checkUpgrade(files[0], files[1], *oldSrc, *newSrc);
+  }
   int failures = 0;
   for (const auto &path : command.get<std::vector<std::string>>("files")) {
     auto source = readFile(path);
@@ -416,6 +560,10 @@ int main(int argc, char **argv) {
 
   argparse::ArgumentParser checkCommand("check");
   checkCommand.add_description("Lex, parse and check source files");
+  checkCommand.add_argument("--upgrade")
+      .help("verify upgrade compatibility between two vagent source units")
+      .default_value(false)
+      .implicit_value(true);
   checkCommand.add_argument("files")
       .help("vagent source files")
       .nargs(argparse::nargs_pattern::at_least_one);

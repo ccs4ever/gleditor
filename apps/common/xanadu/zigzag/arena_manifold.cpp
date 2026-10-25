@@ -2070,6 +2070,7 @@ std::optional<Promoted> promote(xanadu::Store &store,
       }
     }
   }
+  out.mapping = real;
   return out;
 }
 
@@ -2463,6 +2464,7 @@ std::optional<Promoted> promoteOverlay(const ArenaManifold &from,
       }
     }
   }
+  out.mapping = real;
   return out;
 }
 
