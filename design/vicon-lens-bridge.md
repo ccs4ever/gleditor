@@ -1,4 +1,4 @@
-# vicon Lens Bridge: Lenses as Suspended Host Requests in a Goal-Directed Language (v1.1)
+# vicon Lens Bridge: Lenses as Suspended Host Requests in a Goal-Directed Language (v1.2)
 
 A design specification for how a **vicon program** — not a `vicon` REPL verb — opens, traverses,
 mounts, writes back, and releases projection lenses. Design deliverable only: the signatures are
@@ -400,7 +400,7 @@ leq(lcell(lkey(row)), row)      # lcell re-resolves key->ref; = on the tokens is
                               # the same test — leq adds the dead-handle check
 ```
 
-`lens("…")` at statement level produces each root's ref-token; binding `r` keeps the first.
+`lens("…")` at statement level produces each root's ref-token; `r` rebinds per produce — it holds the **last** root (correct for single-root dir:/sql:; a union forest's program re-runs per root).
 Inside `every`, `c := kids(r)` re-binds `c` per produce — the `Bind` runs inline before the
 produce lands the body. `write(c)` would print the dense index — `ltext` is the readable-print
 verb. `(lmount(c) | write(&lenserr))` is the refusal-recovery idiom, and it reads the *actual*
