@@ -1,7 +1,8 @@
 # Vagent Shared Program Manifold (`U-A14`) and Live Agent Upgrade
 
-**Status:** Design Specification (Companion to
-[`vagent-agent-language.md`](vagent-agent-language.md) v3.12, §11.1, §11.2, and §18 `U-A14`)
+**Status:** Approved Specification (Proposals P17.1–P17.5 approved; Open Questions 1–3
+resolved with Option B; companion to [`vagent-agent-language.md`](vagent-agent-language.md) v3.12,
+§11.1, §11.2, and §18 `U-A14`)
 
 ______________________________________________________________________
 
