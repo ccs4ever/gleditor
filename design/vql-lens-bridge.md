@@ -1,4 +1,4 @@
-# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v5.4)
+# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v5.5)
 
 A design specification for how a **VQL program** — not the `vquery` REPL — opens, traverses, mounts,
 writes back, and releases projection lenses. Design deliverable only: the signatures are proposals;
@@ -56,7 +56,7 @@ open in the registry re-binds to the live session's roots — two sessions over 
 would split `dirty_` and cross-clobber on `commit()` (`keyToCell_` is per-session); a *different*
 `(keyword, args)` mints its own projection.
 
-Every gesture on a *cell* is a **step function** — `path/lensMount()`, `$cell/lensNext()`, `path/lensEdit("text")` — mapping over the relation: `$cells/lensMount()` mounts under each cell (N mounts, per-cell yield; a per-cell refusal drops that cell, not the whole relation — `Err`-per-cell → empty for that cell). **Session-scoped ops dedupe**: `lensCommit`/`lensBrowse`/`lensUnmount` resolve each input cell to its (session[, mount]) and run once per distinct target (`lensNext` is deliberately **not** deduped — N cells in one mount materialize N pages; `lensStub` **is** deduped — one probe per mount) — arg-taking variants (`$cells/lensBrowse($c)`) take the arg from the first cell of each distinct target group (per-cell arg variance is silently first-wins — noted) — `$cells/lensCommit()` over N cells of one session commits once, not N times (yielding `[n]` not `[n,0,0…]`) — dispatched in `evaluateStep`'s `FunctionInvocation` arm (`vql_engine.cpp:1390+`), which already receives `currentCells` and already mutates (`link(...)` at `:1466-1540`); cell-typed *args* resolve via `cellsOfValueExpr` (`:362-381`), not `evaluateValueExpr` (which renders cells to `CellValue`, destroying the identity `cellEq` tests). The arg is the relation it filters — the "pipe" semantics without a pipe token (`|` is union-type-only, `parser.cpp:1603`). A user `def lensMount()` does NOT shadow the builtin (the step dispatch checks builtin names before `userDefs_` — stated precedence) — a step function needs no keyword — it's an `Identifier + '('` step (`parser.cpp:912-915`), so `lensMount`/`lensNext`/etc. stay *unreserved* names, not `Kw*` tokens.
+Every gesture on a *cell* is a **step function** — `path/lensMount()`, `$cell/lensNext()`, `path/lensEdit("text")` — mapping over the relation: `$cells/lensMount()` mounts under each cell (N mounts, per-cell yield; a per-cell refusal drops that cell, not the whole relation — `Err`-per-cell → empty for that cell). **Session-scoped ops dedupe**: `lensCommit`/`lensBrowse`/`lensUnmount` resolve each input cell to its (session[, mount]) and run once per distinct target (`lensNext` is deliberately **not** deduped — N cells in one mount materialize N pages; `lensStub`/`lensDirty` **are** deduped — one probe per session) — arg-taking variants (`$cells/lensBrowse($c)`) take the arg from the first cell of each distinct target group (per-cell arg variance is silently first-wins — noted) — `$cells/lensCommit()` over N cells of one session commits once, not N times (yielding `[n]` not `[n,0,0…]`) — dispatched in `evaluateStep`'s `FunctionInvocation` arm (`vql_engine.cpp:1390+`), which already receives `currentCells` and already mutates (`link(...)` at `:1466-1540`); cell-typed *args* resolve via `cellsOfValueExpr` (`:362-381`), not `evaluateValueExpr` (which renders cells to `CellValue`, destroying the identity `cellEq` tests). The arg is the relation it filters — the "pipe" semantics without a pipe token (`|` is union-type-only, `parser.cpp:1603`). A user `def lensMount()` does NOT shadow the builtin (the step dispatch checks builtin names before `userDefs_` — stated precedence) — a step function needs no keyword — it's an `Identifier + '('` step (`parser.cpp:912-915`), so `lensMount`/`lensNext`/etc. stay *unreserved* names, not `Kw*` tokens.
 
 ### D2 — Sessions live on the coordinator, not the per-query engine
 
@@ -104,7 +104,10 @@ constructs (a `def` re-enters `executeScriptBody`/`evaluatePath`, `:617-642`; `a
 smuggles a step), and the runtime flag is a *depth counter* incremented across `callUserDef`/
 `applyFunctor`/`executeScriptBody` re-entry, depth ≤ 1 = statement level (the top-level
 `executeScriptBody` entry is depth 0, not a bump — a `let`/`for`-`in` target at the outermost
-binding prefix stays at depth 1); a mutating step reached through a def or functor is refused. `watch fsLens("/x")` is banned too (`targetPath` evaluates once,
+binding prefix stays at depth 1); `executeWatch`/`executePerspectiveBlock`/`executeActionClause`/
+`executeEffectClause` reach `evaluatePath` via `executeStatement` directly — the *static* rule
+catches those (the counter is the def/functor/`executeScriptBody`-re-entry backstop); a mutating
+step reached through a def or functor is refused. `watch fsLens("/x")` is banned too (`targetPath` evaluates once,
 `:685`, but the body re-fires per target cell — and `executeWatch`'s `dDelta` write now refuses
 under D7 anyway). Enforcement is two-layered: **(i)** a statement-level static rule in the parser/type-contract
 pass (a mutating construct legal only where it evaluates exactly once — top-level path, for-in, outermost-let, sole anchor —
@@ -247,7 +250,7 @@ session's to maintain (Q7B).
 fsLens("/tmp/lensj")
 
 // walk the listing -- /d.seq::rank re-seeks the head, reaching ALL
-// children (d.contains alone yields only the firstborn link's target)
+// children (d.contains walks the left spine transitively; ::rank re-seeks the head)
 $lens/d.contains/d.seq::rank
 
 // mount git under the repo cell (find it first)
@@ -281,7 +284,9 @@ A step function takes no arg when the relation *is* the arg — `path/lensMount(
 the relation. **The parens are mandatory**: a bare `path/lensMount` parses as a `SignedDimensionStep`
 (`parser.cpp:928-935`) — a traversal on a minted `lensMount` dim yielding empty, silently; only
 `Identifier + ('` reaches the `FunctionInvocation` dispatch (`:912-915`). `lensEdit("99")` takes the
-new text; `lensBrowse("t")` the table name. An empty relation maps to a no-op — `[]/lensCommit()`
+new text; `lensBrowse("t")` the table name; arity mismatches hit the existing `no function
+taking N arguments` refusal (`:1577`); per-cell ops (`$cells/lensEdit($t)`) evaluate the arg
+per input cell. An empty relation maps to a no-op — `[]/lensCommit()`
 yields empty without running the gesture (`:1294-1298` guards only `value`/`link`; the lens dispatch
 must check `currentCells.empty()` first).
 
