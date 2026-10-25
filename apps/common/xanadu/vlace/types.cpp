@@ -7,7 +7,9 @@
 #include <algorithm>
 #include <format>
 #include <functional>
+#include <initializer_list>
 #include <ranges>
+#include <string_view>
 #include <utility>
 
 namespace xanadu::vlace {
@@ -81,6 +83,23 @@ TypeChecker::TypeChecker() {
     ctors_["Ok"] =
         Scheme{.vars = {ev, av}, .body = tyFun(avt, tyResult(evt, avt))};
   }
+  // Scalar = SInt Int | SFloat Float | SBool Bool -- the scalar payload a
+  // projected cell can carry (Int64/Double/Bool kinds), surfaced by
+  // cellScalar (vlace-lens-bridge §4). The evaluator owns the ctor tags
+  // (P1 reserves them); registering the type + ctor schemes here lets
+  // `case s of SInt i => ...` typecheck.
+  {
+    dataCtors_["Scalar"] = {"SInt", "SFloat", "SBool"};
+    ctorData_["SInt"]    = "Scalar";
+    ctorData_["SFloat"]  = "Scalar";
+    ctorData_["SBool"]   = "Scalar";
+    ctors_["SInt"] =
+        Scheme{.vars = {}, .body = tyFun(tyInt(), tycon("Scalar"))};
+    ctors_["SFloat"] =
+        Scheme{.vars = {}, .body = tyFun(tyFloat(), tycon("Scalar"))};
+    ctors_["SBool"] =
+        Scheme{.vars = {}, .body = tyFun(tyBool(), tycon("Scalar"))};
+  }
 
   // Typed IO primitives (§6.5), as value-level builtins:
   //   pure     :: a -> IO a
@@ -142,15 +161,73 @@ TypeChecker::TypeChecker() {
       Scheme{.vars = {}, .body = tyFun(tyCell, tyFun(tyDim, tyOption(tyCell)))};
   builtins_["promote"] =
       Scheme{.vars = {}, .body = tyFun(tyCell, tyIO(tyInt()))};
-  // openLens :: String -> IO Cell  (§7.4): project a source, return its root.
+  // openLens :: String -> IO (Result String (List Cell))  -- project a
+  // source through openLensUri, all URI schemes (vlace-lens-bridge §4).
+  // Err carries the refusal, Ok the session's projected roots -- a List
+  // because union:/forest sources emit several, not one root.
   builtins_["openLens"] =
-      Scheme{.vars = {}, .body = tyFun(tyStr(), tyIO(tyCell))};
+      Scheme{.vars = {},
+             .body = tyFun(tyStr(), tyIO(tyResult(tyStr(), tyList(tyCell))))};
   // childrenAll :: Cell -> List Cell  -- a cell's contained children (§7.4).
   builtins_["childrenAll"] =
       Scheme{.vars = {}, .body = tyFun(tyCell, tyList(tyCell))};
   // words :: String -> List String  -- whitespace tokenization (§7.4).
   builtins_["words"] =
       Scheme{.vars = {}, .body = tyFun(tyStr(), tyList(tyStr()))};
+
+  // Lens session gestures (vlace-lens-bridge §4). Each takes a
+  // session-member cell and reports refusal as Err String inside the IO;
+  // runIO's IO.Lens* handlers perform them (P1).
+  const auto ioResult = [&](TyPtr ok) {
+    return tyIO(tyResult(tyStr(), std::move(ok)));
+  };
+  // lensMount :: Cell -> IO (Result String Cell)
+  builtins_["lensMount"] =
+      Scheme{.vars = {}, .body = tyFun(tyCell, ioResult(tyCell))};
+  // lensUnmount :: Cell -> IO (Result String Unit)
+  builtins_["lensUnmount"] =
+      Scheme{.vars = {}, .body = tyFun(tyCell, ioResult(tyUnit()))};
+  // lensNext / lensStub :: Cell -> IO (Result String (Option Cell))
+  builtins_["lensNext"] =
+      Scheme{.vars = {}, .body = tyFun(tyCell, ioResult(tyOption(tyCell)))};
+  builtins_["lensStub"] =
+      Scheme{.vars = {}, .body = tyFun(tyCell, ioResult(tyOption(tyCell)))};
+  // lensBrowse / lensEdit :: Cell -> String -> IO (Result String Unit)
+  builtins_["lensBrowse"] = Scheme{
+      .vars = {}, .body = tyFun(tyCell, tyFun(tyStr(), ioResult(tyUnit())))};
+  builtins_["lensEdit"] = Scheme{
+      .vars = {}, .body = tyFun(tyCell, tyFun(tyStr(), ioResult(tyUnit())))};
+  // lensCommit / lensDirty :: Cell -> IO (Result String Int)
+  builtins_["lensCommit"] =
+      Scheme{.vars = {}, .body = tyFun(tyCell, ioResult(tyInt()))};
+  builtins_["lensDirty"] =
+      Scheme{.vars = {}, .body = tyFun(tyCell, ioResult(tyInt()))};
+  // lensRevert :: Cell -> IO (Result String Unit)
+  builtins_["lensRevert"] =
+      Scheme{.vars = {}, .body = tyFun(tyCell, ioResult(tyUnit()))};
+
+  // Pure cell readers (§4): force-time observations of the arena (D3), so
+  // they install as natives, not IO effects.
+  builtins_["cellKey"] =
+      Scheme{.vars = {}, .body = tyFun(tyCell, tyOption(tyStr()))};
+  builtins_["cellEq"] =
+      Scheme{.vars = {}, .body = tyFun(tyCell, tyFun(tyCell, tyBool()))};
+  builtins_["cellScalar"] =
+      Scheme{.vars = {}, .body = tyFun(tyCell, tyOption(tycon("Scalar")))};
+
+  // find :: (a -> Bool) -> List a -> Option a  -- the prelude defines it in
+  // vlace (prelude.hpp), but the prelude itself is checked with type-checking
+  // off; the normative env needs the scheme so a user program calling `find`
+  // resolves it.
+  {
+    const int fa      = nextVar_++;
+    auto fav          = std::make_shared<Ty>();
+    fav->kind         = Ty::Kind::Var;
+    fav->varId        = fa;
+    builtins_["find"] = Scheme{
+        .vars = {fa},
+        .body = tyFun(tyFun(fav, tyBool()), tyFun(tyList(fav), tyOption(fav)))};
+  }
 }
 
 TyPtr TypeChecker::tycon(std::string name, std::vector<TyPtr> args) {
@@ -737,20 +814,76 @@ std::expected<TyPtr, TypeError> TypeChecker::infer(const ExprNode &e,
             if (!u2) return std::unexpected(u2.error());
             return tyBool();
           }
+          // The pin (vlace-lens-bridge P2): each operator below accepts only
+          // the ground operand types its eval path handles (numericOp in
+          // compiler.cpp). The two operands unify, then a resolved Con
+          // outside the op's set is a TypeMismatch; an unresolved Var passes
+          // so polymorphic helpers (`eq x y = x == y`) still generalize --
+          // a helper later instantiated at e.g. Cell escapes the pin, the
+          // residual hole the design documents.
+          auto pinGround = [&](std::initializer_list<std::string_view> ground)
+              -> std::expected<void, TypeError> {
+            auto u = unify(*l, *r, e.loc);
+            if (!u) return std::unexpected(u.error());
+            TyPtr p = prune(*l);
+            if (p->kind == Ty::Kind::Con &&
+                std::ranges::find(ground, p->con) == ground.end()) {
+              std::string want;
+              for (const std::string_view g : ground) {
+                if (!want.empty()) want += ", ";
+                want += g;
+              }
+              return terr(CompileError::TypeMismatch,
+                          "operator '" + op + "' accepts {" + want +
+                              "} operands, not " + renderType(p),
+                          e.loc);
+            }
+            return {};
+          };
           if (op == "++") {
-            auto u = unify(*l, *r, e.loc);
-            if (!u) return std::unexpected(u.error());
-            return *l; // String or List a
+            // String -> String -> String: eval performs Str concatenation
+            // only, a flagged deviation from spec §5.1/§7.4 where ++ is
+            // `std:fun/append` over List.
+            auto u1 = unify(*l, tyStr(), e.loc);
+            if (!u1) return std::unexpected(u1.error());
+            auto u2 = unify(*r, tyStr(), e.loc);
+            if (!u2) return std::unexpected(u2.error());
+            return tyStr();
           }
-          if (op == "==" || op == "/=" || op == "<" || op == "<=" ||
-              op == ">" || op == ">=") {
-            auto u = unify(*l, *r, e.loc);
-            if (!u) return std::unexpected(u.error());
+          if (op == "==" || op == "/=") {
+            // Char evals as Int (compiler.cpp LiteralKind::Char); Bool ==
+            // fails at eval, so Bool stays outside the set.
+            if (auto pin = pinGround({"Int", "Float", "String", "Char"});
+                !pin) {
+              return std::unexpected(pin.error());
+            }
             return tyBool();
           }
-          // Arithmetic + - * / %: operands and result share one numeric type.
+          if (op == "<" || op == "<=" || op == ">" || op == ">=") {
+            if (auto pin = pinGround({"Int", "Float"}); !pin) {
+              return std::unexpected(pin.error());
+            }
+            return tyBool();
+          }
+          if (op == "%") {
+            // Int only: the VM's Mod opcode silently truncates Float -> Int
+            // (vortex_vm.cpp), so typing % over Float would bless a lie.
+            if (auto pin = pinGround({"Int"}); !pin) {
+              return std::unexpected(pin.error());
+            }
+            return *l;
+          }
+          // Arithmetic + - * / : operands and result share one numeric type.
           // Int and Float are distinct and do not unify, so 1 + 2.0 fails
           // (§4.6).
+          if (op == "+" || op == "-" || op == "*" || op == "/") {
+            if (auto pin = pinGround({"Int", "Float"}); !pin) {
+              return std::unexpected(pin.error());
+            }
+            return *l;
+          }
+          // Any other declared-fixity operator (`.`, a program's own infix):
+          // operands share one type, as before the pin.
           auto u = unify(*l, *r, e.loc);
           if (!u) return std::unexpected(u.error());
           return *l;
