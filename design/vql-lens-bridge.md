@@ -1,4 +1,4 @@
-# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v3.0)
+# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v3.1)
 
 A design specification for how a **VQL program** — not the `vquery` REPL — opens, traverses, mounts,
 writes back, and releases projection lenses. Design deliverable only: the signatures are proposals;
@@ -188,8 +188,9 @@ untracked edge, `:1024-1038`,`:1873-1880`), `shapeProjection` (`:1046-1089`), an
 step; its `cloneGenerator(target)` also appends `d.clone` on a session-owned *target*,
 `vortex_core.cpp:317-325`) and `performCreates`' `attachPoint`/`rankTail` end (`:1233-1235`, not
 just `in`). Rule — same as vlace D6: **every VQL link-writing
-site checks `sessionFor(cell)` on the cells it links and refuses when a write would land on a
-session-owned cell**; the correct write is `lensedit` (content) — projected structure is the
+site checks `sessionFor(cell)` on the cells it links and refuses (`TypeContractError` — not
+per-cell-empty, so a `for … link()` over a mixed relation aborts loudly rather than silently
+writing a subset) when a write would land on a session-owned cell**; the correct write is `lensedit` (content) — projected structure is the
 session's to maintain (Q7B).
 
 ## 4. Proposed surface
@@ -207,7 +208,7 @@ session's to maintain (Q7B).
 | `lensmount` | — | delegate root cells | `sessionMountAt`; `Err`→empty |
 | `lensunmount` | — | the mount-point cells | `mountBoundary`→`cellFor` resolved *before* `sessionUnmountAt` (which returns `expected<void>`); `Err`→empty |
 | `lensnext` | — | materialized stub cells | `sessionNextPage` — mount-scoped via `windowedFor` on a Router session, session-level on a plain `WindowedLens` |
-| `lensstub` | — | pending stub cells | `nextStubAt` (const — not dirty-gated) |
+| `lensstub` | — | pending stub cells (one per input mount — N cells in one mount yield N copies of the same stub; dedupe at the relation level) | `nextStubAt` (const — not dirty-gated) |
 | `lenscommit` | — | applied count (scalar cell) | `sessionCommitAll` → `commit()` applied count |
 | `lensedit(text)` | `String` | the cell | `sessionEdit` — `Err` for ref-bound/unkeyed/non-writable |
 | `lensrevert` | — | the cell | `sessionRevert` — `Err` on source-vanished |
