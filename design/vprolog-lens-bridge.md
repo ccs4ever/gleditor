@@ -1,4 +1,4 @@
-# vprolog Lens Bridge: Lenses as Builtin Predicates in a Backtracking Logic Engine (v1.5)
+# vprolog Lens Bridge: Lenses as Builtin Predicates in a Backtracking Logic Engine (v1.6)
 
 A design specification for how a **vprolog program** — not the `vprolog` REPL's `:lens` verbs —
 opens, enumerates, mounts, writes back, and releases projection lenses. Design deliverable only:
@@ -352,7 +352,7 @@ probes work via `ownsCell`/`keyFor`/`canApply`/`commit()`. The duplicate-`Extern
 (first-success write vs last-emission display) is the proposed `UnionLens::claimedBy` probe —
 shared row.
 
-**Meta**: vprolog is the one sibling with a `MetaSource` in the build — `main.cpp:187-201`
+**Meta**: vprolog is one of three siblings wiring an app-level `MetaSource` (`vquery`/`vpl`/`vprolog` `main.cpp` each construct one, `vquery/main.cpp:408-420`/`vpl/main.cpp:449-461`; none injects it engine-side — the gap R8 owns) — `main.cpp:187-201`
 resolves `meta:` through `LensRepl`'s fold path (`lens_repl.cpp:118-137`). But it is
 **REPL-bound**: `LensRepl::metaFold_` is one slot for a one-session object (the
 member-ordering comment at `lens_repl.hpp:102-110` exists for exactly this), and the closure's
