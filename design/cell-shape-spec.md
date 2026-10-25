@@ -415,12 +415,15 @@ shapeMatches(const M &graph, CellRef cell, const ShapeExpr &shape,
 template <CellGraph M>
 [[nodiscard]] std::vector<CellRef>
 cellsMatching(const M &graph, const ShapeExpr &shape,
-              cpp26::function_ref<vortex::CellValue(CellRef)> render);
+              cpp26::function_ref<vortex::CellValue(CellRef)> render,
+              std::ranges::input_range auto &&candidates,
+              ShapeBindings *bindings = nullptr,
+              MissingPolicy missing = MissingPolicy::Refuse);
 
 /// The predicate factory, cell_views idiom — cells | filter(matchesShape(…)).
 template <CellGraph M>
 [[nodiscard]] auto matchesShape(const M &graph, const ShapeExpr &shape,
-                                cpp26::function_ref<vortex::CellValue(CellRef)> render);
+                                std::function<vortex::CellValue(CellRef)> render);
 
 /// VQL's compareValues, shared — numeric-epsilon then string fallback (D5).
 [[nodiscard]] bool compareCellValues(const vortex::CellValue &left, ShapeCmp op,
