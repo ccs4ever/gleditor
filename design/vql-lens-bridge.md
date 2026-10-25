@@ -128,11 +128,10 @@ lensMount, lensUnmount, lensNext, lensCommit, lensEdit, lensRevert, lensBrowse, 
 `cellKey`/`cellEq`/`cellScalar` are pure **value expressions** — `where cellKey($c) = "fs:52:794498"` filters; `cellEq($a,$b)` identity-compares (the real motivation: `=` compares renders, not identity). Note `?fn(...)` produces `PredicateTest::ValueExpr` (`parser.cpp:1404-1407`) and routes into
 `evaluateValueExpr`'s function table (`:2057-2116`) — an unknown fn returns `""` (falsy, silent
 filter, `:2142`). The pure probes register in **both** dispatch surfaces — `evaluateStep`'s `FunctionInvocation`
-arm (`:1390+`) for `cellsOfValueExpr`-routed args (comparison operands in a predicate go through
-`cellsOfValueExpr` → `evaluateStep`, `:397-417`, *not* `evaluateValueExpr`) **and**
-`evaluateValueExpr`'s fn table (`:2059+`) for `?expr`/value positions (precedent: `contains`/`count`/
-`delta` are registered in both, `:1437-1552`/`:2059-2108`) — **and the mutating names refuse in
-both**
+arm (`:1390+`) for `path/cellKey(...)` calls **and** `evaluateValueExpr`'s fn table
+(`:2059+`) for `?expr`/`where`/comparison operands — `evaluateFactor` evaluates both comparison
+operands through it directly, `:2208-2209` (precedent: `contains`/`count`/`delta` are registered in
+both surfaces, `:1437-1552`/`:2059-2108`) — **and the mutating names refuse in both**
 (`?lensEdit("x")` is a `TypeContractError`, not a silent filter — the last-step rule has no
 predicate exception).
 
