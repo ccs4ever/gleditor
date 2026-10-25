@@ -345,4 +345,32 @@ std::optional<ExternalKey> RouterLens::nextStub() const {
   return std::nullopt;
 }
 
+std::expected<WindowedLens *, std::string>
+RouterLens::windowedFor(const ExternalKey &mountKey) {
+  const auto it = std::ranges::find_if(
+      mounts_, [&](const Mount &m) { return m.mountKey == mountKey; });
+  if (it == mounts_.end()) {
+    return std::unexpected("no mount at " + mountKey);
+  }
+  auto *w = dynamic_cast<WindowedLens *>(it->lens.get());
+  if (w == nullptr) {
+    return std::unexpected("mounted lens is not windowed: " + mountKey);
+  }
+  return w;
+}
+
+std::expected<std::optional<ExternalKey>, std::string>
+RouterLens::nextStubAt(const ExternalKey &mountKey) const {
+  const auto it = std::ranges::find_if(
+      mounts_, [&](const Mount &m) { return m.mountKey == mountKey; });
+  if (it == mounts_.end()) {
+    return std::unexpected("no mount at " + mountKey);
+  }
+  const auto *w = dynamic_cast<const WindowedLens *>(it->lens.get());
+  if (w == nullptr) {
+    return std::unexpected("mounted lens is not windowed: " + mountKey);
+  }
+  return w->nextStub();
+}
+
 } // namespace zigzag

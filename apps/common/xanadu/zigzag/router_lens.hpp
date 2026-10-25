@@ -111,6 +111,23 @@ public:
   /// The first mounted windowed lens's deferred page, if any.
   [[nodiscard]] std::optional<ExternalKey> nextStub() const override;
 
+  // -- mount-scoped windowed access -------------------------------------------
+  // mountBoundary() answers the mount KEY only; these resolve the mount
+  // itself for the windowed verbs, which a first-wins nextStub() cannot
+  // scope when two mounts both defer pages.
+
+  /// The mount at @p mountKey's delegate as a WindowedLens, for the
+  /// app-driven page verbs (materializePage). @p mountKey is a
+  /// mountBoundary() answer. Err when no mount sits at @p mountKey or
+  /// its delegate is not windowed.
+  [[nodiscard]] std::expected<WindowedLens *, std::string>
+  windowedFor(const ExternalKey &mountKey);
+
+  /// nextStub() scoped to the mount at @p mountKey: its deferred page
+  /// key, or nullopt when that mount has none. Err as windowedFor.
+  [[nodiscard]] std::expected<std::optional<ExternalKey>, std::string>
+  nextStubAt(const ExternalKey &mountKey) const;
+
   /// Classify @p path and construct its delegate (browsing it so a bad
   /// mount refuses at open() time, not at the next refresh). Stateless
   /// -- the file picker's "open this path" uses it for the same answer.
@@ -132,6 +149,13 @@ private:
   };
 
   FilesystemLens base_;
+  // In open() order. Two documented staleness hazards, not yet handled:
+  //  - Mount::roots is an open-time snapshot: a delegate that gains
+  //    roots on refresh escapes mount-scoped routing (owns() misses
+  //    them, so mountBoundary/windowedFor/nextStubAt never reach it).
+  //  - A committing lens whose applyContentChange relocates the mount
+  //    cell's key leaves Mount::mountKey stale; mounts_ must be remapped
+  //    or the mount is unreachable (P5's keyToCell_/cellToKey_ rebind).
   std::vector<Mount> mounts_;
 };
 
