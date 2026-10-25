@@ -11,6 +11,11 @@
  *   directory path          delegate lenses under its cells)
  *   <bare file path>        FilesystemLens
  *
+ * Any other `scheme:`-shaped prefix (ALPHA *(ALPHA / DIGIT / '+' /
+ * '.' / '-') ':') refuses rather than guessing FilesystemLens -- a
+ * file literally named "weird:name" must be opened through a
+ * '/'- or './'-leading path.
+ *
  * Meta/VqlResult/Swarm lenses need in-process handles (a manifold, an
  * engine, a manager) rather than paths -- they open in code, not via
  * URI. This is the dispatch the xuzz --lens flag and any future host

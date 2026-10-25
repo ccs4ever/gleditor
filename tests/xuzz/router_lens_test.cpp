@@ -376,6 +376,34 @@ TEST(RouterLensTest, OpenLensUriRoutesDirectoriesToTheRouter) {
   EXPECT_EQ(dynamic_cast<RouterLens *>(bareFile->get()), nullptr);
 }
 
+// An unrecognized `scheme:` prefix refuses up front rather than
+// falling through to FilesystemLens -- including `meta:` (frontends
+// bind it themselves) and a scheme-shaped filename like "weird:name".
+TEST(RouterLensTest, OpenLensUriRefusesUnrecognizedSchemes) {
+  RouterFixture fix;
+  EXPECT_FALSE(zigzag::openLensUri("meta:src").has_value());
+  EXPECT_FALSE(zigzag::openLensUri("meta:").has_value());
+  EXPECT_FALSE(zigzag::openLensUri("bogus:thing").has_value());
+  EXPECT_FALSE(zigzag::openLensUri("weird:name").has_value());
+  // The recursion hole: a union child that names an unknown scheme
+  // refuses the whole URI.
+  EXPECT_FALSE(
+      zigzag::openLensUri("union:meta:x|dir:" + fix.dir.string()).has_value());
+  // ':' that can't be a scheme prefix still takes the filesystem
+  // path: absolute paths start with '/', "./x:y" with '.', "1x:y"
+  // with a digit.
+  const auto colonFile = fix.dir / "with:colon";
+  {
+    std::ofstream{colonFile} << "x";
+  }
+  auto absColon = zigzag::openLensUri(colonFile.string());
+  ASSERT_TRUE(absColon.has_value());
+  EXPECT_NE(dynamic_cast<FilesystemLens *>(absColon->get()), nullptr);
+  auto dotColon = zigzag::openLensUri("./missing:file");
+  ASSERT_TRUE(dotColon.has_value());
+  EXPECT_NE(dynamic_cast<FilesystemLens *>(dotColon->get()), nullptr);
+}
+
 // A .db cell mounts a SqlLens already browsing the first base table --
 // the same projection a bare-path pick of the file produces.
 TEST(RouterLensTest, OpenDatabaseFileMountsSqlBrowseUnderItsCell) {
