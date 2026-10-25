@@ -1,4 +1,4 @@
-# vicon Lens Bridge: Lenses as Suspended Host Requests in a Goal-Directed Language (v1.17)
+# vicon Lens Bridge: Lenses as Suspended Host Requests in a Goal-Directed Language (v1.18)
 
 A design specification for how a **vicon program** — not a `vicon` REPL verb — opens, traverses,
 mounts, writes back, and releases projection lenses. Design deliverable only: the signatures are
@@ -96,8 +96,7 @@ host-side. Every consequence is absorbed:
 - **Ref-ints are untyped.** `kids(42)` — or `kids("42")`, `toInt` runs `stoll` on strings
   (`vortex_vm.cpp:41-45`) — silently resolves dense index 42: the `LiteralCellId` wrong-answer
   channel the VQL doc guards (`vql-lens-bridge.md` D2). Rule: **every request arg is validated**
-  `toInt → CellRef → arena().contains() → epoch check (D5) → sessionFor/ownsCell` where the op is
-  session-scoped; a failing arg makes the request `Err` (Icon failure), never a wrong answer.
+  `toInt → CellRef → arena().contains() → epoch check (D5) → sessionFor/ownsCell` → **the issued-token ledger** — a bare Int64 carries no epoch, so a stale token whose freed index re-mints onto a foreign session's cell passes `contains`+epoch+`sessionFor` and `keyFor` resolves a wrong-but-valid key (`ledit` writes the wrong key's pending text — the alias channel D5 exists to close); the session keeps `issuedTokens_` token→key and a token not issued by this session refuses — same fix as vprolog's v1.12; a failing arg makes the request `Err` (Icon failure), never a wrong answer.
   `c + 1` still adds happily — arithmetic cannot tell a ref from an integer (`MakeVar` has the same
   wart, `vortex_vm.cpp:893`); documented, not fixed — it is the `opref` idiom's own property.
 - **Scalar answers collide with ref-tokens.** `ldirty`/`lcommit` producing `42` is
