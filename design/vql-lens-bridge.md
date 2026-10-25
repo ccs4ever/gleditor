@@ -1,4 +1,4 @@
-# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v5.5)
+# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v5.6)
 
 A design specification for how a **VQL program** — not the `vquery` REPL — opens, traverses, mounts,
 writes back, and releases projection lenses. Design deliverable only: the signatures are proposals;
@@ -309,7 +309,7 @@ must check `currentCells.empty()` first).
 
 | Q | files | change | why not caller/vql |
 |---|---|---|---|
-| Q1 | `vql_engine.{hpp,cpp}` | the `*Lens` generator dispatch → `openLensUri` (intercepted **before** the silent named-store→home fallback at `:944-954`) + `List` roots + `$lens` auto-bind; step-function dispatch for `lensMount`/`lensUnmount`/`lensNext`/`lensStub`/`lensCommit`/`lensEdit`/`lensRevert`/`lensBrowse`/`lensDirty`/`lensClose` in `evaluateStep`'s `FunctionInvocation` arm; mutating-step single-eval check (parser/type-contract) | The generator + step seams live only here. |
+| Q1 | `vql_engine.{hpp,cpp}` + `lens_uri.{hpp,cpp}` | `registerLensScheme(keyword, factory)` (the closed `kSchemes` if-chain becomes a registry); the `*Lens` generator dispatch → `openLensUri` (intercepted **before** the silent named-store→home fallback at `:944-954`) + `List` roots + `$lens` auto-bind; step-function dispatch for `lensMount`/`lensUnmount`/`lensNext`/`lensStub`/`lensCommit`/`lensEdit`/`lensRevert`/`lensBrowse`/`lensDirty`/`lensClose` in `evaluateStep`'s `FunctionInvocation` arm; mutating-step single-eval check (parser/type-contract) | The generator + step seams live only here. |
 | Q2 | `vql_engine.{hpp,cpp}` | `cellKey`/`cellEq`/`cellScalar` as `FunctionInvocation` value-expr builtins + `?fn()`/bare-predicate function resolution through `evaluateValueExpr`'s table for all names | Same engine, different surface. |
 | Q3 | `vql/{lexer,parser,token}.{hpp,cpp}` | `KwLens` joins `parseAnchorNode`'s generator keywords (`:523-528`) **plus** `KwFsLens`/`KwGitLens`/`KwSqlLens`/`KwLogLens`/`KwJournalLens`/`KwCfgLens`/`KwUnionLens` (the `*Lens` helpers — plain `Identifier`s never reach the anchor); the spec fns `dir`/`sql`/`git`/`log`/`journal`/`cfg` stay `Identifier` value-fns; step names stay unreserved `Identifier`-steps | `KwLens` is lexed but unreachable today. |
 | Q4 | `vql_engine.{hpp,cpp}` + `multi_store.{hpp,cpp}` + `lens_repl.{hpp,cpp}` | `lensSessions()` registry on `MultiStoreCoordinator` (`vector<weak_ptr>` membership + owning `vector<shared_ptr>`); `LensRepl::session_` migrates `unique_ptr`→`shared_ptr` + `session()` accessor; `ProjectionSession` gains `core()`; `sessionFor` arena-scoped (per-query engine sees it); `$lens` vector-bind; `LensRepl` exposes `session()` so the REPL's session joins the registry | The session-outlives-engine requirement + shared `:lens`/`*Lens` recency. |
