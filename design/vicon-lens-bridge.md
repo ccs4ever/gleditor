@@ -1,4 +1,4 @@
-# vicon Lens Bridge: Lenses as Suspended Host Requests in a Goal-Directed Language (v1.6)
+# vicon Lens Bridge: Lenses as Suspended Host Requests in a Goal-Directed Language (v1.7)
 
 A design specification for how a **vicon program** — not a `vicon` REPL verb — opens, traverses,
 mounts, writes back, and releases projection lenses. Design deliverable only: the signatures are
@@ -380,7 +380,7 @@ every c := kids(r) do
   }
 
 # a sql: lens — one root (the conn cell), schema-only until browsed
-s := lens("sql:/tmp/lensj/data.db")
+s := lens("sql:sqlite:///tmp/lensj/data.db")
 q := lbrowse(s, "t")             # the browsed query's root cell
 pg := step(q, "d.contains")      # page 0 — step lands on the page, not a row
 sight := step(pg, "d.contains")  # first sight (sql.sight)
