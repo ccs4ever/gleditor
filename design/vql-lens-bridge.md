@@ -1,9 +1,9 @@
-# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v2.8)
+# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v2.9)
 
 A design specification for how a **VQL program** — not the `vquery` REPL — opens, traverses, mounts,
 writes back, and releases projection lenses. Design deliverable only: the signatures are proposals;
 the engine's generator-anchor (`lens` open) and step-function (`path/fn(...)` mutate/read) machinery
-is the seam, not a new layer. Round 1 critique folded in.
+is the seam, not a new layer. Rounds 1–2 critique folded in.
 
 VQL is **declarative**: a query produces a relation (a set of cells). Lens ops split two ways: the
 **open** is a generator anchor (produces cells from nothing); every **gesture on a cell** is a
@@ -107,7 +107,7 @@ backstop in `evaluateStep`/`resolveAnchor` — a mutating dispatch refuses when 
 nested, via an evaluation-depth/`topLevelStatement` flag threaded through `evaluatePath`/
 `evaluateStep` (`contextCells`-non-empty does **not** work: the nested evals to refuse — `for`/`return`/
 effect/`let`/`link`/`count` — call `evaluatePath` with `{}` context, `:2277`/`:2310`/`:2346`/`:2357`/
-`:465`/`:1509`/`:1458-1461`, indistinguishable from a top-level path). Covers predicate/lambda/
+`:465`/`:1509`, indistinguishable from a top-level path). Covers predicate/lambda/
 macro-dim/`PerspectiveStep`/`PerspectiveBlock`/`PathLambda` multiplicities (`:1373-1388`/
 `:1756-1761`/`:1917-1950`/`:2213-2219`/`:2278-2365`). `lens()` itself mints a session — it's **session-mutating**, legal only as the anchor of a
 top-level statement `PathExpression` that evaluates exactly once (not inside `return`, `for`,
@@ -188,7 +188,7 @@ step; its `cloneGenerator(target)` also appends `d.clone` on a session-owned *ta
 just `in`). Rule — same as vlace D6: **every VQL link-writing
 site checks `sessionFor(cell)` on the cells it links and refuses when a write would land on a
 session-owned cell**; the correct write is `lensedit` (content) — projected structure is the
-session's to maintain (Q8).
+session's to maintain (Q7B).
 
 ## 4. Proposed surface
 
@@ -289,7 +289,7 @@ must check `currentCells.empty()` first).
 | Q4 | `vql_engine.{hpp,cpp}` + coordinator | `sessions_`/`sessionFor` on the coordinator's session registry (per-query engine sees it); `$lens` vector-bind; `LensRepl` exposes `session()` so the REPL's session joins the registry | The session-outlives-engine requirement + shared `:lens`/`lens()` recency. |
 | Q5 | `vql/compiler.cpp` OR doc-scope | `StoreGenerator` `lens` under `--engine vortex` maps to `home()` — either compile it or scope the design to the direct engine | The compiler path is a separate surface. |
 | Q6 | `session_ops.{hpp,cpp}` + `sql_lens.{hpp,cpp}` | `sessionBrowseAt(session, key, table)` — mount-scoped resolver + `browse` + `refresh()`; a `SqlLens` accessor (or browse-returns-key) to yield the new query's root; `sessionUnmountAt` pre-resolves `mountBoundary`→`cellFor`; new `session_ops.cpp` keeps `SqlLens` out of the header | The browse resolver shared between vlace and VQL. |
-| Q8 | `vql_engine.cpp` + `vquery/main.cpp` | `sessionFor` guard at every link-writing site: `link(...)` step + `cloneGenerator`, `performCreates` (both `in` and `attachPoint`), `PathMorphism`, `cloneTail`/perspective clones, `shapeProjection`, `executeWatch`; **and** on the `promote`/`--in-place`/`writeResultSlice`/`:save` result-persistence path | D7 — the provenance guard no other row owns. |
+| Q7B | `vql_engine.cpp` + `vquery/main.cpp` | `sessionFor` guard at every link-writing site: `link(...)` step + `cloneGenerator`, `performCreates` (both `in` and `attachPoint`), `PathMorphism`, `cloneTail`/perspective clones, `shapeProjection`, `executeWatch`; **and** on the `promote`/`--in-place`/`writeResultSlice`/`:save` result-persistence path | D7 — the provenance guard no other row owns. |
 | Q7 | `tests/` (new) | VQL lens journey — `lens()` → traverse → `lensmount` → back → `lenscommit`/`lensrevert`/`lensnext`/`lensstub`/`lensbrowse`; sole-anchor refusal (mutating step inside a `where`) | A test sits with its code — the acceptance artifact. |
 
 The session machinery (`session_ops`, `ownsCell`, `canApply`, `revertKey`, `commit()`→`expected<int>`,
