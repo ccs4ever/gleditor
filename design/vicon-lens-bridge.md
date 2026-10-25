@@ -1,4 +1,4 @@
-# vicon Lens Bridge: Lenses as Suspended Host Requests in a Goal-Directed Language (v1.9)
+# vicon Lens Bridge: Lenses as Suspended Host Requests in a Goal-Directed Language (v1.10)
 
 A design specification for how a **vicon program** — not a `vicon` REPL verb — opens, traverses,
 mounts, writes back, and releases projection lenses. Design deliverable only: the signatures are
@@ -112,10 +112,10 @@ host-side. Every consequence is absorbed:
 On `expected`-refusal the Driver writes `ok := 0` and records the reason in Driver-held state —
 the call **fails** (D3).
 
-`lens(uri)`, `kids(c)`, and `lroots(c)` produce **several** results: the Driver holds a per-site
+`lens(path)`/`lens("kw","spec")`/`dirLens`/`sqlLens`/`gitLens`/`logLens`/`journalLens`/`cfgLens`/`unionLens(spec,…)`, `kids(c)`, and `lroots(c)` produce **several** results: the Driver holds a per-site
 answer queue (`unordered_map<site-id, deque<CellRef>>` — the request carries a compile-minted site
 scalar). Queue discipline: **a fresh request at a site REPLACES the queue** — a re-fired
-`kids(c)`/`lens(uri)` with a different arg must not serve the old arg's stale answers, and a
+`kids(c)`/`lens(path)`/`lens("kw","spec")`/`dirLens`/`sqlLens`/`gitLens`/`logLens`/`journalLens`/`cfgLens`/`unionLens(spec,…)` with a different arg must not serve the old arg's stale answers, and a
 re-drive must not append duplicates. The fragment's `altOp` re-sends `NEXT site` — wrapped through
 `guardedAlt` (`compiler.cpp:125-136`) like every other resume path, so a `\n` kill-gate poisons the
 NEXT re-send (the flag's non-persistence is the inherited I2 deviation, D4) — the queue empties,
@@ -284,7 +284,7 @@ is store-less like vlace's evaluator; no `MetaSource` fold exists to borrow. xuz
 four gesture copies (`xuzz_app.cpp`) and does not call `session_ops` — gate-free, noted, out of
 scope (`session_ops.hpp:22-25`).
 
-`lens(uri)` keeps the URI form: a string source designator **is** the Icon idiom — `open(filename)`
+`lens(path)`/`lens("kw","spec")`/`dirLens`/`sqlLens`/`gitLens`/`logLens`/`journalLens`/`cfgLens`/`unionLens(spec,…)` keeps the URI form: a string source designator **is** the Icon idiom — `open(filename)`
 — where the siblings took typed spec objects; the URI's scheme already selects the lens type. The
 price paid either way is canonical-identity dedupe (D2): normalization lives in the registry open
 path, not in the argument's shape.
@@ -323,7 +323,7 @@ is `sessionFor(target-cell)`); `ledit` is the content-write path.
 
 | builtin | produces | notes |
 |---|---|---|
-| `lens(uri)` | each projected root's ref-token | `openLensUri`; dedupe by canonical identity; re-seeds `&lens`; refusal → fails |
+| `lens(path)`/`lens("kw","spec")`/`dirLens`/`sqlLens`/`gitLens`/`logLens`/`journalLens`/`cfgLens`/`unionLens(spec,…)` | each projected root's ref-token | `openLensUri`; dedupe by canonical identity; re-seeds `&lens`; refusal → fails |
 | `kids(cell)` | each child's ref-token — `d.contains` head then its `d.seq` run | snapshot resolved at request time (the `!x`/`childrenAll` hole, I3) |
 | `lroots(cell)` | the session's *current* roots' ref-tokens | `roots_` recomputes per `refresh()` — the post-refresh root list `&lens` alone can't give |
 
