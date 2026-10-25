@@ -1,4 +1,4 @@
-# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v5.0)
+# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v5.1)
 
 A design specification for how a **VQL program** — not the `vquery` REPL — opens, traverses, mounts,
 writes back, and releases projection lenses. Design deliverable only: the signatures are proposals;
@@ -184,8 +184,8 @@ vlace's D6 guards `setLink`; VQL's write surface is *larger* and equally unguard
 `PathMorphism` `->`/`=>` (`link(c,dim,dir,sprout)` + reciprocal — `:1883-1897` — a write on a
 projected cell overwrites its posward link *and* the displaced child's negward edge), `cloneTail`
 and perspective clones (`d.clone` rank — **not lens-managed**, survives every refresh → a permanent
-untracked edge, `:1024-1038`,`:1873-1880`), `shapeProjection` (`:1046-1089`), and `executeWatch`
-(`dDelta` edges on projected cells, `:719-725`) — **including the `link(...)` step builtin itself**
+untracked edge, `:1024-1038`,`:1873-1880`), `shapeProjection` (`:1046-1089`), `findInDocuments` (`:1204-1205` — both ends fresh mints, trivially passes),
+and `executeWatch` (`dDelta` edges on projected cells, `:719-725`) — **including the `link(...)` step builtin itself**
 (`core_->link(c, dim, dir, cloneCell)` over `currentCells`, `:1519-1527` — the flagship mutating
 step; its `cloneGenerator(target)` also appends `d.clone` on a session-owned *target*,
 `vortex_core.cpp:317-325`) and `performCreates`' `attachPoint`/`rankTail` end (`:1233-1235`, not
