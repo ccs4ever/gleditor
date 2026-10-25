@@ -10,7 +10,7 @@
 #include "common/xanadu/zigzag/manifold.hpp"
 #include "common/xanadu/zigzag/meta_lens.hpp"
 #include "common/xanadu/zigzag/projection_lens.hpp"
-#include "common/xanadu/zigzag/router_lens.hpp"
+#include "common/xanadu/zigzag/session_ops.hpp"
 
 namespace zigzag {
 
@@ -174,60 +174,39 @@ bool LensRepl::run(const std::string_view line, std::ostream &out,
     return open(arg, out, metaSource);
   }
   if (arg.starts_with("mount ")) {
-    auto *router = dynamic_cast<RouterLens *>(session_->lensMut());
-    if (router == nullptr) {
-      out << "lens: no router at the root -- mount needs a dir: view\n";
+    const auto mounted = sessionMountAt(*session_, keyArg(arg.substr(6)));
+    if (!mounted) {
+      out << "lens: " << mounted.error() << "\n";
       return true;
     }
-    const auto opened = router->open(keyArg(arg.substr(6)));
-    if (!opened) {
-      out << "lens: mount refused: " << opened.error() << "\n";
-      return true;
-    }
-    (void)session_->refresh();
     printLensTree(*session_, *core_, *arena_, label_, out, /*withKeys=*/true);
     return true;
   }
   if (arg.starts_with("unmount ")) {
-    auto *router = dynamic_cast<RouterLens *>(session_->lensMut());
-    if (router == nullptr) {
-      out << "lens: no router at the root\n";
+    const auto dropped = sessionUnmountAt(*session_, keyArg(arg.substr(8)));
+    if (!dropped) {
+      out << "lens: " << dropped.error() << "\n";
       return true;
     }
-    const auto boundary = router->mountBoundary(keyArg(arg.substr(8)));
-    if (!boundary) {
-      out << "lens: no mount at or above " << arg.substr(8) << "\n";
-      return true;
-    }
-    if (!router->unmount(*boundary)) {
-      out << "lens: unmount refused\n";
-      return true;
-    }
-    (void)session_->refresh();
     printLensTree(*session_, *core_, *arena_, label_, out, /*withKeys=*/true);
     return true;
   }
   if (arg == "next") {
-    auto *w = dynamic_cast<WindowedLens *>(session_->lensMut());
-    if (w == nullptr) {
-      out << "lens: not a windowed lens\n";
+    // Unscoped: the whole session's next deferred page.
+    const auto paged = sessionNextPage(*session_, std::nullopt);
+    if (!paged) {
+      out << "lens: " << paged.error() << "\n";
       return true;
     }
-    const auto stub = w->nextStub();
-    if (!stub) {
+    if (!paged->has_value()) {
       out << "lens: no deferred page\n";
       return true;
     }
-    if (const auto r = w->materializePage(*stub); !r) {
-      out << "lens: materialize failed\n";
-      return true;
-    }
-    (void)session_->refresh();
     printLensTree(*session_, *core_, *arena_, label_, out, /*withKeys=*/true);
     return true;
   }
   if (arg == "commit") {
-    const auto c = session_->commit();
+    const auto c = sessionCommitAll(*session_);
     if (!c) {
       out << "lens: commit failed: " << c.error() << "\n";
     } else {
