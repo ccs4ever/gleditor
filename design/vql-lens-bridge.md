@@ -1,4 +1,4 @@
-# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v3.6)
+# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v3.7)
 
 A design specification for how a **VQL program** — not the `vquery` REPL — opens, traverses, mounts,
 writes back, and releases projection lenses. Design deliverable only: the signatures are proposals;
@@ -214,7 +214,7 @@ session's to maintain (Q7B).
 | `lensmount` | — | delegate root cells | `sessionMountAt`; `Err`→empty |
 | `lensunmount` | — | the mount-point cells | `mountBoundary`→`cellFor` resolved *before* `sessionUnmountAt` (which returns `expected<void>`); `Err`→empty |
 | `lensnext` | — | materialized stub cells | `sessionNextPage` — mount-scoped via `windowedFor` on a Router session, session-level on a plain `WindowedLens` |
-| `lensstub` | — | pending stub cells (one per input mount — N cells in one mount yield N copies of the same stub; dedupe at the relation level) | `nextStubAt` (const — not dirty-gated) |
+| `lensstub` | — | pending stub cells (deduped like the other session-scoped ops — one probe per mount; N cells in one mount yield one stub) | `nextStubAt` (const — not dirty-gated) |
 | `lenscommit` | — | applied count (scalar cell) | `sessionCommitAll` → `commit()` applied count |
 | `lensedit(text)` | `String` | the cell | `sessionEdit` — `Err` for ref-bound/unkeyed/non-writable |
 | `lensrevert` | — | the cell | `sessionRevert` — `Err` on source-vanished |
