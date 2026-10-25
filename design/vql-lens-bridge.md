@@ -1,4 +1,4 @@
-# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v4.3)
+# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v5.0)
 
 A design specification for how a **VQL program** — not the `vquery` REPL — opens, traverses, mounts,
 writes back, and releases projection lenses. Design deliverable only: the signatures are proposals;
@@ -115,8 +115,8 @@ macro-dim/`PerspectiveStep`/`PerspectiveBlock`/`PathLambda` multiplicities (`:13
 top-level statement `PathExpression` that evaluates exactly once (not inside `return`, `for`,
 `let`, `def`, `watch`, `until`, predicates, clone/shape/morphism/create/destructure targets —
 `return fsLens("/x")` over N rows would leak N sessions into append-only `sessions_`, and `lensClose`
-is deferred U-V2). The mutating set is `{fsLens, gitLens, sqlLens, logLens, journalLens, cfgLens, unionLens, lensMount,
-lensUnmount, lensNext, lensCommit, lensEdit, lensRevert, lensBrowse, lensClose}`; the exempt const probes are `{lensStub, lensDirty}`.
+is deferred U-V2). The mutating set is `{lens, fsLens, gitLens, sqlLens, logLens, journalLens, cfgLens, unionLens,
+lensMount, lensUnmount, lensNext, lensCommit, lensEdit, lensRevert, lensBrowse, lensClose}`; the exempt const probes are `{lensStub, lensDirty}`.
 
 `cellKey`/`cellEq`/`cellScalar` are pure **value expressions** — `where cellKey($c) = "fs:52:794498"` filters; `cellEq($a,$b)` identity-compares (the real motivation: `=` compares renders, not identity). Note `?fn(...)` produces `PredicateTest::ValueExpr` (`parser.cpp:1404-1407`) and routes into
 `evaluateValueExpr`'s function table (`:2057-2116`) — an unknown fn returns `""` (falsy, silent
