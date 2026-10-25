@@ -1,4 +1,4 @@
-# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v3.5)
+# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v3.6)
 
 A design specification for how a **VQL program** — not the `vquery` REPL — opens, traverses, mounts,
 writes back, and releases projection lenses. Design deliverable only: the signatures are proposals;
@@ -68,9 +68,9 @@ owns and injects (the `LensRepl` session joins as a `shared_ptr` — `unique_ptr
 type loses the non-owning join)); `sessionFor(cell)` scans it calling `ownsCell` (the P3 pattern).
 
 `$lens` auto-binds on `lens()` open — and re-injects per query from the **coordinator registry's
-most recent open** (open order — a `:lens` REPL open and a `lens()` code open share recency,
-`main.cpp:525-526` currently injects only `lensRepl.root()`); the vector `setVariable` overload
-(`vql_engine.hpp:61`) binds all roots. A bare integer anchor (`AnchorKind::LiteralCellId`, `parser.cpp:641-658`) reaches a projected cell only
+most recent *live* open** (expired `weak_ptr` entries are skipped — a `:lens close` leaves no stale
+`$lens`; today `lensRepl.root()` → `nullopt` after close unbinds correctly, `main.cpp:525-526`); the
+vector `setVariable` overload (`vql_engine.hpp:61`) binds all roots. A bare integer anchor (`AnchorKind::LiteralCellId`, `parser.cpp:641-658`) reaches a projected cell only
 by typing the full ephemeral value (`denseOf` *accepts* ephemeral refs — `arena_manifold.cpp:
 267-269` unmasks the bit — `--format cells` prints them, `main.cpp:558`); a bare dense number
 resolves in the base/overlay namespace, and an ephemeral id is meaningless and unstable across
