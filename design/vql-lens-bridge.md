@@ -1,9 +1,9 @@
-# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v5.6)
+# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v5.7)
 
 A design specification for how a **VQL program** — not the `vquery` REPL — opens, traverses, mounts,
 writes back, and releases projection lenses. Design deliverable only: the signatures are proposals;
 the engine's generator-anchor (`lens` open) and step-function (`path/fn(...)` mutate/read) machinery
-is the seam, not a new layer. Rounds 1–2 critique folded in.
+is the seam, not a new layer. Rounds 1–5 critique folded in.
 
 VQL is **declarative**: a query produces a relation (a set of cells). Lens ops split two ways: the
 **open** is a generator anchor (produces cells from nothing); every **gesture on a cell** is a
@@ -17,7 +17,7 @@ ______________________________________________________________________
 A VQL query should be able to write, in its own terms:
 
 - **open a source** as projected root cells — `dir:`/bare path, `git:`, `sql:`, `cfg:`, `log:`,
-  `journal:`, `union:` — the `openLensUri` scheme table (`lens_uri.cpp:23-124`);
+  `journal:`, `union:` — the `openLensUri` scheme table (`lens_uri.cpp:23-125`);
 - **traverse** with the cell-path syntax it already uses — `$root/d.contains/d.seq/d.role`;
 - **mount a delegate** under a projected cell and come **back** — "back" is a bound variable;
 - **edit, commit, and revert** projected cells on write-capable lenses (`sql:`/`cfg:` today);
@@ -56,7 +56,7 @@ open in the registry re-binds to the live session's roots — two sessions over 
 would split `dirty_` and cross-clobber on `commit()` (`keyToCell_` is per-session); a *different*
 `(keyword, args)` mints its own projection.
 
-Every gesture on a *cell* is a **step function** — `path/lensMount()`, `$cell/lensNext()`, `path/lensEdit("text")` — mapping over the relation: `$cells/lensMount()` mounts under each cell (N mounts, per-cell yield; a per-cell refusal drops that cell, not the whole relation — `Err`-per-cell → empty for that cell). **Session-scoped ops dedupe**: `lensCommit`/`lensBrowse`/`lensUnmount` resolve each input cell to its (session[, mount]) and run once per distinct target (`lensNext` is deliberately **not** deduped — N cells in one mount materialize N pages; `lensStub`/`lensDirty` **are** deduped — one probe per session) — arg-taking variants (`$cells/lensBrowse($c)`) take the arg from the first cell of each distinct target group (per-cell arg variance is silently first-wins — noted) — `$cells/lensCommit()` over N cells of one session commits once, not N times (yielding `[n]` not `[n,0,0…]`) — dispatched in `evaluateStep`'s `FunctionInvocation` arm (`vql_engine.cpp:1390+`), which already receives `currentCells` and already mutates (`link(...)` at `:1466-1540`); cell-typed *args* resolve via `cellsOfValueExpr` (`:362-381`), not `evaluateValueExpr` (which renders cells to `CellValue`, destroying the identity `cellEq` tests). The arg is the relation it filters — the "pipe" semantics without a pipe token (`|` is union-type-only, `parser.cpp:1603`). A user `def lensMount()` does NOT shadow the builtin (the step dispatch checks builtin names before `userDefs_` — stated precedence) — a step function needs no keyword — it's an `Identifier + '('` step (`parser.cpp:912-915`), so `lensMount`/`lensNext`/etc. stay *unreserved* names, not `Kw*` tokens.
+Every gesture on a *cell* is a **step function** — `path/lensMount()`, `$cell/lensNext()`, `path/lensEdit("text")` — mapping over the relation: `$cells/lensMount()` mounts under each cell (N mounts, per-cell yield; a per-cell refusal drops that cell, not the whole relation — `Err`-per-cell → empty for that cell). **Session-scoped ops dedupe**: `lensCommit`/`lensBrowse`/`lensUnmount` resolve each input cell to its (session[, mount]) and run once per distinct target (`lensNext` is deliberately **not** deduped — N cells in one mount materialize N pages; `lensStub`/`lensDirty` **are** deduped — one probe per session) — arg-taking variants (`$cells/lensBrowse("t")`) take the arg from the first cell of each distinct target group (per-cell arg variance is silently first-wins — noted) — `$cells/lensCommit()` over N cells of one session commits once, not N times (yielding `[n]` not `[n,0,0…]`) — dispatched in `evaluateStep`'s `FunctionInvocation` arm (`vql_engine.cpp:1390+`), which already receives `currentCells` and already mutates (`link(...)` at `:1466-1540`); cell-typed *args* resolve via `cellsOfValueExpr` (`:362-381`), not `evaluateValueExpr` (which renders cells to `CellValue`, destroying the identity `cellEq` tests). The arg is the relation it filters — the "pipe" semantics without a pipe token (`|` is union-type-only, `parser.cpp:1603`). A user `def lensMount()` does NOT shadow the builtin (the step dispatch checks builtin names before `userDefs_` — stated precedence) — a step function needs no keyword — it's an `Identifier + '('` step (`parser.cpp:912-915`), so `lensMount`/`lensNext`/etc. stay *unreserved* names, not `Kw*` tokens.
 
 ### D2 — Sessions live on the coordinator, not the per-query engine
 
@@ -175,7 +175,7 @@ across vlace's `IO.LensNext`/`mountedLens` and VQL's next/stub/browse/unmount).
 ### D6 — `meta:` refused; `union:` and `sql:` boundaries documented
 
 `openLensUri` (P6) refuses `meta:` — the engine *could* build the `MetaSource` fold
-(`coordinator_.stores()`/`primaryStore`/`rebuildManifold`, `main.cpp:408-420`), but a borrowed
+(`primaryStore()`/`findStore(label)`/`rebuildManifold`, `main.cpp:408-420`), but a borrowed
 fold must outlive the session and the engine's `core_` has no base manifold; `meta:` is refused
 by design, not by capability gap — noted, not a permanent exclusion. A direct `sql:` open is schema-only
 until `lensBrowse`; a `union:` session supports only **key-level ops** — `UnionLens` is neither `RouterLens`/
@@ -315,7 +315,7 @@ must check `currentCells.empty()` first).
 | Q4 | `vql_engine.{hpp,cpp}` + `multi_store.{hpp,cpp}` + `lens_repl.{hpp,cpp}` | `lensSessions()` registry on `MultiStoreCoordinator` (`vector<weak_ptr>` membership + owning `vector<shared_ptr>`); `LensRepl::session_` migrates `unique_ptr`→`shared_ptr` + `session()` accessor; `ProjectionSession` gains `core()`; `sessionFor` arena-scoped (per-query engine sees it); `$lens` vector-bind; `LensRepl` exposes `session()` so the REPL's session joins the registry | The session-outlives-engine requirement + shared `:lens`/`*Lens` recency. |
 | Q5 | `vql/compiler.cpp` OR doc-scope | `StoreGenerator` `lens` under `--engine vortex` maps to `home()` — either compile it or scope the design to the direct engine | The compiler path is a separate surface. |
 | Q6 | `session_ops.{hpp,cpp}` + `sql_lens.{hpp,cpp}` | `sessionBrowseAt(session, key, table)` — mount-scoped resolver + `browse` + `refresh()`; `sessionMountScopeAt(session, key)` — the cell→`keyFor`→`mountBoundary`→`windowedFor` preamble shared by next/stub/browse/unmount; a `SqlLens` accessor (or browse-returns-key) to yield the new query's root; `sessionUnmountAt` pre-resolves `mountBoundary`→`cellFor`; new `session_ops.cpp` keeps `SqlLens` out of the header | The browse + scope resolvers shared between vlace and VQL. |
-| Q7B | `vql_engine.cpp` + `vquery/main.cpp` | `sessionFor` guard at every link-writing site: `link(...)` step + `cloneGenerator`, `performCreates` (both `in` and `attachPoint`), `PathMorphism`, `cloneTail`/perspective clones, `shapeProjection`, `executeWatch`; **and** on the `promote`/`--in-place`/`writeResultSlice`/`:save` result-persistence path | D7 — the provenance guard no other row owns — **`--engine vortex` included**: `compilePathStep` emits `Link`/`Clone` ops (`vql/compiler.cpp:452-526`) `VortexVM` runs as raw `arena().link` (`vortex_vm.cpp:526`) — mutating paths refuse at compile/run when sessions are live, or the VM's Link goes through the same `sessionFor` funnel. |
+| Q7B | `vql_engine.cpp` + `vquery/main.cpp` | `sessionFor` guard at every link-writing site: `link(...)` step + `cloneGenerator`, `performCreates` (both `in` and `attachPoint`), `PathMorphism`, `cloneTail`/perspective clones, `shapeProjection`, `executeWatch`; **and** on the `promote`/`--in-place`/`writeResultSlice`/`:save` result-persistence path | D7 — the provenance guard no other row owns — **`--engine vortex` included**: `compilePathStep` emits `Link`/`Clone` ops (`vql/compiler.cpp:452-526`) `VortexVM` runs as raw `arena().link` (`vortex_vm.cpp:526`/`:540`) — mutating paths refuse at compile/run when sessions are live, or the VM's Link goes through the same `sessionFor` funnel. |
 | Q7 | `tests/` (new) | VQL lens journey — `fsLens` → traverse → `lensMount` → back → `lensCommit`/`lensRevert`/`lensNext`/`lensStub`/`lensBrowse`; sole-anchor refusal (mutating step inside a `where`) | A test sits with its code — the acceptance artifact. |
 
 The session machinery (`session_ops`, `ownsCell`, `canApply`, `revertKey`, `commit()`→`expected<int>`,
