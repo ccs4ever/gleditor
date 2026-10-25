@@ -210,8 +210,9 @@ The lowering rules that make this the least common denominator:
   `unify`, vlace `EnvPtr`); on fail the trial is discarded — a bare `VariableRef` `targetValue`
   lowers to `Bind` (not `RequireValue`), matching `vql-query-language.md:1050-1051`.
 - **`MissingField` is a callsite policy, not a field property**: `shapeMatches` takes
-  `MissingPolicy { Refuse, BindEmpty }` — VQL passes Refuse from `Cell {…}` types and `watch … as`,
-  BindEmpty from `for {…}` (`vql_engine.cpp:213-214,:2283-2293`) — and per-field `optional`
+  `MissingPolicy { Refuse, BindEmpty }` — VQL passes Refuse from `Cell {…}` types + lambda/def params, BindEmpty from
+  `for {…}` **and `watch … as`** (`vql_engine.cpp:705-706` — the enum's own doc: "a `for` or `watch`
+  binding binds nothing", `vql_engine.hpp:168-170`) (`vql_engine.cpp:213-214,:2283-2293`) — and per-field `optional`
   overrides it (the `T?` arm, `:209-211`).
 
 ### D3 — descent lives in the expression; bindings are flat
@@ -519,10 +520,15 @@ case matchShape entry spec of
 |---|---|---|---|
 | S1 | `apps/common/xanadu/zigzag/cell_shape.{hpp,cpp}` (new) | `ShapeExpr`/`ShapeField`/`ShapeBindings`/`ShapeMode`/`ShapeBase`/`ShapeCmp`/`MissingPolicy`; `shapeMatches`/`cellsMatching`/`matchesShape` over `CellGraph`; `compareCellValues` (lifted `vql_engine.cpp:2145-2199`); `cellKey`/`cellScalar`/`cellEq`/`keyCell`/`sessionForCell` with injected `SessionScan`/`SessionList` | The kernel is the "one copy" — beside `session_ops.hpp`, over the existing `CellGraph` substrate |
 | S2 | `vql/vql_engine.{hpp,cpp}` + `vql/parser.cpp` + `vql/ast.hpp` | `evaluateShapePredicate`/`matchDestructure` re-implemented over the kernel; `MissingPolicy` per callsite; `{}`/`{*}`/`{!*}` valence arms; `: {…}` nested-descent lowering; `linked` default; `PredicateTest::FunctionInvocation` arm + `?{…}` `return true` arm routed to `shapeMatches`; silently-ignored rule variants (`$shape`/`fn(.)`/pivot/virtual-dim) refuse or lower | The three readings converge; the dead arms and vacuous truths are wrong answers today |
-| S3 | `vpl/view.hpp` + `vpl/vpl_engine.cpp` + `vpl/{token,lexer,parser}` | `⎕MATCH`/`⎕SHAPE` quads; **dependency: the Q10 cell-list `VplView`** (`vpl-lens-bridge.md:450`) — the mask yield has no representation without it; spec-string parse through the shared spec-grammar — owned by a new `zigzag/cell_shape_parse.{hpp,cpp}` row — the grammar is:
+| S3 | `vpl/view.hpp` + `vpl/vpl_engine.{hpp,cpp}` + `vpl/{token,lexer,parser}` + `vpl/compiler.{hpp,cpp}` + `vpl/ast.hpp` | `⎕MATCH`/`⎕SHAPE` quads; **dependency: the Q10 cell-list `VplView`** (`vpl-lens-bridge.md:450`) — the mask yield has no representation without it; spec-string parse through the shared spec-grammar — owned by a new `zigzag/cell_shape_parse.{hpp,cpp}` row — the grammar is:
 
 ```
 shape    := "{" field ("," field)* "}" | "{}" | "{*}" | "{!*}"
+field    := dir? dim [":" value | bindName nested? | "!"]
+nested   := shape
+dir      := "+" | "-" | "~"
+bindName := "$" ident | ident
+value    := scalar | "$" ident [nested] | shape
 field    := dir dim [":" value | bindName nested? | "!"]
 nested   := "{" field ("," field)* "}"
 dir      := "+" | "-" | "~"
@@ -533,9 +539,9 @@ value    := scalar | "$" ident | shape
 `{ }` = Closed/valence-0, `{*}` = valence>=1, `{!*}` = forbidden-wildcard; a bare nested `{...}` re-matches the SAME cell (conjunction — a new semantics for the same syntax, since the spec'd `{$a,$b}` composition is rule-union not conjunction); `dir dim: {...}` descends to the neighbor. (a neutral parser producing `std::expected<ShapeExpr, …>` through an injected dim resolver — **`findDimension` (non-minting) at every match-time resolution** (`evaluateShapePredicate` resolves per-rule through `resolveDimension`→`findOrMintDimension`, `vql_engine.cpp:2385` → `multi_store.cpp:354` — a `d.dims`-appending write inside a read; an unresolvable dim fails Require and passes Forbid honestly; compile-time mint is the vicon `step` precedent, per-call mint is not); the VQL `ShapeLiteral` parser can't be a dependency — it's frontend-specific — so each frontend lowers its own syntax through the shared parse or its own) — `field := dir? dim (":" value | bindName nestedShape? | "!" )` where `bindName` is a `$`-sigil identifier (VQL/vicon) or a bare identifier (VPL/vprolog — the sigil is frontend-lexical, the *shape* is shared; the VQL surface needs the S2 grammar addition for `+d.dim: $name {…}` — no AST home today (`DimensionShapeRule.targetValue` is one `ValueExpr` — can't hold both a bind name AND a nested `ShapeLiteral`, `ast.hpp:139`); the lowering needs `ShapeField{mode=Bind, expected=nested}` — S2's grammar row must extend the rule shape (a `bindName` + `targetValue` pair, or `bindName` on the field carrying the nested `ShapeExpr`)) | `⌿` copies — a mask preserving identity needs the cell-list mode first |
 | S4 | `vicon/compiler.{hpp,cpp}` + `vicon/driver.{hpp,cpp}` | `match`/`descendants` builtins on the V1 request/`V2` gate rows — `match` produces subject-then-binds through the site queue; `descendants` BFS over `neighbours` under `traversalBound` | The second-`Halt` protocol is the only host channel |
 | S5 | `vortex_stdlib.{hpp,cpp}` | `lens_shape(C, Pattern)` arm — term→`ShapeExpr` lowering, `bind`/`sub` vars unified with `makeScalarCell(int64(…))` under mark/unify/release; dims via `findDimension` (no mint) | A builtin keeps cells out of `unify` (vlog.cpp:86-94's clone-tail hazard) |
-| S6 | `vlace/compiler.{hpp,cpp}` | `shapeOf`/`matchShape` natives + `Shape`/`ShapeSpec`/`Constraint`/`Field`/`ShapeBase` ctor registration under P1's reserved-tag discipline; lazy `List (String,Cell)` result | The ADT surface lives only in `installXanadu` |
+| S6 | `vlace/compiler.{hpp,cpp}` + `vlace/types.cpp` + `vlace/ast.hpp` | `shapeOf`/`matchShape` natives + `Shape`/`ShapeSpec`/`Constraint`/`Field`/`ShapeBase` ctor registration under P1's reserved-tag discipline; lazy `List (String,Cell)` result | The ADT surface lives only in `installXanadu` |
 | S7 | `vortex_core.{hpp,cpp}` + the Q4 row | `lensSessions()` registry lands → each frontend's injected `SessionScan`/`SessionList` rebinds to the registry scan | VQL Q4 / vicon V4 / vprolog's register — shared, already proposed |
-| S8 | `tests/` (new) | the §5 shape in each frontend's gate test (`lens_*_gate_test.cpp` pattern); kernel unit tests in `tests/lib/` | A test sits with its code — the acceptance artifact |
+| S8 | `tests/` (new) | the §5 shape in each frontend's gate test (`lens_*_gate_test.cpp` pattern); kernel unit tests in `tests/zigzag/` or `tests/xuzz/` | A test sits with its code — the acceptance artifact |
 
 ## 8. What this is not
 
