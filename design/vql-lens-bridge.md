@@ -1,4 +1,4 @@
-# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v3.1)
+# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v3.2)
 
 A design specification for how a **VQL program** — not the `vquery` REPL — opens, traverses, mounts,
 writes back, and releases projection lenses. Design deliverable only: the signatures are proposals;
@@ -188,9 +188,13 @@ untracked edge, `:1024-1038`,`:1873-1880`), `shapeProjection` (`:1046-1089`), an
 step; its `cloneGenerator(target)` also appends `d.clone` on a session-owned *target*,
 `vortex_core.cpp:317-325`) and `performCreates`' `attachPoint`/`rankTail` end (`:1233-1235`, not
 just `in`). Rule — same as vlace D6: **every VQL link-writing
-site checks `sessionFor(cell)` on the cells it links and refuses (`TypeContractError` — not
-per-cell-empty, so a `for … link()` over a mixed relation aborts loudly rather than silently
-writing a subset) when a write would land on a session-owned cell**; the correct write is `lensedit` (content) — projected structure is the
+site checks `sessionFor(cell)` on the cells it links — including the *displaced* slots
+(`link()` clears the reciprocal edge on `displacedUs`/`displacedIt`, `arena_manifold.cpp:1356-1374`;
+`linkedMinting` can write through `proxyFor`, `:919-950`; `resolveDimension` through
+`ensureDimension`, `:94-106`) — a checked-link funnel inspects `from`/`to`/`displacedUs`/
+`displacedIt`/rank tails rather than each callsite open-coding the check — and refuses
+(`TypeContractError` — not per-cell-empty, so a `for … link()` over a mixed relation aborts loudly
+rather than silently writing a subset) when a write would land on a session-owned cell**; the correct write is `lensedit` (content) — projected structure is the
 session's to maintain (Q7B).
 
 ## 4. Proposed surface
@@ -199,7 +203,7 @@ session's to maintain (Q7B).
 
 | generator | args | yields | notes |
 |---|---|---|---|
-| `lens(uri)` | `String` | session's root cells | `openLensUri`; binds `$lens`; refusal → empty relation |
+| `lens(uri)` | `String` | session's root cells | `openLensUri`; binds `$lens`; refusal → empty relation (a session projecting zero roots still registers — `lensdirty`/`lensclose` can reach it; an empty source is not a refusal) |
 
 ### Step functions (`path/fn(...)`, mutating = last-step only)
 
