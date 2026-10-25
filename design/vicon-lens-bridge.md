@@ -1,4 +1,4 @@
-# vicon Lens Bridge: Lenses as Suspended Host Requests in a Goal-Directed Language (v1.21)
+# vicon Lens Bridge: Lenses as Suspended Host Requests in a Goal-Directed Language (v1.22)
 
 A design specification for how a **vicon program** — not a `vicon` REPL verb — opens, traverses,
 mounts, writes back, and releases projection lenses. Design deliverable only: the signatures are
@@ -112,8 +112,8 @@ On `expected`-refusal the Driver writes `ok := 0` and records the reason in Driv
 the call **fails** (D3).
 
 `lens(path)`/`lens("kw","spec")`/`dirLens`/`sqlLens`/`gitLens`/`logLens`/`journalLens`/`cfgLens`/`unionLens(spec,…)`, `kids(c)`, and `lroots(c)` produce **several** results: the Driver holds a per-site
-answer queue (`unordered_map<site-id, deque<CellRef>>` — the request carries a compile-minted site
-scalar). Queue discipline: **a fresh request at a site REPLACES the queue** — a re-fired
+answer queue (`unordered_map<(site, request-seq), deque<CellRef>>` — the request carries a compile-minted site
+scalar plus a runtime request-seq the `NEXT` re-send carries back; a displaced activation's `NEXT` fails with `&lenserr` — same-site recursion is the canonical tree-walk idiom). Queue discipline: **a fresh request at a site REPLACES the queue** — a re-fired
 `kids(c)`/`lens(path)`/`lens("kw","spec")`/`dirLens`/`sqlLens`/`gitLens`/`logLens`/`journalLens`/`cfgLens`/`unionLens(spec,…)` with a different arg must not serve the old arg's stale answers, and a
 re-drive must not append duplicates. The fragment's `altOp` re-sends `NEXT site` — wrapped through
 `guardedAlt` (`compiler.cpp:125-136`) like every other resume path, so a `\n` kill-gate poisons the
@@ -130,7 +130,7 @@ shadowed — declaring one is a `CompileError`, not a shadow.
 The Driver is process-lived, so a core-held registry survives `start()` replacing the program — the
 **same `lensSessions()` row VQL's Q4 registers** (arena-level `weak_ptr` membership + owning
 `vector<shared_ptr>`), scanned by `sessionFor`. **Open dedupe by canonical source identity**:
-`dirLens("/x")` under a live session re-binds the existing roots; two sessions over one writable
+`dirLens("/x")` under a live session re-binds the existing roots — **refreshing an epoch-invalidated session first** (the dedupe path is the re-project trigger, not a lazy stamped read); two sessions over one writable
 source would split `dirty_` and cross-clobber on `commit()` (`keyToCell_` is per-session,
 `projection_session.hpp:200-201`). `openLensUri` does **no** normalization — `dir:/x`, `/x`, and
 `./x` open three sessions over one directory (`lens_uri.cpp:104-124`); the registry records the
