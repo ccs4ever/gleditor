@@ -1,4 +1,4 @@
-# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v5.1)
+# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v5.2)
 
 A design specification for how a **VQL program** — not the `vquery` REPL — opens, traverses, mounts,
 writes back, and releases projection lenses. Design deliverable only: the signatures are proposals;
@@ -53,7 +53,7 @@ session's projected roots, and binds `$lens` (the `setVariable` vector overload 
 a `*Lens` generator is itself session-mutating (it opens a session) but as an anchor it's the query's source —
 `fsLens("/x")/d.contains` is the natural open+traverse.
 
-Every gesture on a *cell* is a **step function** — `path/lensMount()`, `$cell/lensNext()`, `path/lensEdit("text")` — mapping over the relation: `$cells/lensMount()` mounts under each cell (N mounts, per-cell yield; a per-cell refusal drops that cell, not the whole relation — `Err`-per-cell → empty for that cell). **Session-scoped ops dedupe**: `lensCommit`/`lensBrowse`/`lensUnmount` resolve each input cell to its (session[, mount]) and run once per distinct target (`lensNext` is deliberately **not** deduped — N cells in one mount materialize N pages; `lensStub` **is** deduped — one probe per mount) — arg-taking variants (`$cells/lensBrowse($c)`) take the arg from the first cell of each distinct target group (per-cell arg variance is silently first-wins — noted) — `$cells/lensCommit()` over N cells of one session commits once, not N times (yielding `[n]` not `[n,0,0…]`) — dispatched in `evaluateStep`'s `FunctionInvocation` arm (`vql_engine.cpp:1390+`), which already receives `currentCells` and already mutates (`link(...)` at `:1466-1540`); cell-typed *args* resolve via `cellsOfValueExpr` (`:362-381`), not `evaluateValueExpr` (which renders cells to `CellValue`, destroying the identity `cellEq` tests). The arg is the relation it filters — the "pipe" semantics without a pipe token (`|` is union-type-only, `parser.cpp:1603`). A step function needs no keyword — it's an `Identifier + '('` step (`parser.cpp:912-915`), so `lensMount`/`lensNext`/etc. stay *unreserved* names, not `Kw*` tokens.
+Every gesture on a *cell* is a **step function** — `path/lensMount()`, `$cell/lensNext()`, `path/lensEdit("text")` — mapping over the relation: `$cells/lensMount()` mounts under each cell (N mounts, per-cell yield; a per-cell refusal drops that cell, not the whole relation — `Err`-per-cell → empty for that cell). **Session-scoped ops dedupe**: `lensCommit`/`lensBrowse`/`lensUnmount` resolve each input cell to its (session[, mount]) and run once per distinct target (`lensNext` is deliberately **not** deduped — N cells in one mount materialize N pages; `lensStub` **is** deduped — one probe per mount) — arg-taking variants (`$cells/lensBrowse($c)`) take the arg from the first cell of each distinct target group (per-cell arg variance is silently first-wins — noted) — `$cells/lensCommit()` over N cells of one session commits once, not N times (yielding `[n]` not `[n,0,0…]`) — dispatched in `evaluateStep`'s `FunctionInvocation` arm (`vql_engine.cpp:1390+`), which already receives `currentCells` and already mutates (`link(...)` at `:1466-1540`); cell-typed *args* resolve via `cellsOfValueExpr` (`:362-381`), not `evaluateValueExpr` (which renders cells to `CellValue`, destroying the identity `cellEq` tests). The arg is the relation it filters — the "pipe" semantics without a pipe token (`|` is union-type-only, `parser.cpp:1603`). A user `def lensMount()` does NOT shadow the builtin (the step dispatch checks builtin names before `userDefs_` — stated precedence) — a step function needs no keyword — it's an `Identifier + '('` step (`parser.cpp:912-915`), so `lensMount`/`lensNext`/etc. stay *unreserved* names, not `Kw*` tokens.
 
 ### D2 — Sessions live on the coordinator, not the per-query engine
 
@@ -86,8 +86,8 @@ a mutating step inside a `where`/join/predicate could evaluate multiple times or
 follow it** (`path/lensMount()/d.contains` is allowed; `path/lensMount()/d.contains/lensCommit()`
 and `…/lensEdit("99")/lensCommit()` are refused — commit is a separate statement; `where
 lensMount($c)`, mid-join, or any nested evaluation is a `TypeContractError`). The single rule: **a mutating construct may appear only where it evaluates exactly once at
-statement level** — the statement's sole top-level path anchor (`fsLens("/x")`), a flat `for`-`in`
-path (`inPath` evaluates once, `:2277`) or a `let` target **in the pre-`for` binding prefix**
+statement level** — the statement's sole top-level path anchor (`fsLens("/x")`), a `for`-`in` path **before the first `for` clause**
+(`inPath` evaluates once, `:2277`; a `for`-`in` after any `for` re-evaluates per outer row, `:2294` — banned) or a `let` target **in the pre-`for` binding prefix**
 (`let $x := fsLens("/x")` — `:=` — allowed; a `let` *inside* a `for` recursion re-evaluates per
 binding, `evaluateBindings` `:2294` — same leak as `return fsLens("/x")`; and `let $f :=` binds a
 *functor* evaluated per application via `functorOf`/`functors_`, `:392-432`/`:453-462` — both banned), or **one step in a top-level path containing at most one mutating step**
@@ -226,9 +226,9 @@ session's to maintain (Q7B).
 
 | fn | args | returns | notes |
 |---|---|---|---|
-| `cellKey(cell)` | `Cell` | `String`/empty | `ExternalKey` if a projected node cell; empty/`""` yield for attr/authored (VQL has no `NULL` — `CellValue` is `{string,double,int64_t,bool}`; note `cellKey($c) = ""` is *true* for attr cells — a residual wrong-answer comparison, the `cellKey`-vs-`""` collision) |
+| `cellKey(cell)` | `Cell` | `String`/empty | (arg resolves to exactly one cell — N≠1 → `TypeContractError`) `ExternalKey` if a projected node cell; empty/`""` yield for attr/authored (VQL has no `NULL` — `CellValue` is `{string,double,int64_t,bool}`; note `cellKey($c) = ""` is *true* for attr cells — a residual wrong-answer comparison, the `cellKey`-vs-`""` collision) |
 | `cellEq(a, b)` | `Cell, Cell` | `Bool` | identity on `CellRef` — `=` compares rendered text; each arg must resolve to exactly one cell (`cellsOfValueExpr` N≠1 → `TypeContractError`) |
-| `cellScalar(cell)` | `Cell` | `Int`/`Float`/`Bool`/empty | scalar `valueBits`; empty yield on span-cells and non-lens kinds (`Timestamp`/handle kinds — scope: lens-minted kinds only) |
+| `cellScalar(cell)` | `Cell` | `Int`/`Float`/`Bool`/empty | (arg resolves to exactly one cell) | scalar `valueBits`; empty yield on span-cells and non-lens kinds (`Timestamp`/handle kinds — scope: lens-minted kinds only) |
 
 ## 5. Worked example
 
