@@ -1,4 +1,4 @@
-# Cell-Shape Specification: One Neighborhood-Match Kernel for the Vortex Frontends (v1.3)
+# Cell-Shape Specification: One Neighborhood-Match Kernel for the Vortex Frontends (v1.4)
 
 A design specification for the **shared cell-shape kernel** — `zigzag/cell_shape.{hpp,cpp}`, beside
 `session_ops.hpp` (`apps/common/xanadu/zigzag/`) in the "one copy of the protocol" role — and for how
@@ -26,8 +26,10 @@ A shape spec written once should mean the same thing in every frontend:
 
 - **VQL** — `[{shape}]` step filters, `?{shape}` predicate tests, `for {…} in path` destructuring,
   and `Cell {…}` refinement types all lower to one matcher instead of three readings that disagree;
-- **VPL** — a `⎕MATCH` verb over the Q10 cell-list `VplView` yields an identity-preserving mask
-  (`⌿` copies, `vpl_engine.cpp:604-644`, so it cannot carry the idiom);
+- **VPL** — a `⎕SHAPEIDX` verb over the Q10 cell-list `VplView` yields the *indices* of matching cells
+  (the `⍸`-like mask-idiomatic form — `V[idx]` then selects with identity, `vpl-lens-bridge.md:365`;
+  `⌿` copies, `vpl_engine.cpp:604-644`, so a filtered `⎕MATCH` view stays as the convenience but
+  `⎕SHAPEIDX` is the array-native form);
 - **vicon** — `match(c, spec)` is a suspended request and `descendants(c)` a generator, with Int64
   ref-token results like every other vicon cell crossing;
 - **vprolog** — `lens_shape(C, Pattern)` unifies a clause-tree pattern term against a handle, its
@@ -201,6 +203,10 @@ The lowering rules that make this the least common denominator:
   non-Forbid field. **`{}` lowers to `Closed` with no fields** — the empty literal is the one place
   the surface defaults Closed, honoring the spec's "valence-0" row (`vql-query-language.md:1003`)
   without making bare `{+d.a}` exclusive.
+- **`: $v` in a predicate shape is a scoped-commit bind** — `[{…}]`/`?{…}` sites pass a trial
+  `ShapeBindings`; on match the frontend commits the names to its scope (VQL `env_`, vprolog
+  `unify`, vlace `EnvPtr`); on fail the trial is discarded — a bare `VariableRef` `targetValue`
+  lowers to `Bind` (not `RequireValue`), matching `vql-query-language.md:1050-1051`.
 - **`MissingField` is a callsite policy, not a field property**: `shapeMatches` takes
   `MissingPolicy { Refuse, BindEmpty }` — VQL passes Refuse from `Cell {…}` types and `watch … as`,
   BindEmpty from `for {…}` (`vql_engine.cpp:213-214,:2283-2293`) — and per-field `optional`
@@ -511,7 +517,18 @@ case matchShape entry spec of
 |---|---|---|---|
 | S1 | `apps/common/xanadu/zigzag/cell_shape.{hpp,cpp}` (new) | `ShapeExpr`/`ShapeField`/`ShapeBindings`/`ShapeMode`/`ShapeBase`/`ShapeCmp`/`MissingPolicy`; `shapeMatches`/`cellsMatching`/`matchesShape` over `CellGraph`; `compareCellValues` (lifted `vql_engine.cpp:2145-2199`); `cellKey`/`cellScalar`/`cellEq`/`keyCell`/`sessionForCell` with injected `SessionScan`/`SessionList` | The kernel is the "one copy" — beside `session_ops.hpp`, over the existing `CellGraph` substrate |
 | S2 | `vql/vql_engine.{hpp,cpp}` + `vql/parser.cpp` + `vql/ast.hpp` | `evaluateShapePredicate`/`matchDestructure` re-implemented over the kernel; `MissingPolicy` per callsite; `{}`/`{*}`/`{!*}` valence arms; `: {…}` nested-descent lowering; `linked` default; `PredicateTest::FunctionInvocation` arm + `?{…}` `return true` arm routed to `shapeMatches`; silently-ignored rule variants (`$shape`/`fn(.)`/pivot/virtual-dim) refuse or lower | The three readings converge; the dead arms and vacuous truths are wrong answers today |
-| S3 | `vpl/view.hpp` + `vpl/vpl_engine.cpp` + `vpl/{token,lexer,parser}` | `⎕MATCH`/`⎕SHAPE` quads; **dependency: the Q10 cell-list `VplView`** (`vpl-lens-bridge.md:450`) — the mask yield has no representation without it; spec-string parse through the shared spec-grammar — owned by a new `zigzag/cell_shape_parse.{hpp,cpp}` row (a neutral parser producing `std::expected<ShapeExpr, …>` through an injected dim resolver; the VQL `ShapeLiteral` parser can't be a dependency — it's frontend-specific — so each frontend lowers its own syntax through the shared parse or its own) — `field := dir? dim (":" value | bindName nestedShape? | "!" )` where `bindName` is a `$`-sigil identifier (VQL/vicon) or a bare identifier (VPL/vprolog — the sigil is frontend-lexical, the *shape* is shared; the VQL surface needs the S2 grammar addition for `+d.dim: $name {…}` — after `targetValue = $name`, the `{` doesn't parse today) | `⌿` copies — a mask preserving identity needs the cell-list mode first |
+| S3 | `vpl/view.hpp` + `vpl/vpl_engine.cpp` + `vpl/{token,lexer,parser}` | `⎕MATCH`/`⎕SHAPE` quads; **dependency: the Q10 cell-list `VplView`** (`vpl-lens-bridge.md:450`) — the mask yield has no representation without it; spec-string parse through the shared spec-grammar — owned by a new `zigzag/cell_shape_parse.{hpp,cpp}` row — the grammar is:
+
+```
+shape    := "{" field ("," field)* "}"
+field    := dir dim [":" value | bindName nested? | "!"]
+nested   := "{" field ("," field)* "}"
+dir      := "+" | "-" | "~"
+bindName := "$" ident | ident
+value    := scalar | "$" ident | "{" shape "}"
+```
+
+`{ }` = Closed/valence-0, `{*}` = valence>=1, `{!*}` = forbidden-wildcard; a bare nested `{...}` re-matches the SAME cell (conjunction — a new semantics for the same syntax, since the spec'd `{$a,$b}` composition is rule-union not conjunction); `dir dim: {...}` descends to the neighbor. (a neutral parser producing `std::expected<ShapeExpr, …>` through an injected dim resolver; the VQL `ShapeLiteral` parser can't be a dependency — it's frontend-specific — so each frontend lowers its own syntax through the shared parse or its own) — `field := dir? dim (":" value | bindName nestedShape? | "!" )` where `bindName` is a `$`-sigil identifier (VQL/vicon) or a bare identifier (VPL/vprolog — the sigil is frontend-lexical, the *shape* is shared; the VQL surface needs the S2 grammar addition for `+d.dim: $name {…}` — after `targetValue = $name`, the `{` doesn't parse today) | `⌿` copies — a mask preserving identity needs the cell-list mode first |
 | S4 | `vicon/compiler.{hpp,cpp}` + `vicon/driver.{hpp,cpp}` | `match`/`descendants` builtins on the V1 request/`V2` gate rows — `match` produces subject-then-binds through the site queue; `descendants` BFS over `neighbours` under `traversalBound` | The second-`Halt` protocol is the only host channel |
 | S5 | `vortex_stdlib.{hpp,cpp}` | `lens_shape(C, Pattern)` arm — term→`ShapeExpr` lowering, `bind`/`sub` vars unified with `makeScalarCell(int64(…))` under mark/unify/release; dims via `findDimension` (no mint) | A builtin keeps cells out of `unify` (vlog.cpp:86-94's clone-tail hazard) |
 | S6 | `vlace/compiler.{hpp,cpp}` | `shapeOf`/`matchShape` natives + `Shape`/`ShapeSpec`/`Constraint`/`Field`/`ShapeBase` ctor registration under P1's reserved-tag discipline; lazy `List (String,Cell)` result | The ADT surface lives only in `installXanadu` |
