@@ -1,4 +1,4 @@
-# Cell-Shape Specification: One Neighborhood-Match Kernel for the Vortex Frontends (v1.6)
+# Cell-Shape Specification: One Neighborhood-Match Kernel for the Vortex Frontends (v1.7)
 
 A design specification for the **shared cell-shape kernel** — `zigzag/cell_shape.{hpp,cpp}`, beside
 `session_ops.hpp` (`apps/common/xanadu/zigzag/`) in the "one copy of the protocol" role — and for how
@@ -124,7 +124,7 @@ neighbor against an expected value, a `Bind` capturing the neighbor — all unde
 valence bounds the wildcard algebra spec'd. It never walks a rank, never iterates the arena for a
 caller, and never decides how many times to run.
 
-`cellsMatching(graph, shape, render)` is the one concession to enumeration — `cellRefs(m)` filtered
+`cellsMatching(graph, shape, render, candidates)` is the one concession to enumeration — the caller supplies the candidate range (`cellRefs(m)` = `slots_` only — unshadowed base cells that `contains()` answers true for are never candidates; the caller walks `traversalBound()`/`neighbours`/its own enumeration and passes the range in) filtered
 through `shapeMatches` — because "which cells of this manifold satisfy" is itself a per-frontend
 question VQL asks as a generator anchor and VPL as a mask; it ticks `consumeWork` per candidate via
 the `if constexpr requires` pattern `cell_views.hpp:364-367` already uses for `rankContains`.
@@ -192,7 +192,7 @@ using ShapeBindings = std::unordered_map<std::string, std::vector<CellRef>>;
 The lowering rules that make this the least common denominator:
 
 - **bidir folds into the field** (`isBidir`, `ast.hpp:136`) — a `~d.tag` Require is satisfied by
-  either side, a `~d.tag` Forbid requires both sides absent — exactly
+  either side, a `~d.tag` Forbid requires both sides absent — and Forbid tests **edge-existence, not name** (`linked` on a proxy returns `nullopt` whether the edge is absent or merely unproxied — a vacuous pass while the foreign edge exists; the per-mode rule: Require/Bind want the name via `linked`, Forbid wants existence via a non-minting `edgeExists` probe — the `OptionalCell` hop can't express "exists-but-unnamed" so Forbid needs the probe arm) — exactly
   `evaluateShapePredicate`'s `linkedPos`/`linkedNeg` pair (`vql_engine.cpp:2386-2394`).
 - **`expected` carries the value channel orthogonally to mode** — VQL's `: "mp4"` is `RequireValue`
   with a `CellValue`; `: $t` on a destructure field is `Bind`; `: {…}` is the descent arm; an
@@ -522,12 +522,12 @@ case matchShape entry spec of
 | S3 | `vpl/view.hpp` + `vpl/vpl_engine.cpp` + `vpl/{token,lexer,parser}` | `⎕MATCH`/`⎕SHAPE` quads; **dependency: the Q10 cell-list `VplView`** (`vpl-lens-bridge.md:450`) — the mask yield has no representation without it; spec-string parse through the shared spec-grammar — owned by a new `zigzag/cell_shape_parse.{hpp,cpp}` row — the grammar is:
 
 ```
-shape    := "{" field ("," field)* "}"
+shape    := "{" field ("," field)* "}" | "{}" | "{*}" | "{!*}"
 field    := dir dim [":" value | bindName nested? | "!"]
 nested   := "{" field ("," field)* "}"
 dir      := "+" | "-" | "~"
 bindName := "$" ident | ident
-value    := scalar | "$" ident | "{" shape "}"
+value    := scalar | "$" ident | shape
 ```
 
 `{ }` = Closed/valence-0, `{*}` = valence>=1, `{!*}` = forbidden-wildcard; a bare nested `{...}` re-matches the SAME cell (conjunction — a new semantics for the same syntax, since the spec'd `{$a,$b}` composition is rule-union not conjunction); `dir dim: {...}` descends to the neighbor. (a neutral parser producing `std::expected<ShapeExpr, …>` through an injected dim resolver; the VQL `ShapeLiteral` parser can't be a dependency — it's frontend-specific — so each frontend lowers its own syntax through the shared parse or its own) — `field := dir? dim (":" value | bindName nestedShape? | "!" )` where `bindName` is a `$`-sigil identifier (VQL/vicon) or a bare identifier (VPL/vprolog — the sigil is frontend-lexical, the *shape* is shared; the VQL surface needs the S2 grammar addition for `+d.dim: $name {…}` — no AST home today (`DimensionShapeRule.targetValue` is one `ValueExpr` — can't hold both a bind name AND a nested `ShapeLiteral`, `ast.hpp:139`); the lowering needs `ShapeField{mode=Bind, expected=nested}` — S2's grammar row must extend the rule shape (a `bindName` + `targetValue` pair, or `bindName` on the field carrying the nested `ShapeExpr`)) | `⌿` copies — a mask preserving identity needs the cell-list mode first |
