@@ -1,4 +1,4 @@
-# VPL Lens Bridge: Lenses as System Verbs in an Array Language (v1.14)
+# VPL Lens Bridge: Lenses as System Verbs in an Array Language (v1.15)
 
 A design specification for how a **VPL program** — not the `vpl` REPL's `:lens` verbs — opens,
 traverses, mounts, writes back, and releases projection lenses. Design deliverable only: the
@@ -280,7 +280,7 @@ Rule — same as VQL D7, **two layers**:
    `⍴`/`↑` over a mixed rank aborts loudly rather than relinking a subset.
 1. The compiled path: `VortexVM` runs `core_.link` (`vortex_vm.cpp:526-546`), so the funnel *inside
    `ArenaManifold`'s write methods* — VQL's Q7B row, shared (the `sessionFor` funnel inside `shadow()` — every existing-cell mutator: `link`/`linkChain`/`unlink`/`insertIntoRank`/`setValueBits`/`setContent`; `VortexCore::link` is a thin wrapper over `arena_.link` and `VortexVM`/`VPLCompiler` write the arena directly) — covers `--engine vortex` whole.
-   `guardWritable` is still required in the interpreter: its writes never cross `VortexCore::link` — and the `ArenaManifold` funnel needs `masterOf(cell)` (a clone *of* a session cell lands its writes on the master).
+   `guardWritable` is still required in the interpreter: its writes never cross `VortexCore::link` — and the `ArenaManifold` funnel needs `masterOf(cell)` — the clone DimRef is `VortexCore` state (`vortex_core.cpp:327-329` over `dims().clone`), so the arena-level funnel takes it injected (a `function_ref<optional<CellRef>(CellRef)>` the core pushes at attach time); a clone *of* a session cell lands its writes on the master.
 
 The correct content write is `⎕EDIT`; projected structure is the session's to maintain.
 
