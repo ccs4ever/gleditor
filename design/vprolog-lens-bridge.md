@@ -1,4 +1,4 @@
-# vprolog Lens Bridge: Lenses as Builtin Predicates in a Backtracking Logic Engine (v1.16)
+# vprolog Lens Bridge: Lenses as Builtin Predicates in a Backtracking Logic Engine (v1.17)
 
 A design specification for how a **vprolog program** — not the `vprolog` REPL's `:lens` verbs —
 opens, enumerates, mounts, writes back, and releases projection lenses. Design deliverable only:
@@ -450,7 +450,7 @@ commit_text(Dir, Key, Text) :-
     unmount_if(Repo).
 
 unmount_if(C) :- lens_unmount(C, _M), !.
-unmount_if(_).
+unmount_if(C) :- \+ lens_mounted(C).
 
 % the recovery idiom: clause alternation + lens_error, not ; or \+
 mount_or(C, Root) :- lens_mount(C, Root), !.
@@ -471,14 +471,14 @@ fix_row(Db, Applied) :-
 ```text
 ?- child_text('/tmp/lensj', C, T).
 C = 2147483657, T = a.txt ;
-C = 2147483662, T = 'b.txt' ;
-C = 2147483667, T = 'sub' ;
-C = 2147483670, T = 'repo'.
+C = 2147483662, T = b.txt ;
+C = 2147483667, T = sub ;
+C = 2147483670, T = repo.
 
 ?- commit_text('/tmp/lensj', 'fs:52:794498', T).
 T = HEAD ;
 T = commit a1b2c3 ;
-T = 'commit d4e5f6'.
+T = commit d4e5f6.
 
 % cross-query resumption: the key is the durable name, the handle is per-arena
 ?- lens_open(dir('/tmp/lensj'), R), lens_children(R, C), lens_key(C, K), !.
