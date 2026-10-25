@@ -1,4 +1,4 @@
-# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v2.7)
+# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v2.8)
 
 A design specification for how a **VQL program** — not the `vquery` REPL — opens, traverses, mounts,
 writes back, and releases projection lenses. Design deliverable only: the signatures are proposals;
@@ -70,9 +70,11 @@ type loses the non-owning join)); `sessionFor(cell)` scans it calling `ownsCell`
 `$lens` auto-binds on `lens()` open — and re-injects per query from the **coordinator registry's
 most recent open** (open order — a `:lens` REPL open and a `lens()` code open share recency,
 `main.cpp:525-526` currently injects only `lensRepl.root()`); the vector `setVariable` overload
-(`vql_engine.hpp:61`) binds all roots. A bare cell-id literal (`AnchorKind::LiteralCellId` — a bare `IntegerLiteral` anchor,
-`parser.cpp:641-658`; `#` alone is `AnchorKind::Root`) reaches any projected cell across lines
-regardless of `$lens` recency.
+(`vql_engine.hpp:61`) binds all roots. A bare integer anchor (`AnchorKind::LiteralCellId`, `parser.cpp:641-658`) does **not** reach
+projected cells — arena cells carry `ephemeralBit` (`arena_manifold.hpp:24-29`) and `denseOf`
+rejects masked/dense ids (`arena_manifold.cpp:257-270`, `resolveAnchor` `:905-910`); dense ids are
+mint-order-dependent anyway. The stable cross-line handle is the **ExternalKey** `cellkey`
+exposes (`fs:52:794498`); a `cellfor(key)`-style resolution is deferred (U-V3).
 
 ### D3 — Step-function mutations are query-time side effects, sequenced by the relation
 
@@ -90,7 +92,15 @@ banned), or **one step in a top-level path containing at most one mutating step*
 (`path/lensmount()/d.contains` allowed; `…/lenscommit()` after any earlier mutation refused).
 `lens("u")/lensmount()` = mutating anchor + mutating step = two mutations → refused. Nested `for`
 in-paths, `return`, `def`, `watch`, `until`, predicates, clone/shape/morphism/create/destructure
-targets — all refused (the depth flag catches them as nested). Enforcement is two-layered: **(i)** a statement-level static rule in the parser/type-contract
+targets — all refused (the depth flag catches them as nested). The **indirection channel** is
+covered too: the static check scans `def` bodies and functor-bound `let` targets for mutating
+constructs (a `def` re-enters `executeScriptBody`/`evaluatePath`, `:617-642`; `applyFunctor` calls
+`evaluateStep` directly, `:435-441`; an untyped param accepts a functor arg — `f(/lensmount())`
+smuggles a step), and the runtime flag is a *depth counter* incremented across `callUserDef`/
+`applyFunctor`/`executeScriptBody` re-entry, never reset per statement — a mutating step reached
+through a def or functor is refused. `watch lens("u")` is banned too (`targetPath` evaluates once,
+`:685`, but the body re-fires per target cell — and `executeWatch`'s `dDelta` write now refuses
+under D7 anyway). Enforcement is two-layered: **(i)** a statement-level static rule in the parser/type-contract
 pass (a mutating step/generator legal only as a top-level statement path's last transform —
 nested inside `for`/`let`/`def`/`watch`/predicates it's a `TypeContractError`); **(ii)** a runtime
 backstop in `evaluateStep`/`resolveAnchor` — a mutating dispatch refuses when the evaluation is
