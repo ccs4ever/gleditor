@@ -46,6 +46,16 @@ public:
     beliefEventDepth_ = rounds;
     return this;
   }
+  /// `vagent.condition_fuel` for agents instantiated afterwards.
+  CompiledProgram *setConditionFuel(std::size_t fuel) noexcept {
+    conditionFuel_ = fuel;
+    return this;
+  }
+  /// `vagent.maintain_backoff` (ms) for agents instantiated afterwards.
+  CompiledProgram *setMaintainBackoffMs(std::int64_t backoffMs) noexcept {
+    maintainBackoffMs_ = backoffMs;
+    return this;
+  }
   [[nodiscard]] const Unit &unit() const noexcept { return unit_; }
   [[nodiscard]] const CheckedUnit &checked() const noexcept { return checked_; }
   [[nodiscard]] bool declares(std::string_view agentType) const;
@@ -59,6 +69,8 @@ private:
   CheckedUnit checked_;
   std::string ref_;
   std::size_t beliefEventDepth_{kDefaultBeliefEventDepth};
+  std::size_t conditionFuel_{kDefaultConditionFuel};
+  std::int64_t maintainBackoffMs_{kDefaultMaintainBackoffMs};
 };
 
 /// Everything a single-process host needs to run agents: a mesh runtime that

@@ -550,6 +550,51 @@ inline constexpr std::string_view kOutcomeFieldCause  = "cause";
 inline constexpr std::string_view kStatReplyStale     = "reply_stale";
 inline constexpr std::string_view kStatCancelledEarly = "cancelled_early";
 
+// -- Goals, plans and the compiled deliberation cycle (iteration 4c, task W)
+// ------------------------------------------------------------------------
+//
+// What the compiler adds to the intention cells above. All of it is cells, so
+// it travels with a checkpoint and `restoreState` copies it with the graph.
+//
+//  - `goal` is a record whose content is the goal's name, headed by the record
+//    marker, with one field per goal parameter. `tried` is a list of the
+//    qualified plan names already failed. `plan` is the chosen plan's
+//    qualified name; `frame` is the plan's activation frame cell, whose
+//    `d.vars` hold the plan's locals (§5.6); `step` is the resume ordinal of
+//    the plan's last suspension point (0 = start of the body).
+//  - `kIntentionDropping` is set by `drop`; the settle loop ends a marked
+//    intention at the next statement boundary (§6.4).
+//  - A restorer is an `achieve` intention on the `d.subgoal` chain of its
+//    maintain goal intention, carrying a copy of the goal's record.
+//  - `waiting.kind = kWaitKindSubgoal` is matched by the compiled code that
+//    ends the subgoal: it writes `waiting.match` (an `kEffectOutcomeRecord`:
+//    `ok`, and `cause` when not ok) on the parent and marks it ready.
+//  - Wait records may carry fields beginning with `$` that only the compiler
+//    reads (`kWaitingTo`: the delegate's name, for the `cancel`).
+inline constexpr std::string_view kIntentionDropping = "dropping";
+inline constexpr std::string_view kIntentionArgs     = "args";
+inline constexpr std::string_view kGoalAchieve       = "achieve";
+inline constexpr std::string_view kGoalPerform       = "perform";
+inline constexpr std::string_view kGoalMaintain      = "maintain";
+inline constexpr std::string_view kGoalAchieved      = "GoalAchieved";
+inline constexpr std::string_view kGoalFailed        = "GoalFailed";
+inline constexpr std::string_view kGoalDropped       = "GoalDropped";
+inline constexpr std::string_view kPlanFailed        = "PlanFailed";
+inline constexpr std::string_view kWaitingTo         = "$to";
+inline constexpr std::string_view kWaitingAwaitId    = "$await_id";
+inline constexpr std::string_view kWaitingRecord     = "Waiting";
+/// `kKindEffectCancel` entry field is `kOutboxEffectId`.
+/// Plan failure causes the compiled code gives itself.
+inline constexpr std::string_view kCauseFailed       = "failed";
+inline constexpr std::string_view kCauseNoPlan       = "no_applicable_plan";
+inline constexpr std::string_view kCauseSucceedUnmet = "succeed_when_unmet";
+inline constexpr std::string_view kCauseDropped      = "dropped";
+inline constexpr std::string_view kCauseBadStep      = "bad_step";
+/// `vagent.condition_fuel` default.
+inline constexpr std::size_t kDefaultConditionFuel = 1000;
+/// `vagent.maintain_backoff` default, milliseconds.
+inline constexpr std::int64_t kDefaultMaintainBackoffMs = 30000;
+
 // -- Wire (§5.5, §7.3)
 // --------------------------------------------------------- An `ActorSend`'s
 // value is a bencoded dictionary with these keys. Values travel tagged so a

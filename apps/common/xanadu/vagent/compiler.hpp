@@ -91,6 +91,14 @@ public:
   /// the turn fails hard. Applies to agents compiled afterwards.
   Compiler *setBeliefEventDepth(std::size_t rounds) noexcept;
 
+  /// `vagent.condition_fuel` (§6.3, §6.4): step/call/loop budget for one
+  /// isolated goal/plan/`await` condition.
+  Compiler *setConditionFuel(std::size_t fuel) noexcept;
+
+  /// `vagent.maintain_backoff` (§6.3, §6.4): backoff in milliseconds when a
+  /// maintain goal's restorer fails.
+  Compiler *setMaintainBackoffMs(std::int64_t backoffMs) noexcept;
+
   /// The frame-run entries of the agent's method @p name, from the last
   /// successful `compileAgent`.
   [[nodiscard]] std::optional<FrameBody> frameBody(std::string_view name) const;
@@ -102,6 +110,8 @@ private:
   zigzag::vortex::VortexCore &core_;
   zigzag::vortex::VortexVM vm_;
   std::size_t beliefEventDepth_{kDefaultBeliefEventDepth};
+  std::size_t conditionFuel_{kDefaultConditionFuel};
+  std::int64_t maintainBackoffMs_{kDefaultMaintainBackoffMs};
   std::map<std::string, FrameBody, std::less<>> frameBodies_;
 };
 
