@@ -1,4 +1,4 @@
-# vicon Lens Bridge: Lenses as Suspended Host Requests in a Goal-Directed Language (v1.14)
+# vicon Lens Bridge: Lenses as Suspended Host Requests in a Goal-Directed Language (v1.15)
 
 A design specification for how a **vicon program** — not a `vicon` REPL verb — opens, traverses,
 mounts, writes back, and releases projection lenses. Design deliverable only: the signatures are
@@ -236,7 +236,7 @@ backtrack that releases one of those marks truncates `slots_` to `m.cellCount`
   binding (`projection_session.cpp:121-122,:240,:399` — `emplace`, not insert-or-assign).
 
 Rule: **epoch invalidation**. `ArenaManifold` bumps a `releaseEpoch()` (generation counter) on
-every `release()` truncation; every ref-holding structure stamps the epoch at record time — the
+a release that **actually frees cells** (`slots_.size() > m.cellCount` — runtime `Bind`/`Call`/`Return` mints land above a mark but below nothing session-owned; a bump on *every* release invalidates on every backtrack); the invalidation is **selective, not wholesale** — a per-holder `minFreedIndex` watermark records the minimum dense index freed; a stamped structure invalidates only if a recorded ref intersects a post-stamp freed range (a live-but-orphaned session cell survives); every ref-holding structure stamps the epoch at record time — the
 session's `keyToCell_`/`cellToKey_`/`roots_`/`presentKeys_`, the Driver's per-site queues and
 `&lens` seed. A stamped read at a different epoch **invalidates wholesale**: the session clears
 its maps and re-projects on the next `refresh()` (same key → deterministic re-mint); the Driver
