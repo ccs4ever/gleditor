@@ -1,4 +1,4 @@
-# vprolog Lens Bridge: Lenses as Builtin Predicates in a Backtracking Logic Engine (v1.9)
+# vprolog Lens Bridge: Lenses as Builtin Predicates in a Backtracking Logic Engine (v1.10)
 
 A design specification for how a **vprolog program** — not the `vprolog` REPL's `:lens` verbs —
 opens, enumerates, mounts, writes back, and releases projection lenses. Design deliverable only:
@@ -95,7 +95,7 @@ Consequences, absorbed:
 - **Handles are untyped.** `lens_children(42, K)` — `toInt64` coerces strings too
   (`vortex_stdlib.cpp:38-49`) — silently resolves dense index 42: the `LiteralCellId`
   wrong-answer channel the VQL doc guards (`vql-lens-bridge.md` D2). Rule: **every cell arg is
-  validated** `toInt64 → CellRef → contains() → epoch (D4) → sessionFor/ownsCell` where the op is
+  validated** `asInt64`-else-`static_cast<int64_t>(dId)` → `CellRef` → `contains()` → epoch (D4) → `sessionFor`/`ownsCell` — the established `cell_value`/`cell_link` decode (`vortex_stdlib.cpp:987-995`); NOT `toInt64` (it `stoll`s strings and returns 0 on failure, `:38-53` — `refOf(0)` can pass `contains()`) where the op is
   session-scoped; a failing arg makes the goal **fail**, never a wrong answer. `X is C + 1`
   produces a well-formed-but-wrong handle — arithmetic cannot tell a ref from an integer;
   documented, not fixed (vicon's `c + 1` wart, same class).
@@ -404,6 +404,7 @@ the mesh there is no MetaSource to inject, and it fails the same way.
 | `lens_scalar(C, V)` | `Int64`/`Double`/`Bool` scalar | `valueBits` of lens-minted kinds — **kind preserved** via `makeScalarCell(bool)`/`(double)` (`arena_manifold.hpp:567-569`); fails on span/handle kinds |
 | `lens_dirty(C, N)` | `dirtyCount` integer | `session.dirtyCount()` — const read; session handle |
 | `lens_current(R)` | the most recent *live* session's first root | `&lens` analog — weak-expiry + `contains()` + epoch validated at produce time; fails when none is open |
+| `lens_mounted(C)` | succeeds iff `mountBoundary(keyFor(C))` is non-null (a delegate-interior `C` resolves through its mount — `router_lens.hpp:70-71`; discriminates gone-vs-refused in `unmount_if`) |
 | `lens_error(E)` | the last refusal's reason | produce-time read of stdlib-held state (D7); fails when clean |
 | `A = B` | — | on two handles IS identity (`vlog.cpp:115-123`); validated identity is `lens_key` equality or `lens_cell` roundtrip |
 
@@ -485,7 +486,7 @@ R = 2147483650, C = 2147483670, K = 'fs:52:794498'.
 ?- lens_cell('fs:52:794498', C), mount_or(C, G), lens_children(G, K), lens_text(K, T).
 C = 2147483670, G = 2147483712, K = 2147483720, T = 'HEAD' ; …
 
-?- fix_row('/tmp/lensj/data.db?write=1', N).
+?- fix_row('sqlite:///tmp/lensj/data.db?write=1', N).
 N = 1.
 
 % the D5 hazard, demonstrated on the writable sql cell: the edit's arena
@@ -535,7 +536,7 @@ is a live read, not a trailed cell. The `sql:` walk is the lens's real shape —
    negward half.
 8. **A tagged cell currency** — the Int64 handle's collision space (`lens_children(42,K)`, `X is
    C + 1`, count-vs-ref answers) is inherent; a tagged wrapper scalar would close it at
-   `toInt64`-consumer cost — deferred; `contains`+epoch+`sessionFor` validation is the mitigation
+   `asInt64`-consumer cost — deferred; `contains`+epoch+`sessionFor` validation is the mitigation
    that ships.
 9. **Mesh/effect gating** — `mesh_evaluator` runs vprolog on the worker's `context->core`
    (`mesh_evaluator.cpp:928-963`); session-mutating builtins under a `withLensEffects(false)`
@@ -546,7 +547,7 @@ is a live read, not a trailed cell. The `sql:` walk is the lens's real shape —
 
 | R | files | change | why not caller/vprolog |
 |---|---|---|---|
-| R1 | `vortex_stdlib.{hpp,cpp}` | the `lens_*` dispatch block in `solveQueryHelper` — `goalFunctor` arms between the existing builtins and the `candidatePreds` loop (`:1361`/`:1364`); spec-term decode via `functorOf`/`argumentsOf`/`textOf`; generator arms in the mark/unify/recurse/release idiom honoring `consumeWork`/`solutionsCount`/`cutToFrame`; gesture arms firing `session_ops` **before** the yield-mark; arg validation `toInt64 → contains → epoch → sessionFor/ownsCell`; `lastLensError_` + `lens_error`/`lens_current` state; `MetaSource` slot + per-session owned fold; `createPredicate`+`exportSymbol` for the names (the `cell_link` pattern, `:2986-3002`) — **plus the unwind drain** (the V9 analog): `solve()` releases outstanding marks in stack order on exception/return, healing `outstandingMarks_` (`arena_manifold.hpp:755`, `compact()` refusal `arena_manifold.cpp:1698-1701`) | The resolver seam lives only here — the VM is untouched. |
+| R1 | `vortex_stdlib.{hpp,cpp}` | the `lens_*` dispatch block in `solveQueryHelper` — `goalFunctor` arms between the existing builtins and the `candidatePreds` loop (`:1361`/`:1364`); spec-term decode via `functorOf`/`argumentsOf`/`textOf`; generator arms in the mark/unify/recurse/release idiom honoring `consumeWork`/`solutionsCount`/`cutToFrame`; gesture arms firing `session_ops` **before** the yield-mark; arg validation `asInt64`/`static_cast<int64_t>(dId)` → `contains` → epoch → `sessionFor`/`ownsCell`; `lastLensError_` + `lens_error`/`lens_current` state; `MetaSource` slot + per-session owned fold; `createPredicate`+`exportSymbol` for the names (the `cell_link` pattern, `:2986-3002`) — **plus the unwind drain** (the V9 analog): `solve()` releases outstanding marks in stack order on exception/return, healing `outstandingMarks_` (`arena_manifold.hpp:755`, `compact()` refusal `arena_manifold.cpp:1698-1701`) | The resolver seam lives only here — the VM is untouched. |
 | R2 | `vortex_core.{hpp,cpp}` + `lens_repl.{hpp,cpp}` + `union_lens.{hpp,cpp}` | **the VQL Q4 row, shared**: `lensSessions()` registry (arena-level `weak_ptr` + owning `vector<shared_ptr>`); canonical source identity recorded at open on every path incl. `adopt`/`open`; `LensRepl::session_` `unique_ptr`→`shared_ptr`, weak-only join re-registered per `:lens open` (`adopt` destroys the prior session, `lens_repl.cpp:105-113`); `sessionFor` arena-scoped; `UnionLens::claimedBy` | One registry serves every frontend. |
 | R3 | `arena_manifold.{hpp,cpp}` + `projection_session.{hpp,cpp}` | **the vicon V4 row, shared — the D4+D5 repairs**: `releaseEpoch()` bumped per `release()` truncation (`arena_manifold.cpp:1608-1696`); session `keyToCell_`/`cellToKey_`/`roots_`/`presentKeys_`/`managedDims_` (DimRefs are `ephemeralBit|dense` — `ownsCell`'s negward-hop + `tombstone`'s `managedDims_.contains` wrong-positive on a re-minted dim, `projection_session.cpp:75-80`/`:418`/`:437`)/`mintOrder_`/`mintCount_` (rewind's foreign-mint delta + recomputeRoots)/`cps_` (checkpoints hold `Mark`s — a stale `Checkpoint` can *equal* the post-re-mint arena state and `rewind` releases a mark that isn't that boundary, `:485-496`); `pins_`/`refKeys_` survive (ExternalKey-keyed) stamped and wholesale-invalidated on epoch mismatch; `cellToKey_` insert-or-assign on re-mint; `dirty_` → `unordered_map<ExternalKey,string>` pending-text so `commit()` applies `dirty_[key]` not `arena().textOf(*cell)` (`projection_session.cpp:377`) | Session/arena-level repairs every mark-driven frontend needs. |
 | R4 | `session_ops.{hpp,cpp}` + `sql_lens.{hpp,cpp}` | **the VQL Q6 row, shared — still proposals**: `sessionBrowseAt` (gated on `isBrowsed`, `sql_lens.cpp:441-471`), `sessionMountScopeAt`, the `SqlLens` root-key accessor, `sessionUnmountAt` boundary pre-resolve; new `session_ops.cpp` keeps `SqlLens` out of the header | The resolvers all frontends need. |
