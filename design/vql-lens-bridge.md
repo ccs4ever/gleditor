@@ -1,4 +1,4 @@
-# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v6.5)
+# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v6.6)
 
 A design specification for how a **VQL program** — not the `vquery` REPL — opens, traverses, mounts,
 writes back, and releases projection lenses. Design deliverable only: the signatures are proposals;
@@ -92,7 +92,7 @@ follow it** (`path/lensMount()/d.contains` is allowed; `path/lensMount()/d.conta
 and `…/lensEdit("99")/lensCommit()` are refused — commit is a separate statement; `where
 lensMount($c)`, mid-join, or any nested evaluation is a `TypeContractError`). The single rule: **a mutating construct may appear only where it evaluates exactly once at
 statement level** — the statement's sole top-level path anchor (`fsLens("/x")`), a `for`-`in` path **before the first `for` clause**
-(`inPath` evaluates once, `:2277`; a `for`-`in` after any `for` re-evaluates per outer row, `:2294` — banned) or a `let` target **in the pre-`for` binding prefix**
+(`inPath` evaluates once, `:2277`; a `for`-`in` after any `for` re-evaluates per outer row, `:2294` — banned) or a `let` target **in the pre-`for` binding prefix** (a `let $x := fsLens("u")` parses as a `ValueExpr`-wrapped `PathExpression` via `parseValueExpr`'s fallback — the static check must look inside `ValueExpr` let-targets)
 (`let $x := fsLens("/x")` — `:=` — allowed; a `let` *inside* a `for` recursion re-evaluates per
 binding, `evaluateBindings` `:2294` — same leak as `return fsLens("/x")`; and `let $f :=` binds a
 *functor* evaluated per application via `functorOf`/`functors_`, `:392-432`/`:453-462` — both banned), or **one step in a top-level path containing at most one mutating step**
