@@ -1,4 +1,4 @@
-# Cell-Shape Specification: One Neighborhood-Match Kernel for the Vortex Frontends (v1.0)
+# Cell-Shape Specification: One Neighborhood-Match Kernel for the Vortex Frontends (v1.1)
 
 A design specification for the **shared cell-shape kernel** — `zigzag/cell_shape.{hpp,cpp}`, beside
 `session_ops.hpp` (`apps/common/xanadu/zigzag/`) in the "one copy of the protocol" role — and for how
@@ -54,7 +54,7 @@ successor") — expresses in all five syntaxes over one `dir:` session and answe
 | `linksAlong`/`holdsValue`/`rankContains` | the predicate-factory idiom (`views::filter`-ready lambdas) and the `if constexpr requires` optional-method pattern (`cell_views.hpp:346-387`) |
 | `session_ops.hpp` | the precedent this kernel follows — one copy of the protocol, caller names the cell, helpers take `std::expected`-returning verbs (`session_ops.hpp:3-25`) |
 | `linked` vs `linkedMinting` | `linked` is a pure read — "answers noCell for a foreign neighbour nobody has proxied"; `linkedMinting` mints a `proxyFor` cell for a foreign neighbour — **a write inside a read** (`arena_manifold.hpp:482-504`, `arena_manifold.cpp:919-950`) |
-| `dimensionsOf` | the DimLink span — the valence substrate (`arena_manifold.cpp:952-964`) |
+| `dimensionsOf` | the DimLink span — the valence substrate **in local ref-space** (`dimensionsOf` on a proxy delegates to the foreign manifold's run — foreign DimRefs + foreign CellRefs with no `dimOut` to translate back, `arena_manifold.cpp:960-971`; Closed/base/`{*}`/`{!*}`/`descendants`/`shapeOf` must scope to locally-named structure or `dimensionsOf` gains a translating variant) (`arena_manifold.cpp:952-964`) |
 | `denseOf` | ref→dense-index decoding/membership arithmetic, unmasking the ephemeral bit (`arena_manifold.cpp:257-270`) — **not a shape operator**: it answers "does this arena hold this ref", never "what links does the cell carry" (§3, D4) |
 | `ownsCell`/`keyFor`/`cellFor` | the session identity layer on `ProjectionSession` (`projection_session.hpp:41-60`) |
 | `sessionFor` | the `sessions_`→`ownsCell` scan — exists only in vlace's `Compiler` (`compiler.cpp:301-306`, `compiler.hpp:227-236`) |
@@ -197,7 +197,7 @@ The lowering rules that make this the least common denominator:
   the closure captures the expr, not a precomputed value).
 - **valence is two facts, not a syntax**: `base` (Open/Closed — the `*` vs `!*` distinction) and
   `minValence` (what bare `*` contributes). `dimensionsOf` is the counting substrate
-  (`arena_manifold.cpp:952-964`); a Closed base checks every live DimLink's dim is named by a
+  (`arena_manifold.cpp:952-964`); a Closed base checks every live DimLink — **edge-bearing** (`pos != noCell || neg != noCell` — `unlink`/`link(…,nullopt)` zeroes a side and leaves the entry, `arena_manifold.cpp:1318-1376`; `linkCount`/`liveLinks_` count entries not edges; `{*}`/`{!*}`/`{}`/Closed must filter dead entries)'s dim is named by a
   non-Forbid field. **`{}` lowers to `Closed` with no fields** — the empty literal is the one place
   the surface defaults Closed, honoring the spec's "valence-0" row (`vql-query-language.md:1003`)
   without making bare `{+d.a}` exclusive.
