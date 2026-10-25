@@ -293,6 +293,14 @@ ValuePtr Compiler::makeThunk(const ExprNode *body, const EnvPtr &env) {
   return v;
 }
 
+zigzag::ProjectionSession *
+Compiler::sessionFor(const zigzag::CellRef cell) const noexcept {
+  for (const auto &s : sessions_) {
+    if (s->ownsCell(cell)) return s.get();
+  }
+  return nullptr;
+}
+
 std::expected<ValuePtr, EvalError> Compiler::force(ValuePtr v) {
   while (v && v->kind == Value::Kind::Thunk) {
     core_.arena().consumeWork();

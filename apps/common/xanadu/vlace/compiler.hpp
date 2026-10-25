@@ -223,6 +223,15 @@ private:
   // Projection sessions opened by `openLens` (§7.4). Held so the projected
   // cells (and their arena) outlive the evaluation that reads them.
   std::vector<std::shared_ptr<zigzag::ProjectionSession>> sessions_;
+
+  // The session that projected @p cell, or nullptr when no open session
+  // owns it (an authored or foreign cell). Scans sessions_ calling
+  // ownsCell -- the single ownership predicate: node cells resolve through
+  // the session's key map, attribute cells one negward hop on a managed
+  // dim. Shared by every session-resolution op and the cellKey/cellEq/
+  // cellScalar natives so none re-specifies the climb.
+  [[nodiscard]] zigzag::ProjectionSession *
+  sessionFor(zigzag::CellRef cell) const noexcept;
 };
 
 } // namespace xanadu::vlace
