@@ -1,4 +1,4 @@
-# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v6.1)
+# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v6.2)
 
 A design specification for how a **VQL program** — not the `vquery` REPL — opens, traverses, mounts,
 writes back, and releases projection lenses. Design deliverable only: the signatures are proposals;
@@ -226,7 +226,7 @@ session's to maintain (Q7B).
 
 | step | args | yields | notes |
 |---|---|---|---|
-| `lensMount` | — | delegate root cells | `sessionMountAt`; `Err`→empty |
+| `lensMount` | — | the delegate root cell (`roots().front()` — a delegate forest's siblings project but aren't yielded) | `sessionMountAt`; `Err`→empty |
 | `lensUnmount` | — | the mount-point cells | `mountBoundary`→`cellFor` resolved *before* `sessionUnmountAt` (which returns `expected<void>`); `Err`→empty |
 | `lensNext` | — | materialized stub cells | `sessionNextPage` — mount-scoped via `windowedFor` on a Router session, session-level on a plain `WindowedLens` |
 | `lensStub` | — | pending stub cells (deduped like the other session-scoped ops — one probe per mount; N cells in one mount yield one stub) | `nextStubAt` (const — not dirty-gated) |
@@ -235,6 +235,7 @@ session's to maintain (Q7B).
 | `lensRevert` | — | the cell | `sessionRevert` — `Err` on source-vanished |
 | `lensBrowse(table)` | `String` | the new query's root cell | `sessionBrowseAt` — sql-lens-only; `browse` returns `expected<void>` so the root comes from a `SqlLens` accessor or a browse-returns-key change (Q6) |
 | `lensDirty` | — | `dirtyCount` (scalar cell) | `session.dirtyCount()` |
+| `lensRefresh` | — | the root cells (post-refresh) | `refreshIfChanged()` — const probe, exempt; a source that moved since the last gesture re-projects |
 | `lensClose` | — | empty | releases the session — deferred (`U-V2`) |
 
 ### Value expressions (`fn(args)` inside a where/predicate/return)
