@@ -1,4 +1,4 @@
-# vprolog Lens Bridge: Lenses as Builtin Predicates in a Backtracking Logic Engine (v1.6)
+# vprolog Lens Bridge: Lenses as Builtin Predicates in a Backtracking Logic Engine (v1.7)
 
 A design specification for how a **vprolog program** — not the `vprolog` REPL's `:lens` verbs —
 opens, enumerates, mounts, writes back, and releases projection lenses. Design deliverable only:
@@ -115,7 +115,7 @@ the lens, the argument carries its spec. `lens_open(Spec, Root)` accepts:
 |---|---|
 | `'/x'` / `"/x"` (Atom or String) | bare path → `openLensUri`'s auto-detect (`lens_uri.cpp:104-124`: directory → `RouterLens`, delegable file → its delegate, else `FilesystemLens`); **a `scheme:`-shaped operand fails** — spell the functor, not the scheme |
 | `dir(Path)` | `dir:` → `RouterLens` |
-| `sql(Dsn)` | `sql:` — the DSN keeps `openSqlUri`'s own option grammar: `?write=1`/`&write=1` is stripped into the writable flag (`sql_lens.cpp:1184-1207`), so `sql('/x.db?write=1')` opens writable; it is a spec-suffix, not a scheme |
+| `sql(Dsn)` | `sql:` — the DSN keeps `openSqlUri`'s own option grammar: `?write=1`/`&write=1` is stripped into the writable flag (`sql_lens.cpp:1184-1207`), so `sql('sqlite:///x.db?write=1')` opens writable (the `?write=1` strip runs only inside the `sql:<backend>:` branch, `sql_lens.cpp:1184-1207` — a bare path treats `?` as a literal filename); it is a spec-suffix, not a scheme |
 | `git(Path)` / `cfg(Path)` / `log(Path)` | `git:` / `cfg:` / `log:` |
 | `journal` / `journal(Unit)` | `journal:` / `journal:<unit>` (`lens_uri.cpp:93-96`) |
 | `meta(Label)` | the `MetaSource` fold path (D9) — **not** an `openLensUri` scheme (`kSchemes` refuses it, `lens_uri.cpp:42-45`) |
@@ -217,7 +217,7 @@ the mesh `onSolution` budget throw (`mesh_evaluator.cpp:948`) — propagating pa
 (`arena_manifold.hpp:755`), so `compact()` is refused forever (`arena_manifold.cpp:1698-1701`)
 and `ProjectionSession::rewind`'s foreign-mint check fails permanently — the same stranded-mark
 class as vicon's V9 `start()`-drain. `solve()` gains the drain: on unwind (exception or return),
-release outstanding marks in stack order — mints above the oldest solver mark truncate, which
+release outstanding marks in stack order — `floors_` keeps only `{cells,links,content}` (3 of `Mark`'s 11 fields, `arena_manifold.hpp:764-769`), so either a `discard()` loop heals `outstandingMarks_` (leaving mints/trails un-truncated — different semantics) OR an arena-side full-`Mark` floor stack (`drainMarks()`) truncates to pre-solve state, which
 the epoch invalidation absorbs.
 
 ### D5 — Session truth carries the payload; `commit()` must never read the arena image
@@ -285,7 +285,7 @@ mount_or(C, Root) :- lens_mount(C, Root), !.
 mount_or(_, Err)  :- lens_error(Err).
 ```
 
-`lens_error(E)` produces the recorded reason and fails when clean — a **produce-time read of
+`lens_error(E)` produces the recorded reason and fails when clean — **cleared at every `lens_*` arm entry; recorded on every failure path including decode** (validation-miss and refusal both record — no stale reason leaks into the recovery idiom) — a **produce-time read of
 stdlib-held C++ state**, not a trailed cell: the builtin's own `release` would restore a stored
 cell to its *pre-refusal* value before the recovery clause reads it (vicon's `&lenserr`
 argument, D2/D3 there — the constraint is identical and tighter here: the failure itself is what
@@ -410,7 +410,7 @@ the mesh there is no MetaSource to inject, and it fails the same way.
 **Reserved names**: `lens_open`, `lens_roots`, `lens_children`, `lens_current`, `lens_step`,
 `lens_mount`, `lens_unmount`, `lens_next`, `lens_stub`, `lens_browse`, `lens_edit`, `lens_commit`,
 `lens_revert`, `lens_refresh`, `lens_close`, `lens_key`, `lens_cell`, `lens_text`, `lens_scalar`,
-`lens_dirty`, `lens_error` — builtin dispatch precedes `candidatePreds`
+`lens_dirty`, `lens_error`, `lens_mounted` (the mount-presence probe — discriminates gone-vs-refused in `unmount_if`; `isMounted`, `router_lens.hpp:78`) — builtin dispatch precedes `candidatePreds`
 (`vortex_stdlib.cpp:334-1361` vs `:1364`), so a clause head with one of these functors is
 silently shadowed; `compileClause` refuses them (R7).
 
@@ -447,7 +447,7 @@ commit_text(Dir, Key, Text) :-
     lens_text(K, Text),
     unmount_if(Repo).
 
-unmount_if(C) :- lens_unmount(C), !.
+unmount_if(C) :- lens_unmount(C, _M), !.
 unmount_if(_).
 
 % the recovery idiom: clause alternation + lens_error, not ; or \+
@@ -456,7 +456,7 @@ mount_or(_, Err)  :- lens_error(Err).
 
 % sql: schema-only until browsed; the :v: cell is the editable
 fix_row(Db, Applied) :-
-    lens_open(sql(Db), Conn),       % Db = '/x.db?write=1' for the writable half
+    lens_open(sql(Db), Conn),       % Db = 'sqlite:///x.db?write=1' for the writable half
     lens_browse(Conn, 't', Q),
     lens_step(Q, 'd.contains', Page),
     lens_step(Page, 'd.contains', Sight),
@@ -490,7 +490,7 @@ N = 1.
 
 % the D5 hazard, demonstrated on the writable sql cell: the edit's arena
 % text reverts on the failure-driven backtrack; the pending edit does not
-?- lens_open(sql('/tmp/lensj/data.db?write=1'), S),
+?- lens_open(sql('sqlite:///tmp/lensj/data.db?write=1'), S),
 |  lens_browse(S, 't', Q),
 |  lens_step(Q, 'd.contains', P), lens_step(P, 'd.contains', Si),
 |  lens_step(Si, 'd.subject', Row), lens_step(Row, 'd.contains', V),
