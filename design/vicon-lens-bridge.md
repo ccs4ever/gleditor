@@ -1,4 +1,4 @@
-# vicon Lens Bridge: Lenses as Suspended Host Requests in a Goal-Directed Language (v1.15)
+# vicon Lens Bridge: Lenses as Suspended Host Requests in a Goal-Directed Language (v1.16)
 
 A design specification for how a **vicon program** — not a `vicon` REPL verb — opens, traverses,
 mounts, writes back, and releases projection lenses. Design deliverable only: the signatures are
@@ -131,7 +131,7 @@ shadowed — declaring one is a `CompileError`, not a shadow.
 The Driver is process-lived, so a core-held registry survives `start()` replacing the program — the
 **same `lensSessions()` row VQL's Q4 registers** (arena-level `weak_ptr` membership + owning
 `vector<shared_ptr>`), scanned by `sessionFor`. **Open dedupe by canonical source identity**:
-`lens("dir:/x")` under a live session re-binds the existing roots; two sessions over one writable
+`dirLens("/x")` under a live session re-binds the existing roots; two sessions over one writable
 source would split `dirty_` and cross-clobber on `commit()` (`keyToCell_` is per-session,
 `projection_session.hpp:200-201`). `openLensUri` does **no** normalization — `dir:/x`, `/x`, and
 `./x` open three sessions over one directory (`lens_uri.cpp:104-124`); the registry records the
@@ -284,7 +284,7 @@ is store-less like vlace's evaluator; no `MetaSource` fold exists to borrow. xuz
 four gesture copies (`xuzz_app.cpp`) and does not call `session_ops` — gate-free, noted, out of
 scope (`session_ops.hpp:22-25`).
 
-`lens(path)`/`lens("kw","spec")`/`dirLens`/`sqlLens`/`gitLens`/`logLens`/`journalLens`/`cfgLens`/`unionLens(spec,…)` keeps the URI form: a string source designator **is** the Icon idiom — `open(filename)`
+`lens(path)`/`lens("kw","spec")`/`dirLens`/`sqlLens`/`gitLens`/`logLens`/`journalLens`/`cfgLens`/`unionLens(spec,…)` is URI-free: `lens(path)` takes a **bare path only** (a `scheme:`-shaped operand refuses at the arm — `openLensUri` accepts known schemes, `lens_uri.cpp:33-50`, so the arm's own detector rejects them); `lens("kw","spec")` carries keyword and spec separately; `dirLens`/`sqlLens`/`gitLens`/`logLens`/`journalLens`/`cfgLens`/`unionLens` are the typed spellings — `open(filename)` is the idiom, `lens("dir:/x")` is not
 — where the siblings took typed spec objects; the URI's scheme already selects the lens type. The
 price paid either way is canonical-identity dedupe (D2): normalization lives in the registry open
 path, not in the argument's shape.
@@ -366,7 +366,7 @@ is `sessionFor(target-cell)`); `ledit` is the content-write path.
 ```vicon
 # open a dir lens; produces each root's ref-token in turn; &lens re-reads the
 # first live root at produce time
-r := lens("dir:/tmp/lensj")
+r := dirLens("/tmp/lensj")
 
 # the listing — kids() produces ref-ints, so print text, not the token
 every c := kids(r) do write(ltext(c))
@@ -380,7 +380,7 @@ every c := kids(r) do
   }
 
 # a sql: lens — one root (the conn cell), schema-only until browsed
-s := lens("sql:sqlite:///tmp/lensj/data.db?write=1") — `?write=1` is required (without it `openSqlUri` opens `SQLITE_OPEN_READONLY` + `PRAGMA query_only`, `sql_lens.cpp:1184-1207` — `lcommit` refuses)
+s := sqlLens("sqlite:///tmp/lensj/data.db?write=1")  # `?write=1` required (without it `openSqlUri` opens `SQLITE_OPEN_READONLY` + `PRAGMA query_only`, `sql_lens.cpp:1184-1207` — `lcommit` refuses)
 q := lbrowse(s, "t")             # the browsed query's root cell
 pg := step(q, "d.contains")      # page 0 — step lands on the page, not a row
 sight := step(pg, "d.contains")  # first sight (sql.sight)
