@@ -1,4 +1,4 @@
-# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v3.7)
+# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v3.8)
 
 A design specification for how a **VQL program** — not the `vquery` REPL — opens, traverses, mounts,
 writes back, and releases projection lenses. Design deliverable only: the signatures are proposals;
@@ -38,9 +38,9 @@ materialize a page → query ends`.
 | `StoreGeneratorCall` | `anchor.generator` in `resolveAnchor` (`vql_engine.cpp:938-957`, inside `resolveAnchor` at `:846`) — the open seam |
 | `KwLens` | reserved token (`token.hpp:106`, `lexer.cpp:779-780`) — lexed but parser-unreachable (`parseAnchorNode` :523-528 has no `lens` keyword entry) |
 
-VQL has **no cell-identity predicate** (`cellEq` — `=` on cells stringifies operands and compares
+VQL has **no cell-identity predicate** (`celleq` — `=` on cells stringifies operands and compares
 *rendered text*, `vql_engine.cpp:2145-2199` — a wrong-answer comparison, not a type error), **no
-scalar read** (`cellScalar`), and **no session resolution** — the engine holds no `sessions_` list;
+scalar read** (`cellscalar`), and **no session resolution** — the engine holds no `sessions_` list;
 the REPL's `LensRepl` owns the one session `$lens` binds.
 
 ## 3. Design decisions
@@ -103,7 +103,7 @@ smuggles a step), and the runtime flag is a *depth counter* incremented across `
 through a def or functor is refused. `watch lens("u")` is banned too (`targetPath` evaluates once,
 `:685`, but the body re-fires per target cell — and `executeWatch`'s `dDelta` write now refuses
 under D7 anyway). Enforcement is two-layered: **(i)** a statement-level static rule in the parser/type-contract
-pass (a mutating construct legal only where it evaluates exactly once at statement level —
+pass (a mutating construct legal only where it evaluates exactly once — top-level path, for-in, outermost-let, sole anchor —
 nested inside `for`/`let`/`def`/`watch`/predicates it's a `TypeContractError`); **(ii)** a runtime
 backstop in `evaluateStep`/`resolveAnchor` — a mutating dispatch refuses when the evaluation is
 nested, via an evaluation-depth/`topLevelStatement` flag threaded through `evaluatePath`/
@@ -132,11 +132,11 @@ predicate exception).
 ### D4 — Reads observe the arena at query time; projected cells are mutable
 
 `$lens/d.contains` sees the arena as of query time — gestures `refresh()` into the same arena. VQL
-has no thunk caching; reads are always current at evaluation. `cellScalar` returns `Int`/`Float`/
+has no thunk caching; reads are always current at evaluation. `cellscalar` returns `Int`/`Float`/
 `Bool`/`NULL` — `Int64`/`Double`/`Bool`/`None+spans` are the lens-minted kinds (`mintNodeCell`,
 `projection_session.cpp:95-116`); `Timestamp` and the handle kinds (`OpHandle`/`ExternRef`/
 `ForeignOpHandle` — `valueBits` is a `CellRef`, `arena_manifold.cpp:1086-1094`) yield empty by
-design (consistent with the §4 model — `cellScalar` sees only the lens-minted kinds).
+design (consistent with the §4 model — `cellscalar` sees only the lens-minted kinds).
 
 ### D5 — The `session_ops` layer carries the gesture protocol
 
