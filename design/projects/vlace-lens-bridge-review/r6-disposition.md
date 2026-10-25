@@ -47,3 +47,16 @@ Codebase: CONVERGED (0B/0M/5m). Others NOT CONVERGED on narrow items:
   are exactly one hop from their node).
 - runIO arity hygiene + Unit/Tuple reserved (vortex m5, architect m4).
 - union_lens.cpp:77-87 -> :76-88 cite fix; driver.cpp:50-53 vs 92-95.
+
+## R7 interim (vortex) — folded into v7.1
+
+- commit() throw path loses dirty set (vortex M1): dirty moved out
+  before the loop; an applyContentChange throw destroys un-attempted
+  keys -> re-insert must be scope-exit on EVERY early exit (or cursor
+  + re-insert tail).
+- SInt/SFloat/SBool added to reserved-tag list.
+- Mount::roots open-time snapshot noted.
+- promote unguarded on session-owned cells noted (latent).
+- revertKey source-vanished detector: retained presentKeys_.
+- D4 mark-leak scope stale under Err-continuation: scope-guarded
+  discard in refresh/commit noted.
