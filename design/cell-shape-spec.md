@@ -524,16 +524,11 @@ case matchShape entry spec of
 
 ```
 shape    := "{" field ("," field)* "}" | "{}" | "{*}" | "{!*}"
-field    := dir? dim [":" value | bindName nested? | "!"]
+field    := "!"? dir? dim [":" value | bindName nested?]?
 nested   := shape
 dir      := "+" | "-" | "~"
 bindName := "$" ident | ident
 value    := scalar | "$" ident [nested] | shape
-field    := dir dim [":" value | bindName nested? | "!"]
-nested   := "{" field ("," field)* "}"
-dir      := "+" | "-" | "~"
-bindName := "$" ident | ident
-value    := scalar | "$" ident | shape
 ```
 
 `{ }` = Closed/valence-0, `{*}` = valence>=1, `{!*}` = forbidden-wildcard; a bare nested `{...}` re-matches the SAME cell (conjunction — a new semantics for the same syntax, since the spec'd `{$a,$b}` composition is rule-union not conjunction); `dir dim: {...}` descends to the neighbor. (a neutral parser producing `std::expected<ShapeExpr, …>` through an injected dim resolver — **`findDimension` (non-minting) at every match-time resolution** (`evaluateShapePredicate` resolves per-rule through `resolveDimension`→`findOrMintDimension`, `vql_engine.cpp:2385` → `multi_store.cpp:354` — a `d.dims`-appending write inside a read; an unresolvable dim fails Require and passes Forbid honestly; compile-time mint is the vicon `step` precedent, per-call mint is not); the VQL `ShapeLiteral` parser can't be a dependency — it's frontend-specific — so each frontend lowers its own syntax through the shared parse or its own) — `field := dir? dim (":" value | bindName nestedShape? | "!" )` where `bindName` is a `$`-sigil identifier (VQL/vicon) or a bare identifier (VPL/vprolog — the sigil is frontend-lexical, the *shape* is shared; the VQL surface needs the S2 grammar addition for `+d.dim: $name {…}` — no AST home today (`DimensionShapeRule.targetValue` is one `ValueExpr` — can't hold both a bind name AND a nested `ShapeLiteral`, `ast.hpp:139`); the lowering needs `ShapeField{mode=Bind, expected=nested}` — S2's grammar row must extend the rule shape (a `bindName` + `targetValue` pair, or `bindName` on the field carrying the nested `ShapeExpr`)) | `⌿` copies — a mask preserving identity needs the cell-list mode first |
