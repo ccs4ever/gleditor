@@ -1,4 +1,4 @@
-# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v4.2)
+# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v4.3)
 
 A design specification for how a **VQL program** — not the `vquery` REPL — opens, traverses, mounts,
 writes back, and releases projection lenses. Design deliverable only: the signatures are proposals;
@@ -53,7 +53,7 @@ session's projected roots, and binds `$lens` (the `setVariable` vector overload 
 a `*Lens` generator is itself session-mutating (it opens a session) but as an anchor it's the query's source —
 `fsLens("/x")/d.contains` is the natural open+traverse.
 
-Every gesture on a *cell* is a **step function** — `path/lensMount()`, `$cell/lensNext()`, `path/lensEdit("text")` — mapping over the relation: `$cells/lensMount()` mounts under each cell (N mounts, per-cell yield; a per-cell refusal drops that cell, not the whole relation — `Err`-per-cell → empty for that cell). **Session-scoped ops dedupe**: `lensCommit`/`lensBrowse`/`lensUnmount` resolve each input cell to its (session[, mount]) and run once per distinct target (`lensNext`/`lensStub` are deliberately **not** deduped — N cells in one mount materialize N pages (`lensStub` is const — N probes of the same stub, dedupe at the relation level)) — arg-taking variants (`$cells/lensBrowse($c)`) take the arg from the first cell of each distinct target group (per-cell arg variance is silently first-wins — noted) — `$cells/lensCommit()` over N cells of one session commits once, not N times (yielding `[n]` not `[n,0,0…]`) — dispatched in `evaluateStep`'s `FunctionInvocation` arm (`vql_engine.cpp:1390+`), which already receives `currentCells` and already mutates (`link(...)` at `:1466-1540`); cell-typed *args* resolve via `cellsOfValueExpr` (`:362-381`), not `evaluateValueExpr` (which renders cells to `CellValue`, destroying the identity `cellEq` tests). The arg is the relation it filters — the "pipe" semantics without a pipe token (`|` is union-type-only, `parser.cpp:1603`). A step function needs no keyword — it's an `Identifier + '('` step (`parser.cpp:912-915`), so `lensMount`/`lensNext`/etc. stay *unreserved* names, not `Kw*` tokens.
+Every gesture on a *cell* is a **step function** — `path/lensMount()`, `$cell/lensNext()`, `path/lensEdit("text")` — mapping over the relation: `$cells/lensMount()` mounts under each cell (N mounts, per-cell yield; a per-cell refusal drops that cell, not the whole relation — `Err`-per-cell → empty for that cell). **Session-scoped ops dedupe**: `lensCommit`/`lensBrowse`/`lensUnmount` resolve each input cell to its (session[, mount]) and run once per distinct target (`lensNext` is deliberately **not** deduped — N cells in one mount materialize N pages; `lensStub` **is** deduped — one probe per mount) — arg-taking variants (`$cells/lensBrowse($c)`) take the arg from the first cell of each distinct target group (per-cell arg variance is silently first-wins — noted) — `$cells/lensCommit()` over N cells of one session commits once, not N times (yielding `[n]` not `[n,0,0…]`) — dispatched in `evaluateStep`'s `FunctionInvocation` arm (`vql_engine.cpp:1390+`), which already receives `currentCells` and already mutates (`link(...)` at `:1466-1540`); cell-typed *args* resolve via `cellsOfValueExpr` (`:362-381`), not `evaluateValueExpr` (which renders cells to `CellValue`, destroying the identity `cellEq` tests). The arg is the relation it filters — the "pipe" semantics without a pipe token (`|` is union-type-only, `parser.cpp:1603`). A step function needs no keyword — it's an `Identifier + '('` step (`parser.cpp:912-915`), so `lensMount`/`lensNext`/etc. stay *unreserved* names, not `Kw*` tokens.
 
 ### D2 — Sessions live on the coordinator, not the per-query engine
 
@@ -94,7 +94,7 @@ binding, `evaluateBindings` `:2294` — same leak as `return fsLens("/x")`; and 
 (`path/lensMount()/d.contains` allowed; `…/lensCommit()` after any earlier mutation refused).
 `fsLens("/x")/lensMount()` = mutating anchor + mutating step = two mutations → refused. Nested `for`
 in-paths, `return`, `def`, `watch`, `until`, predicates, clone/shape/morphism/create/destructure
-targets — all refused (the depth flag catches them as nested). The **indirection channel** is
+targets — all refused (the *static* positional rule catches them; the depth counter is the def/functor/applyFunctor backstop). The **indirection channel** is
 covered too: the static check scans `def` bodies and functor-bound `let` targets for mutating
 constructs (a `def` re-enters `executeScriptBody`/`evaluatePath`, `:617-642`; `applyFunctor` calls
 `evaluateStep` directly, `:435-441`; an untyped param accepts a functor arg — `f(/lensMount())`
@@ -132,8 +132,7 @@ predicate exception).
 ### D4 — Reads observe the arena at query time; projected cells are mutable
 
 `$lens/d.contains` sees the arena as of query time — gestures `refresh()` into the same arena. VQL
-has no thunk caching; reads are always current at evaluation. `cellScalar` returns `Int`/`Float`/
-`Bool`/`NULL` — `Int64`/`Double`/`Bool`/`None+spans` are the lens-minted kinds (`mintNodeCell`,
+has no thunk caching; reads are always current at evaluation. `cellScalar` returns `Int`/`Float`/`Bool`/empty — `Int64`/`Double`/`Bool`/`None+spans` are the lens-minted kinds (`mintNodeCell`,
 `projection_session.cpp:95-116`); `Timestamp` and the handle kinds (`OpHandle`/`ExternRef`/
 `ForeignOpHandle` — `valueBits` is a `CellRef`, `arena_manifold.cpp:1086-1094`) yield empty by
 design (consistent with the §4 model — `cellScalar` sees only the lens-minted kinds).
@@ -175,7 +174,8 @@ by design, not by capability gap — noted, not a permanent exclusion. A direct 
 until `lensBrowse`; a `RouterLens` inside a `union:` child is unreachable for `lensMount`.
 `--engine vortex` maps `StoreGenerator` anchors to `home()` (`vql/compiler.cpp:687-691`) — a `*Lens`
 query under the compiler silently yields home; either scope to the direct engine or add a compiler
-row (Q5).
+row (Q5) — and `compilePathStep`'s `FunctionInvocation` arm (`vql/compiler.cpp:452-526`) handles
+only `value`/`link`, so `path/lensMount()` under the compiler silently drops the gesture too.
 
 ### D7 — VQL's own arena writes refuse session-owned cells too
 
