@@ -1,4 +1,4 @@
-# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v3.2)
+# VQL Lens Bridge: Lenses as Step Functions in a Declarative Query Language (v3.3)
 
 A design specification for how a **VQL program** — not the `vquery` REPL — opens, traverses, mounts,
 writes back, and releases projection lenses. Design deliverable only: the signatures are proposals;
@@ -73,7 +73,8 @@ most recent open** (open order — a `:lens` REPL open and a `lens()` code open 
 (`vql_engine.hpp:61`) binds all roots. A bare integer anchor (`AnchorKind::LiteralCellId`, `parser.cpp:641-658`) does **not** reach
 projected cells — arena cells carry `ephemeralBit` (`arena_manifold.hpp:24-29`) and `denseOf`
 rejects masked/dense ids (`arena_manifold.cpp:257-270`, `resolveAnchor` `:905-910`); dense ids are
-mint-order-dependent anyway. The stable cross-line handle is the **ExternalKey** `cellkey`
+mint-order-dependent anyway; a pasted `#<CellRef>` carrying `ephemeralBit` passes `contains()`
+(`:905-910`) — reachable but write-guarded by D7. The stable cross-line handle is the **ExternalKey** `cellkey`
 exposes (`fs:52:794498`); a `cellfor(key)`-style resolution is deferred (U-V3).
 
 ### D3 — Step-function mutations are query-time side effects, sequenced by the relation
@@ -85,10 +86,11 @@ a mutating step inside a `where`/join/predicate could evaluate multiple times or
 follow it** (`path/lensmount()/d.contains` is allowed; `path/lensmount()/d.contains/lenscommit()`
 and `…/lensedit("99")/lenscommit()` are refused — commit is a separate statement; `where
 lensmount($c)`, mid-join, or any nested evaluation is a `TypeContractError`). The single rule: **a mutating construct may appear only where it evaluates exactly once at
-statement level** — the statement's sole top-level path anchor (`lens("u")`), a `let`/flat
-`for`-`in` **target path that binds cells at bind time** (`let $x := lens("u")` — `:=` — allowed;
-`let $f :=` binds a *functor* evaluated per application via `functorOf`/`functors_`, `:495-505` —
-banned), or **one step in a top-level path containing at most one mutating step**
+statement level** — the statement's sole top-level path anchor (`lens("u")`), a flat `for`-`in`
+path (`inPath` evaluates once, `:2277`) or a `let` target **in the pre-`for` binding prefix**
+(`let $x := lens("u")` — `:=` — allowed; a `let` *inside* a `for` recursion re-evaluates per
+binding, `evaluateBindings` `:2294` — same leak as `return lens("x")`; and `let $f :=` binds a
+*functor* evaluated per application via `functorOf`/`functors_`, `:495-505` — both banned), or **one step in a top-level path containing at most one mutating step**
 (`path/lensmount()/d.contains` allowed; `…/lenscommit()` after any earlier mutation refused).
 `lens("u")/lensmount()` = mutating anchor + mutating step = two mutations → refused. Nested `for`
 in-paths, `return`, `def`, `watch`, `until`, predicates, clone/shape/morphism/create/destructure
@@ -109,7 +111,7 @@ nested, via an evaluation-depth/`topLevelStatement` flag threaded through `evalu
 effect/`let`/`link`/`count` — call `evaluatePath` with `{}` context, `:2277`/`:2310`/`:2346`/`:2357`/
 `:465`/`:1509`, indistinguishable from a top-level path). Covers predicate/lambda/
 macro-dim/`PerspectiveStep`/`PerspectiveBlock`/`PathLambda` multiplicities (`:1373-1388`/
-`:1756-1761`/`:1917-1950`/`:2213-2219`/`:2278-2365`). `lens()` itself mints a session — it's **session-mutating**, legal only as the anchor of a
+`:1756-1761`/`:1910-1921`/`:2213-2219`/`:2278-2365`). `lens()` itself mints a session — it's **session-mutating**, legal only as the anchor of a
 top-level statement `PathExpression` that evaluates exactly once (not inside `return`, `for`,
 `let`, `def`, `watch`, `until`, predicates, clone/shape/morphism/create/destructure targets —
 `return lens("x")` over N rows would leak N sessions into append-only `sessions_`, and `lensclose`
