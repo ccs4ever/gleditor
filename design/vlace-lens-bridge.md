@@ -1,8 +1,8 @@
-# vlace Lens Bridge: Lenses as First-Class Cells in a Lazy IO Language (v6)
+# vlace Lens Bridge: Lenses as First-Class Cells in a Lazy IO Language (v7)
 
 A design specification for how a **vlace program** — not the `vlace` REPL — opens, walks, mounts,
 writes back, and releases projection lenses. Design deliverable only: nothing here is implemented
-beyond what the compiler already does; the signatures are proposals. Rounds 1–5 of
+beyond what the compiler already does; the signatures are proposals. Rounds 1–6 of
 `vortex-design-critique` folded in; dispositions in `design/projects/vlace-lens-bridge-review/`.
 
 An earlier attempt exposed the REPL verb set as string-keyed `IO.Lens*` effects — a session
@@ -85,11 +85,11 @@ shares the arena with a marking runtime.
 `sessions_` is append-only (`compiler.hpp:225`): forgetting a `Cell` releases *nothing* — the
 session, its OS resources (db handles, watchers — `dir:`/bare-path lenses hold no fds, they're
 snapshot lenses), and identity maps live to evaluation end. The bound today: `Driver` builds a
-fresh `Compiler` per `run`/`runIO` (`driver.cpp:92-95`) — sessions die with the *program*.
+fresh `Compiler` per `run`/`runIO` (`driver.cpp:50-53`/`92-95`) — sessions die with the *program*.
 `lensDrop :: Cell -> IO Unit` is deferred (`U-L10`): needed only if a persistent REPL reuses
 one `Compiler`. Latent hazards then: `refresh()`'s `arena.mark()`/discard is not RAII — an
 exception in `forEachNode` leaks `outstandingMarks_` (`projection_session.cpp:180-250`); a
-dropped session with `checkpoint()` marks leaks them too. Both matter only under U-L10.
+dropped session with `checkpoint()` marks leaks them too. Both matter only under U-L10. **Ref-aliasing** (U-L5, latent): a `refKeys_`-bound cell shared across sessions makes `ownsCell` first-match-in-`sessions_` arbitrary — unreachable today (`meta:` refused, the only ref-emitter).
 
 ### D5 — `openLens` takes URIs, and refusals are `Err` values
 
@@ -105,7 +105,7 @@ misroutes to `FilesystemLens` at `lens_uri.cpp:80-96`; regression note: `weird:n
 bearing a scheme-shaped prefix will refuse — documented). A `union:meta:x|dir:/y` recurses
 into the same hole — one guard closes both. `union:` stays openable; it's not `WindowedLens`
 (`lensNext`/`lensStub` always `Err` on it), `applyContentChange` is first-success/last-error
-(`union_lens.cpp:77-87`), and **a `RouterLens` embedded inside a `union:` child is unreachable
+(`union_lens.cpp:76-88`), and **a `RouterLens` embedded inside a `union:` child is unreachable
 for `lensMount`** (session resolution sees the `UnionLens`, not its children — a capability
 boundary, noted). `meta:` in vlace needs the arena constructed *over* a store fold — refused
 until the evaluator's arena gains a base.
@@ -128,17 +128,17 @@ session-owned cells** — the correct write is `lensEdit`, which routes through
 | name | type | notes |
 |---|---|---|
 | `openLens` | `String -> IO (Result String (List Cell))` | `openLensUri`; `Err` on refusal/empty roots; `meta:` refused inside `openLensUri` (P6); `Ok` = all roots (union: forests) |
-| `lensMount` | `Cell -> IO (Result String Cell)` | `RouterLens::open` under the cell; `Ok` = **delegate root cell**; `Err` = non-RouterLens session, unowned cell, keyless cell, not-a-filesystem-cell (mount-under-mount), `delegateFor` refusal, or mount-while-dirty. Idempotent on an already-mounted cell — the idempotence check wins over the dirty-gate (no mutation → no dirty issue). Post-mount `childrenAll` = `[delegate roots…, fs children…]` (reorders). |
+| `lensMount` | `Cell -> IO (Result String Cell)` | `RouterLens::open` under the cell; `Ok` = **delegate root cell**; `Err` = non-RouterLens session, unowned cell, keyless cell, not-a-filesystem-cell (a delegate cell — `fs:` cells beneath a mounted path CAN mount), `delegateFor` refusal, or mount-while-dirty. Idempotent on an already-mounted cell — the idempotence check wins over the dirty-gate (no mutation → no dirty issue). Post-mount `childrenAll` = `[delegate roots…, fs children…]` (reorders). |
 | `lensUnmount` | `Cell -> IO (Result String Unit)` | drops the mount boundary at-or-above the cell; `Err` modes as mount + dirty |
 | `lensNext` | `Cell -> IO (Result String (Option Cell))` | resolution rule below; `Ok (Some c)` = materialized stub cell, `Ok None` = exhaustion, `Err` = refusal/dirty |
 | `lensStub` | `Cell -> IO (Result String (Option Cell))` | resolution rule below; `Ok Some` = pending stub, `Ok None` = none; `Err` = non-windowed — **not dirty-gated** (a const query, exempt) |
 | `lensCommit` | `Cell -> IO (Result String Int)` | applies the session's whole `dirty_` set (not just the arg's — the cell selects the session, not the key); `Ok` = dirty keys *attempted* (commit skips vanished cells — `projection_session.cpp:284-287`); `Err` = a refusal with ≥0 already applied (per-cell, non-atomic, `unordered_set` order — `:280-303`); applied count unobservable — `lensDirty` covers it |
-| `lensRevert` | `Cell -> IO (Result String Unit)` | `revertKey` (P5): erase the cell's key from `dirty_` + `refresh()` only if it was dirty (non-dirty = true no-op); source-vanished → stale-mark via refresh |
+| `lensRevert` | `Cell -> IO (Result String Unit)` | `revertKey` (P5): erase the cell's key from `dirty_` + `refresh()` only if it was dirty (non-dirty = true no-op); per-key while `lensCommit` is session-wide — a dropped cell handle is unrevertable yet still committable (asymmetry noted); source-vanished → `Err` ("nothing to restate" — refresh stale-marks the cell but `restateContent` only runs for present keys, so the edit text stays visible) |
 | `lensEdit` | `Cell -> String -> IO (Result String Unit)` | `session->editContent(key, text)`; `Err` for ref-bound, unkeyed, or non-writable-lens (via a `canApply` probe — P5) cells; scalar-kind transitions to text-typed while dirty (kind-restored post-commit). **No refresh after** — see the edit/commit rule |
 | `lensDirty` | `Cell -> IO (Result String Int)` | `dirtyCount()` for the resolved session; `Err` on unowned cell |
 | `cellKey` | `Cell -> Option String` | pure: `ExternalKey` if a projected **node** cell (`None` for attr/authored cells) |
 | `cellEq` | `Cell -> Cell -> Bool` | pure: identity on `CellRef` — `==` on cells returns `TypeMismatch` today (`compiler.cpp:195-225`) |
-| `cellScalar` | `Cell -> Option Int` | pure: the scalar `valueBits` on Int64/Double/Bool cells — `cellText` returns `""` on them (textOf renders only `contentOf` spans); covers SqlLens/ConfigLens typed columns |
+| `cellScalar` | `Cell -> Option Scalar` | pure: the cell's scalar content — `data Scalar = SInt Int | SFloat Float | SBool Bool` (runtime-registered, P1's reservation covers it); a bare `Option Int` carries Double bits as garbage — `cellText` returns `""` on scalar cells (textOf renders only `contentOf` spans); covers SqlLens/ConfigLens typed columns |
 
 **Windowed resolution rule** (`lensNext`/`lensStub`): the cell's session is a `RouterLens` →
 `mountBoundary(keyFor(cell))` → that mount's `WindowedLens` via `windowedFor`/`nextStubAt`
@@ -199,7 +199,7 @@ openLens "/tmp/lensj" >>= (fn opened =>
                     lensUnmount repo >>= (fn unmounted =>
                       case unmounted of
                         Err _ => putStrLn "unmount failed"
-                      ; Ok _ => putStrLn "back to files"))))
+                      ; Ok _ => putStrLn "back to files")))
 ```
 
 `find`/`foldr` are defined inline (the prelude isn't loaded by `Driver`; `LensVlaceGate` does
@@ -231,14 +231,14 @@ idiom the surface is built around.
 
 | P | files | change | why not caller/vlace |
 |---|---|---|---|
-| P1 | `compiler.cpp` | `installXanadu`: `IO.LensMount`/`LensUnmount`/`LensNext`/`LensStub`/`LensCommit`/`LensRevert`/`LensEdit`/`LensDirty` ctor tags + `runIO` handlers; `cellKey`/`cellEq`/`cellScalar` pure natives (`makeNative`); `openLens` → `openLensUri` + `List Cell` roots + empty-roots `Err`; `refOfWrapped` forces inner arg **and reserves `Cell`/`Dim`/`IO.*`/all runtime-registered ctor + type names** (ECtor + registerData refuse — forgeable-ctor + `data Cell = …` collision holes closed at construction); **`setLink` guard at callsite** (ownsCell on both operands); `runIO`/`installXanadu` handlers wrap in try/catch-to-`Err` | The effect surface lives only here. |
-| P2 | `types.cpp` | Schemes for §4; pin `++ :: String -> String -> String` **and** `==`/`/=` → `{Int, Float, String}` (Char incidentally Int; `Bool` `==` fails at eval — noted), `<`/`<=`/`>`/`>=` **and** `+`/`-`/`*`/`/`/`%` → `{Int, Float}` (eval ground set — `Str` is legal only for `==`/`/=`); mechanism: reject `prune`→`Con` not in the set, unresolved `Var` allowed (keeps polymorphic helpers; the residual `Cell`-instantiation hole documented); `++`'s pin reconciles vs spec §5.1/§7.4 (`std:fun/append`) — a spec deviation flagged | Normative typecheck needs declared types + the pin rule. |
+| P1 | `compiler.cpp` | `installXanadu`: `IO.LensMount`/`LensUnmount`/`LensNext`/`LensStub`/`LensCommit`/`LensRevert`/`LensEdit`/`LensDirty` ctor tags + `runIO` handlers; `cellKey`/`cellEq`/`cellScalar` pure natives (`makeNative`); `openLens` → `openLensUri` + `List Cell` roots + empty-roots `Err`; `refOfWrapped` forces inner arg **and reserves every tag the runtime interprets** — `Cell`/`Dim`/`IO.*`/`Nil`/`Cons`/`Unit`/`Tuple`/`Ok`/`Err`/`Some`/`None`/`True`/`False` (ECtor + registerData refuse — forgeable-ctor + `data Cell = …`/`data W = Some` collision holes closed; `Unit` registers arity-0 — `Ok Unit` fails typecheck today while matching at eval); **`tests/xuzz/lens_vlace_gate_test.cpp` updated** — its program does `openLens … >>= fn root => childrenAll root` (a `Result` under the new signature — unwrap `Ok` → destructure `[root]`); **`setLink` guard at callsite** (ownsCell on both operands); `runIO`/`installXanadu` handlers wrap in try/catch-to-`Err` | The effect surface lives only here. |
+| P2 | `types.cpp` | Schemes for §4; pin `++ :: String -> String -> String` **and** `==`/`/=` → `{Int, Float, String, Char}` (Char evals as Int — `tyChar` would otherwise refuse a comparison eval accepts; `Bool` `==` fails at eval — noted), `<`/`<=`/`>`/`>=` **and** `+`/`-`/`*`/`/`/`%` → `{Int, Float}` (eval ground set — `Str` is legal only for `==`/`/=`); mechanism: reject `prune`→`Con` not in the set, unresolved `Var` allowed (keeps polymorphic helpers; the residual `Cell`-instantiation hole documented); `++`'s pin reconciles vs spec §5.1/§7.4 (`std:fun/append`) — a spec deviation flagged | Normative typecheck needs declared types + the pin rule. |
 | P3 | `compiler.hpp` | Session-resolution helper — scan `sessions_` calling `s->ownsCell(cell)` (P5's predicate, *not* a re-specified climb — `managedDims` stays private); shared by ops + `cellKey`/`cellEq`/`cellScalar` | Shared by every op; DRY against open-coded copies. |
 | P4 | `prelude.hpp` | `find` only (concatMap dropped — unused) | Prelude wiring into Driver is a separate U-L item; the prelude isn't loaded by any production path today. |
-| P5 | `projection_session.{hpp,cpp}` | `ownsCell(CellRef)` (`cellToKey_` + negward climb on managed dims); **dirty-preserving `restateContent`** (skip `dirty_` keys — fixes xuzz's `refreshIfChanged` clobber too, `xuzz_app.cpp:615`); **`commit()` re-inserts ALL un-attempted keys** on refusal; `editContent` refuses `Int64`/`Double`/`Bool`-kind cells **or** transitions them to text-typed while dirty (kind-restored post-commit — `setValueBits(None,0)` + `setContent`); **`revertKey(key)`** = `dirty_.erase(key)` + `refresh()` **only if dirty** (lands after dirty-preserving restate); `canApply`/writable probe for `lensEdit` early-refusal | Provenance + the real commit-clobber + the revert primitive + the scalar-kind transition. |
+| P5 | `projection_session.{hpp,cpp}` | `ownsCell(CellRef)` (`cellToKey_` + negward climb on managed dims); **dirty-preserving `restateContent`** (skip `dirty_` keys — fixes xuzz's `refreshIfChanged` clobber too, `xuzz_app.cpp:615`); **`commit()` re-inserts ALL un-attempted keys** on refusal **and returns `expected<int,string>`** (the applied count — the "Ok = attempted" count needs a producer; `expected<void>` gives none). **Note**: a relocating `applyContentChange` rebinds `keyToCell_`/`cellToKey_` but leaves `Mount::mountKey`/`roots`/`owns` stale — the mount becomes unreachable for `lensUnmount`/`lensNext`/`lensStub`; noted for whoever implements the first relocating lens; `editContent` transitions `Int64`/`Double`/`Bool`-kind cells to text-typed while dirty (`setValueBits(None,0)` + `setContent`); on commit/revert, `restateContent` restores the kind **and clears `contentOf` spans** (the monostate branch does it today — the scalar branches must too, else `cellText` returns the dead edit forever); **`revertKey(key)`** = `dirty_.erase(key)` + `refresh()` **only if dirty** (lands after dirty-preserving restate); **`ProjectionLens::canApply(key)`** (default-refuse; Sql/Config override; RouterLens routes via `Mount::owns`; UnionLens first-success) — the writable probe for `lensEdit` early-refusal; routing under composites follows their `applyContentChange` paths | Provenance + the real commit-clobber + the revert primitive + the scalar-kind transition. |
 | P6 | `lens_uri.cpp` | `openLensUri` refuses any unrecognized `scheme:` prefix (`^[A-Za-z][A-Za-z0-9+.-]*:`) — `meta:` included; closes `union:meta:x|…` recursion; `weird:name` file regression documented | One guard for every frontend. |
-| P7 | `lens_repl.cpp` + new `zigzag/session_ops.hpp` | Gesture helpers (`sessionMountAt`/`sessionUnmountAt`/`sessionNextPage`/`sessionCommitAll`/`sessionEdit`/`sessionRevert`) shared between `LensRepl::run` and `runIO` — `ExternalKey`-based args, `sessionNextPage(session, optional<ExternalKey> scope)` → `expected<optional<ExternalKey>>` (the materialized stub's key); **the dirty-gate lives inside them** (so the REPL inherits it; xuzz bypasses `session_ops` entirely — its own three gesture copies at `xuzz_app.cpp:691-769` — P5's dirty-preserving `restateContent` is what fixes xuzz's clobber, not the gate) | The gesture+refresh+dirty protocol exists verbatim in `lens_repl.cpp:176-237` — two copies drift; the seam is the layer below `LensRepl`. |
-| P8 | `router_lens.{hpp,cpp}` | `nextStubAt(mountKey)`/`windowedFor(mountKey)` — resolve the mount owning `mountKey`, dynamic_cast its lens to `WindowedLens`, forward `nextStub`/`materializePage`; `nullopt`/`Err` when no mount or non-windowed | `RouterLens::nextStub()` is first-wins across mounts — mount-scoped `lensNext`/`lensStub` need a per-mount accessor `mounts_` doesn't expose. |
+| P7 | `lens_repl.cpp` + new `zigzag/session_ops.hpp` | Gesture helpers (`sessionMountAt`/`sessionUnmountAt`/`sessionNextPage`/`sessionCommitAll`/`sessionEdit`/`sessionRevert`) shared between `LensRepl::run` and `runIO` — `ExternalKey`-based args, `sessionNextPage(session, optional<ExternalKey> scope)` → `expected<optional<ExternalKey>>` (the materialized stub's key; `scope` = the mount key from `mountBoundary`, or `nullopt` = session-level — the REPL's unscoped `next`); **the dirty-gate lives inside them** (so the REPL inherits it; xuzz bypasses `session_ops` entirely — its own three gesture copies at `xuzz_app.cpp:691-769` — P5's dirty-preserving `restateContent` is what fixes xuzz's clobber, not the gate) | The gesture+refresh+dirty protocol exists verbatim in `lens_repl.cpp:176-237` — two copies drift; the seam is the layer below `LensRepl`. |
+| P8 | `router_lens.{hpp,cpp}` | `nextStubAt(mountKey)`/`windowedFor(mountKey)` — resolve the mount owning `mountKey`, dynamic_cast its lens to `WindowedLens`, forward `nextStub`/`materializePage`; `nullopt`/`Err` when no mount or non-windowed; a relocated `mountKey` (P5's rebind) must remap `mounts_` or the mount is unreachable | `RouterLens::nextStub()` is first-wins across mounts — mount-scoped `lensNext`/`lensStub` need a per-mount accessor `mounts_` doesn't expose. |
 
 `cellKey`/`cellEq`/`cellScalar` install as **pure natives** (`makeNative`, like `linked`/
 `cellText`), not `IO.*` ctors — `runIO` only performs `IO.*` effects; a pure reader of session
