@@ -1,4 +1,4 @@
-# vprolog Lens Bridge: Lenses as Builtin Predicates in a Backtracking Logic Engine (v1.11)
+# vprolog Lens Bridge: Lenses as Builtin Predicates in a Backtracking Logic Engine (v1.12)
 
 A design specification for how a **vprolog program** — not the `vprolog` REPL's `:lens` verbs —
 opens, enumerates, mounts, writes back, and releases projection lenses. Design deliverable only:
@@ -204,7 +204,7 @@ truncates it — the open-containing path dies mid-query. The repair is the shar
   session clears its maps and re-projects on the next `refresh()` (same key → deterministic
   re-mint); `cellToKey_` re-mint uses insert-or-assign (the `emplace` sites keep stale reverse
   bindings otherwise — `projection_session.cpp:121-122`,`:239-240`,`:397-399`);
-- every handle decode validates `contains()` **and** epoch; a stale handle fails the goal;
+- every handle decode validates `contains()` **and** epoch **and the issued-token ledger** (a bare Int64 carries no epoch — a stale handle presented after the session re-stamps passes `contains`+epoch+`sessionFor` and `keyFor` resolves a wrong-but-valid key; the session keeps `issuedTokens_` token→key and a token not issued by this session refuses — same fix as vicon's v1.13); a stale handle fails the goal;
 - **dedupe-open refreshes invalidated sessions** (the vicon v1.11 repair) — a re-entered
   `lens_open` finds the dead registry entry, re-projects it, yields fresh handles;
 - `lens_cell(K, C)` — `cellFor` re-resolution through the registry — is the **epoch-surviving
