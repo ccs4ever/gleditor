@@ -1,4 +1,4 @@
-# Cell-Shape Specification: One Neighborhood-Match Kernel for the Vortex Frontends (v1.17)
+# Cell-Shape Specification: One Neighborhood-Match Kernel for the Vortex Frontends (v1.18)
 
 A design specification for the **shared cell-shape kernel** — `zigzag/cell_shape.{hpp,cpp}`, beside
 `session_ops.hpp` (`apps/common/xanadu/zigzag/`) in the "one copy of the protocol" role — and for how
@@ -192,7 +192,7 @@ using ShapeBindings = std::unordered_map<std::string, std::vector<CellRef>>;
 The lowering rules that make this the least common denominator:
 
 - **bidir folds into the field** (`isBidir`, `ast.hpp:136`) — a `~d.tag` Require is satisfied by
-  either side, a `~d.tag` Forbid requires both sides absent — and Forbid tests **edge-existence, not name** (`linked` on a proxy returns `nullopt` whether the edge is absent or merely unproxied — a vacuous pass while the foreign edge exists; the per-mode rule: Require/Bind want the name via `linked`, Forbid wants existence via a non-minting `edgeExists` probe — the `OptionalCell` hop can't express "exists-but-unnamed" so Forbid needs the probe arm — `edgeExists` joins the `CellGraph` optional-method set (the `if constexpr requires` pattern `rankContains` uses, `cell_views.hpp:364-367`); a proxy subject's `dimensionsOf`/`Forbid`/Closed/`{*}`/`{!*}` are **scoped to locally-named structure** (a proxy returns the foreign run verbatim — foreign DimRefs never equal local `field.dim`; the kernel refuses or skips proxies for base/valence checks)) — exactly
+  either side, a `~d.tag` Forbid requires both sides absent — and Forbid tests **edge-existence, not name** (`linked` on a proxy returns `nullopt` whether the edge is absent or merely unproxied — a vacuous pass while the foreign edge exists; the per-mode rule: Require/Bind want the name via `linked`, Forbid wants existence via a non-minting `edgeExists` probe — the `OptionalCell` hop can't express "exists-but-unnamed" so Forbid needs the probe arm — `edgeExists` joins the `CellGraph` optional-method set — `ArenaManifold` implements it (a `linked`+`DimLink` probe without the name filter); `Manifold` gets a `pos!=noCell||neg!=noCell` scan or inherits the probe (S11 row); `if constexpr requires` on an absent graph compiles and **silently reintroduces the exists-but-unnamed vacuous pass** — `validateShape` refuses a Forbid field when the graph lacks the probe (the `if constexpr requires` pattern `rankContains` uses, `cell_views.hpp:364-367`); a proxy subject's `dimensionsOf`/`Forbid`/Closed/`{*}`/`{!*}` are **scoped to locally-named structure** (a proxy returns the foreign run verbatim — foreign DimRefs never equal local `field.dim`; the kernel refuses or skips proxies for base/valence checks)) — exactly
   `evaluateShapePredicate`'s `linkedPos`/`linkedNeg` pair (`vql_engine.cpp:2386-2394`).
 - **`expected` carries the value channel orthogonally to mode** — VQL's `: "mp4"` is `RequireValue`
   with a `CellValue`; `: $t` on a destructure field is `Bind`; `: {…}` is the descent arm; an
@@ -438,7 +438,7 @@ cellsMatching(const M &graph, const ShapeExpr &shape,
               cpp26::optional<ShapeBindings &> bindings = std::nullopt,
               MissingPolicy missing = MissingPolicy::Refuse) {
   return candidates | std::views::filter([&](CellRef c) {
-           return shapeMatches(graph, c, shape, render, bindings, missing, hop); }) |
+           ShapeBindings trial; if (shapeMatches(graph, c, shape, render, trial, missing, hop)) { if (bindings) bindings->merge(std::move(trial)); return true; } return false; }) |
          std::ranges::to<std::vector<CellRef>>();
 }
 
