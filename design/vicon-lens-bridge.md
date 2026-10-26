@@ -1,4 +1,4 @@
-# vicon Lens Bridge: Lenses as Suspended Host Requests in a Goal-Directed Language (v1.34)
+# vicon Lens Bridge: Lenses as Suspended Host Requests in a Goal-Directed Language (v1.35)
 
 A design specification for how a **vicon program** — not a `vicon` REPL verb — opens, traverses,
 mounts, writes back, and releases projection lenses. Design deliverable only: the signatures are
@@ -71,7 +71,7 @@ bridge introduces every piece.
 The vicon spec's §8.1 argument — "no ninth opcode, no new `ChoicePoint` field" — holds: the
 `OpcodeKind` table (`vortex_vm.hpp:27-87`) gains no `Lens*` entries. Instead a lens builtin emits a
 **request fragment**, generalizing the `write` tee: `Value` ops write the request record
-(`__vicon_lens_op` = gesture id, `__vicon_lens_a1`/`_a2`/`_a3` = arg cells — three, so future verbs
+(`__vicon_lens_op` = gesture id, `__vicon_lens_args` = a variadic arg cell-list — three, so future verbs
 are not hard-capped at arity 2 — `__vicon_lens_cont` = `opref` of the site's continuation), then
 `Jump lensGateOp` — a second `Halt` minted per program alongside `haltOp_`/`failOp_`
 (`compiler.cpp:782-783`). `vm_.run` stops on any `Halt`; the Driver's `resume()` loop distinguishes:
