@@ -1,4 +1,4 @@
-# Cell-Shape Specification: One Neighborhood-Match Kernel for the Vortex Frontends (v1.20)
+# Cell-Shape Specification: One Neighborhood-Match Kernel for the Vortex Frontends (v1.21)
 
 A design specification for the **shared cell-shape kernel** — `zigzag/cell_shape.{hpp,cpp}`, beside
 `session_ops.hpp` (`apps/common/xanadu/zigzag/`) in the "one copy of the protocol" role — and for how
@@ -329,7 +329,14 @@ The kernel is grammar-free on purpose; the per-frontend lowering is where syntax
 - `for {…} in path`, `Cell {…}` refinements, `watch … as {…}`, lambda params — `DestructurePattern`
   → `ShapeExpr` with `Bind` fields, per-field `optional` from `T?`, callsite `MissingPolicy`
   (`matchDestructure`'s two existing policies, `vql_engine.hpp:170`), typed fields still checked by
-  `satisfiesType` *after* the kernel binds (the type layer stays VQL's);
+  `satisfiesType` *after* the kernel binds (the type layer stays VQL's); **the `.`-field and
+  `:=`-field are callsite adjuncts, not `ShapeField`s** — `isContext` (`ast.hpp:359`,
+  `matchDestructure` `:185-190`) binds the *subject itself* under `.`/`varName`: the trial
+  `ShapeBindings` is pre-seeded `{"."→{subject}, varName→{subject}}` before the kernel runs;
+  `defaultValue` (`ast.hpp:365`, `:204-205`) is a `Bind`+`optional` field *plus* a post-match
+  default-eval — the frontend evaluates `cellsOfValueExpr(*defaultValue, context)` for names
+  still unbound after the kernel returns (a `ShapeField` tests neighbors; it can't carry
+  "evaluate this on absence");
 - `?{…}` — `evaluateValueExpr`'s `return true` arm (`:2128-2130`) routes to `shapeMatches` on the
   context cell;
 - **the `PredicateTest::FunctionInvocation` dead arm** — `evaluateFactor` gains the arm, dispatching
