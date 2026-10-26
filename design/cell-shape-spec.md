@@ -1,4 +1,4 @@
-# Cell-Shape Specification: One Neighborhood-Match Kernel for the Vortex Frontends (v1.12)
+# Cell-Shape Specification: One Neighborhood-Match Kernel for the Vortex Frontends (v1.16)
 
 A design specification for the **shared cell-shape kernel** — `zigzag/cell_shape.{hpp,cpp}`, beside
 `session_ops.hpp` (`apps/common/xanadu/zigzag/`) in the "one copy of the protocol" role — and for how
@@ -166,13 +166,13 @@ using ShapeExpected =
                                     CellRef)>>;     //   VQL's arbitrary `: expr`
 
 struct ShapeField {
-  DimRef dim{noCell};                 // resolved DimRef — name→dim is the frontend's
+  DimRef dim;                         // resolved DimRef — name→dim is the frontend's (required)
   DimVector dir{DimVector::POS};
   bool bidir{false};                  // `~` — either direction satisfies, both must be
                                       // absent under Forbid
   ShapeMode mode{ShapeMode::Require};
-  ShapeExpected expected{};
-  std::string bindName{};             // empty binds nothing
+  ShapeExpected expect{};             // `expect`, not `expected` — std::expected noise
+  cpp26::optional<std::string> bindName;  // nullopt binds nothing
   bool optional{false};               // Bind-only: absent binds nothing instead of
                                       // failing (VQL's `T?` / `MissingField::BindEmpty`)
 };
@@ -182,7 +182,7 @@ struct ShapeExpr {
   std::size_t minValence{0};          // `*` asserts ≥1 (the spec's "has any connection")
   std::vector<ShapeField> fields;
   std::vector<std::shared_ptr<ShapeExpr>> subShapes;   // same-cell conjunction — a bare nested `{…}`
-                                                        // has no dim to hang a field on; `$shape`/`func(.)`/`d.x = expr`/`d.a<=>d.b` rules also land here (shape-level, not field-level — the `std::function` arm can't carry them since they have no hop and no neighbor)
+                                                        // has no dim to hang a field on; `$shape`/`func(.)`/`d.x = expr`/`d.a<=>d.b` rules **refuse at lowering** (shape-level rules with no hop and no neighbor — not `ShapeExpr`s)
 };
 
 /// Flat name → bound cells; nested binds merge into the same map (D3).
@@ -400,14 +400,31 @@ namespace zigzag {
 // D2 types: ShapeBase, ShapeMode, ShapeCmp, ShapeField, ShapeExpr, ShapeBindings
 enum class MissingPolicy : std::uint8_t { Refuse, BindEmpty };
 
-/// One-cell neighborhood match. `hop` defaults to the graph's linked() —
-/// pass linkedMinting explicitly where federation reach is wanted (D4).
+/// Rejects malformed ShapeExprs before matching: Forbid carrying `expect`,
+/// `optional` on non-Bind, empty `bindName` under Bind, `expect=nested`
+/// under the wrong mode, `minValence` contradicted by fields.
+[[nodiscard]] std::expected<void, std::string> validateShape(const ShapeExpr &expr);
+
+/// One-cell neighborhood match. Refuses `noCell`/non-`contains` subjects first
+/// (an empty dimensionsOf over a stale ref vacuously-passes Closed — the same
+/// wrong-answer class as `?{…}`). `hop` is injected — pass `linkedMinting`
+/// where federation reach is wanted; the 6-arg overload delegates to
+/// `graph.linked` (a `function_ref` default can't capture `graph`).
 template <CellGraph M>
 [[nodiscard]] bool
 shapeMatches(const M &graph, CellRef cell, const ShapeExpr &shape,
              cpp26::function_ref<vortex::CellValue(CellRef)> render,
-             ShapeBindings *bindings = nullptr,
-             MissingPolicy missing = MissingPolicy::Refuse,
+             cpp26::optional<ShapeBindings &> bindings = std::nullopt,
+             MissingPolicy missing = MissingPolicy::Refuse) {
+  return shapeMatches(graph, cell, shape, render, bindings, missing,
+                      [&graph](CellRef c, DimRef d, DimVector v) { return graph.linked(c, d, v); });
+}
+template <CellGraph M>
+[[nodiscard]] bool
+shapeMatches(const M &graph, CellRef cell, const ShapeExpr &shape,
+             cpp26::function_ref<vortex::CellValue(CellRef)> render,
+             cpp26::optional<ShapeBindings &> bindings,
+             MissingPolicy missing,
              cpp26::function_ref<OptionalCell(CellRef, DimRef, DimVector)> hop);
 
 /// The cells of `graph` satisfying `shape` — cellRefs | filter, ticking
@@ -417,8 +434,13 @@ template <CellGraph M>
 cellsMatching(const M &graph, const ShapeExpr &shape,
               cpp26::function_ref<vortex::CellValue(CellRef)> render,
               std::ranges::input_range auto &&candidates,
-              ShapeBindings *bindings = nullptr,
-              MissingPolicy missing = MissingPolicy::Refuse);
+              cpp26::optional<ShapeBindings &> bindings = std::nullopt,
+              MissingPolicy missing = MissingPolicy::Refuse,
+              cpp26::function_ref<OptionalCell(CellRef, DimRef, DimVector)> hop) {
+  return candidates | std::views::filter([&](CellRef c) {
+           return shapeMatches(graph, c, shape, render, bindings, missing, hop); }) |
+         std::ranges::to<std::vector<CellRef>>();
+}
 
 /// The predicate factory, cell_views idiom — cells | filter(matchesShape(…)).
 template <CellGraph M>
