@@ -1,4 +1,4 @@
-# vicon Lens Bridge: Lenses as Suspended Host Requests in a Goal-Directed Language (v1.35)
+# vicon Lens Bridge: Lenses as Suspended Host Requests in a Goal-Directed Language (v1.36)
 
 A design specification for how a **vicon program** — not a `vicon` REPL verb — opens, traverses,
 mounts, writes back, and releases projection lenses. Design deliverable only: the signatures are
@@ -270,9 +270,10 @@ Scope rule: on a `RouterLens` session a cell outside every mount — `mountBound
 `journal:`/`git:` opened directly) **the session is the scope** — `sessionNextPage`'s nullopt arm
 (`session_ops.hpp:128-134`) answers session-wide, no mount needed.
 
-**Session handles, not operands**: `lcommit`/`lrevert`/`ldirty`/`lrefresh` take `c` purely to name
+**Session handles, not operands**: `lcommit`/`ldirty`/`lrefresh` take `c` purely to name
 the session — `sessionFor(ownsCell(c))` — and the effect is session-wide (all dirty keys, the
-whole lens). The per-cell signature is the resolution idiom, not the arity of the effect.
+whole lens); **`lrevert` resolves `keyFor(c)` and is per-key** (`sessionRevert`→`revertKey`
+drops one dirty edit — it is a key-needing op, not a session handle). The per-cell signature is the resolution idiom, not the arity of the effect.
 
 `union:` supports key-level ops only (`UnionLens` is neither `RouterLens`/`WindowedLens`/
 `SqlLens`, `union_lens.hpp:31`) — the scoped verbs fail, and the duplicate-`ExternalKey` refusal is
@@ -336,9 +337,10 @@ is `sessionFor(target-cell)`); `ledit` is the content-write path.
 | `lstub(c)` | the pending stub's ref-token; fails when none | `nextStubAt` — const, not dirty-gated |
 | `lcommit(c)` | applied-count scalar | `sessionCommitAll`; `c` is a session handle; **non-atomic** — a refusal can leave ≥0 applied (D4) |
 | `ledit(c, "text")` | the cell's ref-token | `sessionEdit`; fails on ref-bound/unkeyed/non-writable/epoch-stale |
-| `lrevert(c)` | the cell's ref-token | `sessionRevert`; session handle; fails on source-vanished |
+| `lrevert(c)` | the cell's ref-token | `sessionRevert`→`revertKey(keyFor(c))`; per-key; fails on source-vanished |
 | `lbrowse(c, "t")` | the new query's root cell's ref-token | `sessionBrowseAt` — sql-only, mount-scoped; needs the Q6 `isBrowsed` gate or re-fire duplicates |
 | `ldirty(c)` | `dirtyCount` scalar | const read; session handle |
+| `lpending(c)` | the pending-text for `c`'s key (`dirty_[key]` — the session-truth probe; `ltext` reads the arena image which shows pre-edit bytes after a backtracked edit) |
 | `lrefresh(c)` | the session's first root's ref-token, post-refresh | `refreshIfChanged` — **mints and writes**, dirty-gate-exempt; session handle |
 | `lclose(c)` | — | releases the session — deferred (`U-V2`, as the siblings) |
 
