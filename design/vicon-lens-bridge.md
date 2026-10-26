@@ -1,4 +1,4 @@
-# vicon Lens Bridge: Lenses as Suspended Host Requests in a Goal-Directed Language (v1.31)
+# vicon Lens Bridge: Lenses as Suspended Host Requests in a Goal-Directed Language (v1.32)
 
 A design specification for how a **vicon program** — not a `vicon` REPL verb — opens, traverses,
 mounts, writes back, and releases projection lenses. Design deliverable only: the signatures are
@@ -120,7 +120,7 @@ NEXT re-send (the flag's non-persistence is the inherited I2 deviation, D4) — 
 the next `NEXT` writes `ok := 0` → Icon failure. One host round-trip per produce, lazy by
 construction. Queue pops validate `contains()` + epoch (D5).
 
-`lens`/`kids`/`step` and every `l*` builtin name is **reserved**: `emitCall` checks builtins before
+`lens`/`kids`/`step`/`match`/`descendants`/`leq`/`dirLens`/`sqlLens`/`gitLens`/`logLens`/`journalLens`/`cfgLens`/`unionLens` and every `l*` builtin name — all builtin-dispatched before `procTargets_` is **reserved**: `emitCall` checks builtins before
 `procTargets_` (`compiler.cpp:696,:724-728`), so a user procedure named `kids` would be silently
 shadowed — declaring one is a `CompileError`, not a shadow.
 
