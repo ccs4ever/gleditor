@@ -76,7 +76,7 @@ set must be rechecked against that table before naming lands.
 The URI-string surface VQL rejected stays rejected: **no `⎕LENS 'dir:/x'`**. Each scheme is its own
 verb — `⎕DIR '/x'`, `⎕SQL '/x.db'`, `⎕GIT '/repo'`, `⎕LOG '…'`, `⎕JOURNAL '[unit]'`, `⎕CFG '…'` —
 mapping VQL's `fsLens`/`gitLens`/`sqlLens`/`logLens`/`journalLens`/`cfgLens` one-to-one. `⎕UNION`
-takes a **rank of child specs** — `⎕UNION ('dir:/a' 'cfg:/b')`, each element one complete
+takes a **rank of child specs** — `⎕UNION (('dir' '/a') ('cfg' '/b'))`, each element one complete
 `openLensUri` input — so the `union:` scheme's `|`-delimited sub-grammar (the least xanalogical
 form) disappears into the array; children dedupe per child source identity. `⎕META 'x'` goes through
 the coordinator's `MetaSource` — `meta:` is **not** an `openLensUri` scheme (`kSchemes` refuses it,
@@ -398,7 +398,7 @@ sql:…:t:1
                                        ⍝ until Q11's isString arms
 
       ⍝ multi-source: one union session over child specs, or N opens
-      ⎕UNION ('dir:/a' 'cfg:/b')       ⍝ children dedupe by source identity
+      ⎕UNION (('dir' '/a') ('cfg' '/b'))       ⍝ children dedupe by source identity
       'sql' ⎕LENS '/c.db'              ⍝ generic scheme+spec ≡ ⎕SQL '/c.db'
       ⎕DIR ('/a' '/d')                 ⍝ two opens, deduped by source identity
 
