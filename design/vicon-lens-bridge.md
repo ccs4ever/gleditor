@@ -1,4 +1,4 @@
-# vicon Lens Bridge: Lenses as Suspended Host Requests in a Goal-Directed Language (v1.28)
+# vicon Lens Bridge: Lenses as Suspended Host Requests in a Goal-Directed Language (v1.29)
 
 A design specification for how a **vicon program** — not a `vicon` REPL verb — opens, traverses,
 mounts, writes back, and releases projection lenses. Design deliverable only: the signatures are
@@ -96,7 +96,7 @@ host-side. Every consequence is absorbed:
 - **Ref-ints are untyped.** `kids(42)` — or `kids("42")`, `toInt` runs `stoll` on strings
   (`vortex_vm.cpp:41-45`) — silently resolves dense index 42: the `LiteralCellId` wrong-answer
   channel the VQL doc guards (`vql-lens-bridge.md` D2). Rule: **every request arg is validated**
-  `toInt → CellRef → arena().contains() → epoch check (D5) → sessionFor/ownsCell` → **the issued-token ledger** — a bare Int64 carries no epoch, so a stale token whose freed index re-mints onto a foreign session's cell passes `contains`+epoch+`sessionFor` and `keyFor` resolves a wrong-but-valid key (`ledit` writes the wrong key's pending text — the alias channel D5 exists to close); the session keeps `issuedTokens_` token→(key, issue-generation) — a stale token whose index re-mints AND re-issues to the program passes the ledger's membership check; the ledger entry records the **issuance generation** (an epoch packed into the token's high bits, or a session-minted counter decoupled from the dense index — §6.8's tagged currency is the honest fix, not a deferral) — same fix as vprolog's v1.12; a failing arg makes the request `Err` (Icon failure), never a wrong answer.
+  `toInt → CellRef → arena().contains() → epoch check (D5) → sessionFor/ownsCell` → **the issued-token ledger** — a bare Int64 carries no epoch, so a stale token whose freed index re-mints onto a foreign session's cell passes `contains`+epoch+`sessionFor` and `keyFor` resolves a wrong-but-valid key (`ledit` writes the wrong key's pending text — the alias channel D5 exists to close); the session keeps `issuedTokens_` token→(key, issue-generation) — a stale token whose index re-mints AND re-issues to the program passes the ledger's membership check; the ledger entry records the **issuance generation** (the packed ticket `issueGen << 32 | dense` — the decoupled-counter alternative is rejected (a non-dense value fails `contains` before the ledger) decoupled from the dense index — §6.8's tagged currency is the honest fix, not a deferral) — same fix as vprolog's v1.12; a failing arg makes the request `Err` (Icon failure), never a wrong answer.
   `c + 1` still adds happily — arithmetic cannot tell a ref from an integer (`MakeVar` has the same
   wart, `vortex_vm.cpp:893`); documented, not fixed — it is the `opref` idiom's own property.
 - **Scalar answers collide with ref-tokens.** `ldirty`/`lcommit` producing `42` is
@@ -314,7 +314,7 @@ is `sessionFor(target-cell)`); `ledit` is the content-write path.
 
 | keyword | produces | notes |
 |---|---|---|
-| `&lens` | the most recent *live* session's first root's ref-token; `&null` when none | resolves `session->roots().front()` at produce time — `weak_ptr` expiry + `contains()` + epoch validated |
+| `&lens` | the most recent *live* session's first root's ref-token; `&null` when none | resolves (`roots().empty()` → `&null`; else `session->roots().front()`) at produce time — `weak_ptr` expiry + `contains()` + epoch validated |
 | `&lenserr` | the last refusal's reason; `&null` when clean | `&errortext` shape; a live read — a stored cell would be released by the refusal's own `Fail` |
 
 ### Generators (multi-produce requests; per-site queue, REPLACE-on-refire)

@@ -1,4 +1,4 @@
-# vprolog Lens Bridge: Lenses as Builtin Predicates in a Backtracking Logic Engine (v1.19)
+# vprolog Lens Bridge: Lenses as Builtin Predicates in a Backtracking Logic Engine (v1.20)
 
 A design specification for how a **vprolog program** — not the `vprolog` REPL's `:lens` verbs —
 opens, enumerates, mounts, writes back, and releases projection lenses. Design deliverable only:
@@ -261,7 +261,7 @@ as its yield.
 
 **Session handles, not operands**: `lens_commit(C, N)`/`lens_revert(C)`/`lens_dirty(C, N)`/
 `lens_refresh(C, R)` take a member cell purely to name the session — `sessionFor(ownsCell(C))` —
-and the effect is session-wide (all dirty keys, the whole lens). `lens_current(R)` binds the most
+and the effect is session-wide (all dirty keys, the whole lens). `lens_current(R)` — fails when `roots()` is empty (a zero-root session registers for dedupe but has no root to yield) binds the most
 recent *live* session's first root — the `&lens` analog, weak-expiry + epoch validated — failing
 when no session is open.
 
@@ -391,7 +391,7 @@ the mesh there is no MetaSource to inject, and it fails the same way.
 | `lens_edit(C, Text)` | the cell's handle | `sessionEdit`; fails on ref-bound/unkeyed/non-writable/epoch-stale |
 | `lens_commit(C, N)` | applied-count integer | `sessionCommitAll`; `C` names the session; **non-atomic** — a refusal can leave ≥0 applied (D5) |
 | `lens_revert(C)` | the cell's handle | `sessionRevert`; fails on source-vanished (`presentKeys_` check, `projection_session.hpp:124-129`) |
-| `lens_refresh(C, Root)` | the session's first root, post-refresh | `refreshIfChanged` — mints/restates, dirty-gate-exempt; session handle |
+| `lens_refresh(C, Root)` | the session's first root post-refresh, or fails when `roots()` is empty | `refreshIfChanged` — mints/restates, dirty-gate-exempt; session handle |
 | `lens_close(C)` | — | releases the session — deferred (`U-V2`, as the siblings) |
 
 ### Pure probes (single-solution; fail honestly where the answer is absent)
@@ -403,7 +403,7 @@ the mesh there is no MetaSource to inject, and it fails the same way.
 | `lens_text(C, T)` | the cell's rendered content | the readable-print probe — a bound handle prints its ref-int (`renderTerm`, `vortex_stdlib.cpp:4101-4103`) |
 | `lens_scalar(C, V)` | `Int64`/`Double`/`Bool` scalar | `valueBits` of lens-minted kinds — **kind preserved** via `makeScalarCell(bool)`/`(double)` (`arena_manifold.hpp:567-569`); fails on span/handle kinds |
 | `lens_dirty(C, N)` | `dirtyCount` integer | `session.dirtyCount()` — const read; session handle |
-| `lens_current(R)` | the most recent *live* session's first root | `&lens` analog — weak-expiry + `contains()` + epoch validated at produce time; fails when none is open |
+| `lens_current(R)` — fails when `roots()` is empty (a zero-root session registers for dedupe but has no root to yield) | the most recent *live* session's first root | `&lens` analog — weak-expiry + `contains()` + epoch validated at produce time; fails when none is open |
 | `lens_pending(K, Text)` | the pending-text for `K` — reads `dirty_[key]` (the session-truth probe; `lens_text` reads the arena image which shows pre-edit bytes after a backtracked edit) — resolves `K` through the registry scan, not `keyFor` (a key arg, not a cell handle) |
 | `lens_mounted(C)` | succeeds iff `mountBoundary(keyFor(C))` is non-null (a delegate-interior `C` resolves through its mount — `router_lens.hpp:70-71`; discriminates gone-vs-refused in `unmount_if`) |
 | `lens_error(E)` | the last refusal's reason | produce-time read of stdlib-held state (D7); fails when clean |
