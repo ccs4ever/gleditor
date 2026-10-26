@@ -1,4 +1,4 @@
-# Cell-Shape Specification: One Neighborhood-Match Kernel for the Vortex Frontends (v1.19)
+# Cell-Shape Specification: One Neighborhood-Match Kernel for the Vortex Frontends (v1.20)
 
 A design specification for the **shared cell-shape kernel** — `zigzag/cell_shape.{hpp,cpp}`, beside
 `session_ops.hpp` (`apps/common/xanadu/zigzag/`) in the "one copy of the protocol" role — and for how
@@ -374,7 +374,7 @@ a re-driven goal re-matches deterministically.
 ```vlace
 data Shape      = Shape (List (String, Dir, Cell))      -- the observed neighborhood
 data Constraint = Present | Absent | Bind String
-                | TextOf String | Sub ShapeSpec
+                | TextOf String | Sub ShapeSpec | SubBind String ShapeSpec
 data Field      = Field String Dir Constraint
 data ShapeSpec  = Spec ShapeBase (List Field)
 
@@ -403,7 +403,8 @@ enum class MissingPolicy : std::uint8_t { Refuse, BindEmpty };
 /// Rejects malformed ShapeExprs before matching: Forbid carrying `expect`,
 /// `optional` on non-Bind, empty `bindName` under Bind, `expect=nested`
 /// under the wrong mode, `minValence` contradicted by fields.
-[[nodiscard]] std::expected<void, std::string> validateShape(const ShapeExpr &expr);
+template <CellGraph M>
+[[nodiscard]] std::expected<void, std::string> validateShape(const M &graph, const ShapeExpr &expr);  // graph-dependent — refuses a Forbid field when M lacks edgeExists
 
 /// One-cell neighborhood match. Refuses `noCell`/non-`contains` subjects first
 /// (an empty dimensionsOf over a stale ref vacuously-passes Closed — the same
@@ -545,7 +546,7 @@ case matchShape entry spec of
 |---|---|---|---|
 | S1 | `apps/common/xanadu/zigzag/cell_shape.{hpp,cpp}` (new) | `ShapeExpr`/`ShapeField`/`ShapeBindings`/`ShapeMode`/`ShapeBase`/`ShapeCmp`/`MissingPolicy`; `shapeMatches`/`cellsMatching`/`matchesShape` over `CellGraph`; `compareCellValues` (lifted `vql_engine.cpp:2145-2199`); `cellKey`/`cellScalar`/`cellEq`/`keyCell`/`sessionForCell` with injected `SessionScan`/`SessionList` | The kernel is the "one copy" — beside `session_ops.hpp`, over the existing `CellGraph` substrate |
 | S2 | `vql/vql_engine.{hpp,cpp}` + `vql/parser.cpp` + `vql/ast.hpp` | `evaluateShapePredicate`/`matchDestructure` re-implemented over the kernel; `MissingPolicy` per callsite; `{}`/`{*}`/`{!*}` valence arms; `: {…}` nested-descent lowering; `linked` default; `PredicateTest::FunctionInvocation` arm + `?{…}` `return true` arm routed to `shapeMatches`; silently-ignored rule variants (`$shape`/`fn(.)`/pivot/virtual-dim) refuse or lower | The three readings converge; the dead arms and vacuous truths are wrong answers today |
-| S3 | `vpl/view.hpp` + `vpl/vpl_engine.{hpp,cpp}` + `vpl/{token,lexer,parser}` + `vpl/compiler.{hpp,cpp}` + `vpl/ast.hpp` | `⎕MATCH`/`⎕SHAPE`/`⎕SHAPEIDX` quads (the index-mask form is the array-native one — indices select via `V[idx]` with identity; `⎕MATCH` the fused convenience); **dependency: the Q10 cell-list `VplView`** (`vpl-lens-bridge.md:450`) — the mask yield has no representation without it; spec-string parse through the shared spec-grammar — owned by a new `zigzag/cell_shape_parse.{hpp,cpp}` row (S9 below) — the grammar is:
+| S3 | `vpl/view.hpp` + `vpl/vpl_engine.{hpp,cpp}` + `vpl/{token,lexer,parser}` + `vpl/compiler.{hpp,cpp}` + `vpl/ast.hpp` | `⎕MATCH`/`⎕SHAPE`/`⎕SHAPEIDX`/`⎕SHAPEIDX` quads (the index-mask form is the array-native one — indices select via `V[idx]` with identity; `⎕MATCH` the fused convenience); **dependency: the Q10 cell-list `VplView`** (`vpl-lens-bridge.md:450`) — the mask yield has no representation without it; spec-string parse through the shared spec-grammar — owned by a new `zigzag/cell_shape_parse.{hpp,cpp}` row (S9 below) — the grammar is:
 
 ```
 shape    := "{" field ("," field)* "}" | "(" field ("," field)* ")" | field ("," field)* | "{}" | "{*}" | "{!*}" | "{!*," field ("," field)* "}" | "{*," field ("," field)* "}"
@@ -562,7 +563,8 @@ value    := scalar | "$" ident [nested] | shape
 | S6 | `vlace/compiler.{hpp,cpp}` + `vlace/types.cpp` + `vlace/ast.hpp` | `shapeOf`/`matchShape` natives + `Shape`/`ShapeSpec`/`Constraint`/`Field`/`ShapeBase` ctor registration under P1's reserved-tag discipline; lazy `List (String,Cell)` result | The ADT surface lives only in `installXanadu` |
 | S7 | `vortex_core.{hpp,cpp}` + the Q4 row | `lensSessions()` registry lands → each frontend's injected `SessionScan`/`SessionList` rebinds to the registry scan | VQL Q4 / vicon V4 / vprolog's register — shared, already proposed |
 | S9 | `zigzag/cell_shape_parse.{hpp,cpp}` (new) | the shared textual grammar + injected dim resolver → `std::expected<ShapeExpr, …>` | the neutral parser the spec-string surfaces share |
-| S8 | `tests/` (new) | the shared textual grammar + injected dim resolver → `std::expected<ShapeExpr, …>` | the neutral parser the spec-string surfaces share |
+| S8 | *(merged into S11)* |
+| S11 | `apps/common/xanadu/zigzag/arena_manifold.{hpp,cpp}` + `manifold.hpp` | `edgeExists` on both `CellGraph` impls (`linked`+`DimLink` probe — exists-but-unnamed arm a `linked` hop can't express) | the only correct Forbid for proxy subjects |
 | S10 | `tests/` (new) | the §5 shape in each frontend's gate test (`lens_*_gate_test.cpp` pattern); kernel unit tests in `tests/zigzag/` or `tests/xuzz/` | A test sits with its code — the acceptance artifact |
 
 ## 8. What this is not
