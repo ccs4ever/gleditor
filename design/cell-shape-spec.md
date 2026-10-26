@@ -526,9 +526,9 @@ case matchShape entry spec of
 | S3 | `vpl/view.hpp` + `vpl/vpl_engine.{hpp,cpp}` + `vpl/{token,lexer,parser}` + `vpl/compiler.{hpp,cpp}` + `vpl/ast.hpp` | `⎕MATCH`/`⎕SHAPE`/`⎕SHAPEIDX` quads (the index-mask form is the array-native one — indices select via `V[idx]` with identity; `⎕MATCH` the fused convenience); **dependency: the Q10 cell-list `VplView`** (`vpl-lens-bridge.md:450`) — the mask yield has no representation without it; spec-string parse through the shared spec-grammar — owned by a new `zigzag/cell_shape_parse.{hpp,cpp}` row (S9 below) — the grammar is:
 
 ```
-shape    := "{" field ("," field)* "}" | "{}" | "{*}" | "{!*}"
+shape    := "{" field ("," field)* "}" | "(" field ("," field)* ")" | field ("," field)* | "{}" | "{*}" | "{!*}"
 field    := "!"? dir? dim [":" value | bindName nested?]?
-nested   := shape
+nested   := shape   # braces or parens — the delimiter is frontend-lexical
 dir      := "+" | "-" | "~"
 bindName := "$" ident | ident
 value    := scalar | "$" ident [nested] | shape
