@@ -186,7 +186,7 @@ schema-only); only `lensEdit`/`lensRevert`/`lensCommit`/`lensDirty`/`cellKey`/`c
 work (`ownsCell`/`keyFor`/`canApply`/`commit()` reach union children; a key two children emit
 **refuses** — `applyContentChange` first-success vs `restateContent` last-emission would write the
 first child while displaying the last's text). `UnionLens::child(i)` routing is a later refinement; the ambiguity detection needs a
-`claimedBy`/`canApply`-per-child probe on `UnionLens` (Q6).
+`claimedBy`/`canApply`-per-child probe on `UnionLens` (Q4).
 `--engine vortex` maps `StoreGenerator` anchors to `home()` (`vql/compiler.cpp:687-691`) — a `*Lens`
 query under the compiler silently yields home; either scope to the direct engine or add a compiler
 row (Q5) — and `compilePathStep`'s `FunctionInvocation` arm (`vql/compiler.cpp:452-526`) handles
@@ -233,7 +233,7 @@ session's to maintain (Q7B).
 | `lensCommit` | — | applied count (scalar cell) | `sessionCommitAll` → `commit()` applied count |
 | `lensEdit(text)` | `String` | the cell | `sessionEdit` — `Err` for ref-bound/unkeyed/non-writable |
 | `lensRevert` | — | the cell | `sessionRevert` — `Err` on source-vanished |
-| `lensBrowse(table)` | `String` | the new query's root cell | `sessionBrowseAt` — sql-lens-only; `browse` returns `expected<void>` so the root comes from a `SqlLens` accessor or a browse-returns-key change (Q6) |
+| `lensBrowse(table)` | `String` | the new query's root cell | `sessionBrowseAt` — sql-lens-only; `browse` returns `expected<void>` so the root comes from a `SqlLens` accessor or a browse-returns-key change (Q4) |
 | `lensDirty` | — | `dirtyCount` (scalar cell) | `session.dirtyCount()` |
 | `lensRefresh` | — | the root cells (post-refresh) | `refreshIfChanged()` — const probe, exempt; a source that moved since the last gesture re-projects |
 | `lensClose` | — | empty | releases the session — deferred (`U-V2`) |
