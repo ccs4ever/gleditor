@@ -59,11 +59,16 @@ std::expected<void, std::string> SqlPromotion::ensureReady() {
     }
     at = base_.linked(*at, *dSeq, Posward);
   }
-  if (headCell_ == noCell) {
-    const auto v = store_.makeCell(head_, headName);
-    head_        = v;
-    headCell_    = store_.cellRefOf(v).value();
-    head_        = store_.setLink(head_, *home, *dContains, Posward, headCell_);
+  if (!headCell_) {
+    const auto v    = store_.makeCell(head_, headName);
+    head_           = v;
+    const auto cell = store_.cellRefOf(v);
+    if (!cell) {
+      return std::unexpected(
+          "SQL promotion headcell operation did not mint a cell");
+    }
+    headCell_ = *cell;
+    head_     = store_.setLink(head_, *home, *dContains, Posward, *headCell_);
   }
   if (auto r = refold(); !r) {
     return r;
@@ -83,16 +88,17 @@ void SqlPromotion::recordReconcile(CellRef env) {
   // env -> contains -> subject twins -> contains -> value twins; every
   // cell carrying d.extkey joins the map keyed on that key's text.
   const auto walk = [&](CellRef from, auto &&walk) -> void {
-    for (auto at = from; at != noCell;) {
-      if (const auto a = base_.linked(at, *dExtkey, Posward); a.has_value()) {
-        reconcile_[base_.textOf(*a, store_)] = at;
+    for (std::optional<CellRef> at{from}; at.has_value();) {
+      const CellRef current = *at;
+      if (const auto a = base_.linked(current, *dExtkey, Posward);
+          a.has_value()) {
+        reconcile_[base_.textOf(*a, store_)] = current;
       }
-      const auto first = base_.linked(at, *dCont, Posward);
+      const auto first = base_.linked(current, *dCont, Posward);
       if (first.has_value()) {
         walk(*first, walk);
       }
-      const auto nxt = base_.linked(at, *dSeq, Posward);
-      at             = nxt.value_or(noCell);
+      at = base_.linked(current, *dSeq, Posward);
     }
   };
   walk(env, walk);
@@ -100,11 +106,11 @@ void SqlPromotion::recordReconcile(CellRef env) {
 
 void SqlPromotion::rebuildReconcile() {
   const auto dPromoted = base_.dimensionNamed("d.promoted");
-  if (headCell_ == noCell || !dPromoted) {
+  if (!headCell_ || !dPromoted) {
     return;
   }
   // Members chain posward toward the headcell; read them negward from it.
-  for (auto at = base_.linked(headCell_, *dPromoted, Negward);
+  for (auto at = base_.linked(*headCell_, *dPromoted, Negward);
        at.has_value();) {
     recordReconcile(*at);
     at = base_.linked(*at, *dPromoted, Negward);
@@ -119,6 +125,9 @@ SqlPromotion::promoteImpl(const ExternalKey &key) {
   if (auto r = ensureReady(); !r) {
     return std::unexpected(r.error());
   }
+  if (!headCell_) {
+    return std::unexpected("SQL promotion headcell is not initialized");
+  }
   const auto guard = staging_.mark();
   auto env         = lens_.buildEnvelope(staging_, key);
   if (!env) {
@@ -129,7 +138,7 @@ SqlPromotion::promoteImpl(const ExternalKey &key) {
   // env -> headcell on d.promoted resolves to the base cell, which
   // promote() maps identically without expanding (spec section 6.3).
   const auto dPromoted = staging_.ensureDimension("d.promoted");
-  (void)staging_.link(*env, dPromoted, Posward, headCell_);
+  (void)staging_.link(*env, dPromoted, Posward, *headCell_);
   auto res = promote(store_, head_, staging_, *env);
   staging_.release(guard);
   if (!res.has_value()) {

@@ -9,6 +9,7 @@
 #include <charconv>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <ranges>
 #include <string>
 #include <type_traits>
@@ -30,7 +31,7 @@ Cell makeCell(const CellID id, std::string type = {},
   cell.role = std::move(type);
   cell.data = "cell " + std::to_string(id);
   for (const auto &[dimension, target] : forwardLinks) {
-    cell.dimensions[dimension] = LinkPairs{target, 0};
+    cell.dimensions[dimension] = LinkPairs{target, std::nullopt};
   }
   return cell;
 }
@@ -68,7 +69,7 @@ TEST(ZzCoreTest, CloneMasterResolutionAlongDClone) {
   // Rank: Cell 10 (Master) -> Cell 20 (Clone 1) -> Cell 30 (Clone 2)
   cells[10]                       = makeCell(10, "master");
   cells[10].data                  = "Universal Truth";
-  cells[10].dimensions["d.clone"] = LinkPairs{.pos = 20, .neg = 0};
+  cells[10].dimensions["d.clone"] = LinkPairs{.pos = 20};
 
   cells[20]                       = makeCell(20, "xudu_clone");
   cells[20].data                  = ""; // Clone stores no text
@@ -76,22 +77,36 @@ TEST(ZzCoreTest, CloneMasterResolutionAlongDClone) {
 
   cells[30]                       = makeCell(30, "xudu_clone");
   cells[30].data                  = ""; // Clone stores no text
-  cells[30].dimensions["d.clone"] = LinkPairs{.pos = 0, .neg = 20};
+  cells[30].dimensions["d.clone"] = LinkPairs{.neg = 20};
 
   // Standalone unlinked cell 40
   cells[40]      = makeCell(40, "standalone");
   cells[40].data = "Independent Content";
 
-  EXPECT_EQ(findCloneMaster(cells, 10), 10U);
-  EXPECT_EQ(findCloneMaster(cells, 20), 10U);
-  EXPECT_EQ(findCloneMaster(cells, 30), 10U);
-  EXPECT_EQ(findCloneMaster(cells, 40), 40U);
+  EXPECT_EQ(findCloneMaster(cells, 10), std::optional<CellID>{10});
+  EXPECT_EQ(findCloneMaster(cells, 20), std::optional<CellID>{10});
+  EXPECT_EQ(findCloneMaster(cells, 30), std::optional<CellID>{10});
+  EXPECT_EQ(findCloneMaster(cells, 40), std::optional<CellID>{40});
 
   // Effective text derivation from master head
   EXPECT_EQ(getEffectiveCellText(cells, 10), "Universal Truth");
   EXPECT_EQ(getEffectiveCellText(cells, 20), "Universal Truth");
   EXPECT_EQ(getEffectiveCellText(cells, 30), "Universal Truth");
   EXPECT_EQ(getEffectiveCellText(cells, 40), "Independent Content");
+}
+
+TEST(ZzCoreTest, CloneMasterMayBeCellZero) {
+  std::unordered_map<CellID, Cell> cells;
+  cells[0]                           = makeCell(0, "master");
+  cells[0].data                      = "zero is a cell";
+  cells[9]                           = makeCell(9, "xudu_clone");
+  cells[9].data                      = "stale clone text";
+  cells[9].dimensions["d.clone"].neg = 0;
+
+  EXPECT_EQ(findCloneMaster(cells, 0), std::optional<CellID>{0});
+  EXPECT_EQ(findCloneMaster(cells, 9), std::optional<CellID>{0});
+  EXPECT_EQ(getEffectiveCellText(cells, 9), "zero is a cell");
+  EXPECT_FALSE(linksOn(findCell(cells, 9), "d.missing").pos);
 }
 
 TEST(ZzCoreTest, ACloneOfANonStringCellReadsItsMasterAndNotItself) {
@@ -104,12 +119,12 @@ TEST(ZzCoreTest, ACloneOfANonStringCellReadsItsMasterAndNotItself) {
 
   cells[10]                       = makeCell(10, "master");
   cells[10].data                  = 42.5;
-  cells[10].dimensions["d.clone"] = LinkPairs{.pos = 20, .neg = 0};
+  cells[10].dimensions["d.clone"] = LinkPairs{.pos = 20};
 
   // Stale text on the clone, which is exactly what the fallback would return.
   cells[20]                       = makeCell(20, "xudu_clone");
   cells[20].data                  = std::string{"stale"};
-  cells[20].dimensions["d.clone"] = LinkPairs{.pos = 0, .neg = 10};
+  cells[20].dimensions["d.clone"] = LinkPairs{.neg = 10};
 
   EXPECT_EQ(getEffectiveCellText(cells, 10), "42.5");
   EXPECT_EQ(getEffectiveCellText(cells, 20), "42.5")
@@ -120,19 +135,19 @@ TEST(ZzCoreTest, ACloneOfANonStringCellReadsItsMasterAndNotItself) {
   std::unordered_map<CellID, Cell> flags;
   flags[1]                       = makeCell(1, "master");
   flags[1].data                  = true;
-  flags[1].dimensions["d.clone"] = LinkPairs{.pos = 2, .neg = 0};
+  flags[1].dimensions["d.clone"] = LinkPairs{.pos = 2};
   flags[2]                       = makeCell(2, "xudu_clone");
   flags[2].data                  = std::string{"stale"};
-  flags[2].dimensions["d.clone"] = LinkPairs{.pos = 0, .neg = 1};
+  flags[2].dimensions["d.clone"] = LinkPairs{.neg = 1};
   EXPECT_EQ(getEffectiveCellText(flags, 2), "true");
 
   std::unordered_map<CellID, Cell> blank;
   blank[1]                       = makeCell(1, "master");
   blank[1].data                  = std::string{};
-  blank[1].dimensions["d.clone"] = LinkPairs{.pos = 2, .neg = 0};
+  blank[1].dimensions["d.clone"] = LinkPairs{.pos = 2};
   blank[2]                       = makeCell(2, "xudu_clone");
   blank[2].data                  = std::string{"stale"};
-  blank[2].dimensions["d.clone"] = LinkPairs{.pos = 0, .neg = 1};
+  blank[2].dimensions["d.clone"] = LinkPairs{.neg = 1};
   EXPECT_EQ(getEffectiveCellText(blank, 2), "");
 
   // A blob is not text, and saying so is not the same as saying it is empty:

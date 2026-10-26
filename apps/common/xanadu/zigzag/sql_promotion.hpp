@@ -71,10 +71,10 @@ private:
 
   SqlLens &lens_;
   xanadu::Store &store_;
-  Manifold base_;                 ///< folded view of the store
-  ArenaManifold staging_{&base_}; ///< envelope arena over base_
-  xanadu::MicroversionId head_{}; ///< current store head (op parent)
-  CellRef headCell_{noCell};      ///< sql.promoted:<dbid> headcell
+  Manifold base_;                   ///< folded view of the store
+  ArenaManifold staging_{&base_};   ///< envelope arena over base_
+  xanadu::MicroversionId head_{};   ///< current store head (op parent)
+  std::optional<CellRef> headCell_; ///< sql.promoted:<dbid> headcell
   bool ready_{false};
   /// ExternalKey -> the durable cell it was promoted to (spec 6.3).
   std::unordered_map<ExternalKey, CellRef> reconcile_;

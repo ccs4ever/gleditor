@@ -35,6 +35,11 @@
 
 namespace zigzag {
 
+/// Default number of source rows a windowed lens materializes per page.
+inline constexpr std::size_t kDefaultLensPageSize{64};
+/// A materialized page must make progress even if a caller requests zero.
+inline constexpr std::size_t kMinimumLensPageSize{1};
+
 /// A source node's own stable, lens-defined identity, as a canonical opaque
 /// string. A xanadoc encodes "xd:<documentId>:<version>:<span>"; a filesystem
 /// encodes "fs:<dev>:<ino>" (or "fsp:<hash>"). Only the lens computes one.

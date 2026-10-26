@@ -6,6 +6,7 @@
 
 #include "common/xanadu/zigzag/log_lens.hpp"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -25,7 +26,8 @@ std::string lineKey(const std::string &conn, const std::size_t ordinal) {
 } // namespace
 
 LogLens::LogLens(std::string path, const std::size_t pageSize)
-    : path_(std::move(path)), pageSize_(pageSize == 0 ? 1 : pageSize),
+    : path_(std::move(path)),
+      pageSize_(std::max(pageSize, kMinimumLensPageSize)),
       connKey_("log:" + path_), watch_(path_) {}
 
 std::vector<std::pair<std::string, std::optional<GenericDim>>>

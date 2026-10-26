@@ -122,12 +122,13 @@ struct DynamicDimensionLink {
  * (CompactZZCellTest) still instantiate it.
  *
  * **Not 64 bytes, and not zero-copy** -- which this comment, the design
- * document and CLAUDE.md all used to claim. It is 792 bytes, aligned
- * to 8, and it heap-allocates: a vector of dynamic dimensions, three
- * optionals and a std::string type tag. It used to hold `ephemeralText` as
- * well -- a copy of the very primedia that `span` already addresses -- which
- * migration step 19 deleted: content lives at an address, and a cell holding a
- * second copy of it is a cell that can disagree with the permascroll.
+ * document and CLAUDE.md all used to claim. It is 984 bytes, aligned
+ * to 8, and it heap-allocates: a vector of dynamic dimensions, optional
+ * endpoints and provenance records, and a std::string type tag. It used to hold
+ * `ephemeralText` as well -- a copy of the very primedia that `span` already
+ * addresses -- which migration step 19 deleted: content lives at an address,
+ * and a cell holding a second copy of it is a cell that can disagree with the
+ * permascroll.
  *
  * The claim survived as long as it did because nothing checked it. The
  * static_assert at the end of this file does now -- not at 64, which would be
@@ -135,8 +136,8 @@ struct DynamicDimensionLink {
  * past again.
  *
  * **64 bytes was never reachable as specified.** `standardDimensions` alone
- * is 192: twelve dimensions, two directions each, an eight-byte CellID per
- * link. Getting to a cache line means 32-bit dense indices and moving all but
+ * is 384: twelve dimensions, two optional eight-byte CellIDs per direction
+ * pair. Getting to a cache line means 32-bit dense indices and moving all but
  * the three or four hottest dimensions to a side table -- a different data
  * model, not a tighter packing of this one.
  *

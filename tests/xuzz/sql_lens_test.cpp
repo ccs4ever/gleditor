@@ -9,6 +9,7 @@
 
 #include <sqlite3.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -40,8 +41,8 @@ struct FixtureDb {
   fs::path path;
 
   explicit FixtureDb() {
-    path = fs::temp_directory_path() /
-           ("sql-lens-test-" + std::to_string(::getpid()) + ".db");
+    path        = fs::temp_directory_path() /
+                  ("sql-lens-test-" + std::to_string(::getpid()) + ".db");
     sqlite3 *db = nullptr;
     EXPECT_EQ(sqlite3_open_v2(path.string().c_str(), &db,
                               SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE |
@@ -162,6 +163,22 @@ struct ProjectedDb {
 TEST(SqlLensTest, SchemaAndConnProjectAtRoots) {
   ProjectedDb p;
   ASSERT_NE(p.lens, nullptr);
+  const auto invoices =
+      std::ranges::find_if(p.lens->tables(), [](const SqlTable &table) {
+        return table.name == "invoices";
+      });
+  ASSERT_NE(invoices, p.lens->tables().end());
+  ASSERT_FALSE(invoices->columns.empty());
+  EXPECT_TRUE(invoices->columns[0].keyPosition.has_value());
+  EXPECT_FALSE(invoices->columns[1].keyPosition.has_value());
+
+  const auto nopk =
+      std::ranges::find_if(p.lens->tables(), [](const SqlTable &table) {
+        return table.name == "nopk";
+      });
+  ASSERT_NE(nopk, p.lens->tables().end());
+  EXPECT_FALSE(nopk->columns[0].keyPosition.has_value());
+
   ASSERT_EQ(p.session->roots().size(), 1u);
   const auto conn = p.session->roots()[0];
   EXPECT_EQ(p.attr(conn, "d.role"), "sql.conn");
@@ -189,6 +206,21 @@ TEST(SqlLensTest, SchemaAndConnProjectAtRoots) {
       EXPECT_EQ(p.attr(cols[3], "d.type"), "TEXT");
     }
   }
+}
+
+TEST(SqlLensTest, ZeroPageSizeUsesOneRowWindows) {
+  ProjectedDb p(/*pageSize=*/0);
+  ASSERT_NE(p.lens, nullptr);
+  ASSERT_TRUE(p.lens->browse("invoices").has_value());
+  (void)p.session->refresh();
+
+  const auto query = p.childWithRole("sql.query");
+  ASSERT_TRUE(query.has_value());
+  const auto page = p.child(*query);
+  ASSERT_TRUE(page.has_value());
+  EXPECT_EQ(p.attr(*page, "d.wincount"), "1");
+  ASSERT_TRUE(p.child(*page).has_value());
+  EXPECT_EQ(p.siblings(*page).size(), 2u); // one live page and one stub
 }
 
 TEST(SqlLensTest, BrowseProjectsPagesSightsSubjectsValues) {
@@ -507,6 +539,15 @@ TEST(SqlLensTest, QueryModeRefusesNonWrappableKinds) {
       p.lens->query("INSERT INTO invoices VALUES (9)", {}).has_value());
 }
 
+TEST(SqlLensTest, QueryModeHasNoTableBrowseIdentity) {
+  ProjectedDb p;
+  ASSERT_NE(p.lens, nullptr);
+  ASSERT_TRUE(p.lens->query("SELECT id FROM invoices", {}).has_value());
+  EXPECT_FALSE(p.lens->isBrowsed("invoices"));
+  ASSERT_TRUE(p.lens->browse("invoices").has_value());
+  EXPECT_TRUE(p.lens->isBrowsed("invoices"));
+}
+
 TEST(SqlLensTest, QueryAndBrowseShareSubjectsIndex) {
   ProjectedDb p;
   ASSERT_NE(p.lens, nullptr);
@@ -641,6 +682,25 @@ TEST(SqlLensTest, PromoteIsIdempotentOnSubjectKey) {
   ASSERT_TRUE(again.has_value());
   EXPECT_EQ(*promo.twinOf(rowKey), *again);
   EXPECT_EQ(a.store->opCount(), before);
+}
+
+TEST(SqlLensTest, EnsureReadyInitializesPromotionHeadOnce) {
+  ProjectedDb p;
+  ASSERT_NE(p.lens, nullptr);
+  ASSERT_TRUE(p.lens->browse("invoices").has_value());
+  (void)p.session->refresh();
+  const auto q      = p.childWithRole("sql.query");
+  const auto row    = p.subjectOf(*p.child(*p.child(*q)));
+  const auto rowKey = *p.session->keyFor(row);
+
+  AnnotStore a;
+  SqlPromotion promo(*p.lens, *a.store);
+  ASSERT_TRUE(promo.ensureReady().has_value());
+  const auto operationsAfterInitialization = a.store->opCount();
+
+  ASSERT_TRUE(promo.ensureReady().has_value());
+  EXPECT_EQ(a.store->opCount(), operationsAfterInitialization);
+  EXPECT_TRUE(promo.promoteSubject(rowKey).has_value());
 }
 
 TEST(SqlLensTest, PromotePageEnvelopesSubjectsInOrder) {

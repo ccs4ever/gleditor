@@ -72,9 +72,11 @@ bool ProjectionSession::ownsCell(const CellRef cell) const noexcept {
   // and take exactly one step: an iterative climb loops on authored
   // 2-cycles, and an authored cell holding a node's negward slot steps
   // further negward -- away from the node -- so it never owns.
-  for (const DimLink &dl : core_.arena().dimensionsOf(cell)) {
-    if (dl.neg != noCell && managedDims_.contains(dl.dim) &&
-        cellToKey_.contains(dl.neg)) {
+  const auto &arena = core_.arena();
+  for (const DimLink &dl : arena.dimensionsOf(cell)) {
+    const auto previous = arena.linked(cell, dl.dim, DimVector::NEG);
+    if (managedDims_.contains(dl.dim) && previous &&
+        cellToKey_.contains(*previous)) {
       return true;
     }
   }
@@ -93,21 +95,20 @@ DimRef ProjectionSession::dimFor(std::string_view name) {
 }
 
 CellRef ProjectionSession::mintNodeCell(const SourceNode &node) {
-  auto &arena  = core_.arena();
-  CellRef cell = noCell;
-  std::visit(
-      [&](const auto &c) {
+  auto &arena        = core_.arena();
+  const CellRef cell = std::visit(
+      [&](const auto &c) -> CellRef {
         using T = std::remove_cvref_t<decltype(c)>;
         if constexpr (std::is_same_v<T, std::monostate>) {
-          cell = arena.makeCell();
+          return arena.makeCell();
         } else if constexpr (std::is_same_v<T, std::string>) {
-          cell = arena.makeCell(std::string_view{c});
+          return arena.makeCell(std::string_view{c});
         } else if constexpr (std::is_same_v<T, double>) {
-          cell = arena.makeScalarCell(c);
+          return arena.makeScalarCell(c);
         } else if constexpr (std::is_same_v<T, bool>) {
-          cell = arena.makeScalarCell(c);
+          return arena.makeScalarCell(c);
         } else if constexpr (std::is_same_v<T, std::int64_t>) {
-          cell = arena.makeScalarCell(c);
+          return arena.makeScalarCell(c);
         }
       },
       node.content);
@@ -117,7 +118,6 @@ CellRef ProjectionSession::mintNodeCell(const SourceNode &node) {
 
 void ProjectionSession::mintNode(const SourceNode &node) {
   const CellRef cell = mintNodeCell(node);
-  if (cell == noCell) return;
   keyToCell_.emplace(node.key, cell);
   cellToKey_.emplace(cell, node.key);
   mintOrder_.push_back(node.key);
@@ -174,8 +174,7 @@ void ProjectionSession::restateContent(CellRef cell,
           }
         } else if constexpr (std::is_same_v<T, double>) {
           if (arena.valueKindOf(cell) != xanadu::ValueKind::Double ||
-              !scalarEquals(arena, cell, c) ||
-              !arena.contentOf(cell).empty()) {
+              !scalarEquals(arena, cell, c) || !arena.contentOf(cell).empty()) {
             zigzag::expectWritten(
                 arena.setValueBits(cell, xanadu::ValueKind::Double,
                                    xanadu::canonicalDoubleBits(c)));
@@ -183,16 +182,14 @@ void ProjectionSession::restateContent(CellRef cell,
           }
         } else if constexpr (std::is_same_v<T, bool>) {
           if (arena.valueKindOf(cell) != xanadu::ValueKind::Bool ||
-              !scalarEquals(arena, cell, c) ||
-              !arena.contentOf(cell).empty()) {
+              !scalarEquals(arena, cell, c) || !arena.contentOf(cell).empty()) {
             zigzag::expectWritten(
                 arena.setValueBits(cell, xanadu::ValueKind::Bool, c ? 1 : 0));
             clearSpans();
           }
         } else if constexpr (std::is_same_v<T, std::int64_t>) {
           if (arena.valueKindOf(cell) != xanadu::ValueKind::Int64 ||
-              !scalarEquals(arena, cell, c) ||
-              !arena.contentOf(cell).empty()) {
+              !scalarEquals(arena, cell, c) || !arena.contentOf(cell).empty()) {
             zigzag::expectWritten(
                 arena.setValueBits(cell, xanadu::ValueKind::Int64,
                                    std::bit_cast<std::uint64_t>(c)));
@@ -415,7 +412,10 @@ void ProjectionSession::tombstone(
     const auto run = arena.dimensionsOf(*cell);
     const std::vector<DimLink> snapshot(run.begin(), run.end());
     for (const DimLink &dl : snapshot) {
-      if (dl.pos == noCell || !managedDims_.contains(dl.dim)) continue;
+      if (!managedDims_.contains(dl.dim) ||
+          !arena.linked(*cell, dl.dim, DimVector::POS)) {
+        continue;
+      }
       const bool kept = keep != keepPos.end() && keep->second.contains(dl.dim);
       if (!kept) {
         zigzag::expectWritten(arena.unlink(*cell, dl.dim, DimVector::POS));
@@ -434,7 +434,8 @@ void ProjectionSession::tombstone(
     const auto run  = arena.dimensionsOf(cell);
     const std::vector<DimLink> snapshot(run.begin(), run.end());
     for (const DimLink &dl : snapshot) {
-      if (dl.pos != noCell && managedDims_.contains(dl.dim) &&
+      if (managedDims_.contains(dl.dim) &&
+          arena.linked(cell, dl.dim, DimVector::POS) &&
           !(keep != keepPos.end() && keep->second.contains(dl.dim))) {
         zigzag::expectWritten(arena.unlink(cell, dl.dim, DimVector::POS));
       }

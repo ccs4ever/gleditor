@@ -440,7 +440,7 @@ Compiler::matchPattern(const PatternNode &pat, const ValuePtr &scrutinee,
                 EvalError{.code   = CompileError::NonLinearPattern,
                           .detail = std::string("'") + p.name +
                                     "' bound twice in one pattern",
-                          .loc = pat.loc});
+                          .loc    = pat.loc});
           }
           out[p.name] = scrutinee;
           return true;
@@ -1016,14 +1016,13 @@ void Compiler::installXanadu() {
         if ((*s)->kind != Value::Kind::Str)
           return fail(CompileError::TypeMismatch,
                       "dimensionNamed: argument is not a String", {});
-        DimRef d = c.core().arena().ensureDimension((*s)->s);
-        // ensureDimension always yields a dim; treat noCell as absence.
-        if (d == zigzag::noCell) {
+        const auto d = c.core().arena().dimensionNamed((*s)->s);
+        if (!d) {
           auto none       = makeCtor("None", {});
           none->ctorArity = 0;
           return none;
         }
-        auto some       = makeCtor("Some", {wrapDim(d)});
+        auto some       = makeCtor("Some", {wrapDim(*d)});
         some->ctorArity = 1;
         return some;
       });

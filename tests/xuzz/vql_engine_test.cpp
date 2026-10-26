@@ -33,6 +33,19 @@ TEST(VQLEngineTest, BarePathNavigation) {
   EXPECT_EQ(results[1], bob);
 }
 
+TEST(VQLEngineTest, ValueSliceWithoutLengthReadsTheRemainingValue) {
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core(arena);
+  VQLEngine engine(core);
+
+  const auto text = arena.makeCell("abcdef");
+  engine.setVariable("text", text);
+
+  const auto result = engine.execute("$text.[2]");
+  ASSERT_EQ(result.size(), 1U);
+  EXPECT_EQ(arena.textOf(result.front()), "cdef");
+}
+
 TEST(VQLEngineTest, MultiStoreAndNamedStoreSugar) {
   MultiStoreCoordinator coordinator;
   auto &arena = coordinator.core().arena();

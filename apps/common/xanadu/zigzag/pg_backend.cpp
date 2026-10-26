@@ -14,8 +14,12 @@
 
 #ifdef GLEDITOR_HAVE_PG
 
+#include <cassert>
 #include <charconv>
+#include <chrono>
 #include <cstring>
+#include <limits>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -24,6 +28,9 @@
 namespace zigzag {
 
 namespace {
+
+// Bound remote statements while a cursor is waiting for server results.
+constexpr auto kPgStatementTimeout = std::chrono::seconds{30};
 
 /// Values render as text (PQgetvalue); the GUCs pinned at connect keep
 /// the renderings parse-stable (spec section 7.3 "Values").
@@ -256,7 +263,6 @@ public:
       col.name     = PQgetvalue(r, i, 3);
       col.declType = PQgetvalue(r, i, 4);
       if (!PQgetisnull(r, i, 6)) {
-        col.keyColumn   = true;
         col.keyPosition = std::stoul(PQgetvalue(r, i, 6));
       }
       out.back().columns.push_back(std::move(col));
@@ -513,18 +519,25 @@ private:
   std::vector<const char *> paramTexts(std::span<const SqlValue> params) {
     texts_.clear();
     ptrs_.clear();
+    texts_.reserve(params.size());
+    ptrs_.reserve(params.size());
     for (const auto &v : params) {
       std::visit(
           [&](const auto &x) {
             using T = std::remove_cvref_t<decltype(x)>;
             if constexpr (std::is_same_v<T, std::monostate>) {
-              texts_.push_back({});
+              texts_.push_back(std::nullopt);
             } else if constexpr (std::is_same_v<T, std::int64_t>) {
-              texts_.push_back(std::to_string(x));
+              texts_.emplace_back(std::to_string(x));
             } else if constexpr (std::is_same_v<T, double>) {
-              texts_.push_back(std::to_string(x));
+              char buffer[64];
+              const auto [end, ec] = std::to_chars(
+                  buffer, buffer + sizeof buffer, x, std::chars_format::general,
+                  std::numeric_limits<double>::max_digits10);
+              assert(ec == std::errc{});
+              texts_.emplace_back(std::string{buffer, end});
             } else if constexpr (std::is_same_v<T, std::string>) {
-              texts_.push_back(x);
+              texts_.emplace_back(x);
             } else {
               // \x hex bytea literal -- the backend-side cast reads it.
               std::string hex{"\\x"};
@@ -534,13 +547,13 @@ private:
                                     static_cast<unsigned>(b));
                 hex += buf;
               }
-              texts_.push_back(std::move(hex));
+              texts_.emplace_back(std::move(hex));
             }
           },
           v);
     }
     for (const auto &t : texts_) {
-      ptrs_.push_back(t.empty() ? nullptr : t.c_str());
+      ptrs_.push_back(t ? t->c_str() : nullptr);
     }
     return ptrs_;
   }
@@ -579,7 +592,7 @@ private:
   bool writable_{false};
   bool inTxn_{false};
   bool liveCursor_{false};
-  std::vector<std::string> texts_;
+  std::vector<std::optional<std::string>> texts_;
   std::vector<const char *> ptrs_;
 };
 
@@ -604,10 +617,12 @@ openPgBackend(const std::string_view conninfo, const PgOpenOptions &opts) {
   }
   // Value rendering is text; these pins make the text stable (spec 7.3).
   // A writable handle drops only the read-only pin.
+  const std::string statementTimeout =
+      "SET statement_timeout = '" +
+      std::to_string(kPgStatementTimeout.count()) + "s'";
   std::vector<std::string_view> gucs{
-      "SET statement_timeout = '30s'", "SET DateStyle = ISO",
-      "SET extra_float_digits = 3", "SET bytea_output = hex",
-      "SET IntervalStyle = iso_8601"};
+      statementTimeout, "SET DateStyle = ISO", "SET extra_float_digits = 3",
+      "SET bytea_output = hex", "SET IntervalStyle = iso_8601"};
   if (!opts.writable) {
     gucs.insert(gucs.begin(), "SET default_transaction_read_only = on");
   }

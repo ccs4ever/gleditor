@@ -34,7 +34,8 @@ class LogLens final : public ProjectionLens, public WindowedLens {
 public:
   /// @p path names the log file; @p pageSize bounds each window's lines.
   /// Reads lazily: no file IO until materializePage (or browse()).
-  explicit LogLens(std::string path, std::size_t pageSize = 64);
+  explicit LogLens(std::string path,
+                   std::size_t pageSize = kDefaultLensPageSize);
 
   [[nodiscard]] std::vector<std::pair<std::string, std::optional<GenericDim>>>
   dimensions() const override;

@@ -39,25 +39,22 @@ LinkPairs linksOn(const gleditor::cpp26::optional<const Cell &> cell,
   return it != cell->dimensions.end() ? it->second : LinkPairs{};
 }
 
-CellID findCloneMaster(const std::unordered_map<CellID, Cell> &cells,
-                       const CellID id) {
-  if (0 == id) {
-    return 0;
-  }
+std::optional<CellID>
+findCloneMaster(const std::unordered_map<CellID, Cell> &cells,
+                const CellID id) {
+  if (!cells.contains(id)) return std::nullopt;
   std::unordered_set<CellID> visited;
   CellID current = id;
-  while (current != 0 && visited.insert(current).second) {
+  while (visited.insert(current).second) {
     const auto cell = findCell(cells, current);
-    if (!cell) {
-      break;
-    }
-    const CellID neg = linksOn(cell, cloneDimension).neg;
-    if (0 == neg || !cells.contains(neg)) {
+    if (!cell) return std::nullopt;
+    const auto neg = linksOn(cell, cloneDimension).neg;
+    if (!neg || !cells.contains(*neg)) {
       return current;
     }
-    current = neg;
+    current = *neg;
   }
-  return current != 0 ? current : id;
+  return current;
 }
 
 std::string cellDataAsText(const CellData &data) {
@@ -91,7 +88,8 @@ std::string getEffectiveCellText(const std::unordered_map<CellID, Cell> &cells,
   // indistinguishable from a master holding an empty string, so a clone of a
   // number fell back to whatever text the clone itself happened to carry --
   // which is the one thing a clone must never do.
-  const auto master = findCell(cells, findCloneMaster(cells, id));
+  const auto masterId = findCloneMaster(cells, id);
+  const auto master   = masterId ? findCell(cells, *masterId) : std::nullopt;
   if (master) {
     return cellDataAsText(master->data);
   }

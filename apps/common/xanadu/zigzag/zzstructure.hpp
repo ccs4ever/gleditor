@@ -37,8 +37,8 @@ using CellID = std::uint64_t;
 using DimID  = std::string;
 
 struct LinkPairs {
-  CellID pos = 0; // Direction +1 link
-  CellID neg = 0; // Direction -1 link
+  std::optional<CellID> pos; // Direction +1 link
+  std::optional<CellID> neg; // Direction -1 link
 
   bool operator==(const LinkPairs &) const = default;
 };

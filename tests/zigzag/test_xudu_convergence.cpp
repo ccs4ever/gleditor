@@ -146,7 +146,7 @@ TEST(ZzXuduConvergenceTest, ManifoldValidation) {
 
   Cell c2{.id = 2, .data = "Cell 2", .role = "cell"};
   // Missing backlink from 2 to 1 (asymmetric)
-  c2.dimensions["d.1"].neg = 0;
+  c2.dimensions["d.1"].neg = std::nullopt;
 
   doc.cells[1] = c1;
   doc.cells[2] = c2;
@@ -158,6 +158,22 @@ TEST(ZzXuduConvergenceTest, ManifoldValidation) {
   // Fix the backlink
   doc.cells[2].dimensions["d.1"].neg = 1;
   EXPECT_TRUE(validate2RankManifold(doc, &error));
+}
+
+TEST(ZzXuduConvergenceTest, CellZeroIsAValidLinkEndpoint) {
+  ZzStructureDocument doc;
+  Cell zero{.id = 0, .data = "zero"};
+  zero.dimensions["d.1"].pos = 1;
+  Cell one{.id = 1, .data = "one"};
+  one.dimensions["d.1"].neg = 0;
+  doc.cells.emplace(0, std::move(zero));
+  doc.cells.emplace(1, std::move(one));
+
+  std::string error;
+  ASSERT_TRUE(validate2RankManifold(doc, &error)) << error;
+  const auto raster = rasterizeZzStructure(doc, "d.1", "d.2", CellID{0});
+  EXPECT_EQ(raster.cell_sequence, (std::vector<CellID>{0, 1}));
+  EXPECT_EQ(raster.text, "zero one");
 }
 
 TEST(ZzXuduConvergenceTest, XuduHypertimeUnchangedSpansBecomeCloneCells) {
@@ -355,7 +371,7 @@ ZzStructureDocument sampleSlice() {
   first.data       = std::string{"first cell"};
   first.role       = "chapter";
   first.mime_type  = "text/plain";
-  first.dimensions = {{"d.1", {2, 0}}, {"d.2", {4, 0}}};
+  first.dimensions = {{"d.1", {2, std::nullopt}}, {"d.2", {4, std::nullopt}}};
   doc.cells[1]     = first;
 
   Cell second;
@@ -369,13 +385,13 @@ ZzStructureDocument sampleSlice() {
   Cell third;
   third.id         = 3;
   third.data       = 42.5;
-  third.dimensions = {{"d.1", {0, 2}}};
+  third.dimensions = {{"d.1", {std::nullopt, 2}}};
   doc.cells[3]     = third;
 
   Cell fourth;
   fourth.id         = 4;
   fourth.data       = true;
-  fourth.dimensions = {{"d.2", {0, 1}}};
+  fourth.dimensions = {{"d.2", {std::nullopt, 1}}};
   doc.cells[4]      = fourth;
 
   return doc;

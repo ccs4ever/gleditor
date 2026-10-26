@@ -22,6 +22,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
@@ -87,11 +88,12 @@ TEST(PgBackendTest, SchemaEnumeratesBaseTablesAndViews) {
       // The PK rung: invoices.id is declared.
       bool pk = false;
       for (const auto &c : t.columns) {
-        if (c.name == "id" && c.keyColumn && c.keyPosition == 1) {
+        if (c.name == "id" && c.keyPosition) {
+          EXPECT_EQ(*c.keyPosition, 1u);
           pk = true;
         }
       }
-      EXPECT_TRUE(pk) << "invoices.id must be keyColumn at position 1";
+      EXPECT_TRUE(pk) << "invoices.id must have PK position 1";
     }
     if (t.name == "v_inv") {
       vinv = true;
@@ -121,6 +123,30 @@ TEST(PgBackendTest, PrepareStreamsRowsInSingleRowMode) {
   EXPECT_EQ(std::get<std::string>((*rows)[0][1]), "a");
   EXPECT_NEAR(std::get<double>((*rows)[0][2]), 10.5, 1e-9);
   EXPECT_TRUE(std::holds_alternative<std::monostate>((*rows)[2][3]));
+}
+
+TEST(PgBackendTest, ParametersPreserveNullEmptyTextAndDoublePrecision) {
+  if (pgConninfo().empty()) {
+    GTEST_SKIP() << "GLEDITOR_PG_TEST_CONNINFO unset";
+  }
+  PgDb db;
+  if (db.stub) {
+    GTEST_SKIP() << "stub build -- no libpq";
+  }
+  ASSERT_NE(db.be, nullptr);
+
+  constexpr double precise = 0.10000000000000002;
+  const std::vector<SqlValue> params{std::monostate{}, std::string{}, precise};
+  auto cur = db.be->prepare(
+      "SELECT ($1::text IS NULL)::int, $2::text, $3::float8", params);
+  ASSERT_TRUE(cur.has_value()) << cur.error();
+  const auto rows = (*cur)->fetchNext(1);
+  ASSERT_TRUE(rows.has_value()) << rows.error();
+  ASSERT_EQ(rows->size(), 1u);
+  ASSERT_EQ((*rows)[0].size(), 3u);
+  EXPECT_EQ(std::get<std::int64_t>((*rows)[0][0]), 1);
+  EXPECT_EQ(std::get<std::string>((*rows)[0][1]), "");
+  EXPECT_EQ(std::get<double>((*rows)[0][2]), precise);
 }
 
 TEST(PgBackendTest, QueryModeUnderTheRealBackend) {

@@ -62,6 +62,8 @@ TEST(FileWatchTest, QuietFileStaysClean) {
 
 TEST(FileWatchTest, MissingFileIsInert) {
   FileWatch watch("/nonexistent/path/never/existed");
+  EXPECT_FALSE(watch.active());
+  EXPECT_FALSE(watch.waitableFd().has_value());
   EXPECT_FALSE(watch.dirty());
 }
 

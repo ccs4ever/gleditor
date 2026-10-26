@@ -504,7 +504,7 @@ int main(int argc, char *argv[]) {
       }
 
       // Collect outputs along cursor or results
-      zigzag::CellRef haltOp = zigzag::noCell;
+      std::optional<zigzag::CellRef> haltOp;
       for (unsigned int &generatedOpcode :
            std::views::reverse(compRes.generatedOpcodes)) {
         auto k = vm.getOpcodeKind(generatedOpcode);
@@ -513,8 +513,8 @@ int main(int argc, char *argv[]) {
           break;
         }
       }
-      if (haltOp != zigzag::noCell) {
-        results = coordinator.core().inputsOf(haltOp);
+      if (haltOp) {
+        results = coordinator.core().inputsOf(*haltOp);
       } else if (!compRes.generatedOpcodes.empty()) {
         results.push_back(compRes.generatedOpcodes.front());
       }

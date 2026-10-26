@@ -58,29 +58,29 @@ public:
     return std::nullopt;
 #elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) ||     \
     defined(__OpenBSD__) || defined(__DragonFly__)
-    return kq_ >= 0 ? std::optional<int>{kq_} : std::nullopt;
+    return kq_;
 #else
-    return fd_ >= 0 ? std::optional<int>{fd_} : std::nullopt;
+    return fd_;
 #endif
   }
 
   [[nodiscard]] bool active() const noexcept {
 #if defined(_WIN32)
-    return handle_ != nullptr && handle_ != INVALID_HANDLE_VALUE;
+    return handle_.has_value();
 #else
-    return fd_ >= 0;
+    return fd_.has_value();
 #endif
   }
 
 private:
 #if defined(_WIN32)
-  HANDLE handle_{nullptr}; ///< change-notification handle on the dir
+  std::optional<HANDLE> handle_; ///< change-notification handle on the dir
 #elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) ||     \
     defined(__OpenBSD__) || defined(__DragonFly__)
-  int kq_{-1}; ///< the kqueue itself
-  int fd_{-1}; ///< the watched file's O_EVTONLY descriptor
+  std::optional<int> kq_; ///< the kqueue itself
+  std::optional<int> fd_; ///< the watched file's O_EVTONLY descriptor
 #else
-  int fd_{-1}; ///< inotify fd (Linux) or nothing
+  std::optional<int> fd_; ///< inotify fd (Linux) or nothing
 #endif
 };
 

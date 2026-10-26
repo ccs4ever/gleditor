@@ -56,9 +56,9 @@ struct SqlPage {
   ExternalKey key;   ///< q:<qh>:p:<winid>
   std::string winid; ///< k:start | k:<bound> | o:<offset>
   bool stub{true};
-  std::size_t mintSeq{0}; ///< materialization epoch (rewind boundary)
-  std::string winlo;      ///< exclusive fetch bound, typed encoding
-  std::string winhi;      ///< continuation bound ("" = unknown/none)
+  std::size_t mintSeq{0};           ///< materialization epoch (rewind boundary)
+  std::optional<std::string> winlo; ///< exclusive fetch bound, typed encoding
+  std::optional<std::string> winhi; ///< continuation bound when available
   /// The typed bound this window fetches after (keyset only; empty for
   /// k:start and ordinal pages).
   std::vector<SqlValue> bound;
@@ -74,9 +74,9 @@ struct SqlQuery {
   std::string sql; ///< display + qhash input
   /// SELECT .. FROM part; window SQL inserts WHERE between it and sqlOrder.
   std::string sqlSelect;
-  std::string sqlOrder; ///< "ORDER BY .." or ""
-  std::string stable;   ///< canonical table name
-  std::string tableKey; ///< t:<stable> ("" in query mode)
+  std::string sqlOrder;                ///< "ORDER BY .." or ""
+  std::string stable;                  ///< canonical table name
+  std::optional<std::string> tableKey; ///< t:<stable> only for table browse
   /// The subject-key scope: t:<stable> for browse, q:<qhash> for query.
   std::string rowScope;
   /// Bound parameters of a query-mode statement; feeds qhash + replay.
@@ -90,7 +90,7 @@ struct SqlQuery {
   std::vector<std::string> colTypes;  ///< declType per visible col
   std::vector<std::string> colKeys;   ///< schema-col keys, select order
   std::vector<int> pkCols;            ///< result-col idx, PK order
-  int ridCol{-1};                     ///< result-col idx of __sql_rid
+  std::optional<int> ridCol;          ///< result-col idx of __sql_rid
   std::vector<int> sortCols;          ///< result-col idx of sort key
   std::vector<std::string> sortNames; ///< ORDER BY column expressions
   std::size_t mintSeq{0};             ///< the epoch browse() created it in
@@ -103,7 +103,7 @@ class SqlLens final : public ProjectionLens, public WindowedLens {
 public:
   SqlLens(std::unique_ptr<SqlBackend> backend, std::string dbid,
           std::string backendName, std::string displayPath,
-          std::size_t pageSize = 64);
+          std::size_t pageSize = kDefaultLensPageSize);
 
   // -- app-driven entry points ------------------------------------------------
 
@@ -262,13 +262,14 @@ private:
 
 /// Open a sqlite database read-only and wrap it in a SqlLens.
 [[nodiscard]] std::expected<std::unique_ptr<SqlLens>, std::string>
-openSqliteLens(std::string_view path, std::size_t pageSize = 64);
+openSqliteLens(std::string_view path,
+               std::size_t pageSize = kDefaultLensPageSize);
 
 /// Open the user-facing lens URI (spec section 7.4):
 ///   sql:sqlite:///abs/path.db     -- sqlite (a bare path is shorthand)
 ///   sql:pg://host:port/db         -- recognized, backend lands in phase 7
 [[nodiscard]] std::expected<std::unique_ptr<SqlLens>, std::string>
-openSqlUri(std::string_view uri, std::size_t pageSize = 64);
+openSqlUri(std::string_view uri, std::size_t pageSize = kDefaultLensPageSize);
 
 } // namespace zigzag
 

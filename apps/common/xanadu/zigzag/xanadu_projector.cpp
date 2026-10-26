@@ -9,6 +9,7 @@
 #include <ctime>
 #include <format>
 #include <map>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <unordered_set>
@@ -277,8 +278,8 @@ ZzStructureDocument projectXanaduToZigzag(
       if (m1.docIndex != m2.docIndex && spansOverlap(m1.span, m2.span)) {
         auto &c1 = result.cells[m1.id];
         auto &c2 = result.cells[m2.id];
-        if (c1.dimensions[opts.transclusion_dimension].pos == 0 &&
-            c2.dimensions[opts.transclusion_dimension].neg == 0) {
+        if (!c1.dimensions[opts.transclusion_dimension].pos &&
+            !c2.dimensions[opts.transclusion_dimension].neg) {
           c1.dimensions[opts.transclusion_dimension].pos = m2.id;
           c2.dimensions[opts.transclusion_dimension].neg = m1.id;
         }
@@ -294,8 +295,8 @@ ZzStructureDocument projectXanaduToZigzag(
     for (std::size_t p = 0; p < minSize; ++p) {
       const CellID c1 = c1Chain[p];
       const CellID c2 = c2Chain[p];
-      if (result.cells[c1].dimensions[opts.version_dimension].pos == 0 &&
-          result.cells[c2].dimensions[opts.version_dimension].neg == 0) {
+      if (!result.cells[c1].dimensions[opts.version_dimension].pos &&
+          !result.cells[c2].dimensions[opts.version_dimension].neg) {
         result.cells[c1].dimensions[opts.version_dimension].pos = c2;
         result.cells[c2].dimensions[opts.version_dimension].neg = c1;
       }
@@ -304,27 +305,27 @@ ZzStructureDocument projectXanaduToZigzag(
 
   // --- 3. Link Xanalinks along opts.link_dimension ---
   for (const auto &link : links) {
-    CellID leftId  = 0;
-    CellID rightId = 0;
+    std::optional<CellID> leftId;
+    std::optional<CellID> rightId;
 
     for (const auto &mapping : cellMappings) {
-      if (leftId == 0 && !link.left.empty() &&
+      if (!leftId && !link.left.empty() &&
           spansOverlap(mapping.span, link.left.front())) {
         leftId = mapping.id;
       }
-      if (rightId == 0 && !link.right.empty() &&
+      if (!rightId && !link.right.empty() &&
           spansOverlap(mapping.span, link.right.front())) {
         rightId = mapping.id;
       }
     }
 
-    if (leftId != 0 && rightId != 0 && leftId != rightId) {
-      auto &cL = result.cells[leftId];
-      auto &cR = result.cells[rightId];
-      if (cL.dimensions[opts.link_dimension].pos == 0 &&
-          cR.dimensions[opts.link_dimension].neg == 0) {
-        cL.dimensions[opts.link_dimension].pos = rightId;
-        cR.dimensions[opts.link_dimension].neg = leftId;
+    if (leftId && rightId && *leftId != *rightId) {
+      auto &cL = result.cells[*leftId];
+      auto &cR = result.cells[*rightId];
+      if (!cL.dimensions[opts.link_dimension].pos &&
+          !cR.dimensions[opts.link_dimension].neg) {
+        cL.dimensions[opts.link_dimension].pos = *rightId;
+        cR.dimensions[opts.link_dimension].neg = *leftId;
       }
     }
   }
@@ -402,58 +403,64 @@ ZzRasterResult rasterizeZzStructure(const ZzStructureDocument &doc,
                            : doc.cells.begin()->first;
 
   // Find head of secondary dimension if present
-  CellID rowHead = start;
+  std::optional<CellID> rowHead{start};
   std::unordered_set<CellID> visitedRows;
-  while (true) {
-    const auto it = doc.cells.find(rowHead);
+  while (rowHead) {
+    const CellID current = *rowHead;
+    const auto it        = doc.cells.find(current);
     if (it == doc.cells.end()) {
+      rowHead.reset();
       break;
     }
     const auto lIt = it->second.dimensions.find(secondaryDim);
-    if (lIt == it->second.dimensions.end() || lIt->second.neg == 0) {
+    if (lIt == it->second.dimensions.end() || !lIt->second.neg) {
       break;
     }
-    if (visitedRows.contains(lIt->second.neg)) {
+    if (visitedRows.contains(*lIt->second.neg)) {
       break; // Cycle break
     }
-    visitedRows.insert(rowHead);
-    rowHead = lIt->second.neg;
+    visitedRows.insert(current);
+    rowHead = *lIt->second.neg;
   }
 
   visitedRows.clear();
   std::unordered_set<CellID> visitedCells;
 
-  while (rowHead != 0 && !visitedRows.contains(rowHead)) {
-    visitedRows.insert(rowHead);
+  while (rowHead && !visitedRows.contains(*rowHead)) {
+    const CellID currentRow = *rowHead;
+    visitedRows.insert(currentRow);
 
     // Find head of primary dimension for this row
-    CellID colHead = rowHead;
+    std::optional<CellID> colHead{currentRow};
     std::unordered_set<CellID> visitedCols;
-    while (true) {
-      const auto it = doc.cells.find(colHead);
+    while (colHead) {
+      const CellID current = *colHead;
+      const auto it        = doc.cells.find(current);
       if (it == doc.cells.end()) {
+        colHead.reset();
         break;
       }
       const auto lIt = it->second.dimensions.find(primaryDim);
-      if (lIt == it->second.dimensions.end() || lIt->second.neg == 0) {
+      if (lIt == it->second.dimensions.end() || !lIt->second.neg) {
         break;
       }
-      if (visitedCols.contains(lIt->second.neg)) {
+      if (visitedCols.contains(*lIt->second.neg)) {
         break;
       }
-      visitedCols.insert(colHead);
-      colHead = lIt->second.neg;
+      visitedCols.insert(current);
+      colHead = *lIt->second.neg;
     }
 
     visitedCols.clear();
-    CellID current  = colHead;
-    bool firstInRow = true;
+    std::optional<CellID> current = colHead;
+    bool firstInRow               = true;
 
-    while (current != 0 && !visitedCols.contains(current)) {
-      visitedCols.insert(current);
-      visitedCells.insert(current);
+    while (current && !visitedCols.contains(*current)) {
+      const CellID currentCell = *current;
+      visitedCols.insert(currentCell);
+      visitedCells.insert(currentCell);
 
-      const auto it = doc.cells.find(current);
+      const auto it = doc.cells.find(currentCell);
       if (it == doc.cells.end()) {
         break;
       }
@@ -463,20 +470,22 @@ ZzRasterResult rasterizeZzStructure(const ZzStructureDocument &doc,
       }
       firstInRow = false;
 
-      result.text += zzcore::getEffectiveCellText(doc.cells, current);
-      result.cell_sequence.push_back(current);
+      result.text += zzcore::getEffectiveCellText(doc.cells, currentCell);
+      result.cell_sequence.push_back(currentCell);
 
       const auto lIt = it->second.dimensions.find(primaryDim);
-      current = (lIt != it->second.dimensions.end()) ? lIt->second.pos : 0;
+      current =
+          lIt != it->second.dimensions.end() ? lIt->second.pos : std::nullopt;
     }
 
     result.text += "\n\n";
     result.line_breaks.push_back(result.text.size());
 
-    const auto it = doc.cells.find(rowHead);
+    const auto it = doc.cells.find(currentRow);
     if (it != doc.cells.end()) {
       const auto lIt = it->second.dimensions.find(secondaryDim);
-      rowHead = (lIt != it->second.dimensions.end()) ? lIt->second.pos : 0;
+      rowHead =
+          lIt != it->second.dimensions.end() ? lIt->second.pos : std::nullopt;
     } else {
       break;
     }
@@ -651,17 +660,17 @@ SlicedStore sliceToStore(const ZzStructureDocument &doc, xanadu::Store &store,
     for (const auto &dim : dims) {
       const auto links   = cell.dimensions.at(dim);
       const auto dimCell = out.dimensions.at(dim);
-      if (0 != links.pos && out.cells.contains(links.pos)) {
+      if (links.pos && out.cells.contains(*links.pos)) {
         linkTo(out.cells.at(id), dimCell, DimVector::POS,
-               out.cells.at(links.pos));
+               out.cells.at(*links.pos));
       }
-      if (0 != links.neg && out.cells.contains(links.neg)) {
-        const auto &other    = doc.cells.at(links.neg);
+      if (links.neg && out.cells.contains(*links.neg)) {
+        const auto &other    = doc.cells.at(*links.neg);
         const auto reachesUs = other.dimensions.contains(dim) &&
                                other.dimensions.at(dim).pos == id;
         if (!reachesUs) {
           linkTo(out.cells.at(id), dimCell, DimVector::NEG,
-                 out.cells.at(links.neg));
+                 out.cells.at(*links.neg));
         }
       }
     }
@@ -750,9 +759,17 @@ ZzStructureDocument storeToSlice(const xanadu::Store &store,
         continue;
       }
       LinkPairs pairs;
-      pairs.pos = structural.contains(link.pos) ? 0 : link.pos;
-      pairs.neg = structural.contains(link.neg) ? 0 : link.neg;
-      if (0 != pairs.pos || 0 != pairs.neg) {
+      if (const auto pos =
+              manifold.linked(slot.birthOp, link.dim, DimVector::POS);
+          pos && !structural.contains(*pos)) {
+        pairs.pos = *pos;
+      }
+      if (const auto neg =
+              manifold.linked(slot.birthOp, link.dim, DimVector::NEG);
+          neg && !structural.contains(*neg)) {
+        pairs.neg = *neg;
+      }
+      if (pairs.pos || pairs.neg) {
         cell.dimensions[named->second] = pairs;
       }
     }
@@ -810,9 +827,9 @@ storeToLinkPackage(const xanadu::Store &store, const Manifold &manifold,
 
   const auto localScroll = store.userPermascroll().currentScroll();
   const auto scrollFor   = [&store,
-                          &localScroll](const xanadu::PrimediaSpan &span) {
+                            &localScroll](const xanadu::PrimediaSpan &span) {
     return span.isLocal() ? gleditor::refOf(&localScroll)
-                            : store.scroll(span.scroll);
+                          : store.scroll(span.scroll);
   };
 
   std::unordered_map<CellRef, xanadu::GlobalSpan> cellSpans;
@@ -851,8 +868,9 @@ storeToLinkPackage(const xanadu::Store &store, const Manifold &manifold,
           (mediaDim && link.dim == *mediaDim)) {
         continue;
       }
-      if (link.pos != 0 && !structural.contains(link.pos)) {
-        const auto itTo = cellSpans.find(link.pos);
+      const auto pos = manifold.linked(slot.birthOp, link.dim, DimVector::POS);
+      if (pos && !structural.contains(*pos)) {
+        const auto itTo = cellSpans.find(*pos);
         if (itTo != cellSpans.end()) {
           const auto dimIt = names.find(link.dim);
           const std::string dimName =
@@ -903,44 +921,44 @@ bool validate2RankManifold(const ZzStructureDocument &doc,
                            std::string *errorOut) {
   for (const auto &[id, cell] : doc.cells) {
     for (const auto &[dim, linkPairs] : cell.dimensions) {
-      if (linkPairs.pos != 0) {
-        const auto targetIt = doc.cells.find(linkPairs.pos);
+      if (linkPairs.pos) {
+        const auto targetIt = doc.cells.find(*linkPairs.pos);
         if (targetIt == doc.cells.end()) {
           if (errorOut) {
             *errorOut = std::format("Cell {} links to non-existent positive "
                                     "target {} on dimension {}",
-                                    id, linkPairs.pos, dim);
+                                    id, *linkPairs.pos, dim);
           }
           return false;
         }
         const auto backIt = targetIt->second.dimensions.find(dim);
         if (backIt == targetIt->second.dimensions.end() ||
-            backIt->second.neg != id) {
+            backIt->second.neg != std::optional<CellID>{id}) {
           if (errorOut) {
             *errorOut =
                 std::format("Asymmetric link between {} and {} on dimension {}",
-                            id, linkPairs.pos, dim);
+                            id, *linkPairs.pos, dim);
           }
           return false;
         }
       }
-      if (linkPairs.neg != 0) {
-        const auto targetIt = doc.cells.find(linkPairs.neg);
+      if (linkPairs.neg) {
+        const auto targetIt = doc.cells.find(*linkPairs.neg);
         if (targetIt == doc.cells.end()) {
           if (errorOut) {
             *errorOut = std::format("Cell {} links to non-existent negative "
                                     "target {} on dimension {}",
-                                    id, linkPairs.neg, dim);
+                                    id, *linkPairs.neg, dim);
           }
           return false;
         }
         const auto backIt = targetIt->second.dimensions.find(dim);
         if (backIt == targetIt->second.dimensions.end() ||
-            backIt->second.pos != id) {
+            backIt->second.pos != std::optional<CellID>{id}) {
           if (errorOut) {
             *errorOut =
                 std::format("Asymmetric link between {} and {} on dimension {}",
-                            id, linkPairs.neg, dim);
+                            id, *linkPairs.neg, dim);
           }
           return false;
         }

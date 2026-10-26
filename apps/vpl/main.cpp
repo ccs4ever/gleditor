@@ -43,7 +43,6 @@ using namespace xanadu::vpl;
 using namespace zigzag;
 
 std::string formatCell(const ArenaManifold &arena, CellRef c) {
-  if (c == noCell) return "·";
   if (auto iVal = arena.asInt64(c)) return std::to_string(*iVal);
   if (auto dVal = arena.asDouble(c)) {
     std::ostringstream ss;
@@ -610,26 +609,30 @@ int main(int argc, char *argv[]) {
       // A lens projects into `arena` (the engine's own core), not a
       // store fold: bind the rank its root holds on the named dim,
       // walking d.seq between the siblings that dim's links reach.
-      CellRef first = noCell;
+      std::optional<CellRef> first;
       if (const auto lroot = lensRepl.root()) {
-        const auto ldim = directEngine.resolveDimension(name);
-        if (ldim != noCell) {
-          first = arena.linked(*lroot, ldim, DimVector::POS).value_or(noCell);
+        const auto ldim = directEngine.core().findDimension(name);
+        if (ldim) {
+          first = arena.linked(*lroot, *ldim, DimVector::POS);
         }
-        if (first == noCell) {
-          const auto cont = directEngine.resolveDimension("d.contains");
-          if (cont != noCell) {
-            first = arena.linked(*lroot, cont, DimVector::POS).value_or(noCell);
+        if (!first) {
+          const auto cont = directEngine.core().findDimension("d.contains");
+          if (cont) {
+            first = arena.linked(*lroot, *cont, DimVector::POS);
           }
         }
       }
-      if (first == noCell) {
+      if (!first) {
         std::cerr << "No dimension named " << name
                   << " in the open store or lens.\n";
         return false;
       }
-      const auto axis = directEngine.resolveDimension("d.seq");
-      lastView        = VplView(first, {DirectedDim{axis, DimVector::POS}});
+      const auto axis = directEngine.core().findDimension("d.seq");
+      if (!axis) {
+        std::cerr << "The lens has no d.seq dimension.\n";
+        return false;
+      }
+      lastView = VplView(*first, {DirectedDim{*axis, DimVector::POS}});
       directEngine.setVariable("data", lastView);
       hasView = true;
       std::cout << "data: " << formatView(lastView, arena) << "\n";

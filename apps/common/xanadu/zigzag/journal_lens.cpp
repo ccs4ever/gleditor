@@ -9,6 +9,9 @@
 
 #include "common/xanadu/zigzag/journal_lens.hpp"
 
+#include <algorithm>
+#include <chrono>
+
 namespace zigzag {
 
 namespace {
@@ -141,14 +144,16 @@ std::string pageKey(const std::string &conn, const std::string &cursor) {
 /// "<isotime> <unit>: <MESSAGE>" -- seconds-precision UTC, matching the
 /// spec's example. One entry is one line: embedded newlines become
 /// spaces so MESSAGE can't fake extra lines.
-std::string iso8601(const std::uint64_t usec) {
-  const std::time_t t = static_cast<std::time_t>(usec / 1000000);
+constexpr std::uint64_t kMicrosecondsPerSecond{1'000'000};
+
+std::optional<std::string> iso8601(const std::uint64_t usec) {
+  const std::time_t t = static_cast<std::time_t>(usec / kMicrosecondsPerSecond);
   std::tm tm          = {};
   const std::tm *tmp  = ::gmtime_r(&t, &tm);
   char buf[32]        = {};
   if (tmp == nullptr ||
       std::strftime(buf, sizeof buf, "%Y-%m-%dT%H:%M:%SZ", tmp) == 0) {
-    return "-";
+    return std::nullopt;
   }
   return buf;
 }
@@ -157,7 +162,7 @@ std::string iso8601(const std::uint64_t usec) {
 
 JournalLens::JournalLens(const std::string_view unitFilter,
                          const std::size_t pageSize)
-    : filter_{unitFilter}, pageSize_(pageSize == 0 ? 1 : pageSize),
+    : filter_{unitFilter}, pageSize_(std::max(pageSize, kMinimumLensPageSize)),
       connKey_(filter_.empty() ? "journal" : "journal@" + filter_) {
   int r = sd_journal_open(&j_, SD_JOURNAL_LOCAL_ONLY);
   if (r == -EPERM || r == -EACCES) {
@@ -181,17 +186,17 @@ JournalLens::~JournalLens() {
   }
 }
 
-std::string JournalLens::field(const char *name) const {
+std::optional<std::string> JournalLens::field(const char *name) const {
   const void *data = nullptr;
   std::size_t size = 0;
   if (sd_journal_get_data(j_, name, &data, &size) < 0) {
-    return {};
+    return std::nullopt;
   }
   // get_data returns the "NAME=value" field wholesale.
   const std::string_view v{static_cast<const char *>(data), size};
   const std::string_view prefix{name};
-  if (!v.starts_with(prefix) || v.size() <= prefix.size() + 1) {
-    return {};
+  if (!v.starts_with(prefix) || v.size() < prefix.size() + 1) {
+    return std::nullopt;
   }
   return std::string{v.substr(prefix.size() + 1)};
 }
@@ -207,26 +212,31 @@ JournalLens::currentLine() const {
   std::free(cur);
 
   std::uint64_t usec = 0;
-  std::string text =
-      sd_journal_get_realtime_usec(j_, &usec) >= 0 ? iso8601(usec) : "-";
-  std::string unit = field("_SYSTEMD_UNIT");
-  if (unit.empty()) {
-    unit = field("SYSLOG_IDENTIFIER");
-  }
-  std::string msg = field("MESSAGE");
-  for (auto &ch : msg) {
-    if (ch == '\n') {
-      ch = ' ';
+  std::string text;
+  if (sd_journal_get_realtime_usec(j_, &usec) >= 0) {
+    if (const auto timestamp = iso8601(usec)) {
+      text = *timestamp;
     }
   }
-  if (!unit.empty()) {
-    text += ' ';
-    text += unit;
+  auto unit = field("_SYSTEMD_UNIT");
+  if (!unit || unit->empty()) {
+    unit = field("SYSLOG_IDENTIFIER");
+  }
+  auto msg = field("MESSAGE");
+  if (msg)
+    for (auto &ch : *msg) {
+      if (ch == '\n') {
+        ch = ' ';
+      }
+    }
+  if (unit && !unit->empty()) {
+    if (!text.empty()) text += ' ';
+    text += *unit;
     text += ':';
   }
-  if (!msg.empty()) {
-    text += ' ';
-    text += msg;
+  if (msg && !msg->empty()) {
+    if (!text.empty()) text += ' ';
+    text += *msg;
   }
   line.text = std::move(text);
   return line;
@@ -391,7 +401,7 @@ namespace zigzag {
 
 JournalLens::JournalLens(const std::string_view unitFilter,
                          const std::size_t pageSize)
-    : filter_{unitFilter}, pageSize_(pageSize == 0 ? 1 : pageSize),
+    : filter_{unitFilter}, pageSize_(std::max(pageSize, kMinimumLensPageSize)),
       connKey_(filter_.empty() ? "journal" : "journal@" + filter_),
       openErr_{"journal: this build has no libsystemd -- rebuild with "
                "GLEDITOR_JOURNAL_SD=1 (the Makefile probes pkg-config "
@@ -414,7 +424,9 @@ JournalLens::olderHead(const std::string & /*headCursor*/) const {
   return std::nullopt;
 }
 
-std::string JournalLens::field(const char * /*name*/) const { return {}; }
+std::optional<std::string> JournalLens::field(const char * /*name*/) const {
+  return std::nullopt;
+}
 
 void JournalLens::appendStubAfter(const std::string & /*headCursor*/) {}
 

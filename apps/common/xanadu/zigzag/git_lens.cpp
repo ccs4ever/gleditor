@@ -6,6 +6,7 @@
 
 #include "common/xanadu/zigzag/git_lens.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <filesystem>
@@ -38,7 +39,8 @@ std::string commitKey(const std::string &conn, const std::string &sha) {
 } // namespace
 
 GitLens::GitLens(std::string repoPath, const std::size_t pageSize)
-    : repo_(std::move(repoPath)), pageSize_(pageSize == 0 ? 1 : pageSize),
+    : repo_(std::move(repoPath)),
+      pageSize_(std::max(pageSize, kMinimumLensPageSize)),
       connKey_("git:" + repo_), headWatch_(repo_ + "/.git/HEAD"),
       packedWatch_(repo_ + "/.git/packed-refs") {}
 

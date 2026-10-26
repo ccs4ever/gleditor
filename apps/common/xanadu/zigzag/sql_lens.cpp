@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <ranges>
+#include <stdexcept>
 #include <system_error>
 #include <utility>
 
@@ -92,7 +93,7 @@ SqlLens::SqlLens(std::unique_ptr<SqlBackend> backend, std::string dbid,
       displayPath_(std::move(displayPath)),
       watch_(backendName_ == "sqlite" ? displayPath_ : ""),
       walWatch_(backendName_ == "sqlite" ? displayPath_ + "-wal" : ""),
-      pageSize_(pageSize) {
+      pageSize_(std::max(pageSize, kMinimumLensPageSize)) {
   if (auto s = backend_->schema(); s) {
     schema_ = std::move(*s);
   }
@@ -135,8 +136,11 @@ ExternalKey SqlLens::rowKeyFor(const SqlQuery &q,
     return prefix + ":pk:" + encodeSqlValues(keys);
   }
   case SqlKeyClass::Rid:
+    if (!q.ridCol) {
+      throw std::logic_error("RID query has no result column index");
+    }
     return prefix +
-           ":rid:" + encodeSqlValue(row[static_cast<std::size_t>(q.ridCol)]);
+           ":rid:" + encodeSqlValue(row[static_cast<std::size_t>(*q.ridCol)]);
   case SqlKeyClass::Hash:
     return prefix + ":h:" + sqlHashHex(rowHashInput(row));
   }
@@ -162,7 +166,7 @@ SqlLens::planBrowse(const SqlTable &t) const {
     q.colNames.push_back(c.name);
     q.vnames.push_back(c.name);
     q.colTypes.push_back(c.declType);
-    q.colKeys.push_back(base + q.tableKey + ":c:" + sqlKeyEncode(c.name));
+    q.colKeys.push_back(base + *q.tableKey + ":c:" + sqlKeyEncode(c.name));
   }
 
   // Key class: declared PK -> pk:; a rowid table -> rid:; else h: + ordinal.
@@ -170,8 +174,8 @@ SqlLens::planBrowse(const SqlTable &t) const {
   {
     std::vector<std::pair<std::uint32_t, int>> keyed;
     for (std::size_t i = 0; i < t.columns.size(); ++i) {
-      if (t.columns[i].keyColumn) {
-        keyed.emplace_back(t.columns[i].keyPosition, static_cast<int>(i));
+      if (const auto position = t.columns[i].keyPosition) {
+        keyed.emplace_back(*position, static_cast<int>(i));
       }
     }
     std::ranges::sort(keyed);
@@ -206,7 +210,7 @@ SqlLens::planBrowse(const SqlTable &t) const {
     } else {
       select += "," + quotedIdent(ridName) + " AS __sql_rid";
       q.ridCol   = static_cast<int>(q.colNames.size());
-      q.sortCols = {q.ridCol};
+      q.sortCols = {*q.ridCol};
       // WHERE can't see select aliases -- use the rowid identifier itself.
       q.sortNames.push_back(quotedIdent(ridName));
     }
@@ -235,7 +239,7 @@ SqlLens::planBrowse(const SqlTable &t) const {
   q.key   = base + "q:" + q.qhash;
   // Browse-scoped subjects unify across queries that see the same row
   // (spec section 4.4 cross-query unification).
-  q.rowScope = q.tableKey;
+  q.rowScope = *q.tableKey;
   return q;
 }
 
@@ -297,7 +301,11 @@ std::expected<void, std::string> SqlLens::fetchWindow(SqlQuery &q,
     if (!cur) {
       return std::unexpected(cur.error());
     }
-    page.winlo = startOff == 0 ? "" : "o:" + std::to_string(startOff);
+    if (startOff != 0) {
+      page.winlo = "o:" + std::to_string(startOff);
+    } else {
+      page.winlo.reset();
+    }
   } else {
     // Keyset: OR-of-prefix-equalities over the bound (ASC NULLS LAST --
     // a NULL bound means nothing follows, so that clause is FALSE). The
@@ -354,6 +362,7 @@ std::expected<void, std::string> SqlLens::fetchWindow(SqlQuery &q,
   }
   page.stub    = false;
   page.mintSeq = ++seqCounter_;
+  page.winhi.reset();
   page.rowKeys.clear();
   page.rowKeys.reserve(page.rows.size());
   for (const auto &r : page.rows) {
@@ -390,7 +399,9 @@ std::expected<void, std::string> SqlLens::fetchWindow(SqlQuery &q,
   // pages advance the fetch offset instead.
   if (q.ordinal) {
     page.offset += page.rows.size();
-    page.winhi = page.rows.empty() ? "" : "o:" + std::to_string(page.offset);
+    if (!page.rows.empty()) {
+      page.winhi = "o:" + std::to_string(page.offset);
+    }
   } else if (!page.rows.empty()) {
     const auto &last = page.rows.back();
     std::vector<SqlValue> bound;
@@ -467,8 +478,9 @@ std::expected<void, std::string> SqlLens::browse(std::string_view tableName) {
 
 bool SqlLens::isBrowsed(const std::string_view tableName) const {
   const std::string tk = "t:" + sqlKeyEncode(tableName);
-  return std::ranges::any_of(
-      queries_, [&](const SqlQuery &q) { return q.tableKey == tk; });
+  return std::ranges::any_of(queries_, [&](const SqlQuery &q) {
+    return q.tableKey && *q.tableKey == tk;
+  });
 }
 
 std::expected<void, std::string>
@@ -723,8 +735,8 @@ void SqlLens::emitSchema(
           {"d.type", c.declType.empty() ? "ANY" : c.declType},
           {"d.ordinal", std::to_string(i)},
       };
-      if (c.keyColumn) {
-        attrs.emplace_back("d.pk", std::to_string(c.keyPosition));
+      if (c.keyPosition) {
+        attrs.emplace_back("d.pk", std::to_string(*c.keyPosition));
       }
       emit({.key        = base + tk + ":c:" + sqlKeyEncode(c.name),
             .content    = c.name,
@@ -767,11 +779,11 @@ void SqlLens::emitQuery(
         {"d.wincount", std::to_string(p.rows.size())},
         {"d.snapscope", "none"},
     };
-    if (!p.winlo.empty()) {
-      pattrs.emplace_back("d.winlo", p.winlo);
+    if (p.winlo) {
+      pattrs.emplace_back("d.winlo", *p.winlo);
     }
-    if (!p.winhi.empty()) {
-      pattrs.emplace_back("d.winhi", p.winhi);
+    if (p.winhi) {
+      pattrs.emplace_back("d.winhi", *p.winhi);
     }
     emit({.key = p.key, .content = p.winid, .attributes = pattrs});
     for (std::size_t i = 0; i < p.rowKeys.size(); ++i) {
@@ -962,8 +974,8 @@ void SqlLens::forEachEdge(
     rows.erase(std::unique(rows.begin(), rows.end()), rows.end());
     // d.conforms heads at the schema table; a query-mode result conforms
     // to no single base table, so the rank is absent there.
-    if (!q.tableKey.empty()) {
-      emitRank(rows, base + q.tableKey, "d.conforms");
+    if (q.tableKey) {
+      emitRank(rows, base + *q.tableKey, "d.conforms");
     }
     // The query's result columns belong to it on d.colof.
     emitRank(q.colKeys, q.key, "d.colof");
@@ -1051,7 +1063,7 @@ bool SqlLens::canApply(const ExternalKey &node) const {
       break;
     }
   }
-  if (q == nullptr || q->tableKey.empty() || q->cls == SqlKeyClass::Hash) {
+  if (q == nullptr || !q->tableKey || q->cls == SqlKeyClass::Hash) {
     return false;
   }
   for (const auto &vname : s.vnames) {
@@ -1090,7 +1102,7 @@ SqlLens::applyContentChange(const ExternalKey &node,
   // query's colNames ARE base columns; a q: row's names are result
   // labels, not provably writable columns. An h: row addresses
   // nothing at all.
-  if (q->tableKey.empty() || q->cls == SqlKeyClass::Hash) {
+  if (!q->tableKey || q->cls == SqlKeyClass::Hash) {
     return std::unexpected("only browsed pk/rid-addressed rows are writable");
   }
   std::string col;
@@ -1142,8 +1154,11 @@ SqlLens::applyContentChange(const ExternalKey &node,
       params.push_back(s.values[idx]);
     }
   } else {
+    if (!q->ridCol) {
+      return std::unexpected("rowid query has no result column index");
+    }
     sql += backend_->nullSafeEq("rowid", params.size() + 1);
-    params.push_back(s.values[static_cast<std::size_t>(q->ridCol)]);
+    params.push_back(s.values[static_cast<std::size_t>(*q->ridCol)]);
   }
   const auto n = backend_->execWrite(sql, params);
   if (!n) {

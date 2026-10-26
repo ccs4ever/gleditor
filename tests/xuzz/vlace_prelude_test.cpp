@@ -41,6 +41,34 @@ TEST(VlacePreludeTest, PreludeParses) {
   EXPECT_EQ(runWithPrelude("id 42"), "42");
 }
 
+TEST(VlacePreludeTest, DimensionNamedLooksUpWithoutMinting) {
+  const auto runLookup = [](const std::string_view name,
+                            const bool createDimension) {
+    zigzag::ArenaManifold arena;
+    zigzag::vortex::VortexCore core(arena);
+    zigzag::vortex::VortexVM vm(core);
+    Compiler compiler(core, vm);
+    if (createDimension) {
+      (void)arena.ensureDimension(name);
+    }
+    const auto cellCount = arena.cellCount();
+
+    const std::string source = "dimensionNamed \"" + std::string(name) + "\"";
+    Parser parser(source);
+    const auto program = parser.parseProgram();
+    EXPECT_TRUE(program.has_value());
+    if (!program) return std::string{};
+    const auto result = compiler.evaluateProgram(*program);
+    EXPECT_TRUE(result.has_value());
+    if (!result) return std::string{};
+    EXPECT_EQ(arena.cellCount(), cellCount);
+    return compiler.render(*result);
+  };
+
+  EXPECT_EQ(runLookup("d.not-yet-created", false), "None");
+  EXPECT_TRUE(runLookup("d.already-created", true).starts_with("Some"));
+}
+
 TEST(VlacePreludeTest, Combinators) {
   EXPECT_EQ(runWithPrelude("const 1 2"), "1");
   EXPECT_EQ(runWithPrelude("flip const 1 2"), "2");

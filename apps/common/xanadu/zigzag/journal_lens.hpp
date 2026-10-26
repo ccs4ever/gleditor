@@ -48,7 +48,7 @@ public:
   /// falling back to the calling user's own journal when the open is
   /// refused on permissions. No entries are read until browse().
   explicit JournalLens(std::string_view unitFilter = {},
-                       std::size_t pageSize        = 64);
+                       std::size_t pageSize        = kDefaultLensPageSize);
   ~JournalLens() override;
   JournalLens(const JournalLens &)            = delete;
   JournalLens &operator=(const JournalLens &) = delete;
@@ -117,7 +117,7 @@ private:
   [[nodiscard]] std::optional<std::string>
   olderHead(const std::string &headCursor) const;
   /// Read one field of the current entry, NAME= prefix stripped.
-  [[nodiscard]] std::string field(const char *name) const;
+  [[nodiscard]] std::optional<std::string> field(const char *name) const;
   /// Append the stub for the next-older window after @p headCursor's
   /// page, when the journal reaches back that far.
   void appendStubAfter(const std::string &headCursor);

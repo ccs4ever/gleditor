@@ -30,8 +30,8 @@ struct SqlColumn {
   std::string name;
   std::string declType;                 ///< declared type, "" if none
   std::optional<std::string> baseTable; ///< set iff attributable (spec §4.3)
-  bool keyColumn{false};                ///< declared PK member
-  std::uint32_t keyPosition{0};         ///< its position in the PK (spec §4.3)
+  std::optional<std::uint32_t>
+      keyPosition; ///< one-based PK order; unset for non-key columns
 };
 
 struct SqlTable {         ///< for the schema projection (spec §3.6)

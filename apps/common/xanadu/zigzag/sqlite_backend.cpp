@@ -28,6 +28,16 @@ namespace zigzag {
 
 namespace {
 
+// Check the VM periodically so the elapsed-time limit can interrupt long
+// statements without invoking the callback for every SQLite opcode.
+constexpr int kProgressInstructionInterval{8192};
+// Let short-lived writer locks clear, then return control instead of waiting
+// indefinitely while a read lens is used from the UI.
+constexpr auto kSqliteBusyWait = std::chrono::milliseconds{250};
+// NULLS FIRST/LAST syntax and the read-only hot-WAL fallback both require
+// SQLite 3.30 or newer.
+constexpr int kMinimumSqliteVersion{3'030'000};
+
 /// Percent-encode a filesystem path for a file: URI. '/' is the path
 /// separator and passes through; RFC-3986 unreserved bytes pass; everything
 /// else encodes as %XX. A literal '?', '#' or '%' in a filename would
@@ -162,7 +172,8 @@ class SqliteBackend final : public SqlBackend {
 public:
   SqliteBackend(sqlite3 *db, SqliteOpenOptions opts, std::string journalMode)
       : db_(db), opts_(opts), journalMode_(std::move(journalMode)) {
-    sqlite3_progress_handler(db_, 8192, &SqliteBackend::progressThunk, this);
+    sqlite3_progress_handler(db_, kProgressInstructionInterval,
+                             &SqliteBackend::progressThunk, this);
   }
   ~SqliteBackend() override {
     // Finalize any live window cursor before closing.
@@ -479,7 +490,6 @@ public:
         c.baseTable    = std::string(tn);
         const auto &pk = pkOf(*tn);
         if (const auto it = pk.find(c.name); it != pk.end()) {
-          c.keyColumn   = true;
           c.keyPosition = it->second;
         }
       }
@@ -522,12 +532,12 @@ public:
             continue;
           }
           SqlColumn c;
-          c.name        = cr[1];
-          c.declType    = cr[2];
-          c.keyColumn   = cr[5] != "0";
-          c.keyPosition = c.keyColumn ? static_cast<std::uint32_t>(std::strtoul(
-                                            cr[5].c_str(), nullptr, 10))
-                                      : 0;
+          c.name     = cr[1];
+          c.declType = cr[2];
+          if (cr[5] != "0") {
+            c.keyPosition = static_cast<std::uint32_t>(
+                std::strtoul(cr[5].c_str(), nullptr, 10));
+          }
           t.columns.push_back(std::move(c));
         }
       }
@@ -738,7 +748,7 @@ std::expected<std::string, std::string> openPragmas(sqlite3 *db,
 
 std::expected<std::unique_ptr<SqlBackend>, std::string>
 openSqliteBackend(std::string_view path, const SqliteOpenOptions &opts) {
-  if (sqlite3_libversion_number() < 3030000) {
+  if (sqlite3_libversion_number() < kMinimumSqliteVersion) {
     return std::unexpected("SQLite >= 3.30 required (NULLS FIRST|LAST + "
                            "read-only hot-wal fallback)");
   }
@@ -758,7 +768,7 @@ openSqliteBackend(std::string_view path, const SqliteOpenOptions &opts) {
     }
     return std::unexpected(err);
   }
-  sqlite3_busy_timeout(db, 250);
+  sqlite3_busy_timeout(db, static_cast<int>(kSqliteBusyWait.count()));
   auto mode = openPragmas(db, opts.writable);
   if (!mode) {
     std::string err = mode.error();

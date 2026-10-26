@@ -81,6 +81,7 @@ TEST(CompactZZCellTest, LinkPairsAndDynamicDimensions) {
   // Set custom dynamic dimension
   cell.setLinks("d.author_provenance", {.pos = 500, .neg = 0});
   EXPECT_EQ(cell.linksOn("d.author_provenance").pos, 500U);
+  EXPECT_TRUE(cell.linksOn("d.author_provenance").neg);
   EXPECT_EQ(cell.linksOn("d.author_provenance").neg, 0U);
   EXPECT_EQ(cell.dynamicDimensions.size(), 1U);
 }
@@ -549,7 +550,7 @@ TEST(ShapingCacheTest, ChangedTextIsNotServedFromCache) {
   // not share an entry.
   const auto first = rig.engine.addCell("Alpha content x");
   const auto req   = UnifiedTransclusionEngine::RenderSliceRequest{
-        .focusCellId = first, .radiusX = 1, .radiusY = 1, .radiusZ = 1};
+      .focusCellId = first, .radiusX = 1, .radiusY = 1, .radiusZ = 1};
 
   std::ignore = rig.engine.stageVisibleCells(req, rig.font, *rig.glyphCache);
   const auto afterFirst = rig.engine.shapingCacheStats();
@@ -557,7 +558,7 @@ TEST(ShapingCacheTest, ChangedTextIsNotServedFromCache) {
   // A second cell whose text differs only in its last character.
   const auto second = rig.engine.addCell("Alpha content y");
   const auto req2   = UnifiedTransclusionEngine::RenderSliceRequest{
-        .focusCellId = second, .radiusX = 1, .radiusY = 1, .radiusZ = 1};
+      .focusCellId = second, .radiusX = 1, .radiusY = 1, .radiusZ = 1};
   std::ignore = rig.engine.stageVisibleCells(req2, rig.font, *rig.glyphCache);
   const auto afterSecond = rig.engine.shapingCacheStats();
 

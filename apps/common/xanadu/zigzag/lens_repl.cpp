@@ -52,7 +52,9 @@ std::vector<std::pair<std::string, std::string>> LensRepl::entries() const {
   while (!stack.empty()) {
     const auto cell = stack.back();
     stack.pop_back();
-    out.emplace_back(session_->keyFor(cell).value_or(""), arena_->textOf(cell));
+    if (const auto key = session_->keyFor(cell)) {
+      out.emplace_back(*key, arena_->textOf(cell));
+    }
     // Push the children reversed so they pop in seq order.
     std::vector<CellRef> kids;
     for (auto child               = arena_->linked(cell, contains, Posward);

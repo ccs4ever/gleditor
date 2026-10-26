@@ -42,7 +42,8 @@ class GitLens final : public ProjectionLens, public WindowedLens {
 public:
   /// @p repoPath names a git worktree (or a bare dir); @p pageSize
   /// bounds each log window's commits.
-  explicit GitLens(std::string repoPath, std::size_t pageSize = 64);
+  explicit GitLens(std::string repoPath,
+                   std::size_t pageSize = kDefaultLensPageSize);
 
   [[nodiscard]] std::vector<std::pair<std::string, std::optional<GenericDim>>>
   dimensions() const override;

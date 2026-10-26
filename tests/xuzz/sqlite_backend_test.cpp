@@ -214,9 +214,9 @@ TEST(SqliteBackendTest, SchemaProjectsTablesColumnsAndKeys) {
   ASSERT_NE(inv, ts.end());
   EXPECT_FALSE(inv->isView);
   ASSERT_GE(inv->columns.size(), 4u);
-  EXPECT_TRUE(inv->columns[0].keyColumn);
-  EXPECT_EQ(inv->columns[0].keyPosition, 1u);
-  EXPECT_FALSE(inv->columns[1].keyColumn);
+  ASSERT_TRUE(inv->columns[0].keyPosition.has_value());
+  EXPECT_EQ(*inv->columns[0].keyPosition, 1u);
+  EXPECT_FALSE(inv->columns[1].keyPosition.has_value());
   const auto vw = std::ranges::find_if(
       ts, [](const SqlTable &t) { return t.name == "v_invoices"; });
   ASSERT_NE(vw, ts.end());
@@ -357,9 +357,9 @@ TEST(SqliteBackendTest, ColumnProvenanceWhenAvailable) {
   if ((*be)->capabilities().columnProvenance) {
     ASSERT_TRUE(cols[0].baseTable.has_value());
     EXPECT_EQ(*cols[0].baseTable, "invoices");
-    EXPECT_TRUE(cols[0].keyColumn);
-    EXPECT_EQ(cols[0].keyPosition, 1u);
-    EXPECT_FALSE(cols[1].keyColumn);
+    ASSERT_TRUE(cols[0].keyPosition.has_value());
+    EXPECT_EQ(*cols[0].keyPosition, 1u);
+    EXPECT_FALSE(cols[1].keyPosition.has_value());
   } else {
     GTEST_SKIP() << "sqlite built without SQLITE_ENABLE_COLUMN_METADATA";
   }

@@ -40,12 +40,9 @@ ZzStructureDocument projectionToZz(const std::string_view label,
   if (!session.roots().empty()) {
     doc.focus = session.roots()[0];
   }
-  doc.view                      = {.x_dimension = "d.contains",
-                                   .y_dimension = "d.seq",
-                                   .z_dimension = "d.role"};
-  doc.scene.cell_radius         = 0.30F;
-  doc.scene.neighborhood_radius = 3;
-
+  doc.view         = {.x_dimension = "d.contains",
+                      .y_dimension = "d.seq",
+                      .z_dimension = "d.role"};
   const auto slots = arena.cells();
   doc.cells.reserve(slots.size());
   for (const auto &slot : slots) {
@@ -64,12 +61,11 @@ ZzStructureDocument projectionToZz(const std::string_view label,
     // dimensionsOf hands back the cell's links per dim -- the whole
     // rank topology in one span.
     for (const auto &link : arena.dimensionsOf(ref)) {
-      if (link.pos == noCell && link.neg == noCell) {
-        continue;
+      auto pos = arena.linked(ref, link.dim, Posward);
+      auto neg = arena.linked(ref, link.dim, Negward);
+      if (pos || neg) {
+        c.dimensions[arena.textOf(link.dim)] = {.pos = pos, .neg = neg};
       }
-      c.dimensions[arena.textOf(link.dim)] = LinkPairs{
-          .pos = link.pos == noCell ? 0 : static_cast<CellID>(link.pos),
-          .neg = link.neg == noCell ? 0 : static_cast<CellID>(link.neg)};
     }
     doc.cells.emplace(ref, std::move(c));
   }

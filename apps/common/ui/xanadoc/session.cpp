@@ -2250,7 +2250,8 @@ Session::sourceFor(const MicroversionId &version, const std::size_t storeIndex,
   if (scopedBirth) {
     structureName = st.resolveStructureName(version, *scopedBirth);
   }
-  const bool hasStructureName = structureName.has_value();
+  const bool hasStructureName =
+      structureName.has_value() && !structureName->empty();
   std::string title = std::move(structureName).value_or(std::string{});
   if (!hasStructureName && st.isSystem()) {
     if (const auto kind = systemDocKindForStoreIndex(storeIndex)) {

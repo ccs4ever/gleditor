@@ -10,6 +10,7 @@
 #include <gleditor/cpp26.hpp>
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -63,9 +64,10 @@ findCell(const std::unordered_map<CellID, Cell> &cells, CellID id);
  *
  * In ZigZag, a d.clone rank links a master cell to all its clones. Following
  * negward links on d.clone leads to the head of the rank, which is the Master
- * Cell. If the cell has no negward d.clone link, it is its own master.
+ * Cell. If the cell has no negward d.clone link, it is its own master. Returns
+ * nullopt when @p id does not name a cell; cell ID zero is valid.
  */
-[[nodiscard]] CellID
+[[nodiscard]] std::optional<CellID>
 findCloneMaster(const std::unordered_map<CellID, Cell> &cells, CellID id);
 
 /**

@@ -1409,7 +1409,7 @@ VQLEngine::evaluateStep(const PathStep &step,
     if (fn.name == "value") {
       if (currentCells.empty()) return stepOutput;
       std::int64_t offset = 0;
-      std::int64_t length = -1;
+      std::optional<std::int64_t> length;
       if (fn.args.size() >= 2) {
         const auto offsetValue = evaluateValueExpr(fn.args[1], currentCells[0]);
         if (!offsetValue) return stepOutput;
