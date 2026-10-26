@@ -562,7 +562,8 @@ value    := scalar | "$" ident [nested] | shape
 | S6 | `vlace/compiler.{hpp,cpp}` + `vlace/types.cpp` + `vlace/ast.hpp` | `shapeOf`/`matchShape` natives + `Shape`/`ShapeSpec`/`Constraint`/`Field`/`ShapeBase` ctor registration under P1's reserved-tag discipline; lazy `List (String,Cell)` result | The ADT surface lives only in `installXanadu` |
 | S7 | `vortex_core.{hpp,cpp}` + the Q4 row | `lensSessions()` registry lands → each frontend's injected `SessionScan`/`SessionList` rebinds to the registry scan | VQL Q4 / vicon V4 / vprolog's register — shared, already proposed |
 | S9 | `zigzag/cell_shape_parse.{hpp,cpp}` (new) | the shared textual grammar + injected dim resolver → `std::expected<ShapeExpr, …>` | the neutral parser the spec-string surfaces share |
-| S8 | `tests/` (new) | the §5 shape in each frontend's gate test (`lens_*_gate_test.cpp` pattern); kernel unit tests in `tests/zigzag/` or `tests/xuzz/` | A test sits with its code — the acceptance artifact |
+| S8 | `tests/` (new) | the shared textual grammar + injected dim resolver → `std::expected<ShapeExpr, …>` | the neutral parser the spec-string surfaces share |
+| S10 | `tests/` (new) | the §5 shape in each frontend's gate test (`lens_*_gate_test.cpp` pattern); kernel unit tests in `tests/zigzag/` or `tests/xuzz/` | A test sits with its code — the acceptance artifact |
 
 ## 8. What this is not
 
