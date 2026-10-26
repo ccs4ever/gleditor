@@ -257,8 +257,8 @@ std::expected<ActorPid, ActorError> MeshActorRuntime::resume(
   // mutable Manifold or its receiver-local numeric root as authority.
   ValueLimits limits;
   limits.operations = std::min(limits.operations, grant->maxCells);
-  auto verified = receiveValue(manifest, *sourceLease,
-                               checkpoint.store->userPermascrollPtr(), limits);
+  auto verified     = receiveValue(manifest, *sourceLease,
+                                   checkpoint.store->userPermascrollPtr(), limits);
   if (!verified) return std::unexpected(ActorError::InvalidMessage);
   try {
     auto actor          = std::make_unique<Actor>();

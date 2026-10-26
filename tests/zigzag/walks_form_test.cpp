@@ -14,9 +14,9 @@ std::vector<xanadu::WalkEntry> entries() {
                           .parent = {{1}},
                           .target = xanadu::CellSite{document, {}, 8, {0, 3}}},
            .referenced = true},
-          {.visit = {.id     = {3},
-                     .parent = {{1}},
-                     .target = xanadu::CellSite{document, {}, 92, {0, 3}}},
+          {.visit       = {.id     = {3},
+                           .parent = {{1}},
+                           .target = xanadu::CellSite{document, {}, 92, {0, 3}}},
            .annotations = {"Café second branch"}}};
 }
 std::string describe(const xanadu::OccurrenceSite &site) {

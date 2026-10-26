@@ -412,8 +412,8 @@ void ConfigLens::emitMembers(std::vector<CfgNode> &nodes,
   auto addOne = [&](std::string_view name, std::size_t index,
                     const JsonValue &member) {
     CfgNode n;
-    n.key            = nodes[parentIdx].key + "/" +
-                       (name.empty() ? std::to_string(index) : ptrEscape(name));
+    n.key = nodes[parentIdx].key + "/" +
+            (name.empty() ? std::to_string(index) : ptrEscape(name));
     const bool isArr = std::holds_alternative<JsonValue::Array>(member.v);
     const bool container =
         isArr || std::holds_alternative<JsonValue::Object>(member.v);

@@ -75,9 +75,9 @@ void main() {
   // (rather than eyeballing a screenshot) caught it in Phase 4.
   vTexCoord = vec2((0 != (corner & 1)) ? imgUv.z : imgUv.x,
                    (0 != (corner & 2)) ? imgUv.y : imgUv.w);
-  vLayer    = float(imgLayer);
-  vTag = uvec2(uIdentity |
-                   (uint(GLEDITOR_TAG_KIND_IMAGE) << GLEDITOR_TAG_KIND_SHIFT),
-               imgIndex);
+  vLayer   = float(imgLayer);
+  vTag     = uvec2(uIdentity |
+                       (uint(GLEDITOR_TAG_KIND_IMAGE) << GLEDITOR_TAG_KIND_SHIFT),
+                   imgIndex);
   vOpacity = uOpacity;
 }

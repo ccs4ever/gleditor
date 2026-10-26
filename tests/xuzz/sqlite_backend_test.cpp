@@ -31,9 +31,9 @@ struct FixtureDb {
   fs::path path;
 
   explicit FixtureDb(std::string_view journalMode, bool populate = true) {
-    path        = fs::temp_directory_path() /
-                  ("sqlite-backend-test-" + std::to_string(::getpid()) + "-" +
-                   std::to_string(counter++) + ".db");
+    path = fs::temp_directory_path() /
+           ("sqlite-backend-test-" + std::to_string(::getpid()) + "-" +
+            std::to_string(counter++) + ".db");
     sqlite3 *db = nullptr;
     EXPECT_EQ(sqlite3_open_v2(path.string().c_str(), &db,
                               SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE |

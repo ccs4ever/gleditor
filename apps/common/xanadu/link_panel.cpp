@@ -128,11 +128,11 @@ linkPanelLines(const SelectedLink &selected,
     lines.push_back(std::move(*line));
   }
   lines.push_back(
-      {.text = std::format("origin: {}", origin ? name(*origin) +
+      {.text           = std::format("origin: {}", origin ? name(*origin) +
                                                       std::string(kSep) +
                                                       rangeLabel(*origin)
-                                                : "none"),
-       .tone = PanelLine::Tone::Muted,
+                                                          : "none"),
+       .tone           = PanelLine::Tone::Muted,
        .compactContext = origin ? "origin saved" : "origin none"});
   return lines;
 }

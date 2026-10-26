@@ -61,9 +61,9 @@ TEST(MeshCheckpointTest, OnlyExactAcknowledgementCommitsTheSignedStatePointer) {
   xanadu::Store store;
   zigzag::ArenaManifold arena;
   const auto root = arena.makeCell("persistent actor state");
-  auto sealed = publishValue(store, {}, arena, root, keys, node,
-                             xanadu::SignedProvenance{"fixture", "signature"},
-                             directory, {}, {}, *encoded);
+  auto sealed     = publishValue(store, {}, arena, root, keys, node,
+                                 xanadu::SignedProvenance{"fixture", "signature"},
+                                 directory, {}, {}, *encoded);
   ASSERT_TRUE(sealed) << sealed.error();
   bool acknowledged = false;
   unsigned puts     = 0;

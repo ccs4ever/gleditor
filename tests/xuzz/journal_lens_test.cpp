@@ -190,7 +190,7 @@ TEST(JournalLensTest, SentMessageAppearsInTheTailWindow) {
   const std::string marker = "gleditor-journal-lens-test-" +
                              std::to_string(::getpid()) + "-" +
                              std::to_string(::time(nullptr));
-  const std::string msg    = "MESSAGE=" + marker;
+  const std::string msg = "MESSAGE=" + marker;
   if (sd_journal_send(msg.c_str(), "SYSLOG_IDENTIFIER=gleditor-test",
                       "PRIORITY=6", nullptr) < 0) {
     GTEST_SKIP() << "no journald socket to write a marker through";

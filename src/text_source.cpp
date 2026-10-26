@@ -549,9 +549,9 @@ std::expected<void, SourceError> FileTextSource::load() const {
     const MagicMimeDetector magic;
     const auto mime = magic.identifyBuffer(content.data(), content.size());
     piecesCache     = {ContentPiece{
-        .bytes    = content,
-        .mimeType = MagicMimeDetector::isMediaMime(mime) ? mime : std::string{},
-        .pageBreakAfter = false}};
+            .bytes    = content,
+            .mimeType = MagicMimeDetector::isMediaMime(mime) ? mime : std::string{},
+            .pageBreakAfter = false}};
   }
   loaded = true;
   return {};

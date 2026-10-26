@@ -62,10 +62,10 @@ protected:
                       .expires   = now + 60,
                       .budget    = limits,
                       .issuer    = requesterKeys.publicKey};
-    g.proof = {.resource  = g.job,
-               .timestamp = now,
-               .nonce = *xanadu::identity::HashcashEngine::mint(g.job, now, 4),
-               .difficultyBits = 4};
+    g.proof     = {.resource  = g.job,
+                   .timestamp = now,
+                   .nonce = *xanadu::identity::HashcashEngine::mint(g.job, now, 4),
+                   .difficultyBits = 4};
     g.signature = xanadu::signMutableItem(grantSigningBuffer(g), requesterKeys);
     return g;
   }

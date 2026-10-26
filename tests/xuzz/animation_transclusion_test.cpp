@@ -245,8 +245,8 @@ TEST_F(AnimationTransclusionTest, TranscludeAnimatedGifRendersAsMediaCard) {
 
   auto textVer     = store.insert(MicroversionId{}, 0, before);
   std::uint32_t at = static_cast<std::uint32_t>(before.size());
-  textVer = store.transclude(textVer, at, animVersion, 0,
-                             static_cast<std::uint32_t>(gifBytes.size()));
+  textVer          = store.transclude(textVer, at, animVersion, 0,
+                                      static_cast<std::uint32_t>(gifBytes.size()));
   at += static_cast<std::uint32_t>(gifBytes.size());
   textVer = store.insert(textVer, at, after);
 
@@ -286,8 +286,8 @@ TEST_F(AnimationTransclusionTest, TranscludeAnimatedSvgRendersAsMediaCard) {
 
   auto textVer     = store.insert(MicroversionId{}, 0, before);
   std::uint32_t at = static_cast<std::uint32_t>(before.size());
-  textVer = store.transclude(textVer, at, animVersion, 0,
-                             static_cast<std::uint32_t>(svgBytes.size()));
+  textVer          = store.transclude(textVer, at, animVersion, 0,
+                                      static_cast<std::uint32_t>(svgBytes.size()));
   at += static_cast<std::uint32_t>(svgBytes.size());
   textVer = store.insert(textVer, at, after);
 

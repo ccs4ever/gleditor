@@ -58,7 +58,7 @@ RegionId RenderDevice::defineRegion(const RenderRegion &region) {
                                      region.clipHeight,
                                  fullRegion_.viewHeight) -
                        clipped.clipBottom;
-  const auto id      = static_cast<RegionId>(regions_.size());
+  const auto id = static_cast<RegionId>(regions_.size());
   regions_.push_back(clipped);
   return id;
 }

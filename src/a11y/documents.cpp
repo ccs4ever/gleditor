@@ -220,13 +220,13 @@ void DocumentsSource::describe(Builder &into) {
         // which is how a caret is spelled.
         const auto focus = pointAt(doc, first, doc.caretByte);
         node.selection   = TextSelection{
-            .anchor = doc.hasSelection
-                          ? pointAt(doc, first,
+              .anchor = doc.hasSelection
+                            ? pointAt(doc, first,
                                     doc.selectionStart == doc.caretByte
-                                        ? doc.selectionEnd
-                                        : doc.selectionStart)
-                          : focus,
-            .focus  = focus};
+                                          ? doc.selectionEnd
+                                          : doc.selectionStart)
+                            : focus,
+              .focus  = focus};
         into.takeFocus(into.id(id));
       }
     }

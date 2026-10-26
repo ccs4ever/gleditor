@@ -433,7 +433,7 @@ std::optional<CliOptions> CliParser::parse(argparse::ArgumentParser &parser,
       opts.sessionPassword = exportParser.get<std::string>("--password");
       opts.permascrollPath = exportParser.get<std::string>("--permascroll");
       opts.headless        = (exportParser["--headless"] == true ||
-                              exportParser["--batch"] == true);
+                       exportParser["--batch"] == true);
       if (exportParser.present<std::vector<std::string>>("--version-id")) {
         opts.sessionVersions =
             exportParser.get<std::vector<std::string>>("--version-id");
@@ -484,7 +484,7 @@ std::optional<CliOptions> CliParser::parse(argparse::ArgumentParser &parser,
       opts.sessionPassword   = importParser.get<std::string>("--password");
       opts.permascrollPath   = importParser.get<std::string>("--permascroll");
       opts.headless          = (importParser["--headless"] == true ||
-                                importParser["--batch"] == true);
+                       importParser["--batch"] == true);
       return opts;
     } else {
       std::cerr << "Unknown session command: " << action << "\n";

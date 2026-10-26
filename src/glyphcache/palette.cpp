@@ -70,8 +70,8 @@ GlyphPalette::put(const Rect &charBox, const std::span<const std::byte> data) {
       .topLeft = PointF{.x = static_cast<float>(std::to_underlying(x)),
                         .y = static_cast<float>(std::to_underlying(y))},
       .box     = RectF{
-          .width  = static_cast<float>(std::to_underlying(charBox.width)),
-          .height = static_cast<float>(std::to_underlying(charBox.height))}});
+              .width  = static_cast<float>(std::to_underlying(charBox.width)),
+              .height = static_cast<float>(std::to_underlying(charBox.height))}});
 }
 
 void GlyphPalette::grow(const Rect &newDims,

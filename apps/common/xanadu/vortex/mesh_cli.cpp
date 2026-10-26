@@ -144,8 +144,8 @@ Launch load(const std::filesystem::path &configuration) {
   result.host.resultRoot = path("results");
   worker.permascroll     = std::make_shared<xanadu::UserPermascroll>(
       xanadu::UserPermascroll::Config{.storageDir     = path("permascroll"),
-                                      .masterIdentity = *author,
-                                      .deviceKeys     = keys});
+                                          .masterIdentity = *author,
+                                          .deviceKeys     = keys});
   const auto &budget = field(value, "budget");
   auto count         = [&](std::string_view key) {
     const auto n = field(budget, key).asInteger();
@@ -284,9 +284,9 @@ std::optional<int> runMeshCommand(Frontend frontend, int argc, char **argv) {
                           .requester = host.node(),
                           .worker    = node(argv[3]),
                           .expires   = wallNow() + static_cast<std::uint64_t>(
-                                                       launch.timeout.count()),
-                          .budget    = budget,
-                          .issuer    = keys.publicKey};
+                                                     launch.timeout.count()),
+                          .budget = budget,
+                          .issuer = keys.publicKey};
     const auto stampTime = wallNow();
     auto nonce           = xanadu::identity::HashcashEngine::mint(
         grant.job, stampTime, xanadu::identity::kDefaultHashcashDifficulty);

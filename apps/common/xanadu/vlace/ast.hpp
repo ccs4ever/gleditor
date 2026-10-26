@@ -235,8 +235,8 @@ enum class CompileError : std::uint8_t {
 [[nodiscard]] inline bool isReservedCtorTag(std::string_view tag) noexcept {
   if (tag.starts_with("IO.")) return true;
   for (const std::string_view t :
-       {"Cell",   "Dim",  "Nil", "Cons",  "Unit",  "Tuple", "Ok", "Err",
-        "Some",   "None", "True", "False", "SInt", "SFloat", "SBool"}) {
+       {"Cell", "Dim", "Nil", "Cons", "Unit", "Tuple", "Ok", "Err", "Some",
+        "None", "True", "False", "SInt", "SFloat", "SBool"}) {
     if (tag == t) return true;
   }
   return false;

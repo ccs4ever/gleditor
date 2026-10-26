@@ -440,7 +440,7 @@ Compiler::matchPattern(const PatternNode &pat, const ValuePtr &scrutinee,
                 EvalError{.code   = CompileError::NonLinearPattern,
                           .detail = std::string("'") + p.name +
                                     "' bound twice in one pattern",
-                          .loc    = pat.loc});
+                          .loc = pat.loc});
           }
           out[p.name] = scrutinee;
           return true;

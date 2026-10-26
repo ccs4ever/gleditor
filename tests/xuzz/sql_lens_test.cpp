@@ -41,8 +41,8 @@ struct FixtureDb {
   fs::path path;
 
   explicit FixtureDb() {
-    path        = fs::temp_directory_path() /
-                  ("sql-lens-test-" + std::to_string(::getpid()) + ".db");
+    path = fs::temp_directory_path() /
+           ("sql-lens-test-" + std::to_string(::getpid()) + ".db");
     sqlite3 *db = nullptr;
     EXPECT_EQ(sqlite3_open_v2(path.string().c_str(), &db,
                               SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE |

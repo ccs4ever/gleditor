@@ -427,17 +427,15 @@ std::string TypeChecker::renderType(const TyPtr &tIn) {
   return out;
 }
 
-std::expected<void, TypeError>
-TypeChecker::registerData(const DataDecl &dd) {
+std::expected<void, TypeError> TypeChecker::registerData(const DataDecl &dd) {
   for (const auto &c : dd.ctors) {
     // A ctor name the runtime itself interprets may not be redeclared
     // (§7 P1): `data W = Some` would overwrite the prelude scheme a
     // program already typechecks against.
     if (isReservedCtorTag(c.name)) {
-      return terr(CompileError::TypeMismatch,
-                  "data constructor '" + c.name +
-                      "' is reserved by the runtime",
-                  {});
+      return terr(
+          CompileError::TypeMismatch,
+          "data constructor '" + c.name + "' is reserved by the runtime", {});
     }
   }
   // Build the result type Tname a b ... with fresh vars for the params.

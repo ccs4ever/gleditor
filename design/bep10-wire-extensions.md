@@ -8,7 +8,8 @@ ______________________________________________________________________
 
 In traditional decentralized systems, identity, collaborative live editing, and micropayments are
 delegated to separate network sidecars, HTTP servers, or blockchain RPC nodes. In the Xanadulogical
-architecture of `xuzz` and the `xanadu` engine, **the BitTorrent peer wire is the sole transport layer**.
+architecture of `xuzz` and the `xanadu` engine, **the BitTorrent peer wire is the sole transport
+layer**.
 
 By building on **BEP 10 (Extension Protocol for BitTorrent)**:
 

@@ -1381,6 +1381,7 @@ ______________________________________________________________________
   ladder with `d.keystab` marking, windowed projection via `ProjectionSession::refresh()` +
   `checkpoint()`/`rewind()`, three replay semantics, `promoteRow`/`promotePage` with a reconcile map
   as the annotation crossing, the `SqlBackend` port, read-only round one.
+
 - **rev 2.** Folded a five-perspective critique (Xanadu/ZigZag purist, technical writer,
   Vortex/runtime expert, system architect, SQL expert). Structural corrections: replaced the
   unimplementable "widened `d.contains`" with strict firstborn `d.contains` + `d.seq` chains and
@@ -1402,6 +1403,7 @@ ______________________________________________________________________
   mode/key-class table, the `d.state` value set, rank-table completeness, the two R8s,
   lens-doc-vs-local § refs, the `swarm_catalog_index` sandbox overclaim, and the reconcile-map
   rebuild path.
+
 - **rev 3.** Folded the same five perspectives' second round. Structural corrections: added the
   `sql.sight` occurrence layer (§3.7) — pages chain *sightings*, subjects float, `d.subject` is the
   join — resolving the one-cell-two-windows rank-position conflict and retiring `d.dupcount`;
@@ -1421,6 +1423,7 @@ ______________________________________________________________________
   generalized to cursors on rollback journals; NULL-aware keyset predicates with explicit
   `NULLS FIRST|LAST`; blob digests made budget-independent over the complete value; portals as the
   uniform parameterized PG path. Plus ~30 wording/consistency repairs.
+
 - **rev 4.** Third critique round. Structural: result columns moved off the query's `d.contains`
   (which can't hold two firstborns) onto a `d.colof` membership rank; sighting keys re-based on
   `(window, window-ordinal)` so N sightings of one subject in one window get distinct cells;
@@ -1438,6 +1441,7 @@ ______________________________________________________________________
   sort columns out of `v:` keys, `d.winlo` unified as the exclusive bound on stubs and pages alike
   (the `<window-id>` `k:` bound is known pre-fetch, so a stub's key *is* its page's key),
   foreign-mint detection stated as a count delta.
+
 - **rev 5.** Fourth critique round — convergence. The last two encodability holes closed: `k:start`
   encodes the boundless first window (the `k:` grammar couldn't express page 0), and browse-of-view
   falls to ordinal windows (a non-unique sort key makes boundary ties ambiguous, not just unstable).
@@ -1449,6 +1453,7 @@ ______________________________________________________________________
   recorded (ever-seen indexes, filtered by `d.state`); `replayWindow` regenerates browse SQL from
   the generation spec; `__sql_sort_*` columns are backend-internal, never projected; foreign-mint
   counting includes attribute cells and reports dense indices.
+
 - **rev 6.** Final polish pass. Resolved the stale-member contradiction (the `d.subjects` index is
   ever-seen — the lens keeps emitting stale members' index links — while membership ranks re-emit
   over live members only, so stale members self-exclude and occurrence counts are live counts);
@@ -1457,21 +1462,21 @@ ______________________________________________________________________
   `ord:` caveat; `k:start` emits no lower predicate on replay; mode table shows the views→ordinal
   exception; `d.state` scope covers sightings.
 
-- **rev 7.** As implemented on `design/sql-to-zigzag`. All six phases landed (the `SqlBackend`
-  port + read-only SQLite backend; `refresh()`/`checkpoint()`/`rewind()`/`pin()` + `WindowedLens`;
-  browse mode; query mode + `sql:` URI + typed params + ordinal replay; the promote envelope +
+- **rev 7.** As implemented on `design/sql-to-zigzag`. All six phases landed (the `SqlBackend` port
+  \+ read-only SQLite backend; `refresh()`/`checkpoint()`/`rewind()`/`pin()` + `WindowedLens`; browse
+  mode; query mode + `sql:` URI + typed params + ordinal replay; the promote envelope +
   `SqlPromotion` driver + `d.promoted` reconcile; the xuzz surface + the vprolog gate). The write
   phase followed: `SqlBackend::execWrite` + the dialect surface (`paramPlaceholder`/`nullSafeEq` —
   `?`/`IS ?` on SQLite, `$n`/`IS NOT DISTINCT FROM $n` on Postgres), `SqliteOpenOptions::writable`,
   `applyContentChange` for `pk:`/`rid:` value cells, `?write=1` on the URI, and `PgBackend`'s real
-  libpq half (single-row streaming, read-only GUC pins, `execWrite` behind `PgOpenOptions::writable`,
-  `LISTEN`/`PQnotifies` as a pushed change source with `PQsocket` the waitable fd — tested live
-  against PostgreSQL 18.6). The evented seam is `pollChanged()` → `refreshIfChanged()` with
-  `FileWatch` (inotify/kqueue/`FindFirstChangeNotification`/inert) + a `waitableFd` trait verb;
-  `SqlLens` watches the db *and* its `-wal` (a WAL write lands there until checkpoint). xuzz:
-  `LensSurfaceContributor` adopts the session into the slice view each quiesced frame;
-  `lens.next-page`/`commit`/`promote`/`open`/`back`/`open-source` actions; `RouterLens` mounts a
-  delegate lens under a filesystem cell (`lens.open` on a `.git` dir, a `.log`, a `.json` — one hop
-  in, `lens.back` out); `union:a|b` composes lenses in one URI; `LensFilePicker` is the reusable
-  picker's FilesystemLens projection; `ZigzagVisualizer`'s `setOnExternalCellEdit` routes a cell
-  edit into the session's dirty set for `lens.commit`.
+  libpq half (single-row streaming, read-only GUC pins, `execWrite` behind
+  `PgOpenOptions::writable`, `LISTEN`/`PQnotifies` as a pushed change source with `PQsocket` the
+  waitable fd — tested live against PostgreSQL 18.6). The evented seam is `pollChanged()` →
+  `refreshIfChanged()` with `FileWatch` (inotify/kqueue/`FindFirstChangeNotification`/inert) + a
+  `waitableFd` trait verb; `SqlLens` watches the db *and* its `-wal` (a WAL write lands there until
+  checkpoint). xuzz: `LensSurfaceContributor` adopts the session into the slice view each quiesced
+  frame; `lens.next-page`/`commit`/`promote`/`open`/`back`/`open-source` actions; `RouterLens`
+  mounts a delegate lens under a filesystem cell (`lens.open` on a `.git` dir, a `.log`, a `.json` —
+  one hop in, `lens.back` out); `union:a|b` composes lenses in one URI; `LensFilePicker` is the
+  reusable picker's FilesystemLens projection; `ZigzagVisualizer`'s `setOnExternalCellEdit` routes a
+  cell edit into the session's dirty set for `lens.commit`.

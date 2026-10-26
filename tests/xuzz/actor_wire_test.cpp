@@ -21,7 +21,7 @@ ActorMessage example(MessageType type) {
   message.requestId = "request-1";
   message.source    = ActorPid{"node:key:salt", "opaque-cursor-1", 1, 1};
   message.target    = ActorPid{"node:other:salt", "opaque-cursor-2", 2,
-                               std::numeric_limits<std::uint64_t>::max()};
+                            std::numeric_limits<std::uint64_t>::max()};
   switch (type) {
   case MessageType::ActorSpawn:
     message.target.reset();

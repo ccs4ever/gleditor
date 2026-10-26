@@ -75,7 +75,7 @@ TEST_P(DocumentPaletteDeviceTest,
       device->createBuffer(render::BufferKind::Vertex, sizeof(rows));
   device->updateBuffer(vertices, 0, std::as_bytes(std::span(rows)));
   const render::HighlightRange highlight{
-      .identity = identity | (render::tagKindGlyph
+      .identity     = identity | (render::tagKindGlyph
                               << (render::tagDocBits + render::tagPageBits)),
       .firstCluster = 2,
       .lastCluster  = 2,

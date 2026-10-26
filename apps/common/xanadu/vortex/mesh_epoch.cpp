@@ -142,11 +142,11 @@ reserveNodeId(const std::filesystem::path &deploymentDirectory,
       if (errno != EINTR) File::fail("lock");
 
     const auto stateName = deviceName + ".epochs";
-    int fd = ::openat(directory.get(), stateName.c_str(),
-                      O_RDWR | O_APPEND | O_CREAT | O_EXCL | O_CLOEXEC |
-                          O_NOFOLLOW | O_NONBLOCK,
-                      0600);
-    const bool created = fd >= 0;
+    int fd               = ::openat(directory.get(), stateName.c_str(),
+                                    O_RDWR | O_APPEND | O_CREAT | O_EXCL | O_CLOEXEC |
+                                        O_NOFOLLOW | O_NONBLOCK,
+                                    0600);
+    const bool created   = fd >= 0;
     if (fd < 0 && errno == EEXIST)
       fd = ::openat(directory.get(), stateName.c_str(),
                     O_RDWR | O_APPEND | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);

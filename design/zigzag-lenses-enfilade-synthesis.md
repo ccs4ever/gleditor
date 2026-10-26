@@ -1,14 +1,16 @@
 # The Enfilade-Accelerated Dimension-Cell Operating Environment
+
 ## Nelsonian Monoidal Indices Across Synthetic, Transductive, and Presentation Lenses
 
-**Document Version:** 1.0  
-**Branch:** `feat/zigzag-lenses`  
-**Date:** October 18, 2026  
-**Author:** Project Xanadu Enfilade Architect  
+**Document Version:** 1.0\
+**Branch:** `feat/zigzag-lenses`\
+**Date:** October 18, 2026\
+**Author:** Project Xanadu Enfilade Architect\
 **In Response to:**
+
 - [`design/zigzag-lenses-plan9-philosophy.md`](zigzag-lenses-plan9-philosophy.md)
 - [`design/zigzag-lenses-tripartite-critique.md`](zigzag-lenses-tripartite-critique.md)
-**Foundational References:**
+  **Foundational References:**
 - [`design/enfilade/enfilade-rank-indexing.md`](enfilade/enfilade-rank-indexing.md) (U1 Solution)
 - [`design/enfilade/layoutfilade-virtualized-scrolling.md`](enfilade/layoutfilade-virtualized-scrolling.md)
 - [`design/enfilade/spanfilade-transclusion-index.md`](enfilade/spanfilade-transclusion-index.md)
@@ -16,20 +18,30 @@
 - [`design/enfilade/holefilade-and-settlement-ledger.md`](enfilade/holefilade-and-settlement-ledger.md)
 - [`design/enfilade/chronofilade-example.md`](enfilade/chronofilade-example.md)
 
----
+______________________________________________________________________
 
 ## Executive Summary
 
-The union of Plan 9's compositional computing model with Ted Nelson's Project Xanadu and Zigzag hyperstructures replaces single-parent directory trees with orthogonal $N$-dimensional 2-rank manifolds ($\text{deg}^\pm(c, d) \le 1$). However, as diagnosed in the Multi-Expert Tripartite Critique, raw pointer-chasing and naive CSR rank traversal (`linked(c, d, step) = 4.96 ns`) create fatal $O(N)$ bottlenecks:
+The union of Plan 9's compositional computing model with Ted Nelson's Project Xanadu and Zigzag
+hyperstructures replaces single-parent directory trees with orthogonal $N$-dimensional 2-rank
+manifolds ($\text{deg}^\pm(c, d) \le 1$). However, as diagnosed in the Multi-Expert Tripartite
+Critique, raw pointer-chasing and naive CSR rank traversal (`linked(c, d, step) = 4.96 ns`) create
+fatal $O(N)$ bottlenecks:
+
 1. Jumping to cell $N$ or computing scrollbar positions along a rank requires linear walks.
-2. Rendering massive documents or 3D lattices triggers quadratic shaping passes or memory explosion.
-3. Transductive filtering streams entire ranks rather than pruning unpromising branches.
-4. Optical transclusion discovery devolves into $O(D \cdot N)$ pairwise scans across open documents.
-5. Fleet observability across 50,000 nodes at 10M metrics/sec collapses P2P gossip networks.
+1. Rendering massive documents or 3D lattices triggers quadratic shaping passes or memory explosion.
+1. Transductive filtering streams entire ranks rather than pruning unpromising branches.
+1. Optical transclusion discovery devolves into $O(D \cdot N)$ pairwise scans across open documents.
+1. Fleet observability across 50,000 nodes at 10M metrics/sec collapses P2P gossip networks.
 
-The architectural answer is the **Grand Enfilade**—not as an archaic piece table, but as a family of **cache-conscious $B$-enfilades ($B \in \{8, 16\}$) governed by monoid algebra $(\mathcal{D}, \circ, e_D) \times (\mathcal{W}, \oplus, 0_W) \to \mathcal{W}$**. 
+The architectural answer is the **Grand Enfilade**—not as an archaic piece table, but as a family of
+**cache-conscious $B$-enfilades ($B \in \{8, 16\}$) governed by monoid algebra
+$(\mathcal{D}, \circ, e_D) \times (\mathcal{W}, \oplus, 0_W) \to \mathcal{W}$**.
 
-Crucially, under Nelsonian **Ruling R8**, **an enfilade is a derived replay product, never cells**. It mints zero `CompactOpNode`s, incurs zero disk writes, does not enlarge the 32-byte `CellSlot` (preserving **R12 & U3**), and operates ephemerally across local `ArenaManifold`s and distributed `SpoolMesh` fabrics.
+Crucially, under Nelsonian **Ruling R8**, **an enfilade is a derived replay product, never cells**.
+It mints zero `CompactOpNode`s, incurs zero disk writes, does not enlarge the 32-byte `CellSlot`
+(preserving **R12 & U3**), and operates ephemerally across local `ArenaManifold`s and distributed
+`SpoolMesh` fabrics.
 
 ```
 +───────────────────────────────────────────────────────────────────────────────────+
@@ -60,16 +72,21 @@ Crucially, under Nelsonian **Ruling R8**, **an enfilade is a derived replay prod
   └───────────────────────────────────────────────────────────────────────────────┘
 ```
 
----
+______________________________________________________________________
 
 ## 1. Rank Navigation & Random Access (U1 Solved via Poomfilades)
 
 ### 1.1 The U1 Problem in Zigzag Lenses
-In canonical Zigzag, a rank is a 1D sequence linked along dimension $d$. Finding the $k$-th cell or drawing a scrollbar thumb requires two complementary operations:
-1. **Ordinal $\to$ Cell ($i \to C$)**: "Jump to the 50,000th item on the rank."
-2. **Cell $\to$ Ordinal ($C \to i$)**: "What fraction of the rank lies before the current focus cell?"
 
-In raw CSR, both are $O(N)$. Storing absolute integers on cells invalidates $O(N)$ cells on every insertion.
+In canonical Zigzag, a rank is a 1D sequence linked along dimension $d$. Finding the $k$-th cell or
+drawing a scrollbar thumb requires two complementary operations:
+
+1. **Ordinal $\to$ Cell ($i \to C$)**: "Jump to the 50,000th item on the rank."
+1. **Cell $\to$ Ordinal ($C \to i$)**: "What fraction of the rank lies before the current focus
+   cell?"
+
+In raw CSR, both are $O(N)$. Storing absolute integers on cells invalidates $O(N)$ cells on every
+insertion.
 
 ### 1.2 Algebraic Formulation: The Poomfilade Monoids
 
@@ -85,7 +102,9 @@ In raw CSR, both are $O(N)$. Storing absolute integers on cells invalidates $O(N
 
 ### 1.3 C++23 Contract & Leaf Ascent Architecture
 
-To satisfy **R12 & U3**, `CellSlot` remains exactly 32 bytes and carries no enfilade pointers. Leaf association is decoupled into an auxiliary rank index table `std::span<LeafHandle>` maintained only while a rank is actively indexed.
+To satisfy **R12 & U3**, `CellSlot` remains exactly 32 bytes and carries no enfilade pointers. Leaf
+association is decoupled into an auxiliary rank index table `std::span<LeafHandle>` maintained only
+while a rank is actively indexed.
 
 ```cpp
 namespace xanadu::enfilade {
@@ -140,21 +159,35 @@ private:
 ```
 
 ### 1.4 Architectural Mapping into Lenses
-- **Scrollbar Thumb Geometry**: In `LatticeLens` and `AcmeLens`, thumb offset is computed instantaneously:
-  $$\text{ThumbPos} = \frac{\text{ordinalOfCell}(C_{\text{focus}})}{\text{totalCount}()}$$
-  Scrubbing the thumb directly dispatches `cellAtOrdinal(\lfloor \text{Ratio} \times \text{totalCount}() \rfloor)$` in $< 35\text{ ns}$, maintaining locked 120 FPS interaction over million-cell ranks.
-- **Coordinate Addressing**: 9Z2026 wire protocol handlers servicing `Zhop(ordinal=50000)` jump in $O(\log N)$ rather than walking sockets or memory buffers.
 
----
+- **Scrollbar Thumb Geometry**: In `LatticeLens` and `AcmeLens`, thumb offset is computed
+  instantaneously:
+
+  $$
+  \text{ThumbPos} = \frac{\text{ordinalOfCell}(C_{\text{focus}})}{\text{totalCount}()}
+  $$
+
+  Scrubbing the thumb directly dispatches
+  `cellAtOrdinal(\lfloor \text{Ratio} \times \text{totalCount}() \rfloor)$` in $< 35\text{ ns}$,
+  maintaining locked 120 FPS interaction over million-cell ranks.
+
+- **Coordinate Addressing**: 9Z2026 wire protocol handlers servicing `Zhop(ordinal=50000)` jump in
+  $O(\log N)$ rather than walking sockets or memory buffers.
+
+______________________________________________________________________
 
 ## 2. Virtualized Spatial Layout & 120 FPS Rendering (Layoutfilade)
 
 ### 2.1 The Virtualized Rendering Problem
-In `XanadocLens`, `AcmeLens`, and `LatticeLens`, displaying huge documents or large dimensional grids naively requires:
+
+In `XanadocLens`, `AcmeLens`, and `LatticeLens`, displaying huge documents or large dimensional
+grids naively requires:
+
 - Pre-shaping millions of text lines via HarfBuzz/FreeType ($15\text{--}50\ \mu\text{s}$ per line).
 - Cascading full-document recomputations when a single glyph or widget changes size.
 
 ### 2.2 Algebraic Formulation: 2D Progression & Extent Monoids
+
 The Layoutfilade (`include/gleditor/enfilade/layoutfilade.hpp`) implements a 2D progression monoid:
 
 ```math
@@ -168,28 +201,41 @@ The Layoutfilade (`include/gleditor/enfilade/layoutfilade.hpp`) implements a 2D 
 ```
 
 ### 2.3 Memory Layout: Flat B-Enfilade with Cache-Line Locality
+
 To guarantee 120 FPS ($8.33\text{ ms}$ budget) under heavy viewport motion:
-- **Routing Crums (`LayoutCrum`)**: Branching factor $B=16$, `alignas(64)` matching cache lines. Tree depth $\le 4$ for $100,000$ lines.
-- **Leaf Entries (`LayoutEntry`)**: Exactly 32 bytes (2 entries packed per 64-byte cache line). Decouples visual dimensions ($H_{\text{px}}, W_{\text{px}}$) from document byte lengths.
+
+- **Routing Crums (`LayoutCrum`)**: Branching factor $B=16$, `alignas(64)` matching cache lines.
+  Tree depth $\le 4$ for $100,000$ lines.
+- **Leaf Entries (`LayoutEntry`)**: Exactly 32 bytes (2 entries packed per 64-byte cache line).
+  Decouples visual dimensions ($H_{\text{px}}, W_{\text{px}}$) from document byte lengths.
 
 ### 2.4 Integration Across Presentation Lenses
-1. **`XanadocLens` Flow Layout**:
-   - `visibleRange(topY, bottomY)` descends the tree in $O(\log_{16} N)$, pruning subtrees outside the vertical window.
-   - Text outside the screen is **never shaped**. HarfBuzz and FreeType are invoked exclusively on the 40–80 lines currently intersecting the frustum.
-2. **`AcmeLens` Fluid Tag Lines & Panes**:
-   - Tag buffers and body texts are indexed by `Layoutfilade`.
-   - Modifying a single character shifts relative offsets along one logarithmic path ($\le 4$ crums). Downstream lines remain untouched in memory.
-3. **`LatticeLens` 3D Spatial Layout**:
-   - Extended to 3D bounding cubes via `SpatialLayoutfilade`. Frustum culling discards entire sub-clusters of cells in $O(1)$.
 
----
+1. **`XanadocLens` Flow Layout**:
+   - `visibleRange(topY, bottomY)` descends the tree in $O(\log_{16} N)$, pruning subtrees outside
+     the vertical window.
+   - Text outside the screen is **never shaped**. HarfBuzz and FreeType are invoked exclusively on
+     the 40–80 lines currently intersecting the frustum.
+1. **`AcmeLens` Fluid Tag Lines & Panes**:
+   - Tag buffers and body texts are indexed by `Layoutfilade`.
+   - Modifying a single character shifts relative offsets along one logarithmic path ($\le 4$
+     crums). Downstream lines remain untouched in memory.
+1. **`LatticeLens` 3D Spatial Layout**:
+   - Extended to 3D bounding cubes via `SpatialLayoutfilade`. Frustum culling discards entire
+     sub-clusters of cells in $O(1)$.
+
+______________________________________________________________________
 
 ## 3. Transductive Pipeline & Predicate Pruning (Multi-Valence Arrayfilade)
 
 ### 3.1 The Filter & Sort Bottleneck
-In Tier 2 Transductive Lenses (`FilterLens`, `SortLens`), creating a derived rank ($d.\text{filtered}$) by testing every cell along a million-element source rank consumes dozens of milliseconds, dropping the application below interactive frame rates.
+
+In Tier 2 Transductive Lenses (`FilterLens`, `SortLens`), creating a derived rank
+($d.\text{filtered}$) by testing every cell along a million-element source rank consumes dozens of
+milliseconds, dropping the application below interactive frame rates.
 
 ### 3.2 Monoid Formulation: Multidimensional Hulls & Query Planning Bounds
+
 The `Arrayfilade` (`apps/common/xanadu/enfilade/arrayfilade.hpp`) establishes:
 
 ```math
@@ -220,26 +266,43 @@ struct ArrayWid {
 ```
 
 ### 3.3 Zero-Copy Slicing and Predicate Pushdown Mechanics
-1. **$O(1)$ Subtree Rejection**:
-   - **Range Predicate** ($\text{cpu\_usage} > 80.0$): If $w.\text{maxScalar} < 80.0$, the entire crum subtree ($B^k$ cells) is pruned in a single instruction.
-   - **Type Predicate** (`isString()`): If $(w.\text{scalarTypeMask} \ \& \ \text{MaskString}) == 0$, prune immediately.
-   - **Equality / Token Predicate** (`name == "xuzz"`): Evaluates 64-bit Bloom filter:
-     $$\text{if } ((w.\text{bloomFilter} \ \& \ \text{Bloom}("xuzz")) \neq \text{Bloom}("xuzz")) \implies \text{Prune Subtree}$$
-2. **Sublinear Zero-Copy Slicing**:
-   - `Arrayfilade::slice([minCoord, maxCoord])` returns an ephemeral enfilade sharing child crums without allocating or copying underlying manifold cells.
-3. **Derived Rank Materialization in `prepare()`**:
-   - `FilterLens::prepare()` walks only the non-pruned subtrees to emit contiguous CSR links into the `derived_` arena. Rendering traverses $+d.\text{filtered}$ in pure $4.96\text{ ns}$ memory hops.
 
----
+1. **$O(1)$ Subtree Rejection**:
+   - **Range Predicate** ($\text{cpu\_usage} > 80.0$): If $w.\text{maxScalar} < 80.0$, the entire
+     crum subtree ($B^k$ cells) is pruned in a single instruction.
+
+   - **Type Predicate** (`isString()`): If
+     $(w.\text{scalarTypeMask} \ \& \ \text{MaskString}) == 0$, prune immediately.
+
+   - **Equality / Token Predicate** (`name == "xuzz"`): Evaluates 64-bit Bloom filter:
+
+     $$
+     \text{if } ((w.\text{bloomFilter} \ \& \ \text{Bloom}("xuzz")) \neq \text{Bloom}("xuzz")) \implies \text{Prune Subtree}
+     $$
+1. **Sublinear Zero-Copy Slicing**:
+   - `Arrayfilade::slice([minCoord, maxCoord])` returns an ephemeral enfilade sharing child crums
+     without allocating or copying underlying manifold cells.
+1. **Derived Rank Materialization in `prepare()`**:
+   - `FilterLens::prepare()` walks only the non-pruned subtrees to emit contiguous CSR links into
+     the `derived_` arena. Rendering traverses $+d.\text{filtered}$ in pure $4.96\text{ ns}$ memory
+     hops.
+
+______________________________________________________________________
 
 ## 4. Optical Transclusion Beams & Link Gathering (The True Spanfilade)
 
 ### 4.1 The Nelsonian Transclusion Discovery Problem
-In Xanadu hypermedia, visible text and data are Edit Decision Lists (EDLs) addressing the universal permascroll. When multiple documents, slices, or panes transclude identical spans, the presentation layer must draw **living optical connection beams** between identical source passages.
+
+In Xanadu hypermedia, visible text and data are Edit Decision Lists (EDLs) addressing the universal
+permascroll. When multiple documents, slices, or panes transclude identical spans, the presentation
+layer must draw **living optical connection beams** between identical source passages.
+
 - Naive scan across $D$ open views with $N$ spans requires $O(D \cdot N)$ comparisons.
 
 ### 4.2 Interval B-Enfilade Monoids
-The `Spanfilade` (`apps/common/xanadu/enfilade/spanfilade.hpp`) indexes permascroll intervals $[S, S + L)$:
+
+The `Spanfilade` (`apps/common/xanadu/enfilade/spanfilade.hpp`) indexes permascroll intervals
+$[S, S + L)$:
 
 ```math
 \begin{aligned}
@@ -251,23 +314,35 @@ The `Spanfilade` (`apps/common/xanadu/enfilade/spanfilade.hpp`) indexes permascr
 ```
 
 ### 4.3 Logarithmic-Time Viewport Transclusion Gathering
+
 When `XanadocLens` or `SliceView` renders a frame:
-1. Extract the active permascroll spans visible in the viewport ($[P_{\text{view\_start}}, P_{\text{view\_end}}]$).
-2. Execute `Spanfilade::findOccurrences(P)`:
+
+1. Extract the active permascroll spans visible in the viewport
+   ($[P_{\text{view\_start}}, P_{\text{view\_end}}]$).
+1. Execute `Spanfilade::findOccurrences(P)`:
    - Evaluates `w.overlaps(P.start, P.end)` at each crum.
    - Non-intersecting branches are skipped in $O(1)$.
-3. Returns all matching `(docId, docOffset, cellDense, spanIndex)` pairs in $O(\log_{16} N + K)$ time, where $K$ is the number of visible transclusions.
-4. `BridgeCoordinator` and `LinkBeams` generate cubic Bézier spline control points connecting the exact bounding boxes in under $20\ \mu\text{s}$, well within the $8.33\text{ ms}$ 120 FPS envelope.
+1. Returns all matching `(docId, docOffset, cellDense, spanIndex)` pairs in $O(\log_{16} N + K)$
+   time, where $K$ is the number of visible transclusions.
+1. `BridgeCoordinator` and `LinkBeams` generate cubic Bézier spline control points connecting the
+   exact bounding boxes in under $20\ \mu\text{s}$, well within the $8.33\text{ ms}$ 120 FPS
+   envelope.
 
----
+______________________________________________________________________
 
 ## 5. Fleet Observability at Scale (50,000 Nodes via Treefilades)
 
 ### 5.1 The SRE 10M Metrics/Sec Critique
-As emphasized in the Tripartite Critique (§7.1), a distributed swarm of 50,000 nodes emitting 10M metrics/sec cannot be queried via raw P2P gossip or linear dimensional hops without flooding network links and saturating CPU caches.
+
+As emphasized in the Tripartite Critique (§7.1), a distributed swarm of 50,000 nodes emitting 10M
+metrics/sec cannot be queried via raw P2P gossip or linear dimensional hops without flooding network
+links and saturating CPU caches.
 
 ### 5.2 Streaming Statistical Monoids: `StatDsp` and `StatWid`
-We specify the **Treefilade**: a hierarchical enfilade whose interior crums aggregate streaming sketches across topology ranks ($d.\text{node} \to d.\text{zone} \to d.\text{region} \to d.\text{fleet}$).
+
+We specify the **Treefilade**: a hierarchical enfilade whose interior crums aggregate streaming
+sketches across topology ranks
+($d.\text{node} \to d.\text{zone} \to d.\text{region} \to d.\text{fleet}$).
 
 ```cpp
 namespace xanadu::enfilade {
@@ -325,6 +400,7 @@ inline StatWid act(const StatDsp &, const StatWid &w) noexcept { return w; }
 ```
 
 ### 5.3 Distributed Spool-Mesh Telemetry Aggregation
+
 ```
       [Fleet Coordinator Root Crum]  <-- p99, count, anomalies evaluated in O(1)
                 ▲            ▲
@@ -334,25 +410,39 @@ inline StatWid act(const StatDsp &, const StatWid &w) noexcept { return w; }
         ▲        ▲            ▲        ▲
     [Nodes...] [Nodes...]  [Nodes...] [Nodes...] (50,000 nodes total)
 ```
-- **$O(1)$ Fleet-Wide Quantiles**: Root crums hold aggregated DDSketches. A query for `p99(http_req_latency)` over the entire fleet of 50,000 hosts evaluates in $O(1)$ without contacting individual nodes.
-- **Hierarchical $O(\log N)$ Traversal**: Tree depth for 50,000 nodes with $B=16$ is $\lceil \log_{16}(50000) \rceil = 4$. Root-to-leaf anomaly drills take 4 network/memory hops ($< 15\text{ ms}$).
-- **Push-Based Anomaly Alerting**: When a leaf detects $\text{alertFlags} \neq 0$, it pushes a notification up the Treefilade. Intermediary nodes update their alert masks, reactively triggering 9Z `Zwatch` subscriptions along $d.\text{alerting}$.
 
----
+- **$O(1)$ Fleet-Wide Quantiles**: Root crums hold aggregated DDSketches. A query for
+  `p99(http_req_latency)` over the entire fleet of 50,000 hosts evaluates in $O(1)$ without
+  contacting individual nodes.
+- **Hierarchical $O(\log N)$ Traversal**: Tree depth for 50,000 nodes with $B=16$ is
+  $\lceil \log_{16}(50000) \rceil = 4$. Root-to-leaf anomaly drills take 4 network/memory hops
+  ($< 15\text{ ms}$).
+- **Push-Based Anomaly Alerting**: When a leaf detects $\text{alertFlags} \neq 0$, it pushes a
+  notification up the Treefilade. Intermediary nodes update their alert masks, reactively triggering
+  9Z `Zwatch` subscriptions along $d.\text{alerting}$.
+
+______________________________________________________________________
 
 ## 6. Hypertime Diffing & Time Travel (The Osmic Chronofilade)
 
 ### 6.1 The Replay Latency Dilemma
-Nelsonian architecture mandates that versions are never stored as full snapshots, but reconstructed on demand from the append-only operations spool DAG. Replaying 100,000 operations linearly to scrub a timeline slider drops frame rates to single digits.
+
+Nelsonian architecture mandates that versions are never stored as full snapshots, but reconstructed
+on demand from the append-only operations spool DAG. Replaying 100,000 operations linearly to scrub
+a timeline slider drops frame rates to single digits.
 
 ### 6.2 The Three Chronofilade Pillars
+
 The `Chronofilade` (`apps/common/xanadu/enfilade/chronofilade.hpp`) combines:
+
 1. **Composable EDL Transform Monoid $(\mathcal{T}, \circ, I)$**:
-   - Transforms compose associatively ($T_2 \circ T_1$), coalescing adjacent primedia spans and contiguous source ranges automatically.
-2. **DAG Binary Lifting Table (`up_[idx][k]`)**:
+   - Transforms compose associatively ($T_2 \circ T_1$), coalescing adjacent primedia spans and
+     contiguous source ranges automatically.
+1. **DAG Binary Lifting Table (`up_[idx][k]`)**:
    - Each operation indexes its $2^k$-th ancestor.
-   - Lowest Common Ancestor ($\text{LCA}(V_A, V_B)$) between any two microversions executes in **$\sim 15\text{ ns}$** ($O(\log K)$).
-3. **Compact Periodic Checkpoints**:
+   - Lowest Common Ancestor ($\text{LCA}(V_A, V_B)$) between any two microversions executes in
+     **$\sim 15\text{ ns}$** ($O(\log K)$).
+1. **Compact Periodic Checkpoints**:
    - Cached every 32 operations along ancestral paths ($\sim 100$ bytes each).
 
 ```
@@ -366,23 +456,35 @@ The `Chronofilade` (`apps/common/xanadu/enfilade/chronofilade.hpp`) combines:
 ```
 
 ### 6.3 120 FPS Time-Travel Scrubbing in Presentation Lenses
-- Scrubbing a presentation slider across 100,000 versions jumps to the nearest checkpoint via binary lifting ($O(1)$) and applies $\le 31$ composable EDL transforms.
-- State reconstruction takes **$< 0.3\ \mu\text{s}$**, eliminating replay stalls.
-- Structural diffs between microversions $V_A$ and $V_B$ are generated by composing $T(\text{LCA} \to V_A)^{-1} \circ T(\text{LCA} \to V_B)$ in $< 1\ \mu\text{s}$, driving real-time visual insertion/deletion heatmaps in `XanadocLens` and `LatticeLens`.
 
----
+- Scrubbing a presentation slider across 100,000 versions jumps to the nearest checkpoint via binary
+  lifting ($O(1)$) and applies $\le 31$ composable EDL transforms.
+- State reconstruction takes **$< 0.3\ \mu\text{s}$**, eliminating replay stalls.
+- Structural diffs between microversions $V_A$ and $V_B$ are generated by composing
+  $T(\text{LCA} \to V_A)^{-1} \circ T(\text{LCA} \to V_B)$ in $< 1\ \mu\text{s}$, driving real-time
+  visual insertion/deletion heatmaps in `XanadocLens` and `LatticeLens`.
+
+______________________________________________________________________
 
 ## 7. Ephemeral Arenafilades (Memory Lifecycles & B=8 Architecture)
 
 ### 7.1 Reconciling Enfilades with `ArenaManifold` Epoch Tossing
-Per Architectural Ruling **R8**, ephemeral system entities (`ProcLens`, `NetLens`, dynamic query derivations) live exclusively in `ArenaManifold`. However, `ArenaManifold` cell slots and CSR link runs are append-only; long-running monitors periodically execute an **Epoch Toss** (`release(emptyMark)`):
+
+Per Architectural Ruling **R8**, ephemeral system entities (`ProcLens`, `NetLens`, dynamic query
+derivations) live exclusively in `ArenaManifold`. However, `ArenaManifold` cell slots and CSR link
+runs are append-only; long-running monitors periodically execute an **Epoch Toss**
+(`release(emptyMark)`):
+
 - All memory past the mark is invalidated instantaneously.
 - Any pointers into the tossed heap become dangling references.
 
-Traditional tree implementations (`std::map`, pointer-based B-trees) require recursive deletions and cause catastrophic allocator fragmentation under epoch tossing.
+Traditional tree implementations (`std::map`, pointer-based B-trees) require recursive deletions and
+cause catastrophic allocator fragmentation under epoch tossing.
 
 ### 7.2 The Cache-Conscious B-Enfilade (`CrumNode<Dsp, Wid, 8>`)
+
 The codebase solves this via `include/gleditor/enfilade/crum_node.hpp`:
+
 ```cpp
 template <typename Dsp, typename Wid, std::size_t B = 8>
 struct alignas(kCacheLineBytes) CrumNode {
@@ -407,37 +509,48 @@ struct alignas(kCacheLineBytes) CrumNode {
 ```
 
 ### 7.3 Ephemeral Allocation & Zero-Cost Teardown
-1. **Arena Slab Allocation**:
-   - `Arenafilade` crums and entries are allocated from contiguous slices of the `ArenaManifold`'s linear byte arena or scratch buffer.
-2. **Zero-Cost Destructors**:
-   - Because crums are trivially destructible value types (`std::is_trivially_destructible_v<CrumNode> == true`), tearing down an entire enfilade of 500,000 nodes during an epoch toss is an **$O(1)$ pointer reset**.
-   - Zero heap `free()` calls, zero destructor walks, zero cache pollution.
-3. **Rebuild-on-Demand Policy (Ruling V3)**:
-   - When a camera shifts or a monitor resets, the ephemeral index is tossed and lazily re-aggregated from the active window's CSR runs during `prepare()`.
 
----
+1. **Arena Slab Allocation**:
+   - `Arenafilade` crums and entries are allocated from contiguous slices of the `ArenaManifold`'s
+     linear byte arena or scratch buffer.
+1. **Zero-Cost Destructors**:
+   - Because crums are trivially destructible value types
+     (`std::is_trivially_destructible_v<CrumNode> == true`), tearing down an entire enfilade of
+     500,000 nodes during an epoch toss is an **$O(1)$ pointer reset**.
+   - Zero heap `free()` calls, zero destructor walks, zero cache pollution.
+1. **Rebuild-on-Demand Policy (Ruling V3)**:
+   - When a camera shifts or a monitor resets, the ephemeral index is tossed and lazily
+     re-aggregated from the active window's CSR runs during `prepare()`.
+
+______________________________________________________________________
 
 ## 8. Synthesis: Enfilade Deployment Matrix Across the Lens Stack
 
-| Enfilade Specialization | Dsp Monoid | Wid Monoid | Primary Lens Tier | Target Subsystem / Query | Complexity |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Poomfilade / Rankfilade** | `RankDsp` $(\Delta i)$ | `RankWid` $(\sum N)$ | Tier 2 & Tier 3 | Scrollbar thumb geometry; $A[k]$ ordinal random access | $O(\log_8 N)$ |
-| **Layoutfilade** | `LayoutDsp` $(\Delta b, \Delta Y, \Delta l)$ | `LayoutWid` $(\Sigma b, \Sigma H, \Sigma l, \max W, \Sigma m)$ | Tier 3 (Presentation) | Virtualized scrolling; $Y \leftrightarrow \text{line}$; localized reflow | $O(\log_{16} N)$ |
-| **Multi-Valence Arrayfilade** | `ArrayDsp` $(\Delta c_0..\Delta c_3)$ | `ArrayWid` $(\text{Hull}, \text{Reductions}, [s_{\min}, s_{\max}], \text{Bloom})$ | Tier 2 (Transductive) | Multidimensional VPL slicing; VQL predicate pushdown | $O(\log_8 N)$ |
-| **The True Spanfilade** | `SpanDsp` $(\Delta \text{addr})$ | `SpanWid` $([\min S, \max E), \Sigma N)$ | Tier 3 (Presentation) | Permascroll range stabbing; optical link beams | $O(\log_{16} N + K)$ |
-| **Treefilade (Fleet Telemetry)**| `StatDsp` $(\Delta \text{hops})$ | `StatWid` $(\Sigma N, \Sigma x, \Sigma x^2, \text{DDSketch}, \text{HLL})$ | Tier 1 & Spool-Mesh | 50,000-node fleet observability; $O(1)$ p99 quantiles | $O(\log_{16} N)$ |
-| **Osmic Chronofilade** | EDL Transform $(T \circ I)$ | Microversion depth & checkpoints | Tier 3 & Store Replay | Timeline scrubbing; $15\text{ ns}$ LCA; microversion diffs | $O(\log K)$ |
-| **The True Holefilade** | `HoleDsp` $(\Delta \text{offset})$| `HoleWid` $(\Sigma \text{clear}, \Sigma \text{withheld}, \Sigma \text{owed})$ | Tier 1 & Swarm Wire | Permascroll withholding; takedowns; transcopyright ledger | $O(\log_{16} N)$ |
+| Enfilade Specialization          | Dsp Monoid                                   | Wid Monoid                                                                        | Primary Lens Tier     | Target Subsystem / Query                                                 | Complexity           |
+| :------------------------------- | :------------------------------------------- | :-------------------------------------------------------------------------------- | :-------------------- | :----------------------------------------------------------------------- | :------------------- |
+| **Poomfilade / Rankfilade**      | `RankDsp` $(\Delta i)$                       | `RankWid` $(\sum N)$                                                              | Tier 2 & Tier 3       | Scrollbar thumb geometry; $A[k]$ ordinal random access                   | $O(\log_8 N)$        |
+| **Layoutfilade**                 | `LayoutDsp` $(\Delta b, \Delta Y, \Delta l)$ | `LayoutWid` $(\Sigma b, \Sigma H, \Sigma l, \max W, \Sigma m)$                    | Tier 3 (Presentation) | Virtualized scrolling; $Y \leftrightarrow \text{line}$; localized reflow | $O(\log_{16} N)$     |
+| **Multi-Valence Arrayfilade**    | `ArrayDsp` $(\Delta c_0..\Delta c_3)$        | `ArrayWid` $(\text{Hull}, \text{Reductions}, [s_{\min}, s_{\max}], \text{Bloom})$ | Tier 2 (Transductive) | Multidimensional VPL slicing; VQL predicate pushdown                     | $O(\log_8 N)$        |
+| **The True Spanfilade**          | `SpanDsp` $(\Delta \text{addr})$             | `SpanWid` $([\min S, \max E), \Sigma N)$                                          | Tier 3 (Presentation) | Permascroll range stabbing; optical link beams                           | $O(\log_{16} N + K)$ |
+| **Treefilade (Fleet Telemetry)** | `StatDsp` $(\Delta \text{hops})$             | `StatWid` $(\Sigma N, \Sigma x, \Sigma x^2, \text{DDSketch}, \text{HLL})$         | Tier 1 & Spool-Mesh   | 50,000-node fleet observability; $O(1)$ p99 quantiles                    | $O(\log_{16} N)$     |
+| **Osmic Chronofilade**           | EDL Transform $(T \circ I)$                  | Microversion depth & checkpoints                                                  | Tier 3 & Store Replay | Timeline scrubbing; $15\text{ ns}$ LCA; microversion diffs               | $O(\log K)$          |
+| **The True Holefilade**          | `HoleDsp` $(\Delta \text{offset})$           | `HoleWid` $(\Sigma \text{clear}, \Sigma \text{withheld}, \Sigma \text{owed})$     | Tier 1 & Swarm Wire   | Permascroll withholding; takedowns; transcopyright ledger                | $O(\log_{16} N)$     |
 
----
+______________________________________________________________________
 
 ## Conclusion
 
-By grounding the Dimension-Cell Operating Environment in the rigorous monoid algebra of Nelsonian Enfilades, we eliminate every performance vulnerability identified in the Tripartite Critique:
+By grounding the Dimension-Cell Operating Environment in the rigorous monoid algebra of Nelsonian
+Enfilades, we eliminate every performance vulnerability identified in the Tripartite Critique:
+
 - **Random access along ranks is solved** ($O(\log N)$ via Poomfilades).
 - **120 FPS virtualized rendering is achieved** (via 2D Layoutfilades and Spanfilades).
-- **Transductive query pipelines are accelerated by orders of magnitude** (via Arrayfilade predicate pushdown).
-- **Fleet-scale distributed telemetry is rendered sublinear** (via Treefilades and streaming sketches).
+- **Transductive query pipelines are accelerated by orders of magnitude** (via Arrayfilade predicate
+  pushdown).
+- **Fleet-scale distributed telemetry is rendered sublinear** (via Treefilades and streaming
+  sketches).
 - **Hypertime diffing and scrubbing become real-time** (via Chronofilades and binary lifting).
 
-Every enfilade operates strictly as a **derived replay product** under **Ruling R8**, preserving cache locality, 32-byte `CellSlot` sizing (**R12 & U3**), and the unshakeable architectural purity of Project Xanadu.
+Every enfilade operates strictly as a **derived replay product** under **Ruling R8**, preserving
+cache locality, 32-byte `CellSlot` sizing (**R12 & U3**), and the unshakeable architectural purity
+of Project Xanadu.
