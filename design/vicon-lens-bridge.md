@@ -1,4 +1,4 @@
-# vicon Lens Bridge: Lenses as Suspended Host Requests in a Goal-Directed Language (v1.29)
+# vicon Lens Bridge: Lenses as Suspended Host Requests in a Goal-Directed Language (v1.30)
 
 A design specification for how a **vicon program** — not a `vicon` REPL verb — opens, traverses,
 mounts, writes back, and releases projection lenses. Design deliverable only: the signatures are
@@ -282,7 +282,7 @@ is store-less like vlace's evaluator; no `MetaSource` fold exists to borrow. xuz
 four gesture copies (`xuzz_app.cpp`) and does not call `session_ops` — gate-free, noted, out of
 scope (`session_ops.hpp:22-25`).
 
-`lens(path)`/`lens("kw","spec")`/`dirLens`/`sqlLens`/`gitLens`/`logLens`/`journalLens`/`cfgLens`/`unionLens(spec,…)` is URI-free: `lens(path)` takes a **bare path only** (a `scheme:`-shaped operand refuses at the arm — `openLensUri` accepts known schemes, `lens_uri.cpp:33-50`, so the arm's own detector rejects them); `lens("kw","spec")` carries keyword and spec separately; `dirLens`/`sqlLens`/`gitLens`/`logLens`/`journalLens`/`cfgLens`/`unionLens` are the typed spellings — `open(filename)` is the idiom, `lens("dir:/x")` is not
+`lens(path)`/`lens("kw","spec")`/`dirLens`/`sqlLens`/`gitLens`/`logLens`/`journalLens`/`cfgLens`/`unionLens(spec,…)` is URI-free: `lens(path)` takes a **bare path only** (a `scheme:`-shaped operand refuses at the arm — `openLensUri` accepts known schemes, `lens_uri.cpp:33-50`, so the arm's own detector rejects them); `lens("kw","spec")` carries keyword and spec separately; `dirLens`/`sqlLens`/`gitLens`/`logLens`/`journalLens`/`cfgLens`/`unionLens`/`match`/`descendants` — all builtin-dispatched before `procTargets_` (`compiler.cpp:696,724-728`), so a user procedure with any of these names is silently shadowed are the typed spellings — `open(filename)` is the idiom, `lens("dir:/x")` is not
 — where the siblings took typed spec objects; the URI's scheme already selects the lens type. The
 price paid either way is canonical-identity dedupe (D2): normalization lives in the registry open
 path, not in the argument's shape.
