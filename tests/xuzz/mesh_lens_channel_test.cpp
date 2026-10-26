@@ -31,7 +31,10 @@ TEST(MeshLensChannelTest, SimulatedTwoPeerMaterializationHop) {
   EXPECT_EQ(client.stateOf(pCell), ProxyCellState::Resolving);
 
   // 3. Server serves peer requests
-  auto provider = [](std::string_view cellName) -> std::optional<std::string> {
+  std::size_t providerCalls = 0;
+  auto provider             = [&providerCalls](
+                      std::string_view cellName) -> std::optional<std::string> {
+    ++providerCalls;
     if (cellName == "proc/42/status") {
       return "PID 42: RUNNING, mem=64MB";
     }
@@ -40,6 +43,7 @@ TEST(MeshLensChannelTest, SimulatedTwoPeerMaterializationHop) {
 
   const auto answered = server.servePeerRequests(provider);
   EXPECT_EQ(answered, 1U);
+  EXPECT_EQ(providerCalls, 1U);
 
   // 4. Client polls incoming
   const auto resolved = client.pollIncoming(clientArena);

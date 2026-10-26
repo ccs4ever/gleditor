@@ -80,7 +80,10 @@ public:
     return *stdlib_;
   }
   [[nodiscard]] Store *store() const noexcept { return store_; }
-  void setStore(Store *store) noexcept { store_ = store; }
+  VPLEngine *setStore(Store *store) noexcept {
+    store_ = store;
+    return this;
+  }
 
   /// Default dimension for 1D arrays (defaults to "d.1").
   [[nodiscard]] zigzag::DimRef defaultDim();

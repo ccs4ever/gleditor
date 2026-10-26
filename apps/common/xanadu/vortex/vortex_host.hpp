@@ -134,19 +134,21 @@ public:
     return vplEngine_;
   }
 
-  void setAppActionDelegate(AppActionDelegate delegate) {
+  VortexHost *setAppActionDelegate(AppActionDelegate delegate) {
     appActionDelegate_ = std::move(delegate);
+    return this;
   }
   [[nodiscard]] const AppActionDelegate &appActionDelegate() const noexcept {
     return appActionDelegate_;
   }
 
   // -- Configuration ----------------------------------------------------------
-  void setConfig(VortexHostConfig config) {
+  VortexHost *setConfig(VortexHostConfig config) {
     config_ = std::move(config);
     // Rebuild the data-parallel worker pool so a worker_threads change takes
     // effect immediately (Stage 2/4).
     applyParallelConfig();
+    return this;
   }
   [[nodiscard]] const VortexHostConfig &config() const noexcept {
     return config_;

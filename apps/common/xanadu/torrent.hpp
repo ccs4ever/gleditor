@@ -37,13 +37,14 @@
 #include <cstdint>
 #include <expected>
 #include <filesystem>
-#include <functional>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#include <gleditor/cpp26.hpp>
 
 #include <gleditor/color.hpp>
 
@@ -298,11 +299,13 @@ writeTorrentSeed(const std::filesystem::path &directory,
  *
  * Shared because a magnet link and a BEP 46 mutable link are the same syntax
  * carrying different parameters, and two readings of that syntax would be two
- * things to keep in agreement.
+ * things to keep in agreement. The visitor is borrowed, called synchronously
+ * for each parameter, and not retained.
  */
 void forEachMagnetParameter(
     std::string_view uri,
-    const std::function<void(std::string_view key, std::string value)> &visit);
+    gleditor::cpp26::function_ref<void(std::string_view key, std::string value)>
+        visit);
 
 } // namespace xanadu
 

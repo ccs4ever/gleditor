@@ -15,6 +15,8 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 #include "common/xanadu/torrent.hpp"
 
@@ -150,6 +152,23 @@ TEST(MagnetTest, theHashIsRead) {
   const auto link = xanadu::MagnetLink::parse(
       std::string("magnet:?xt=urn:btih:") + singleFileHash);
   EXPECT_EQ(link.hash.hex(), singleFileHash);
+}
+
+TEST(MagnetTest, parameterVisitorKeepsRepeatedKeysAndCapturedState) {
+  std::vector<std::pair<std::string, std::string>> visited;
+  std::size_t count  = 0;
+  const auto visitor = [&visited, &count](const std::string_view key,
+                                          std::string value) {
+    ++count;
+    visited.emplace_back(key, std::move(value));
+  };
+
+  xanadu::forEachMagnetParameter("magnet:?tr=udp%3A%2F%2Fa&tr=udp%3A%2F%2Fb",
+                                 visitor);
+
+  EXPECT_EQ(count, 2U);
+  EXPECT_EQ(visited, (std::vector<std::pair<std::string, std::string>>{
+                         {"tr", "udp://a"}, {"tr", "udp://b"}}));
 }
 
 TEST(MagnetTest, whatATorrentEmitsIsWhatThisReads) {

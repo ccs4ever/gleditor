@@ -167,7 +167,7 @@ GifDecoder::decode(std::span<const std::uint8_t> /*bytes*/) {
 
 cpp26::optional<const GifFrame &>
 GifDecoder::frameAt(const float seconds) const noexcept {
-  if (frames_.empty()) return std::nullopt;
+  if (frames_.empty()) return cpp26::nullopt;
   if (seconds <= 0.0F) {
     return frames_.front();
   }
@@ -187,7 +187,7 @@ GifDecoder::frame(const std::size_t index) const noexcept {
   if (index < frames_.size()) {
     return frames_[index];
   }
-  return std::nullopt;
+  return cpp26::nullopt;
 }
 
 } // namespace gleditor

@@ -1,9 +1,11 @@
 # C++26 compatibility plan
 
-Reviewed 2026-09-24. This is a plan for using selected C++26 library facilities while the project
+Reviewed 2026-10-26. This is a plan for using selected C++26 library facilities while the project
 continues to build with its Makefile-selected C++23 or C++26 draft mode. Compiler dialect and
 standard-library coverage are separate: `-std=c++2c` alone does not establish that a library type
-exists. Implemented rows below are in this worktree; the other rows are estimates, not commitments.
+exists. Implemented rows describe the current tree; the other rows are estimates, not commitments.
+The [October audit](audits/cpp26-functional-audit.md) records current usage and the
+[upstream readiness survey](audits/cpp26-library-research.md).
 
 ## GitHub survey
 
@@ -15,7 +17,7 @@ worth watching or using for this repository:
 | ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
 | [Beman optional](https://github.com/bemanproject/optional)                                | Reference-style implementation of `optional<T&>` and optional range support; header-only API can be consumed by GNU Make.                                                  | Pin for the first tranche.                                                                     |
 | [zhihaoy/nontype_functional](https://github.com/zhihaoy/nontype_functional)               | Complete non-owning `function_ref` implementation with qualified signatures. Its `nontype` constructor reflects an older draft; current libstdc++ uses `constant_wrapper`. | Pin for ordinary callable use; keep draft-specific constructor tags outside the common facade. |
-| [Beman inplace_vector](https://github.com/bemanproject/inplace_vector)                    | Standard-oriented fixed-capacity vector; headers can be used without adopting its CMake build. Upstream still labels it under development.                                 | Pin for a narrowly scoped tether-render staging buffer.                                        |
+| [Beman inplace_vector](https://github.com/bemanproject/inplace_vector)                    | Standard-oriented fixed-capacity vector; headers can be used without adopting its CMake build. Upstream still labels it under development.                                 | Keep the pin for bounded segmented-pill staging buffers.                                       |
 | [PLF hive](https://github.com/mattreecebentley/plf_hive)                                  | Mature colony/hive container lineage.                                                                                                                                      | Candidate only after an iterator-stability use case is identified.                             |
 | [NVIDIA stdexec](https://github.com/NVIDIA/stdexec)                                       | Broad implementation of C++26 senders and receivers; upstream calls it experimental and tracks changing wording.                                                           | Evaluate for asynchronous orchestration, not as a blanket replacement for existing callbacks.  |
 | [Kokkos stdBLAS](https://github.com/kokkos/stdBLAS)                                       | Reference implementation of `std::linalg` algorithms over `mdspan`.                                                                                                        | Revisit if renderer or array workloads need standard BLAS-shaped operations.                   |
@@ -36,25 +38,25 @@ Estimates are engineer-days to integrate, test and document in this repository, 
 library. They exclude future migrations of unrelated call sites. Value depends on an actual use
 case; "defer" means there is currently no demonstrated advantage over existing code.
 
-| Feature                                      | Likely source                     |             Effort | Project use and decision                                                                        |
-| -------------------------------------------- | --------------------------------- | -----------------: | ----------------------------------------------------------------------------------------------- |
-| `std::function_ref`                          | nontype_functional                |                2-3 | **Implemented** for Vortex `map`/`filter`/`fold` and `WorkerPool::run` (see below).             |
-| `std::optional<T&>`                          | Beman optional                    |                2-3 | **Implemented** for borrowed ZigZag cell lookup.                                                |
-| Optional range support                       | Beman optional                    |                1-2 | **Implemented** alongside optional references; test zero or one iteration.                      |
-| `std::inplace_vector`                        | Beman inplace_vector              |                3-5 | **Implemented** for the default 17-point tether curve; larger configured curves remain dynamic. |
-| Checked `std::span::at` access               | Native library or local helper    |                1-2 | **Implemented** for GIF byte reads through `gleditor::cpp26::span_at`.                          |
-| `std::views::concat` for two const spans     | Native library or C++23 `join`    |                2-3 | **Implemented** for VQL `!both`; see [the scoped adapter](cpp26-views-concat-plan.md).          |
-| `std::hive`                                  | PLF hive                          |                4-7 | Defer pending a stable-iterator workload and memory comparison with existing containers.        |
-| `std::execution` senders/receivers           | NVIDIA stdexec                    |              10-20 | Defer pending a concrete threading and cancellation design for swarm or rendering work.         |
-| `std::simd`                                  | GSI SIMD or native library        |               5-10 | Defer pending profiler evidence in glyph, layout or decode kernels.                             |
-| `std::linalg`                                | Kokkos stdBLAS                    |               5-10 | Defer; no current BLAS-shaped hot path.                                                         |
-| `std::copyable_function`                     | Beman copyable_function or native |                2-4 | Defer; existing ownership semantics already use `std::function`.                                |
-| `std::text_encoding`                         | Native library or local adapter   |                3-5 | Candidate for import metadata; encoding identification does not transcode document text.        |
-| `std::indirect`/`std::polymorphic`           | Beman indirect or native library  |                3-6 | Defer pending a value-semantic ownership use case.                                              |
-| C++26 formatting additions                   | {fmt} or native library           |                2-4 | Defer; spdlog/{fmt} already serve diagnostics and formatting.                                   |
-| Compile-time reflection                      | Compiler support                  |             15-30+ | Cannot be faithfully supplied as a library polyfill; wait for compiler coverage.                |
-| Contracts                                    | Compiler support                  |             10-20+ | Cannot preserve language-level semantics with a macro; wait for compiler support.               |
-| Pack indexing and other core-language syntax | Compiler support                  | 5-15 per migration | No library polyfill; use existing templates until supported toolchains converge.                |
+| Feature                                      | Likely source                     |             Effort | Project use and decision                                                                       |
+| -------------------------------------------- | --------------------------------- | -----------------: | ---------------------------------------------------------------------------------------------- |
+| `std::function_ref`                          | nontype_functional                |                2-3 | **Implemented** for Vortex `map`/`filter`/`fold` and `WorkerPool::run` (see below).            |
+| `std::optional<T&>`                          | Beman optional                    |                2-3 | **Implemented** for borrowed ZigZag cell lookup.                                               |
+| Optional range support                       | Beman optional                    |                1-2 | **Implemented** alongside optional references; test zero or one iteration.                     |
+| `std::inplace_vector`                        | Beman inplace_vector              |                3-5 | **Implemented** for two 32-slot segmented-pill buffers, with dynamic storage for larger pills. |
+| Checked `std::span::at` access               | Native library or local helper    |                1-2 | **Implemented** for GIF byte reads through `gleditor::cpp26::span_at`.                         |
+| `std::views::concat` for two const spans     | Native library or C++23 `join`    |                2-3 | **Implemented** for VQL `!both`; see [the scoped adapter](cpp26-views-concat-plan.md).         |
+| `std::hive`                                  | PLF hive                          |                4-7 | Defer pending a stable-iterator workload and memory comparison with existing containers.       |
+| `std::execution` senders/receivers           | NVIDIA stdexec                    |              10-20 | Defer pending a concrete threading and cancellation design for swarm or rendering work.        |
+| `std::simd`                                  | GSI SIMD or native library        |               5-10 | Defer pending profiler evidence in glyph, layout or decode kernels.                            |
+| `std::linalg`                                | Kokkos stdBLAS                    |               5-10 | Defer; no current BLAS-shaped hot path.                                                        |
+| `std::copyable_function`                     | Beman copyable_function or native |                2-4 | Defer; existing ownership semantics already use `std::function`.                               |
+| `std::text_encoding`                         | Native library or local adapter   |                3-5 | Candidate for import metadata; encoding identification does not transcode document text.       |
+| `std::indirect`/`std::polymorphic`           | Beman indirect or native library  |                3-6 | Defer pending a value-semantic ownership use case.                                             |
+| C++26 formatting additions                   | {fmt} or native library           |                2-4 | Defer; spdlog/{fmt} already serve diagnostics and formatting.                                  |
+| Compile-time reflection                      | Compiler support                  |             15-30+ | Cannot be faithfully supplied as a library polyfill; wait for compiler coverage.               |
+| Contracts                                    | Compiler support                  |             10-20+ | Cannot preserve language-level semantics with a macro; wait for compiler support.              |
+| Pack indexing and other core-language syntax | Compiler support                  | 5-15 per migration | No library polyfill; use existing templates until supported toolchains converge.               |
 
 The first three estimates overlap; the implemented features share the compatibility header,
 submodule setup and CI work. Future features should be integrated one at a time only where the
@@ -71,7 +73,7 @@ Every choice is made once, in `<gleditor/cpp26_select.hpp>`, which defines a
 `__cpp_lib_function_ref >= 202603L`; `inplace_vector` requires
 `__cpp_lib_inplace_vector >= 202603L`; optional references and range support require both
 `__cpp_lib_optional >= 202506L` and `__cpp_lib_optional_range_support >= 202406L`.
-`GLEDITOR_CPP26_FORCE_FALLBACK=1` exercises all four fallback branches. The Makefile records this
+`GLEDITOR_CPP26_FORCE_FALLBACK=1` exercises all five fallback groups. The Makefile records this
 define in its object build flags, so switching modes rebuilds affected objects.
 
 `include/gleditor/cpp26_span.hpp` adds `gleditor::cpp26::span_at(span, index)` for checked access at
@@ -111,14 +113,17 @@ under `gleditor/cpp26-fallback/`, which `gleditor.pc` adds as `-isystem`. Persis
 must not contain these types. `findCell`'s optional reference borrows from its input map; callers
 must keep the map alive and avoid invalidating the referenced cell.
 
-The tether renderer normally samples 16 segments into 17 points once per frame. With a local
-allocation-counting probe using `glm::vec3`, construction of the former `std::vector` used one
-allocation; `inplace_vector<glm::vec3, 17>` used zero in both the native and forced-fallback paths.
-The configured segment count is not capped: counts above 16 still use `std::vector`, and the same
-point-generation loop feeds the renderer in either case. The Beman implementation is still under
-development: its `try_push_back` currently returns a pointer, while this native library returns
-`optional<T&>`. Only `resize`, `data`, and `size` are used across both branches here. Keep this use
-local until the fallback's API and constexpr support settle.
+`layoutSegmentedPill` currently uses two `inplace_vector<float, 32>` staging buffers for measured
+and final widths. Pills above 32 segments use dynamic vectors; the inline threshold does not limit
+user content. Both branches feed the same layout loops through spans. The used subset includes
+`resize`, copy assignment, `data` and `size`; broader insertion APIs remain outside the verified
+common contract. The pinned Beman implementation's try-insertion API and constexpr support still
+differ from newer native implementations, so broaden usage deliberately.
+
+An earlier allocation-counting probe compared `std::vector<glm::vec3>` with a 17-point
+`inplace_vector` tether buffer and reported one allocation versus zero in native and fallback modes.
+That historical probe is not a measurement of the current segmented-pill layout or frame latency;
+the tether renderer now uses its own `NurbsSamples` storage.
 
 `WorkerPool::run` takes its work as `function_ref` because its per-frame caller, the Vulkan
 secondary-command recorder, passes a closure of five captures (40 bytes), past libstdc++'s 16-byte
@@ -126,17 +131,21 @@ secondary-command recorder, passes a closure of five captures (40 bytes), past l
 `std::function` allocated once per call, `function_ref` zero, in both native and forced-fallback
 modes. The pool keeps a pointer to the reference only until `run` returns.
 
+Use the facade's associated tags with its optional types, including `cpp26::nullopt` in empty
+returns and conditional expressions. `std::nullopt` is not interchangeable with Beman's tag; native
+aliases can hide this mismatch, so forced-fallback compilation is essential.
+
 ## Verification and migration
 
 The normal build chooses native facilities when its standard library reports the required macros;
 otherwise it uses the pinned fallbacks. The SDL2 CI job rebuilds `xudu` and the affected test
-binaries with `GLEDITOR_CPP26_FORCE_FALLBACK=1`, then runs the compatibility, VQL `!both`, checked
-span, GIF, Vortex functional and ZigZag lookup tests headlessly. Native and forced-fallback paths
-were tested locally with Clang 22 and libstdc++ 16; the fallback headers were also compiled in C++23
-mode with Clang and GCC. CI runner libraries may only exercise the fallback path until a newer
-toolchain is added. Run both local builds and the full `make -j$(nproc) test` suite before
-broadening adoption. The existing `-std=c++2c` probe with `-std=c++2b` fallback remains
-authoritative.
+binaries with `GLEDITOR_CPP26_FORCE_FALLBACK=1`, then runs the full library, xuzz and ZigZag suites
+headlessly. Generic facade parity tests live in `tests/lib/cpp26_compat_test.cpp`; engine-specific
+tests stay with the engine. Native and forced-fallback paths were tested locally with Clang 22 and
+libstdc++ 16; the fallback headers were also compiled in C++23 mode with Clang and GCC. CI runner
+libraries may only exercise the fallback path until a newer toolchain is added. Run both local
+builds and the full `make -j$(nproc) test` suite before broadening adoption. The existing
+`-std=c++2c` probe with `-std=c++2b` fallback remains authoritative.
 
 When every supported standard library provides an adopted facility, raise or remove the feature gate
 only after native and fallback tests agree and a clean build across supported compilers succeeds.

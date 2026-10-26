@@ -33,12 +33,13 @@ void ScreenOverlay::changed() {
   dirty_ = true;
   ++revision_;
 }
-void ScreenOverlay::setModel(Widget model) {
+ScreenOverlay *ScreenOverlay::setModel(Widget model) {
   const std::scoped_lock lock(guard_);
   model_ = std::move(model);
   changed();
+  return this;
 }
-void ScreenOverlay::setVisible(bool visible) {
+ScreenOverlay *ScreenOverlay::setVisible(bool visible) {
   const std::scoped_lock lock(guard_);
   if (visible_ != visible) {
     visible_ = visible;
@@ -50,20 +51,23 @@ void ScreenOverlay::setVisible(bool visible) {
     }
     changed();
   }
+  return this;
 }
 bool ScreenOverlay::visible() const {
   const std::scoped_lock lock(guard_);
   return visible_;
 }
-void ScreenOverlay::setBounds(std::optional<Rect> bounds) {
+ScreenOverlay *ScreenOverlay::setBounds(std::optional<Rect> bounds) {
   const std::scoped_lock lock(guard_);
   bounds_ = bounds;
   changed();
+  return this;
 }
-void ScreenOverlay::setActionHandler(
+ScreenOverlay *ScreenOverlay::setActionHandler(
     std::function<void(const WidgetAction &)> handler) {
   const std::scoped_lock lock(guard_);
   actionHandler_ = std::move(handler);
+  return this;
 }
 void ScreenOverlay::invalidate() {
   const std::scoped_lock lock(guard_);

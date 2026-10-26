@@ -1407,8 +1407,7 @@ VplView VPLEngine::mintRank(const std::vector<double> &values,
     prev = c;
   }
   VplView res(head, {zigzag::DirectedDim{dim, zigzag::DimVector::POS}});
-  res.setExtents({values.size()});
-  res.setScalarPayload(values[0]);
+  res.setExtents({values.size()})->setScalarPayload(values[0]);
   return res;
 }
 
@@ -1424,8 +1423,7 @@ VplView VPLEngine::mintRank(const std::vector<std::int64_t> &values,
     prev = c;
   }
   VplView res(head, {zigzag::DirectedDim{dim, zigzag::DimVector::POS}});
-  res.setExtents({values.size()});
-  res.setScalarPayload(values[0]);
+  res.setExtents({values.size()})->setScalarPayload(values[0]);
   return res;
 }
 

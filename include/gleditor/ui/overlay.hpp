@@ -19,12 +19,12 @@ class ScreenOverlay : public FrameContributor,
 public:
   explicit ScreenOverlay(Widget);
   ~ScreenOverlay() override;
-  void setModel(Widget);
-  void setVisible(bool);
+  ScreenOverlay *setModel(Widget);
+  ScreenOverlay *setVisible(bool);
   [[nodiscard]] bool visible() const;
   /// Nullopt uses the metrics' safe area. Bounds are Canvas pixels.
-  void setBounds(std::optional<Rect>);
-  void setActionHandler(std::function<void(const WidgetAction &)>);
+  ScreenOverlay *setBounds(std::optional<Rect>);
+  ScreenOverlay *setActionHandler(std::function<void(const WidgetAction &)>);
   void invalidate();
   /// Also usable without a render device for geometry/accessibility inspection.
   [[nodiscard]] std::shared_ptr<const WidgetScene> prepare(const UiMetrics &,

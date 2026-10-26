@@ -4,12 +4,42 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <vector>
 
 namespace gleditor {
 namespace {
+
+struct UnsizedSentinel {
+  const int *end{};
+
+  friend bool operator==(const int *iterator, UnsizedSentinel sentinel) {
+    return iterator == sentinel.end;
+  }
+};
+
+using UnsizedRandomAccessRange =
+    std::ranges::subrange<const int *, UnsizedSentinel,
+                          std::ranges::subrange_kind::unsized>;
+
+static_assert(std::ranges::random_access_range<UnsizedRandomAccessRange>);
+static_assert(!std::ranges::sized_range<UnsizedRandomAccessRange>);
+
+struct SizedRandomAccessRange {
+  const int *first{};
+  const int *last{};
+
+  [[nodiscard]] const int *begin() const { return first; }
+  [[nodiscard]] const int *end() const { return last; }
+  [[nodiscard]] std::size_t size() const {
+    return static_cast<std::size_t>(last - first);
+  }
+};
+
+static_assert(std::ranges::random_access_range<SizedRandomAccessRange>);
+static_assert(std::ranges::sized_range<SizedRandomAccessRange>);
 
 TEST(FpPrimitivesTest, FromAndToSentinelRoundTrip) {
   constexpr std::uint32_t kSentinel = 0xFFFF'FFFFU;
@@ -44,6 +74,23 @@ TEST(FpPrimitivesTest, RangesNthOfAndSingleOf) {
   EXPECT_EQ(singleOf(numbers), std::nullopt);
 }
 
+TEST(FpPrimitivesTest, NthOfSupportsUnsizedRandomAccessRanges) {
+  const int numbers[]{10, 20, 30};
+  const UnsizedRandomAccessRange range{numbers, UnsizedSentinel{numbers + 3}};
+
+  EXPECT_EQ(nthOf(range, 0), 10);
+  EXPECT_EQ(nthOf(range, 2), 30);
+  EXPECT_EQ(nthOf(range, 3), std::nullopt);
+}
+
+TEST(FpPrimitivesTest, NthOfDoesNotRequireRangeSubscript) {
+  const int numbers[]{10, 20, 30};
+  const SizedRandomAccessRange range{numbers, numbers + 3};
+
+  EXPECT_EQ(nthOf(range, 1), 20);
+  EXPECT_EQ(nthOf(range, 3), std::nullopt);
+}
+
 TEST(FpPrimitivesTest, SteppedPathViewLinearAndCycleTermination) {
   // Linear sequence: 1 -> 2 -> 3 -> stop (nullopt)
   auto nextStep = [](int x) -> std::optional<int> {
@@ -52,6 +99,11 @@ TEST(FpPrimitivesTest, SteppedPathViewLinearAndCycleTermination) {
     }
     return std::nullopt;
   };
+
+  using PathView = decltype(stepped_path_view(nextStep, std::optional{1}));
+  static_assert(std::ranges::input_range<PathView>);
+  static_assert(!std::ranges::forward_range<PathView>);
+  static_assert(std::input_iterator<typename PathView::iterator>);
 
   std::vector<int> collected;
   for (int val : stepped_path_view(nextStep, std::optional{1})) {

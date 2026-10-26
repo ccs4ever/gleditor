@@ -13,12 +13,13 @@
 #define XANADU_VIEW_TRANSDUCTIVE_VIEW_HPP
 
 #include <cstdint>
-#include <functional>
 #include <optional>
 #include <span>
 #include <string_view>
 #include <unordered_set>
 #include <vector>
+
+#include <gleditor/cpp26.hpp>
 
 #include "common/xanadu/view/view_manifold.hpp"
 
@@ -65,19 +66,22 @@ public:
 
   /// Materialize a filtered rank from @p head along @p sourceDim into @p
   /// dimName. Walks the base rank, mints derived occurrences for matches, and
-  /// links them into CSR runs.
-  [[nodiscard]] std::optional<ViewCellRef>
-  materializeFilter(std::optional<zigzag::CellRef> head,
-                    std::optional<zigzag::DimRef> sourceDim,
-                    const std::function<bool(zigzag::CellRef)> &predicate,
-                    std::string_view dimName = "d.filtered");
+  /// links them into CSR runs. @p predicate is borrowed and called only before
+  /// this function returns; it is not retained.
+  [[nodiscard]] std::optional<ViewCellRef> materializeFilter(
+      std::optional<zigzag::CellRef> head,
+      std::optional<zigzag::DimRef> sourceDim,
+      gleditor::cpp26::function_ref<bool(zigzag::CellRef)> predicate,
+      std::string_view dimName = "d.filtered");
 
   /// Materialize a sorted rank from @p head along @p sourceDim using @p
-  /// comparator.
+  /// comparator. @p comparator is borrowed and used only before this function
+  /// returns; it is not retained.
   [[nodiscard]] std::optional<ViewCellRef> materializeSorted(
       std::optional<zigzag::CellRef> head,
       std::optional<zigzag::DimRef> sourceDim,
-      const std::function<bool(zigzag::CellRef, zigzag::CellRef)> &comparator,
+      gleditor::cpp26::function_ref<bool(zigzag::CellRef, zigzag::CellRef)>
+          comparator,
       std::string_view dimName = "d.sorted");
 
   /// Materialize a union rank across multiple rank heads into @p dimName,

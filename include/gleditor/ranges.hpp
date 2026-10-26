@@ -71,11 +71,13 @@ template <std::ranges::forward_range R, typename Pred>
 template <std::ranges::input_range R>
 [[nodiscard]] constexpr auto nthOf(R &&range, const std::size_t n)
     -> std::optional<std::ranges::range_value_t<R>> {
-  if constexpr (std::ranges::random_access_range<R>) {
+  if constexpr (std::ranges::random_access_range<R> &&
+                std::ranges::sized_range<R>) {
     if (n >= std::ranges::size(range)) {
       return std::nullopt;
     }
-    return range[n];
+    using Difference = std::ranges::range_difference_t<R>;
+    return *(std::ranges::begin(range) + static_cast<Difference>(n));
   } else {
     auto it             = std::ranges::begin(range);
     const auto sentinel = std::ranges::end(range);

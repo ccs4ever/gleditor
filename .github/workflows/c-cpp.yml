@@ -206,6 +206,7 @@ jobs:
         LIBGL_ALWAYS_SOFTWARE: 1
         XDG_DATA_HOME: ${{ github.workspace }}/build/xdg/data
         XDG_CONFIG_HOME: ${{ github.workspace }}/build/xdg/config
+        XDG_CACHE_HOME: ${{ github.workspace }}/build/xdg/cache
       run: |
         make -j$(nproc) GLEDITOR_SDL=2 GLEDITOR_ENABLE_VULKAN=1 \
           GLEDITOR_CPP26_FORCE_FALLBACK=1 xudu gleditor_test xuzz_test zigzag_test

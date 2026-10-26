@@ -467,7 +467,7 @@ std::vector<std::uint32_t> parseSelectOnly(const std::string_view text) {
 
 void forEachMagnetParameter(
     const std::string_view uri,
-    const std::function<void(std::string_view, std::string)> &visit) {
+    gleditor::cpp26::function_ref<void(std::string_view, std::string)> visit) {
   if (!uri.starts_with("magnet:?")) {
     return;
   }

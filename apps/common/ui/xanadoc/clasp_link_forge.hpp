@@ -93,19 +93,21 @@ public:
   void cycleType() noexcept;
   void cycleTier() noexcept;
 
-  void setLinkType(const LinkType type) noexcept {
+  LinkForgeWidget *setLinkType(const LinkType type) noexcept {
     if (selectedType_ != type) {
       selectedType_ = type;
       changed();
     }
+    return this;
   }
   [[nodiscard]] LinkType linkType() const noexcept { return selectedType_; }
 
-  void setProminenceTier(const ProminenceTier tier) noexcept {
+  LinkForgeWidget *setProminenceTier(const ProminenceTier tier) noexcept {
     if (selectedTier_ != tier) {
       selectedTier_ = tier;
       changed();
     }
+    return this;
   }
   [[nodiscard]] ProminenceTier prominenceTier() const noexcept {
     return selectedTier_;

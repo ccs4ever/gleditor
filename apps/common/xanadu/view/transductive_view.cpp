@@ -46,7 +46,7 @@ std::optional<zigzag::CellRef> CycleBoundedRankIterator::next() noexcept {
 std::optional<ViewCellRef> TransductiveView::materializeFilter(
     std::optional<zigzag::CellRef> head,
     std::optional<zigzag::DimRef> sourceDim,
-    const std::function<bool(zigzag::CellRef)> &predicate,
+    gleditor::cpp26::function_ref<bool(zigzag::CellRef)> predicate,
     std::string_view dimName) {
   if (!head.has_value() || !sourceDim.has_value() || *head == zigzag::noCell ||
       *sourceDim == zigzag::noCell) {
@@ -94,7 +94,8 @@ std::optional<ViewCellRef> TransductiveView::materializeFilter(
 std::optional<ViewCellRef> TransductiveView::materializeSorted(
     std::optional<zigzag::CellRef> head,
     std::optional<zigzag::DimRef> sourceDim,
-    const std::function<bool(zigzag::CellRef, zigzag::CellRef)> &comparator,
+    gleditor::cpp26::function_ref<bool(zigzag::CellRef, zigzag::CellRef)>
+        comparator,
     std::string_view dimName) {
   if (!head.has_value() || !sourceDim.has_value() || *head == zigzag::noCell ||
       *sourceDim == zigzag::noCell) {

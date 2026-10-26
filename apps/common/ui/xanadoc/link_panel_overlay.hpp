@@ -62,14 +62,17 @@ public:
 
   LinkPanelOverlay(LinkContext &context, Session &session);
 
-  void setCellHighlighter(CellHighlighter highlighter) {
+  LinkPanelOverlay *setCellHighlighter(CellHighlighter highlighter) {
     cellHighlighter = std::move(highlighter);
+    return this;
   }
-  void setAnchorResolver(AnchorResolver resolver) {
+  LinkPanelOverlay *setAnchorResolver(AnchorResolver resolver) {
     anchorResolver = std::move(resolver);
+    return this;
   }
-  void setFramingHandler(FramingHandler handler) {
+  LinkPanelOverlay *setFramingHandler(FramingHandler handler) {
     framingHandler = std::move(handler);
+    return this;
   }
 
   /// From system://ui; applied at launch and whenever that store changes.

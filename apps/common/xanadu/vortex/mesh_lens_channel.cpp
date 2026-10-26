@@ -137,8 +137,8 @@ std::size_t MeshLensChannel::checkTimeouts(std::uint64_t nowMs,
 }
 
 std::size_t MeshLensChannel::servePeerRequests(
-    const std::function<std::optional<std::string>(std::string_view)>
-        &provider) {
+    gleditor::cpp26::function_ref<std::optional<std::string>(std::string_view)>
+        provider) {
   if (!channel_) {
     return 0;
   }

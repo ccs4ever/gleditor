@@ -936,7 +936,10 @@ public:
   [[nodiscard]] const std::string &contents() const { return text; }
   /// Position among the renderer's open documents, carried in the picking tag
   /// so a result names which document was clicked.
-  void setDocIndex(const std::uint32_t index) { docIndex = index; }
+  Doc *setDocIndex(const std::uint32_t index) {
+    docIndex = index;
+    return this;
+  }
   [[nodiscard]] std::uint32_t documentIndex() const { return docIndex; }
   /// Built page @p index, or nothing for one not built yet or past the end.
   [[nodiscard]] gleditor::cpp26::optional<const Page &>

@@ -24,6 +24,7 @@
 #include "common/xanadu/compact_op.hpp"
 #include "common/xanadu/segmented_ops_spool.hpp"
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/store_tables.hpp"
 #include "common/xanadu/user_permascroll.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
 
@@ -234,6 +235,23 @@ TEST_F(XuduDumpTest, sectionsAreAddressableSoAFormatChangeCanBeDiffed) {
   EXPECT_EQ(runDump("--section=ops " + sample.args()).output, ops.output);
 
   EXPECT_EQ(runDump("--section=nonsense " + sample.args()).exitCode, 2);
+}
+
+TEST_F(XuduDumpTest, keylessDeploymentIsReportedInsteadOfPrintedAsAKey) {
+  const auto sample = savedStore(scratch("keyless-deployment"));
+  auto tables       = xanadu::readStoreTables(sample.store / "store.tables");
+  tables.deployedScrolls.emplace_back();
+  const auto deployment = tables.deployedScrolls.size();
+  xanadu::writeStoreTables(sample.store / "store.tables", tables);
+
+  const auto run = runDump("--section=scrolls " + sample.args());
+  EXPECT_EQ(run.exitCode, 1) << run.output;
+  EXPECT_THAT(run.output,
+              testing::HasSubstr("deployment " + std::to_string(deployment) +
+                                 " has no canonical scroll key"));
+  EXPECT_THAT(run.output,
+              testing::Not(testing::HasSubstr(
+                  "deployment  " + std::to_string(deployment) + " ")));
 }
 
 /// The store's operations written out through the compact binary wire format

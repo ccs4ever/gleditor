@@ -109,12 +109,19 @@ TEST(TransductiveViewTest, SortedMaterialization) {
   ViewManifold viewManifold(base);
   TransductiveView transView(viewManifold);
 
-  const auto sortedHead = transView.materializeSorted(
-      cells.front(), dSeq, [&](zigzag::CellRef a, zigzag::CellRef b) -> bool {
-        return base.asInt64(a).value_or(0) < base.asInt64(b).value_or(0);
-      });
+  bool descending         = false;
+  std::size_t comparisons = 0;
+  const auto compare      = [&](zigzag::CellRef a, zigzag::CellRef b) -> bool {
+    ++comparisons;
+    const auto left  = base.asInt64(a).value_or(0);
+    const auto right = base.asInt64(b).value_or(0);
+    return descending ? left > right : left < right;
+  };
+  const auto sortedHead =
+      transView.materializeSorted(cells.front(), dSeq, compare);
 
   ASSERT_TRUE(sortedHead.has_value());
+  EXPECT_GT(comparisons, 0U);
 
   // Check that the resolved sequence is strictly sorted: 1, 5, 10, 23, 42, 88,
   // 100
@@ -135,6 +142,27 @@ TEST(TransductiveViewTest, SortedMaterialization) {
 
   const std::vector<std::int64_t> expected = {1, 5, 10, 23, 42, 88, 100};
   EXPECT_EQ(resolved, expected);
+}
+
+TEST(TransductiveViewTest, FilterInvokesBorrowedStatefulPredicateInline) {
+  zigzag::ArenaManifold base;
+  const auto dSeq   = base.ensureDimension("d.seq");
+  const auto first  = base.makeCell();
+  const auto second = base.makeCell();
+  zigzag::expectWritten(base.link(first, dSeq, zigzag::DimVector::POS, second));
+
+  ViewManifold viewManifold(base);
+  TransductiveView transView(viewManifold);
+  std::size_t visits   = 0;
+  const auto predicate = [&visits](zigzag::CellRef) {
+    ++visits;
+    return true;
+  };
+
+  const auto head = transView.materializeFilter(first, dSeq, predicate);
+
+  EXPECT_TRUE(head.has_value());
+  EXPECT_EQ(visits, 2U);
 }
 
 TEST(TransductiveViewTest, CycleDetectionInMalformedUnionRank) {

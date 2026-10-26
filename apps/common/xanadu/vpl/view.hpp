@@ -98,8 +98,9 @@ public:
   [[nodiscard]] std::optional<zigzag::CellRef> origin() const noexcept {
     return origin_;
   }
-  void setOrigin(std::optional<zigzag::CellRef> origin) noexcept {
+  VplView *setOrigin(std::optional<zigzag::CellRef> origin) noexcept {
     origin_ = origin;
+    return this;
   }
 
   [[nodiscard]] const std::vector<zigzag::DirectedDim> &axes() const noexcept {
@@ -110,8 +111,9 @@ public:
   [[nodiscard]] const std::vector<std::size_t> &extents() const noexcept {
     return extents_;
   }
-  void setExtents(std::vector<std::size_t> extents) noexcept {
+  VplView *setExtents(std::vector<std::size_t> extents) noexcept {
     extents_ = std::move(extents);
+    return this;
   }
 
   /// Valence: number of dimensions indexed along (APL rank).
@@ -121,26 +123,32 @@ public:
   [[nodiscard]] bool isFloat() const noexcept { return isFloat_; }
   [[nodiscard]] bool isString() const noexcept { return isString_; }
   [[nodiscard]] bool isRagged() const noexcept { return isRagged_; }
-  void setRagged(bool ragged) noexcept { isRagged_ = ragged; }
+  VplView *setRagged(bool ragged) noexcept {
+    isRagged_ = ragged;
+    return this;
+  }
 
   [[nodiscard]] bool isEnclosed() const noexcept { return isEnclosed_; }
   [[nodiscard]] const std::shared_ptr<VplView> &enclosedView() const noexcept {
     return enclosedView_;
   }
-  void enclose(std::shared_ptr<VplView> inner) noexcept {
+  VplView *enclose(std::shared_ptr<VplView> inner) noexcept {
     isEnclosed_   = true;
     enclosedView_ = std::move(inner);
+    return this;
   }
 
   [[nodiscard]] double scalarFloat() const noexcept { return scalarFloat_; }
   [[nodiscard]] std::int64_t scalarInt() const noexcept { return scalarInt_; }
-  void setScalarPayload(std::int64_t val) noexcept {
+  VplView *setScalarPayload(std::int64_t val) noexcept {
     scalarInt_   = val;
     scalarFloat_ = static_cast<double>(val);
+    return this;
   }
-  void setScalarPayload(double val) noexcept {
+  VplView *setScalarPayload(double val) noexcept {
     scalarFloat_ = val;
     scalarInt_   = static_cast<std::int64_t>(val);
+    return this;
   }
   [[nodiscard]] const std::string &scalarString() const noexcept {
     return scalarString_;

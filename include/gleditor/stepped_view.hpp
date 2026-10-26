@@ -16,7 +16,7 @@ namespace gleditor {
 
 /**
  * @class stepped_path_view
- * @brief Lazy forward view over elements produced by calling a stepping
+ * @brief Lazy input view over elements produced by calling a stepping
  * function.
  *
  * Generates an element sequence beginning at @p start and advancing by calling
@@ -35,7 +35,7 @@ public:
   public:
     using value_type       = T;
     using difference_type  = std::ptrdiff_t;
-    using iterator_concept = std::forward_iterator_tag;
+    using iterator_concept = std::input_iterator_tag;
 
     constexpr iterator() noexcept = default;
     constexpr iterator(const StepFn *step, std::optional<T> start,
@@ -43,6 +43,7 @@ public:
         : step_{step}, start_{start},
           cur_{limit && *limit == 0 ? std::nullopt : start}, limit_{limit} {}
 
+    /// The reference is into this iterator and expires when it advances.
     [[nodiscard]] constexpr const T &operator*() const noexcept {
       return *cur_;
     }

@@ -21,6 +21,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include <gleditor/cpp26.hpp>
+
 #include "common/xanadu/vortex/spool_mesh.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 #include "common/xanadu/zigzag/dim_vector.hpp"
@@ -102,11 +104,12 @@ public:
   /**
    * @brief Simulates serving requests from a peer: inspects channel for
    * requests directed to @p localNode and sends back responses using @p
-   * provider.
+   * provider. The provider is borrowed for this call, invoked synchronously,
+   * and not retained.
    */
-  std::size_t servePeerRequests(
-      const std::function<std::optional<std::string>(std::string_view)>
-          &provider);
+  std::size_t servePeerRequests(gleditor::cpp26::function_ref<
+                                std::optional<std::string>(std::string_view)>
+                                    provider);
 
   [[nodiscard]] std::optional<ProxyCellState> stateOf(CellRef proxyRef) const;
   [[nodiscard]] const ProxyCell *getProxy(CellRef proxyRef) const;

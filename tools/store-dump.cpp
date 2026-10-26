@@ -371,8 +371,13 @@ void dumpTables(const xanadu::StoreTables &tables, bool wantScrolls) {
     std::cout << "publishedlocal  " << tables.publishedLocalScroll << '\n';
     for (std::size_t i = 0; i < tables.deployedScrolls.size(); ++i) {
       const auto &scroll = tables.deployedScrolls[i];
-      std::cout << "deployment  " << i + 1 << ' ' << xanadu::scrollKey(scroll)
-                << '\n';
+      const auto key     = xanadu::scrollKey(scroll);
+      if (!key) {
+        throw xanadu::StoreTablesUnreadable("deployment " +
+                                            std::to_string(i + 1) +
+                                            " has no canonical scroll key");
+      }
+      std::cout << "deployment  " << i + 1 << ' ' << *key << '\n';
     }
     for (const auto &segment : tables.localSegments) {
       std::cout << "localsegment  " << segmentFields(segment) << '\n';

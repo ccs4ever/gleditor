@@ -89,7 +89,8 @@ std::string getEffectiveCellText(const std::unordered_map<CellID, Cell> &cells,
   // number fell back to whatever text the clone itself happened to carry --
   // which is the one thing a clone must never do.
   const auto masterId = findCloneMaster(cells, id);
-  const auto master   = masterId ? findCell(cells, *masterId) : std::nullopt;
+  const auto master =
+      masterId ? findCell(cells, *masterId) : gleditor::cpp26::nullopt;
   if (master) {
     return cellDataAsText(master->data);
   }
