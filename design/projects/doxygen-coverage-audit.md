@@ -107,6 +107,14 @@ exclusive SDL2 or platform branches. The full-generation gate passed after this 
 files and 40,001 member entries, with all configured probes present. The old configuration fails the
 new function probes; the enabled feature extraction passes them.
 
+## Main-branch integration verification
+
+After merging upstream lens and SQL work, the full documentation gate passed again with Doxygen
+1.18.0 and Graphviz: 984/984 authored source files and 43,933 unique member entries, with every
+configured symbol probe and shader entry point present. Extraction also enables the PostgreSQL and
+systemd feature branches. These counts describe the merged tree; they do not expand the coverage
+claim beyond the limits below.
+
 ## Remaining limits
 
 The initial symbol-only run recorded 195 documentation/parser warnings and a missing `epstopdf`

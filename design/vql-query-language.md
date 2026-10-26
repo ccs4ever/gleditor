@@ -1,6 +1,6 @@
 # Vortex Query Language (VQL) Specification
 
-**Document Version:** 15.1 — Root Step Selectors, Functional Lens UFCS & Universal Lenses
+**Document Version:** 16.0 — Structural Typing, Unified Shape Contracts & Point-Free Functors
 **Compilation Target:** Vortex Hyperstructural Runtime Core (Single-Primitive Matrix Manifold)
 
 VQL is the declarative, XQuery-like companion language for
@@ -320,14 +320,13 @@ DestructureField      ::= "." ( ":" VariableRef )?
 
 TypeExpr              ::= UnionType
 UnionType             ::= PrimaryType ( "|" PrimaryType )*
-PrimaryType           ::= ( BasicType | GenericType | ShapeType | ParenType ) "?"?
+PrimaryType           ::= ( ( BasicType | GenericType ) ShapeType? | ShapeType | ParenType ) "?"?
 ParenType             ::= "(" TypeExpr ")"
 BasicType             ::= "Cell" | "Dim" | "Store" | "Slice" | "Version"
                         | "Int" | "Float" | "String" | "Bool" | "Any"
                         | ContextualTypeIdent
 GenericType           ::= ( "Stream" | ContextualTypeIdent ) "<" TypeExpr ( "," TypeExpr )* ">"
-ShapeType             ::= "{" ShapeTypeField ( "," ShapeTypeField )* "}"
-ShapeTypeField        ::= SignedDimension ( ":" TypeExpr )?
+ShapeType             ::= DestructurePattern   (* a contract's fields may bind *)
 ContextualTypeIdent   ::= [a-zA-Z_][a-zA-Z0-9_]*
 
 LetClause             ::= "let" VariableRef ":=" ( PathExpression | ValueExpr )
@@ -2249,6 +2248,53 @@ static_assert(sizeof(CurriedMorphism) == 24);
 **2. Dedicated Vortex Opcode (`TRAVERSE_CURRIED_DIM`)**: Instead of allocating closure control
 blocks, the VM executes a tight, unrolled inner CSR loop directly over `ArenaManifold::links_` in
 **3–5 CPU cycles per hop** (28x–45x faster than general call frames).
+
+#### 4.12.5 What the Direct Evaluator Implements, and What It Decided
+
+The reference engine (`apps/common/xanadu/vql/vql_engine.cpp`) implements §4.12.1–§4.12.3; the
+lowering in §4.12.4 is not built. The rulings below are where the prose above left a choice open.
+
+- **A shape type is a destructure pattern.** `ShapeType` holds a `DestructurePattern`, and a
+  `DestructureField` carries an optional variable, type and default. So `Cell { +d.title: String }`
+  (a contract), `{ +d.title: $t }` (a binding) and `$task: Cell { +d.owner: $o: Cell }` (both) are
+  one production, and Mode 4 binds `$o` because the contract that checks the field is the pattern
+  that binds it. A separate `ShapeTypeField` would have been a second grammar for the same braces.
+
+- **A parameter's type is a match; a return type is a promise.** A cell that misses a parameter's
+  contract makes that call match nothing, as a failed destructure always has, so
+  `##/+d.items/score_paper()` is a typed filter over a stream. A result outside the declared return
+  type throws `TypeContractError` naming the function: that is the body breaking its own signature,
+  and skipping the cell would hide the bug. An unknown type name is refused the same way, by name,
+  rather than read as `Any`.
+
+- **A non-stream type is one value.** `Cell` takes exactly one cell, `Cell?` zero or one, and
+  `Stream<T>` any number, each checked against `T` alone (so a shape inside a stream binds nothing:
+  one name cannot hold a field of every member). A typed field decides absence by its type, so
+  `+d.subtitle: $s: String?` admits a cell with no subtitle and binds `$s` empty.
+
+- **Scalars are read as comparisons read them (§4.3).** `Int`, `Float` and `Bool` accept a cell
+  minted with those value bits and a text cell whose whole content reads as one, because imported
+  and typed content is text and only literal-minted cells carry value bits. `"95"` is therefore both
+  a `String` and an `Int`. `Version` is text that `MicroversionId::parse` accepts; `Dim` a cell on
+  the core's `d.dims` rank or in the arena's dimension table; `Slice` a registered store's home cell
+  or the arena's own; `Store` a registered store's cell on `d.stores` or the coordinator origin.
+
+- **A default is used only when the field is absent**, and passing a cell or a path never mints: the
+  bound cell is the linked one. Only a literal default mints its scalar, and only when it is used.
+  `let $y := $x` now binds `$x`'s cells too, where it used to mint a copy of their value.
+
+- **A functor is its steps, composed when bound.** `let` (and an untyped def parameter) keeps a
+  leading-`/` path, or a path anchored on a functor variable, as a step list rather than evaluating
+  it; a bare `/$f` step inside it is inlined then, so rebinding `$f` later does not reach into a
+  functor already built from it. `f / /g` is `f/g`: the second slash is `g`'s own. Applied as a step
+  (`$c / $up`) the steps run over the step's input, and the step's predicates and clamp then apply
+  to what they reach. Applying one allocates no closure or frame; the step vectors are the same as
+  any path's, which §4.12.4's `CurriedMorphism` is what removes.
+
+- **The compiler refuses a functor binding**
+  (`point-free path functors are not compiled to Vortex yet; run the query with --engine direct`)
+  rather than compiling it as the cells the path reaches from home. Types are erased by the
+  compiler, as §4.12.1 allows; it does not yet check them.
 
 ______________________________________________________________________
 

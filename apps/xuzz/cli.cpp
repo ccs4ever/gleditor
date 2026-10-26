@@ -187,8 +187,17 @@ void CliParser::buildParser(argparse::ArgumentParser &parser,
       .default_value(std::string{});
 
   hiddenUnlessDetailed(parser.add_argument("--lens"))
-      .help("project a filesystem path through the FilesystemLens and show its "
+      .help("project a filesystem path or a sql: URI "
+            "(sql:sqlite:///abs/db.sqlite) through a lens and show its "
             "cells (use with --raster to print and exit)")
+      .default_value(std::string{});
+
+  hiddenUnlessDetailed(parser.add_argument("--sql-browse"))
+      .help("with --lens sql:..., browse one schema table or view")
+      .default_value(std::string{});
+
+  hiddenUnlessDetailed(parser.add_argument("--sql-query"))
+      .help("with --lens sql:..., run one read-only SELECT/VALUES/WITH")
       .default_value(std::string{});
 
   hiddenUnlessDetailed(parser.add_argument("--raster"))
@@ -522,6 +531,14 @@ std::optional<CliOptions> CliParser::parse(argparse::ArgumentParser &parser,
   if (const auto lensPath = parser.get<std::string>("--lens");
       !lensPath.empty()) {
     opts.lensPath = lensPath;
+  }
+  if (const auto sqlBrowse = parser.get<std::string>("--sql-browse");
+      !sqlBrowse.empty()) {
+    opts.sqlBrowse = sqlBrowse;
+  }
+  if (const auto sqlQuery = parser.get<std::string>("--sql-query");
+      !sqlQuery.empty()) {
+    opts.sqlQuery = sqlQuery;
   }
 
   opts.rasterMode = (parser["--raster"] == true);

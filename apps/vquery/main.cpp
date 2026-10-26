@@ -35,6 +35,7 @@
 #include "common/xanadu/vql/compiler.hpp"
 #include "common/xanadu/vql/parser.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
+#include "common/xanadu/zigzag/lens_repl.hpp"
 
 namespace {
 
@@ -119,6 +120,7 @@ void printHelpREPL() {
       << "  :store <label> <path> Load additional xanadoc/slice store\n"
       << "  :stores               List currently loaded stores\n"
       << "  :save <path>          Save the last query rows as a result slice\n"
+      << zigzag::LensRepl::helpText
       << "  :ast <query>          Print AST dump for query\n"
       << "  :asm <query>          Print compiled bytecode for query\n"
       << "  :help                 Show this help message\n"
@@ -234,6 +236,10 @@ int main(int argc, char *argv[]) {
           "Path to result store (created if non-existent, updated if existing)")
       .default_value(std::string(""));
 
+  program.add_argument("--lens")
+      .help("Open a lens URI (path, dir:, git:, sql:, cfg:, log:, journal:, "
+            "union:, meta:<label>) and print its projected tree")
+      .default_value(std::string{});
   program.add_argument("--in-place")
       .help("Modify the primary input store in-place")
       .default_value(false)
@@ -398,6 +404,40 @@ int main(int argc, char *argv[]) {
     }
   }
 
+  // meta:<label> binds the coordinator's matching store -- or its
+  // primary when the label is empty -- as a frozen fold for MetaLens.
+  const zigzag::LensRepl::MetaSource lensMeta =
+      [&coordinator](std::string_view label)
+      -> std::expected<std::pair<zigzag::Manifold, const xanadu::SpanReader *>,
+                       std::string> {
+    const auto info = label.empty() ? coordinator.primaryStore()
+                                    : coordinator.findStore(label);
+    if (!info || info->store == nullptr) {
+      return std::unexpected("no store named '" + std::string{label} + "'");
+    }
+    const auto &store = info->store;
+    return std::pair{store->rebuildManifold(store->primaryCurrentVersion()),
+                     store.get()};
+  };
+  // The coordinator's core, not an internal fold: lens cells land in the
+  // same arena VQL queries, so ':lens' projects directly into the query
+  // space.
+  zigzag::LensRepl lensRepl(coordinator.core());
+
+  // --lens is the programmatic surface: print the projection and exit.
+  {
+    const auto lensUri = program.get<std::string>("--lens");
+    if (!lensUri.empty()) {
+      if (lensUri.starts_with("meta:")) {
+        std::ostringstream buf;
+        lensRepl.run(":lens " + lensUri, buf, lensMeta);
+        std::cout << buf.str();
+        return buf.str().contains(" cells,") ? 0 : 1;
+      }
+      return zigzag::runLensRaster(lensUri, std::cout);
+    }
+  }
+
   // Obtain query text
   auto queryText = program.get<std::string>("--eval");
   auto queryFile = program.get<std::string>("--file");
@@ -481,6 +521,11 @@ int main(int argc, char *argv[]) {
     } else {
       // Direct fast-path execution
       xanadu::vql::VQLEngine engine(coordinator);
+      // An open lens enters the query space as $lens: '$lens/d.contains'
+      // walks the projected tree exactly as if the cells were authored.
+      if (const auto root = lensRepl.root()) {
+        engine.setVariable("lens", *root);
+      }
       try {
         results = engine.execute(ast);
       } catch (const std::runtime_error &err) {
@@ -670,6 +715,8 @@ int main(int argc, char *argv[]) {
       } else {
         std::cout << "Unknown engine. Use :engine direct or :engine vortex\n";
       }
+    } else if (zigzag::LensRepl::handles(line)) {
+      lensRepl.run(line, std::cout, lensMeta);
     } else if (line == ":stores") {
       std::cout << "Registered stores on ##/d.stores rank:\n";
       for (const auto &s : coordinator.stores()) {

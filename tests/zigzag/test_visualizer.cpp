@@ -6,6 +6,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <stdexcept>
+#include <string_view>
 
 #include <gleditor/doc.hpp>
 
@@ -97,6 +98,24 @@ TEST(ZigzagVisualizerTest, ReturnWithoutFocusDoesNotActivateACell) {
   viz.keyPressed(gleditor::Key::Return, gleditor::KeyMods::None);
 
   EXPECT_FALSE(activated);
+}
+
+TEST(ZigzagVisualizerTest, ExternalEditRefusalDoesNotFallBackToStore) {
+  ZigzagVisualizer viz("Sans 12");
+  const auto focus      = focusedCell(viz);
+  const auto beforeOps  = viz.operationCount();
+  const auto beforeText = viz.inspectCell(static_cast<CellRef>(focus)).text;
+  int attempts          = 0;
+  viz.setOnExternalCellEdit([&](CellID, std::string_view) {
+    ++attempts;
+    return false;
+  });
+
+  viz.updateFocusCellText("read-only source refusal");
+
+  EXPECT_EQ(attempts, 1);
+  EXPECT_EQ(viz.operationCount(), beforeOps);
+  EXPECT_EQ(viz.inspectCell(static_cast<CellRef>(focus)).text, beforeText);
 }
 
 TEST(ZigzagVisualizerTest, NavigationAlongDimensions) {

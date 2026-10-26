@@ -2407,7 +2407,8 @@ PREDEFINED            += GLEDITOR_SDL_MAJOR=3 GLEDITOR_ENABLE_VULKAN=1 \
                          GLEDITOR_HAVE_DECODE_INDEX_FLAC=1 \
                          GLEDITOR_HAVE_DECODE_INDEX_TIFF=1 \
                          GLEDITOR_HAVE_DECODE_INDEX_GIF=1 \
-                         GLEDITOR_HAVE_SVG_THORVG=1
+                         GLEDITOR_HAVE_SVG_THORVG=1 \
+                         GLEDITOR_HAVE_PG=1 GLEDITOR_HAVE_SYSTEMD=1
 
 # If the MACRO_EXPANSION and EXPAND_ONLY_PREDEF tags are set to YES then this
 # tag can be used to specify a list of macro names that should be expanded. The

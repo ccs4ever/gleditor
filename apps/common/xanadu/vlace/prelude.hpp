@@ -51,6 +51,10 @@ filter p xs = case xs of
   [] => [] ;
   (h : t) => if p h then h : filter p t else filter p t ;
 
+find p xs = case xs of
+  [] => None ;
+  (h : t) => if p h then Some h else find p t ;
+
 foldr f z xs = case xs of
   [] => z ;
   (h : t) => f h (foldr f z t) ;

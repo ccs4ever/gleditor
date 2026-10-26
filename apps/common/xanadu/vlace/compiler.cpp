@@ -4,14 +4,18 @@
  */
 #include "common/xanadu/vlace/compiler.hpp"
 
+#include <exception>
 #include <format>
 #include <istream>
 #include <optional>
 #include <ostream>
 #include <utility>
 
-#include "common/xanadu/zigzag/filesystem_lens.hpp"
+#include "common/xanadu/zigzag/lens_uri.hpp"
 #include "common/xanadu/zigzag/projection_session.hpp"
+#include "common/xanadu/zigzag/router_lens.hpp"
+#include "common/xanadu/zigzag/session_ops.hpp"
+#include "common/xanadu/zigzag/sql_lens.hpp"
 
 namespace xanadu::vlace {
 
@@ -293,6 +297,14 @@ ValuePtr Compiler::makeThunk(const ExprNode *body, const EnvPtr &env) {
   return v;
 }
 
+zigzag::ProjectionSession *
+Compiler::sessionFor(const zigzag::CellRef cell) const noexcept {
+  for (const auto &s : sessions_) {
+    if (s->ownsCell(cell)) return s.get();
+  }
+  return nullptr;
+}
+
 std::expected<ValuePtr, EvalError> Compiler::force(ValuePtr v) {
   while (v && v->kind == Value::Kind::Thunk) {
     core_.arena().consumeWork();
@@ -310,8 +322,16 @@ std::expected<ValuePtr, EvalError> Compiler::force(ValuePtr v) {
   return v;
 }
 
-void Compiler::registerData(const DataDecl &dd) {
+std::expected<void, EvalError> Compiler::registerData(const DataDecl &dd) {
   for (const auto &c : dd.ctors) {
+    // A ctor name the runtime itself interprets may not be redeclared
+    // (§7 P1): `data W = Some` would shadow the prelude scheme and
+    // `data Cell = Cell Int` would make the opaque Cell tag forgeable.
+    if (isReservedCtorTag(c.name)) {
+      return fail(
+          CompileError::TypeMismatch,
+          "data constructor '" + c.name + "' is reserved by the runtime", {});
+    }
     const std::size_t arity = c.isRecord ? c.fields.size() : c.argTypes.size();
     ctorArity_[c.name]      = arity;
     if (c.isRecord) {
@@ -328,6 +348,7 @@ void Compiler::registerData(const DataDecl &dd) {
       ctorFields_[c.name] = std::move(names);
     }
   }
+  return {};
 }
 
 std::expected<ValuePtr, EvalError>
@@ -584,7 +605,16 @@ Compiler::apply(const ValuePtr &fnRaw, ValuePtr arg, SourceLocation loc) {
     auto nv = std::make_shared<Value>(*fn);
     nv->args.push_back(std::move(arg));
     if (nv->args.size() < nv->nativeArity) return nv; // still partial
-    return (*nv->native)(*this, nv->args);
+    // Arena writes (intern/mintSlot) throw rather than refuse; a native
+    // body must never let a C++ exception out of eval (§7 P1).
+    try {
+      return (*nv->native)(*this, nv->args);
+    } catch (const std::exception &e) {
+      return fail(CompileError::TypeMismatch,
+                  std::string("native '") + nv->nativeName +
+                      "' threw: " + e.what(),
+                  loc);
+    }
   }
 
   if (!fn || fn->kind != Value::Kind::Closure) {
@@ -655,6 +685,16 @@ std::expected<ValuePtr, EvalError> Compiler::eval(const ExprNode &e,
         } else if constexpr (std::is_same_v<T, ECtor>) {
           if (node.name == "True") return makeBool(true);
           if (node.name == "False") return makeBool(false);
+          // The opaque tags may be matched but never constructed by a
+          // program (§7 P1): only the runtime mints a Cell/Dim/Unit or an
+          // IO.* description -- a forged `Cell n` would alias a live
+          // arena cell.
+          if (isOpaqueCtorTag(node.name)) {
+            return fail(CompileError::TypeMismatch,
+                        "constructor '" + node.name +
+                            "' is runtime-owned and cannot be constructed",
+                        e.loc);
+          }
           // A known constructor: build a (possibly partial) Ctor value whose
           // ctorArity drives saturation under apply().
           const auto it           = ctorArity_.find(node.name);
@@ -798,7 +838,8 @@ Compiler::evaluateProgram(const Program &prog) {
   // (letrec-style: define the name before evaluating, so functions recurse).
   for (const auto &d : prog.decls) {
     if (std::holds_alternative<DataDecl>(d)) {
-      registerData(std::get<DataDecl>(d));
+      auto r = registerData(std::get<DataDecl>(d));
+      if (!r) return std::unexpected(r.error());
     }
   }
   for (const auto &d : prog.decls) {
@@ -838,76 +879,138 @@ ValuePtr makeNative(std::string name, std::size_t arity, NativeFn fn) {
   v->native      = std::make_shared<NativeFn>(std::move(fn));
   return v;
 }
-// Unwrap a `Cell n` / `Dim n` tagged Ctor to its numeric ref.
-std::optional<std::uint32_t> refOfWrapped(const ValuePtr &v,
+// Unwrap a `Cell n` / `Dim n` tagged Ctor to its numeric ref. The inner
+// arg arrives unforced -- ctor arguments are thunks -- so force it
+// before reading the Int (P1).
+std::optional<std::uint32_t> refOfWrapped(Compiler &c, const ValuePtr &v,
                                           std::string_view tag) {
   if (!v || v->kind != Value::Kind::Ctor || v->tag != tag ||
       v->args.size() != 1)
     return std::nullopt;
-  const ValuePtr &inner = v->args[0];
-  if (!inner || inner->kind != Value::Kind::Int) return std::nullopt;
-  return static_cast<std::uint32_t>(inner->i);
+  auto inner = c.forceValue(v->args[0]);
+  if (!inner || !*inner || (*inner)->kind != Value::Kind::Int) {
+    return std::nullopt;
+  }
+  return static_cast<std::uint32_t>((*inner)->i);
+}
+
+// A CellRef/DimRef is surfaced to vlace as a `Cell n` / `Dim n` value so the
+// type system (and pattern matching) keep them distinct from a bare Int.
+ValuePtr wrapCell(CellRef r) {
+  auto inner   = std::make_shared<Value>();
+  inner->kind  = Value::Kind::Int;
+  inner->i     = static_cast<std::int64_t>(r);
+  auto v       = makeCtor("Cell", {inner});
+  v->ctorArity = 1;
+  return v;
+}
+ValuePtr wrapDim(zigzag::DimRef r) {
+  auto inner   = std::make_shared<Value>();
+  inner->kind  = Value::Kind::Int;
+  inner->i     = static_cast<std::int64_t>(r);
+  auto v       = makeCtor("Dim", {inner});
+  v->ctorArity = 1;
+  return v;
+}
+
+// The small ADT builders the IO effects answer with. `Err` carries a
+// String reason; `Ok`/`Some` carry the payload value.
+ValuePtr unitValue() {
+  auto v       = makeCtor("Unit", {});
+  v->ctorArity = 0;
+  return v;
+}
+ValuePtr okResult(ValuePtr payload) {
+  auto v       = makeCtor("Ok", {std::move(payload)});
+  v->ctorArity = 1;
+  return v;
+}
+ValuePtr errResult(const std::string &why) {
+  auto v       = makeCtor("Err", {makeStr(why)});
+  v->ctorArity = 1;
+  return v;
+}
+ValuePtr someOf(ValuePtr payload) {
+  auto v       = makeCtor("Some", {std::move(payload)});
+  v->ctorArity = 1;
+  return v;
+}
+ValuePtr noneOf() {
+  auto v       = makeCtor("None", {});
+  v->ctorArity = 0;
+  return v;
+}
+ValuePtr nilOf() {
+  auto v       = makeCtor("Nil", {});
+  v->ctorArity = 0;
+  return v;
+}
+// A Nil/Cons chain over already-built values (cells are wrapCell'ed).
+ValuePtr listOf(const std::vector<ValuePtr> &items) {
+  ValuePtr acc = nilOf();
+  for (auto it = items.rbegin(); it != items.rend(); ++it) {
+    auto cons       = makeCtor("Cons", {*it, acc});
+    cons->ctorArity = 2;
+    acc             = cons;
+  }
+  return acc;
+}
+ValuePtr listOfCells(const std::vector<CellRef> &cells) {
+  std::vector<ValuePtr> items;
+  items.reserve(cells.size());
+  for (const CellRef r : cells) items.push_back(wrapCell(r));
+  return listOf(items);
 }
 } // namespace
 
 void Compiler::installXanadu() {
   using zigzag::CellRef;
   using zigzag::DimRef;
-  // A CellRef/DimRef is surfaced to vlace as a `Cell n` / `Dim n` value so the
-  // type system (and pattern matching) keep them distinct from a bare Int.
-  auto wrapCell = [](CellRef r) {
-    auto inner   = std::make_shared<Value>();
-    inner->kind  = Value::Kind::Int;
-    inner->i     = static_cast<std::int64_t>(r);
-    auto v       = makeCtor("Cell", {inner});
-    v->ctorArity = 1;
-    return v;
-  };
-  auto wrapDim = [](DimRef r) {
-    auto inner   = std::make_shared<Value>();
-    inner->kind  = Value::Kind::Int;
-    inner->i     = static_cast<std::int64_t>(r);
-    auto v       = makeCtor("Dim", {inner});
-    v->ctorArity = 1;
-    return v;
-  };
-  ctorArity_["Cell"] = 1;
-  ctorArity_["Dim"]  = 1;
+  // The Cell/Dim wrapper arities plus the prelude ADT arities the
+  // evaluator mints itself (Unit is runtime-built only -- ECtor refuses
+  // it -- but its arity registers so arity checks know the tag; the
+  // Scalar ctors are cellScalar's payload, §7 P1).
+  ctorArity_["Cell"]   = 1;
+  ctorArity_["Dim"]    = 1;
+  ctorArity_["Unit"]   = 0;
+  ctorArity_["SInt"]   = 1;
+  ctorArity_["SFloat"] = 1;
+  ctorArity_["SBool"]  = 1;
 
   // makeText :: String -> Cell  -- mint an arena text cell (pure authoring:
   // builds in the ephemeral arena, mints no persistent op, §13.1).
-  globals_->vars["makeText"] =
-      makeNative("makeText", 1,
-                 [wrapCell](Compiler &c, std::vector<ValuePtr> &args)
-                     -> std::expected<ValuePtr, EvalError> {
-                   auto s = c.force(args[0]);
-                   if (!s) return s;
-                   if ((*s)->kind != Value::Kind::Str)
-                     return fail(CompileError::TypeMismatch,
-                                 "makeText: argument is not a String", {});
-                   CellRef ref = c.core().arena().makeCell((*s)->s);
-                   return wrapCell(ref);
-                 });
+  globals_->vars["makeText"] = makeNative(
+      "makeText", 1,
+      [](Compiler &c,
+         std::vector<ValuePtr> &args) -> std::expected<ValuePtr, EvalError> {
+        auto s = c.force(args[0]);
+        if (!s) return s;
+        if ((*s)->kind != Value::Kind::Str)
+          return fail(CompileError::TypeMismatch,
+                      "makeText: argument is not a String", {});
+        CellRef ref = c.core().arena().makeCell((*s)->s);
+        return wrapCell(ref);
+      });
 
   // makeDim :: String -> Dim  -- ensure a named dimension (idempotent).
-  globals_->vars["makeDim"] =
-      makeNative("makeDim", 1,
-                 [wrapDim](Compiler &c, std::vector<ValuePtr> &args)
-                     -> std::expected<ValuePtr, EvalError> {
-                   auto s = c.force(args[0]);
-                   if (!s) return s;
-                   if ((*s)->kind != Value::Kind::Str)
-                     return fail(CompileError::TypeMismatch,
-                                 "makeDim: argument is not a String", {});
-                   DimRef d = c.core().arena().ensureDimension((*s)->s);
-                   return wrapDim(d);
-                 });
+  globals_->vars["makeDim"] = makeNative(
+      "makeDim", 1,
+      [](Compiler &c,
+         std::vector<ValuePtr> &args) -> std::expected<ValuePtr, EvalError> {
+        auto s = c.force(args[0]);
+        if (!s) return s;
+        if ((*s)->kind != Value::Kind::Str)
+          return fail(CompileError::TypeMismatch,
+                      "makeDim: argument is not a String", {});
+        DimRef d = c.core().arena().ensureDimension((*s)->s);
+        return wrapDim(d);
+      });
 
   // dimensionNamed :: String -> Option Dim  -- look up an existing dimension.
   globals_->vars["dimensionNamed"] = makeNative(
       "dimensionNamed", 1,
-      [wrapDim](Compiler &c, std::vector<ValuePtr> &args)
-          -> std::expected<ValuePtr, EvalError> {
+      [](Compiler &c,
+         std::vector<ValuePtr> &args) -> std::expected<ValuePtr, EvalError> {
         auto s = c.force(args[0]);
         if (!s) return s;
         if ((*s)->kind != Value::Kind::Str)
@@ -927,7 +1030,11 @@ void Compiler::installXanadu() {
 
   // setLink :: Cell -> Dim -> Cell -> Unit  -- link `from` posward along `dim`
   // to `to`. The engine writes BOTH reciprocal edges (bidirectional by
-  // construction, §13.4 example 2), so no second write is needed.
+  // construction, §13.4 example 2), so no second write is needed -- and BOTH
+  // cell operands are checked for session ownership (bridge D6): a generic
+  // arena verb must not write a lens-owned cell -- the write would bypass
+  // dirty_/the next refresh()'s tombstone, and `setLink authored dim
+  // projected` would write the projected cell's negward slot.
   globals_->vars["setLink"] = makeNative(
       "setLink", 3,
       [](Compiler &c,
@@ -938,20 +1045,24 @@ void Compiler::installXanadu() {
         if (!dimV) return dimV;
         auto toV = c.force(args[2]);
         if (!toV) return toV;
-        auto from = refOfWrapped(*fromV, "Cell");
-        auto dim  = refOfWrapped(*dimV, "Dim");
-        auto to   = refOfWrapped(*toV, "Cell");
+        auto from = refOfWrapped(c, *fromV, "Cell");
+        auto dim  = refOfWrapped(c, *dimV, "Dim");
+        auto to   = refOfWrapped(c, *toV, "Cell");
         if (!from || !dim || !to)
           return fail(CompileError::TypeMismatch,
                       "setLink: expects (Cell) (Dim) (Cell)", {});
+        if (c.sessionFor(*from) != nullptr || c.sessionFor(*to) != nullptr) {
+          return fail(CompileError::TypeMismatch,
+                      "setLink: operand is owned by an open lens session; "
+                      "edit it through lensEdit",
+                      {});
+        }
         auto lr = c.core().arena().link(*from, *dim, zigzag::Posward,
                                         std::optional<CellRef>(*to));
         if (!lr)
           return fail(CompileError::TypeMismatch,
                       "setLink: arena refused the link", {});
-        auto u       = makeCtor("Unit", {});
-        u->ctorArity = 0;
-        return u;
+        return unitValue();
       });
 
   // cellText :: Cell -> String  -- read a cell's content as text (a read of a
@@ -962,7 +1073,7 @@ void Compiler::installXanadu() {
          std::vector<ValuePtr> &args) -> std::expected<ValuePtr, EvalError> {
         auto cv = c.force(args[0]);
         if (!cv) return cv;
-        auto ref = refOfWrapped(*cv, "Cell");
+        auto ref = refOfWrapped(c, *cv, "Cell");
         if (!ref)
           return fail(CompileError::TypeMismatch,
                       "cellText: argument is not a Cell", {});
@@ -974,30 +1085,29 @@ void Compiler::installXanadu() {
 
   // linked :: Cell -> Dim -> Option Cell  -- the posward neighbour on `dim`,
   // the one-step read that `walk` and navigation build on (§13.4 example 5).
-  globals_->vars["linked"] =
-      makeNative("linked", 2,
-                 [wrapCell](Compiler &c, std::vector<ValuePtr> &args)
-                     -> std::expected<ValuePtr, EvalError> {
-                   auto fromV = c.force(args[0]);
-                   if (!fromV) return fromV;
-                   auto dimV = c.force(args[1]);
-                   if (!dimV) return dimV;
-                   auto from = refOfWrapped(*fromV, "Cell");
-                   auto dim  = refOfWrapped(*dimV, "Dim");
-                   if (!from || !dim)
-                     return fail(CompileError::TypeMismatch,
-                                 "linked: expects (Cell) (Dim)", {});
-                   auto nb =
-                       c.core().arena().linked(*from, *dim, zigzag::Posward);
-                   if (!nb.has_value()) {
-                     auto none       = makeCtor("None", {});
-                     none->ctorArity = 0;
-                     return none;
-                   }
-                   auto some       = makeCtor("Some", {wrapCell(*nb)});
-                   some->ctorArity = 1;
-                   return some;
-                 });
+  globals_->vars["linked"] = makeNative(
+      "linked", 2,
+      [](Compiler &c,
+         std::vector<ValuePtr> &args) -> std::expected<ValuePtr, EvalError> {
+        auto fromV = c.force(args[0]);
+        if (!fromV) return fromV;
+        auto dimV = c.force(args[1]);
+        if (!dimV) return dimV;
+        auto from = refOfWrapped(c, *fromV, "Cell");
+        auto dim  = refOfWrapped(c, *dimV, "Dim");
+        if (!from || !dim)
+          return fail(CompileError::TypeMismatch,
+                      "linked: expects (Cell) (Dim)", {});
+        auto nb = c.core().arena().linked(*from, *dim, zigzag::Posward);
+        if (!nb.has_value()) {
+          auto none       = makeCtor("None", {});
+          none->ctorArity = 0;
+          return none;
+        }
+        auto some       = makeCtor("Some", {wrapCell(*nb)});
+        some->ctorArity = 1;
+        return some;
+      });
 
   // childrenAll :: Cell -> List Cell  -- the contained children of a cell: its
   // d.contains first child, then every d.seq sibling after it. One native
@@ -1006,11 +1116,11 @@ void Compiler::installXanadu() {
   // child plus the sibling chain, §7.4.)
   globals_->vars["childrenAll"] = makeNative(
       "childrenAll", 1,
-      [wrapCell](Compiler &c, std::vector<ValuePtr> &args)
-          -> std::expected<ValuePtr, EvalError> {
+      [](Compiler &c,
+         std::vector<ValuePtr> &args) -> std::expected<ValuePtr, EvalError> {
         auto cv = c.force(args[0]);
         if (!cv) return cv;
-        auto parent = refOfWrapped(*cv, "Cell");
+        auto parent = refOfWrapped(c, *cv, "Cell");
         if (!parent)
           return fail(CompileError::TypeMismatch,
                       "childrenAll: argument is not a Cell", {});
@@ -1089,6 +1199,85 @@ void Compiler::installXanadu() {
         return acc;
       });
 
+  // -- Lens bridge (design/vlace-lens-bridge.md §4, P1)
+  // ------------------------
+  //
+  // Pure natives: reads of session-owned cells stay pure-typed -- a Cell is
+  // a stable handle into mutable structure and a read observes the arena as
+  // of when the thunk is forced (D3).
+
+  // cellKey :: Cell -> Option String  -- the ExternalKey of a projected
+  // NODE cell; None for attribute cells (no key of their own) and for
+  // authored cells no session owns.
+  globals_->vars["cellKey"] = makeNative(
+      "cellKey", 1,
+      [](Compiler &c,
+         std::vector<ValuePtr> &args) -> std::expected<ValuePtr, EvalError> {
+        auto cv = c.force(args[0]);
+        if (!cv) return cv;
+        const auto ref = refOfWrapped(c, *cv, "Cell");
+        if (!ref.has_value())
+          return fail(CompileError::TypeMismatch,
+                      "cellKey: argument is not a Cell", {});
+        auto *session = c.sessionFor(*ref);
+        if (session == nullptr) return noneOf();
+        const auto key = session->keyFor(*ref);
+        if (!key.has_value()) return noneOf();
+        return someOf(makeStr(*key));
+      });
+
+  // cellEq :: Cell -> Cell -> Bool  -- identity on CellRef; `==` on cells
+  // is a TypeMismatch, so identity needs its own predicate (§4).
+  globals_->vars["cellEq"] = makeNative(
+      "cellEq", 2,
+      [](Compiler &c,
+         std::vector<ValuePtr> &args) -> std::expected<ValuePtr, EvalError> {
+        auto av = c.force(args[0]);
+        if (!av) return av;
+        auto bv = c.force(args[1]);
+        if (!bv) return bv;
+        const auto a = refOfWrapped(c, *av, "Cell");
+        const auto b = refOfWrapped(c, *bv, "Cell");
+        if (!a.has_value() || !b.has_value())
+          return fail(CompileError::TypeMismatch,
+                      "cellEq: expects (Cell) (Cell)", {});
+        return makeBool(*a == *b);
+      });
+
+  // cellScalar :: Cell -> Option Scalar  -- the cell's scalar payload as
+  // `data Scalar = SInt Int | SFloat Float | SBool Bool`; text-kind and
+  // absent cells give None. cellText renders only contentOf spans, so a
+  // scalar cell (a SqlLens/ConfigLens typed column, an Int64 minted by
+  // arithmetic) is invisible without this.
+  globals_->vars["cellScalar"] = makeNative(
+      "cellScalar", 1,
+      [](Compiler &c,
+         std::vector<ValuePtr> &args) -> std::expected<ValuePtr, EvalError> {
+        auto cv = c.force(args[0]);
+        if (!cv) return cv;
+        const auto ref = refOfWrapped(c, *cv, "Cell");
+        if (!ref.has_value())
+          return fail(CompileError::TypeMismatch,
+                      "cellScalar: argument is not a Cell", {});
+        const auto rendered = c.core().render(*ref);
+        if (!rendered) return noneOf();
+        auto scalar = [](const char *tag, ValuePtr payload) {
+          auto s       = makeCtor(tag, {std::move(payload)});
+          s->ctorArity = 1;
+          return s;
+        };
+        if (const auto *i = std::get_if<std::int64_t>(&*rendered)) {
+          return someOf(scalar("SInt", makeInt(*i)));
+        }
+        if (const auto *d = std::get_if<double>(&*rendered)) {
+          return someOf(scalar("SFloat", makeFloat(*d)));
+        }
+        if (const auto *b = std::get_if<bool>(&*rendered)) {
+          return someOf(scalar("SBool", makeBool(*b)));
+        }
+        return noneOf(); // a text cell -- no scalar payload
+      });
+
   // promote :: Cell -> IO Int  -- THE authoring effect (§13.1): an IO
   // description that, run at the boundary, crosses the pure arena to
   // persistence. A driverless (no-Store) run reports the reachable subgraph
@@ -1100,15 +1289,49 @@ void Compiler::installXanadu() {
     globals_->vars["promote"] = v;
   }
 
-  // openLens :: String -> IO Cell  -- project an external source (a directory
-  // path) through its lens into THIS evaluator's arena, returning the root
-  // cell (§7.4). An IO effect because it reads the external world; performed by
-  // runIO, which builds the lens + session and keeps the session alive.
+  // openLens :: String -> IO (Result String (List Cell))  -- project an
+  // external source through openLensUri (all schemes; the P6 scheme guard
+  // refuses `meta:` and friends) into THIS evaluator's arena, answering
+  // Ok with EVERY projected root (union:/forest sources emit several) or
+  // Err with the refusal. Performed by runIO, which builds the lens +
+  // session and keeps the session alive in sessions_.
   {
     auto v                     = makeCtor("IO.OpenLens", {});
     v->ctorArity               = 1;
     globals_->vars["openLens"] = v;
   }
+
+  // The lens-session effects (§4). Each is an IO description runIO
+  // performs; every one answers `Result String <payload>` so a refusal
+  // is a value in the type. The cell argument resolves the session
+  // through sessionFor; key-needing ops then use the cell's OWN
+  // keyFor (an attribute cell resolves the session by its negward hop
+  // but carries no key -- "no key" is an Err, never a retarget to the
+  // node's body).
+  //
+  //   lensMount   :: Cell -> IO (Result String Cell)         -- delegate root
+  //   lensUnmount :: Cell -> IO (Result String Unit)
+  //   lensNext    :: Cell -> IO (Result String (Option Cell)) -- next page
+  //   lensStub    :: Cell -> IO (Result String (Option Cell)) -- peek, ungated
+  //   lensBrowse  :: Cell -> String -> IO (Result String Unit) -- sql: only
+  //   lensCommit  :: Cell -> IO (Result String Int)          -- applied count
+  //   lensRevert  :: Cell -> IO (Result String Unit)
+  //   lensEdit    :: Cell -> String -> IO (Result String Unit)
+  //   lensDirty   :: Cell -> IO (Result String Int)          -- pending count
+  auto effect = [this](const char *name, const char *tag, std::size_t arity) {
+    auto v               = makeCtor(tag, {});
+    v->ctorArity         = arity;
+    globals_->vars[name] = v;
+  };
+  effect("lensMount", "IO.LensMount", 1);
+  effect("lensUnmount", "IO.LensUnmount", 1);
+  effect("lensNext", "IO.LensNext", 1);
+  effect("lensStub", "IO.LensStub", 1);
+  effect("lensBrowse", "IO.LensBrowse", 2);
+  effect("lensCommit", "IO.LensCommit", 1);
+  effect("lensRevert", "IO.LensRevert", 1);
+  effect("lensEdit", "IO.LensEdit", 2);
+  effect("lensDirty", "IO.LensDirty", 1);
 }
 
 void Compiler::installBuiltins() {
@@ -1159,84 +1382,349 @@ Compiler::runIO(const ValuePtr &action, std::istream &in, std::ostream &out) {
                 {});
   }
   const std::string &tag = v->tag;
-  if (tag == "IO.Pure") {
-    return v->args.empty() ? makeCtor("Unit", {}) : v->args[0];
-  }
-  if (tag == "IO.PutStr" || tag == "IO.PutStrLn") {
-    auto sE = force(v->args.at(0));
-    if (!sE) return sE;
-    if ((*sE)->kind != Value::Kind::Str) {
+
+  // An under-saturated effect tag reaching the boundary is a malformed
+  // description -- check arity before any args.at() (P1).
+  auto arity = [&v](std::size_t n) -> std::expected<void, EvalError> {
+    if (v->args.size() != n) {
       return fail(CompileError::TypeMismatch,
-                  "putStr: argument is not a String", {});
+                  "runIO: '" + v->tag + "' wants " + std::to_string(n) +
+                      " argument(s), got " + std::to_string(v->args.size()),
+                  {});
     }
-    out << (*sE)->s;
-    if (tag == "IO.PutStrLn") out << '\n';
-    return makeCtor("Unit", {});
-  }
-  if (tag == "IO.GetLine") {
-    std::string line;
-    std::getline(in, line);
-    return makeStr(std::move(line));
-  }
-  if (tag == "IO.Promote") {
-    // THE authoring effect (§13.1). Without a backing Store (the driver's REPL
-    // arena is store-less), performing it cannot write the spool; it reports
-    // the op count a real promote would emit -- the number of arena cells
-    // currently minted -- as a faithful dry-run. A Store-backed embedder
-    // overrides this to call zigzag::promote and return the new version.
-    (void)v->args; // the root cell; a store-backed run walks from it
-    const auto n = static_cast<std::int64_t>(core_.arena().cells().size());
-    return makeInt(n);
-  }
-  if (tag == "IO.OpenLens") {
-    // Project an external source into this evaluator's arena and return the
-    // root cell (§7.4). The path is the forced string argument. Currently the
-    // only lens is the FilesystemLens (a directory path); a URI scheme could
-    // dispatch others. The session is retained so the projection outlives the
-    // program that reads it.
-    auto pE = force(v->args.at(0));
-    if (!pE) return pE;
-    if ((*pE)->kind != Value::Kind::Str) {
-      return fail(CompileError::TypeMismatch,
-                  "openLens: argument is not a String", {});
+    return {};
+  };
+  // Perform @p body for a lens effect, mapping a thrown exception to the
+  // `Err` Result the effect's type promises (intern/mintSlot/browse throw,
+  // not refuse).
+  auto effect = [](const char *op,
+                   auto &&body) -> std::expected<ValuePtr, EvalError> {
+    try {
+      return body();
+    } catch (const std::exception &e) {
+      return errResult(std::string(op) + ": " + e.what());
     }
-    auto session = std::make_shared<zigzag::ProjectionSession>(
-        std::make_unique<zigzag::FilesystemLens>((*pE)->s), core_);
-    sessions_.push_back(session);
-    if (session->roots().empty()) {
-      // An unreadable / empty source: None would be more honest, but openLens
-      // is typed IO Cell; return a bare cell so a program can detect emptiness
-      // via cellText == "". A richer IO (Option Cell) is a later refinement.
-      auto inner      = std::make_shared<Value>();
-      inner->kind     = Value::Kind::Int;
-      inner->i        = 0;
-      auto cell       = makeCtor("Cell", {inner});
-      cell->ctorArity = 1;
-      return cell;
+  };
+  // Resolve the cell argument of a lens effect to (owning session, the
+  // cell's OWN key). An attribute cell resolves its session by the
+  // negward hop but carries no key -- the optional is empty and the op
+  // must not retarget the node's body. The error channel is the
+  // already-built `Err` Result: handlers return it verbatim.
+  auto resolveCell = [this, &v](std::size_t i, const char *op)
+      -> std::expected<std::pair<zigzag::ProjectionSession *,
+                                 std::optional<zigzag::ExternalKey>>,
+                       ValuePtr> {
+    auto fv = force(v->args[i]);
+    if (!fv) {
+      return std::unexpected(
+          errResult(std::string(op) + ": " + fv.error().detail));
     }
-    auto inner      = std::make_shared<Value>();
-    inner->kind     = Value::Kind::Int;
-    inner->i        = static_cast<std::int64_t>(session->roots().front());
-    auto cell       = makeCtor("Cell", {inner});
-    cell->ctorArity = 1;
-    return cell;
+    const auto ref = refOfWrapped(*this, *fv, "Cell");
+    if (!ref.has_value()) {
+      return std::unexpected(
+          errResult(std::string(op) + ": argument is not a Cell"));
+    }
+    auto *session = sessionFor(*ref);
+    if (session == nullptr) {
+      return std::unexpected(errResult(
+          std::string(op) + ": cell is not owned by any open lens session"));
+    }
+    return std::pair{session, session->keyFor(*ref)};
+  };
+  // The mount-scope a RouterLens needs for the windowed/browse verbs:
+  // the cell's own key -> mountBoundary -> that mount's delegate lens.
+  // Non-router sessions answer the session lens itself. The error
+  // channel is the `Err` Result value.
+  auto mountedLens =
+      [](zigzag::ProjectionSession &session,
+         const std::optional<zigzag::ExternalKey> &key,
+         const char *op) -> std::expected<zigzag::ProjectionLens *, ValuePtr> {
+    auto *router = dynamic_cast<zigzag::RouterLens *>(session.lensMut());
+    if (router == nullptr) {
+      return session.lensMut();
+    }
+    if (!key.has_value()) {
+      return std::unexpected(
+          errResult(std::string(op) + ": cell has no source key"));
+    }
+    const auto boundary = router->mountBoundary(*key);
+    if (!boundary.has_value()) {
+      return std::unexpected(
+          errResult(std::string(op) + ": cell sits outside every mount"));
+    }
+    const auto win = router->windowedFor(*boundary);
+    if (!win.has_value()) {
+      return std::unexpected(errResult(win.error()));
+    }
+    // windowedFor answers the mount's delegate as a WindowedLens; the
+    // delegate IS a ProjectionLens (SqlLens/GitLens/... inherit both).
+    auto *lens = dynamic_cast<zigzag::ProjectionLens *>(*win);
+    if (lens == nullptr) {
+      return std::unexpected(
+          errResult(std::string(op) + ": mount's lens is unreachable"));
+    }
+    return lens;
+  };
+
+  try {
+    if (tag == "IO.Pure") {
+      return v->args.empty() ? unitValue() : v->args[0];
+    }
+    if (tag == "IO.PutStr" || tag == "IO.PutStrLn") {
+      if (const auto a = arity(1); !a) return std::unexpected(a.error());
+      auto sE = force(v->args.at(0));
+      if (!sE) return sE;
+      if ((*sE)->kind != Value::Kind::Str) {
+        return fail(CompileError::TypeMismatch,
+                    "putStr: argument is not a String", {});
+      }
+      out << (*sE)->s;
+      if (tag == "IO.PutStrLn") out << '\n';
+      return unitValue();
+    }
+    if (tag == "IO.GetLine") {
+      if (const auto a = arity(0); !a) return std::unexpected(a.error());
+      std::string line;
+      std::getline(in, line);
+      return makeStr(std::move(line));
+    }
+    if (tag == "IO.Promote") {
+      if (const auto a = arity(1); !a) return std::unexpected(a.error());
+      // THE authoring effect (§13.1). Without a backing Store (the driver's
+      // REPL arena is store-less), performing it cannot write the spool; it
+      // reports the op count a real promote would emit -- the number of arena
+      // cells currently minted -- as a faithful dry-run. A Store-backed
+      // embedder overrides this to call zigzag::promote and return the new
+      // version.
+      const auto n = static_cast<std::int64_t>(core_.arena().cells().size());
+      return makeInt(n);
+    }
+    if (tag == "IO.OpenLens") {
+      if (const auto a = arity(1); !a) return std::unexpected(a.error());
+      auto pE = force(v->args.at(0));
+      if (!pE) return pE;
+      if ((*pE)->kind != Value::Kind::Str) {
+        return fail(CompileError::TypeMismatch,
+                    "openLens: argument is not a String", {});
+      }
+      return effect("openLens", [&]() -> std::expected<ValuePtr, EvalError> {
+        // openLensUri dispatches every scheme (dir:/bare path, sql:,
+        // cfg:, log:, journal:, git:, union:) and refuses unrecognized
+        // scheme-shaped prefixes -- `meta:` included (P6).
+        auto lens = zigzag::openLensUri((*pE)->s);
+        if (!lens.has_value()) {
+          return errResult(lens.error());
+        }
+        auto session = std::make_shared<zigzag::ProjectionSession>(
+            std::move(*lens), core_);
+        if (session->roots().empty()) {
+          return errResult("openLens: source projected no roots");
+        }
+        sessions_.push_back(session);
+        // `Ok` carries EVERY root -- a union:/forest source emits
+        // several, and a bare Cell would orphan the siblings (D1).
+        return okResult(listOfCells(session->roots()));
+      });
+    }
+    if (tag == "IO.LensMount") {
+      if (const auto a = arity(1); !a) return std::unexpected(a.error());
+      return effect("lensMount", [&]() -> std::expected<ValuePtr, EvalError> {
+        auto sk = resolveCell(0, "lensMount");
+        if (!sk) return sk.error();
+        if (!sk->second.has_value()) {
+          return errResult("lensMount: cell has no source key");
+        }
+        const auto mounted = zigzag::sessionMountAt(*sk->first, *sk->second);
+        if (!mounted.has_value()) return errResult(mounted.error());
+        const auto root = sk->first->cellFor(*mounted);
+        if (!root.has_value()) {
+          return errResult("lensMount: delegate root is not projected");
+        }
+        return okResult(wrapCell(*root)); // the delegate's root cell
+      });
+    }
+    if (tag == "IO.LensUnmount") {
+      if (const auto a = arity(1); !a) return std::unexpected(a.error());
+      return effect("lensUnmount", [&]() -> std::expected<ValuePtr, EvalError> {
+        auto sk = resolveCell(0, "lensUnmount");
+        if (!sk) return sk.error();
+        if (!sk->second.has_value()) {
+          return errResult("lensUnmount: cell has no source key");
+        }
+        const auto dropped = zigzag::sessionUnmountAt(*sk->first, *sk->second);
+        if (!dropped.has_value()) {
+          return errResult(dropped.error());
+        }
+        return okResult(unitValue());
+      });
+    }
+    if (tag == "IO.LensNext") {
+      if (const auto a = arity(1); !a) return std::unexpected(a.error());
+      return effect("lensNext", [&]() -> std::expected<ValuePtr, EvalError> {
+        auto sk = resolveCell(0, "lensNext");
+        if (!sk) return sk.error();
+        // Windowed resolution (§4): a RouterLens session pages through
+        // the mount boundary the cell's own key resolves to -- a nullopt
+        // scope would let sessionNextPage fall back to the router's
+        // first-wins nextStub across mounts. A plain WindowedLens
+        // session (sql:/log:/journal:/git: opened directly) pages
+        // itself; anything else refuses inside the helper.
+        std::optional<zigzag::ExternalKey> scope;
+        if (auto *router =
+                dynamic_cast<zigzag::RouterLens *>(sk->first->lensMut());
+            router != nullptr) {
+          if (!sk->second.has_value()) {
+            return errResult("lensNext: cell has no source key");
+          }
+          const auto boundary = router->mountBoundary(*sk->second);
+          if (!boundary.has_value()) {
+            return errResult("lensNext: cell sits outside every mount");
+          }
+          scope = *boundary;
+        }
+        const auto paged = zigzag::sessionNextPage(*sk->first, scope);
+        if (!paged.has_value()) return errResult(paged.error());
+        if (!paged->has_value()) return okResult(noneOf()); // exhausted
+        const auto cell = sk->first->cellFor(**paged);
+        if (!cell.has_value()) {
+          return errResult("lensNext: materialized page has no cell");
+        }
+        return okResult(someOf(wrapCell(*cell)));
+      });
+    }
+    if (tag == "IO.LensStub") {
+      if (const auto a = arity(1); !a) return std::unexpected(a.error());
+      return effect("lensStub", [&]() -> std::expected<ValuePtr, EvalError> {
+        auto sk = resolveCell(0, "lensStub");
+        if (!sk) return sk.error();
+        // The same routing as lensNext but a const query -- NOT
+        // dirty-gated: peeking at the pending stub mutates nothing.
+        const auto lens = mountedLens(*sk->first, sk->second, "lensStub");
+        if (!lens) return lens.error();
+        const auto *window = dynamic_cast<const zigzag::WindowedLens *>(*lens);
+        if (window == nullptr) {
+          return errResult("lensStub: session's lens is not windowed");
+        }
+        const auto stub = window->nextStub();
+        if (!stub.has_value()) return okResult(noneOf());
+        const auto cell = sk->first->cellFor(*stub);
+        if (!cell.has_value()) {
+          return errResult("lensStub: stub key is not projected");
+        }
+        return okResult(someOf(wrapCell(*cell)));
+      });
+    }
+    if (tag == "IO.LensBrowse") {
+      if (const auto a = arity(2); !a) return std::unexpected(a.error());
+      auto tE = force(v->args.at(1));
+      if (!tE) return tE;
+      if ((*tE)->kind != Value::Kind::Str) {
+        return fail(CompileError::TypeMismatch,
+                    "lensBrowse: table name is not a String", {});
+      }
+      return effect("lensBrowse", [&]() -> std::expected<ValuePtr, EvalError> {
+        auto sk = resolveCell(0, "lensBrowse");
+        if (!sk) return sk.error();
+        const auto lens = mountedLens(*sk->first, sk->second, "lensBrowse");
+        if (!lens) return lens.error();
+        auto *sql = dynamic_cast<zigzag::SqlLens *>(*lens);
+        if (sql == nullptr) {
+          return errResult("lensBrowse: not a sql lens");
+        }
+        const std::string &table = (*tE)->s;
+        if (sql->isBrowsed(table)) {
+          return errResult("lensBrowse: '" + table + "' is already browsed");
+        }
+        if (const auto r = sql->browse(table); !r.has_value()) {
+          return errResult(r.error());
+        }
+        (void)sk->first->refresh(); // project the new query subtree
+        return okResult(unitValue());
+      });
+    }
+    if (tag == "IO.LensCommit") {
+      if (const auto a = arity(1); !a) return std::unexpected(a.error());
+      return effect("lensCommit", [&]() -> std::expected<ValuePtr, EvalError> {
+        auto sk = resolveCell(0, "lensCommit");
+        if (!sk) return sk.error();
+        // Session-wide: the cell names the session, not the key -- the
+        // whole dirty_ set is attempted (§4).
+        const auto applied = zigzag::sessionCommitAll(*sk->first);
+        if (!applied.has_value()) return errResult(applied.error());
+        return okResult(makeInt(*applied));
+      });
+    }
+    if (tag == "IO.LensRevert") {
+      if (const auto a = arity(1); !a) return std::unexpected(a.error());
+      return effect("lensRevert", [&]() -> std::expected<ValuePtr, EvalError> {
+        auto sk = resolveCell(0, "lensRevert");
+        if (!sk) return sk.error();
+        if (!sk->second.has_value()) {
+          return errResult("lensRevert: cell has no source key");
+        }
+        const auto r = zigzag::sessionRevert(*sk->first, *sk->second);
+        if (!r.has_value()) return errResult(r.error());
+        return okResult(unitValue());
+      });
+    }
+    if (tag == "IO.LensEdit") {
+      if (const auto a = arity(2); !a) return std::unexpected(a.error());
+      auto tE = force(v->args.at(1));
+      if (!tE) return tE;
+      if ((*tE)->kind != Value::Kind::Str) {
+        return fail(CompileError::TypeMismatch,
+                    "lensEdit: replacement text is not a String", {});
+      }
+      return effect("lensEdit", [&]() -> std::expected<ValuePtr, EvalError> {
+        auto sk = resolveCell(0, "lensEdit");
+        if (!sk) return sk.error();
+        if (!sk->second.has_value()) {
+          return errResult("lensEdit: cell has no source key");
+        }
+        // editContent itself probes the lens's canApply -- ref-bound,
+        // unkeyed and non-writable cells all refuse inside (§4).
+        const auto r = zigzag::sessionEdit(*sk->first, *sk->second, (*tE)->s);
+        if (!r.has_value()) return errResult(r.error());
+        return okResult(unitValue());
+      });
+    }
+    if (tag == "IO.LensDirty") {
+      if (const auto a = arity(1); !a) return std::unexpected(a.error());
+      return effect("lensDirty", [&]() -> std::expected<ValuePtr, EvalError> {
+        auto sk = resolveCell(0, "lensDirty");
+        if (!sk) return sk.error();
+        return okResult(
+            makeInt(static_cast<std::int64_t>(sk->first->dirtyCount())));
+      });
+    }
+    if (tag == "IO.Then") {
+      if (const auto a = arity(2); !a) return std::unexpected(a.error());
+      // Perform the first action for its effect, discard its value, run
+      // second.
+      auto first = runIO(v->args.at(0), in, out);
+      if (!first) return first;
+      return runIO(v->args.at(1), in, out);
+    }
+    if (tag == "IO.Bind") {
+      if (const auto a = arity(2); !a) return std::unexpected(a.error());
+      // Perform the first action, feed its value to the continuation, run
+      // that.
+      auto first = runIO(v->args.at(0), in, out);
+      if (!first) return first;
+      auto next = apply(v->args.at(1), *first, {});
+      if (!next) return next;
+      return runIO(*next, in, out);
+    }
+    return fail(CompileError::TypeMismatch,
+                std::string("runIO: unknown IO node '") + tag + "'", {});
+  } catch (const std::exception &e) {
+    // An effect that throws rather than refuses (intern/mintSlot, a
+    // lens constructor) surfaces as an eval error for structural IO
+    // nodes; the lens effects catch their own into the `Err` Result
+    // their type promises.
+    return fail(CompileError::TypeMismatch,
+                std::string("runIO: '") + tag + "' threw: " + e.what(), {});
   }
-  if (tag == "IO.Then") {
-    // Perform the first action for its effect, discard its value, run second.
-    auto first = runIO(v->args.at(0), in, out);
-    if (!first) return first;
-    return runIO(v->args.at(1), in, out);
-  }
-  if (tag == "IO.Bind") {
-    // Perform the first action, feed its value to the continuation, run that.
-    auto first = runIO(v->args.at(0), in, out);
-    if (!first) return first;
-    auto next = apply(v->args.at(1), *first, {});
-    if (!next) return next;
-    return runIO(*next, in, out);
-  }
-  return fail(CompileError::TypeMismatch,
-              std::string("runIO: unknown IO node '") + tag + "'", {});
 }
 
 } // namespace xanadu::vlace

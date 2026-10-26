@@ -15,6 +15,7 @@
 
 #include "common/xanadu/vlace/driver.hpp"
 #include "common/xanadu/vortex/mesh_cli.hpp"
+#include "common/xanadu/zigzag/lens_repl.hpp"
 
 namespace {
 
@@ -63,6 +64,7 @@ void runREPL(Driver &driver) {
             << "Type an expression; :quit, :q, :exit or EOF to leave.\n\n";
 
   std::string line;
+  zigzag::LensRepl lensRepl;
   while (true) {
     std::cout << "vlace> " << std::flush;
     if (!std::getline(std::cin, line)) {
@@ -79,6 +81,12 @@ void runREPL(Driver &driver) {
 
     if (trimmed == ":quit" || trimmed == ":q" || trimmed == ":exit") {
       break;
+    }
+    // vlace holds no open store, so meta: has no fold to bind -- the
+    // reply says so.
+    if (zigzag::LensRepl::handles(trimmed)) {
+      lensRepl.run(trimmed, std::cout);
+      continue;
     }
 
     auto result = driver.run(trimmed);
@@ -111,6 +119,10 @@ int main(int argc, char *argv[]) {
       .help("Evaluate a vlace expression and exit")
       .default_value(std::string(""));
 
+  program.add_argument("--lens")
+      .help("Open a lens URI (path, dir:, git:, sql:, cfg:, log:, journal:, "
+            "union:) and print its projected tree")
+      .default_value(std::string{});
   program.add_argument("--headless")
       .help("Run the file or -e expression and exit (no interactive prompt)")
       .default_value(false)
@@ -126,6 +138,13 @@ int main(int argc, char *argv[]) {
   } catch (const std::exception &err) {
     std::cerr << err.what() << "\n" << program;
     return 1;
+  }
+
+  {
+    const auto lensUri = program.get<std::string>("--lens");
+    if (!lensUri.empty()) {
+      return zigzag::runLensRaster(lensUri, std::cout);
+    }
   }
 
   Driver driver;

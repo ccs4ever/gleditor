@@ -29,6 +29,7 @@
 #include "common/xanadu/vprolog/parser.hpp"
 #include "common/xanadu/vql/ascii_visualizer.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
+#include "common/xanadu/zigzag/lens_repl.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
 
 namespace {
@@ -51,6 +52,7 @@ void printREPLHelp() {
          "slice\n"
       << "  :grid                 Display ASCII lattice topology of logic "
          "cells\n"
+      << zigzag::LensRepl::helpText
       << "  :help / help.         Show this help message\n"
       << "  :quit / :exit / halt. Exit the REPL\n";
 }
@@ -178,6 +180,25 @@ void runREPL(Compiler &compiler, std::vector<Clause> &clauses,
   std::vector<xanadu::ResultRow> lastResults;
   bool hasQuery = false;
   std::string inputProvenance;
+  // The compiler's core: projected cells are cells goals can unify over.
+  zigzag::LensRepl lensRepl(compiler.core());
+  // :open consumes the store it loads, so meta: opens its own on first
+  // use -- the shared_ptr keeps the SpanReader alive for the session.
+  std::shared_ptr<xanadu::Store> metaStore;
+  const zigzag::LensRepl::MetaSource meta =
+      [&metaStore, &inputProvenance, &permascroll](const std::string_view label)
+      -> std::expected<std::pair<zigzag::Manifold, const xanadu::SpanReader *>,
+                       std::string> {
+    const auto path = label.empty() ? inputProvenance : std::string{label};
+    if (!std::filesystem::exists(path)) {
+      return std::unexpected("meta: needs an open store -- :open one first");
+    }
+    metaStore = std::make_shared<xanadu::Store>(permascroll);
+    metaStore->load(path);
+    return std::pair{
+        metaStore->rebuildManifold(metaStore->primaryCurrentVersion()),
+        metaStore.get()};
+  };
   while (true) {
     if (buffer.empty()) {
       std::cout << "?- " << std::flush;
@@ -204,6 +225,44 @@ void runREPL(Compiler &compiler, std::vector<Clause> &clauses,
       }
       if (line == ":help" || line == "help." || line == "help") {
         printREPLHelp();
+        continue;
+      }
+      if (zigzag::LensRepl::handles(line)) {
+        const auto before = std::string{lensRepl.label()};
+        lensRepl.run(line, std::cout, meta);
+        if (lensRepl.label() != before && !lensRepl.label().empty()) {
+          std::cout << "% lens: " << lensRepl.entries().size()
+                    << " entries seeded as lens_entry(Key, Text)\n";
+          // The projection enters the term space as facts, so goals
+          // unify over the lens: lens_entry(Key, Text). A malformed
+          // source cell's text can't break the REPL.
+          for (const auto &[key, text] : lensRepl.entries()) {
+            auto quoted = [](std::string_view s) {
+              std::string q;
+              for (const char ch : s) {
+                if (ch == '\'')
+                  q += "''";
+                else if (ch == '\\')
+                  q += "\\\\";
+                else
+                  q += ch;
+              }
+              return q;
+            };
+            const auto fact =
+                "lens_entry('" + quoted(key) + "', '" + quoted(text) + "').";
+            try {
+              Parser fp(fact);
+              for (const auto &c : fp.parseProgram().clauses) {
+                compiler.compileClause(c);
+                clauses.push_back(c);
+              }
+            } catch (const std::exception &ex) {
+              std::cout << "% seed failed on " << fact << " : " << ex.what()
+                        << "\n";
+            }
+          }
+        }
         continue;
       }
       if (line == ":listing" || line == "listing." || line == "listing") {
@@ -472,6 +531,10 @@ int main(int argc, char *argv[]) {
       .default_value(false)
       .implicit_value(true);
 
+  program.add_argument("--lens")
+      .help("Open a lens URI (path, dir:, git:, sql:, cfg:, log:, journal:, "
+            "union:) and print its projected tree")
+      .default_value(std::string{});
   program.add_argument("--headless")
       .help("Run without touching display devices")
       .default_value(false)
@@ -503,6 +566,13 @@ int main(int argc, char *argv[]) {
           ? xanadu::PermascrollRegistry::instance().defaultUser()
           : std::make_shared<xanadu::UserPermascroll>(
                 xanadu::UserPermascroll::Config{.storageDir = permascrollPath});
+  {
+    const auto lensUri = program.get<std::string>("--lens");
+    if (!lensUri.empty()) {
+      return zigzag::runLensRaster(lensUri, std::cout);
+    }
+  }
+
   std::unique_ptr<xanadu::TemporaryStreamStore> stdinStore;
   std::string inputProvenance;
   const auto outputStore  = program.get<std::string>("--output-store");

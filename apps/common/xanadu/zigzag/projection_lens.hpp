@@ -79,6 +79,12 @@ struct SourceNode {
   NodeContent content;
   std::vector<std::pair<std::string, std::string>> attributes;
   std::uint64_t order{0}; ///< total order within siblings (determinism)
+  /// Project-by-reference (lens-candidates U-L5): when set, the key names
+  /// an existing cell rather than a mint request -- the session binds it
+  /// read-only: no mint, no content restatement, no attribute writes, no
+  /// tombstone. The session arena must overlay the cell's manifold for
+  /// the ref to resolve. content/attributes are ignored on a ref node.
+  std::optional<CellRef> ref;
 };
 
 /// One edge the lens asserts, in ExternalKey space, so the framework resolves
@@ -115,7 +121,62 @@ public:
   virtual void forEachEdge(
       gleditor::cpp26::function_ref<void(const SourceEdge &)> emit) const = 0;
 
+  // -- refresh-time hooks (opt-in; defaults keep one-shot lenses working) ----
+
+  /// Attributes to stamp on a cell whose key was absent from the latest
+  /// refresh() enumeration -- stale-marking is the lens's vocabulary, not the
+  /// framework's. Default: absent keys stay untouched.
+  [[nodiscard]] virtual std::vector<std::pair<std::string, std::string>>
+  staleAttributes(const ExternalKey & /*key*/) const {
+    return {};
+  }
+
+  /// Lens-declared roots. Emit every key that should appear in
+  /// ProjectionSession::roots() and return true to override the default
+  /// structural rule (a node that is no posward structural edge's target is
+  /// a root). Default returns false -> structural election. Lenses whose
+  /// subjects float outside the containment tree (SqlLens's shared row
+  /// subjects) declare their roots rather than flooding roots() with every
+  /// node ever seen.
+  virtual bool
+  forEachRoot(gleditor::cpp26::function_ref<void(const ExternalKey &)>
+              /*emit*/) const {
+    return false;
+  }
+
+  // -- evented hint (opt-in)
+  // ---------------------------------------------------
+
+  /// Whether the source moved since the lens last enumerated -- the
+  /// pulled half of the evented contract (lens -> app -> session). The
+  /// app polls at a marks-quiesced point and calls refresh() when this
+  /// returns true. Lenses may also self-check inside forEachNode so the
+  /// projection stays honest even without a driver. Default false: a
+  /// non-evented lens never reports.
+  [[nodiscard]] virtual bool pollChanged() const { return false; }
+
+  /// A waitable descriptor for an event loop's epoll/poll/select --
+  /// the pushed half of the evented contract. A lens whose change
+  /// signal is a kernel-descriptor event (a FileWatch, a socket)
+  /// exposes it here; an app loop can wait on it (EPOLLET-compatible:
+  /// pollChanged() drains fully) instead of polling every quiescence.
+  /// Nullopt = no descriptor; the funnel polls as usual.
+  [[nodiscard]] virtual std::optional<int> waitableFd() const noexcept {
+    return std::nullopt;
+  }
+
   // -- cells -> source (unproject); default = refuse -------------------------
+
+  /// Would applyContentChange even attempt @p node? The cheap probe
+  /// ProjectionSession::editContent calls so a non-writable cell
+  /// refuses at the edit gesture rather than at commit. Composite
+  /// lenses follow the same routing their applyContentChange does.
+  /// Default false (read-only lens); true is no guarantee -- the
+  /// apply can still refuse on the content (a value that fails to
+  /// parse, a row that vanished).
+  [[nodiscard]] virtual bool canApply(const ExternalKey & /*node*/) const {
+    return false;
+  }
 
   /// Apply a content change back to the source. Returns the (possibly
   /// relocated) ExternalKey, or an error. Default: refuse (read-only lens).
@@ -130,6 +191,38 @@ public:
   applyAttributeChange(const ExternalKey & /*node*/, std::string_view /*rank*/,
                        std::string_view /*newValue*/) {
     return std::unexpected("this lens is read-only");
+  }
+};
+
+/// A ProjectionLens over an unbounded source that materializes bounded pages.
+/// Orthogonal to the projection trait -- implement alongside it (SqlLens is
+/// the first); the session reaches discardMaterializedAfter through a
+/// dynamic_cast so it never needs the concrete type.
+class WindowedLens {
+public:
+  virtual ~WindowedLens() = default;
+
+  /// Materialize the window @p windowKey names -- the fetch behind a deferred
+  /// stub. Driven by the app (it keeps a non-owning pointer to the concrete
+  /// lens), not the session. Default refuses: a lens may be windowed only in
+  /// name.
+  [[nodiscard]] virtual std::expected<void, std::string>
+  materializePage(const ExternalKey & /*windowKey*/) {
+    return std::unexpected("no window materialization");
+  }
+
+  /// Drop every buffered window whose materialization epoch follows
+  /// @p boundaryKey's -- the lens-side half of ProjectionSession::rewind.
+  /// The page buffer is off-arena state the arena's release() cannot touch;
+  /// without this the next refresh would re-emit buffered rows and resurrect
+  /// the tossed window. Default no-op for lenses with no buffer.
+  virtual void discardMaterializedAfter(const ExternalKey & /*boundaryKey*/) {}
+
+  /// The next deferred page's key, for a next-page gesture. Returns
+  /// nullopt when nothing is stubbed. The scan order is the lens's own
+  /// (for SqlLens, the horizon's page order; for LogLens, page order).
+  [[nodiscard]] virtual std::optional<ExternalKey> nextStub() const {
+    return std::nullopt;
   }
 };
 

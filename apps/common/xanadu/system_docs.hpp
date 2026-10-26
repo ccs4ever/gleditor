@@ -540,6 +540,19 @@ inline constexpr std::string_view kKeymapDeleteFocusCell =
 inline constexpr std::string_view kKeymapDeleteFocusCellBksp =
     "std:zigzag/delete_focus_cell_bksp";
 inline constexpr std::string_view kKeymapSaveStore = "std:zigzag/save_store";
+// The projection-lens surface's verbs (design/sql-to-zigzag.md rev 7):
+// mount/unmount a delegate under the focused filesystem cell, page the
+// windowed horizon, dirty-write the source, promote to annotation, and
+// pick a new source. Zigzag scope -- the same view they act on.
+inline constexpr std::string_view kKeymapLensOpen = "std:zigzag/lens_open";
+inline constexpr std::string_view kKeymapLensBack = "std:zigzag/lens_back";
+inline constexpr std::string_view kKeymapLensNextPage =
+    "std:zigzag/lens_next_page";
+inline constexpr std::string_view kKeymapLensCommit = "std:zigzag/lens_commit";
+inline constexpr std::string_view kKeymapLensPromote =
+    "std:zigzag/lens_promote";
+inline constexpr std::string_view kKeymapLensOpenSource =
+    "std:zigzag/lens_open_source";
 
 // Keymap - Xuzz Zigzag Presentation Actions
 inline constexpr std::string_view kKeymapZigzagTogglePalette =

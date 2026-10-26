@@ -67,6 +67,11 @@ TEST(VlacePreludeTest, Filter) {
   EXPECT_EQ(runWithPrelude("filter (fn x => x > 2) [1, 2, 3, 4]"), "[3, 4]");
 }
 
+TEST(VlacePreludeTest, Find) {
+  EXPECT_EQ(runWithPrelude("find (fn x => x > 2) [1, 2, 3, 4]"), "Some 3");
+  EXPECT_EQ(runWithPrelude("find (fn x => x > 9) [1, 2, 3, 4]"), "None");
+}
+
 TEST(VlacePreludeTest, Foldr) {
   EXPECT_EQ(runWithPrelude("foldr (fn x y => x + y) 0 [1, 2, 3, 4]"), "10");
 }

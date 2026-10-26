@@ -5,6 +5,7 @@
 #include "xuzz_app.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
@@ -13,6 +14,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <sstream>
@@ -37,6 +39,7 @@
 #include "cli.hpp"
 #include "view_coordinator.hpp"
 
+#include "common/ui/lens_file_picker.hpp"
 #include "common/ui/quotation_builder_overlay.hpp"
 #include "common/ui/store_object_manager.hpp"
 #include "common/ui/walks.hpp"
@@ -50,8 +53,14 @@
 #include "common/xanadu/vortex/vortex_host.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 #include "common/xanadu/zigzag/filesystem_lens.hpp"
+#include "common/xanadu/zigzag/lens_uri.hpp"
 #include "common/xanadu/zigzag/projection_lens.hpp"
 #include "common/xanadu/zigzag/projection_session.hpp"
+#include "common/xanadu/zigzag/projection_surface.hpp"
+#include "common/xanadu/zigzag/projection_to_zz.hpp"
+#include "common/xanadu/zigzag/router_lens.hpp"
+#include "common/xanadu/zigzag/sql_lens.hpp"
+#include "common/xanadu/zigzag/sql_promotion.hpp"
 #include "common/xanadu/zigzag/xanadu_projector.hpp"
 #include "common/xanadu/zigzag/zzcore.hpp"
 
@@ -503,49 +512,400 @@ int XuzzApp::executeSessionImport(CliOptions &opts, int /*argc*/,
   return 0;
 }
 
-int XuzzApp::executeLensRaster(const std::string &lensPath) {
-  // Project a filesystem path through the FilesystemLens into an arena and
-  // print its cells, proving a projected non-Xanadu source is visible in xuzz.
-  if (lensPath.empty() || !fs::exists(lensPath)) {
-    std::cerr << "Error: --lens path does not exist: " << lensPath << "\n";
+int XuzzApp::executeSqlLensRaster(const std::string &uri,
+                                  const std::string &sqlBrowse,
+                                  const std::string &sqlQuery) {
+  // A sql: URI projects a read-only database: schema at open, then any
+  // requested browse/query materializes its first page (spec section
+  // 5.1's two modes). Read-only by construction -- browse/query mint no
+  // ops anywhere.
+  auto lens = zigzag::openSqlUri(uri);
+  if (!lens) {
+    std::cerr << "Error: " << lens.error() << "\n";
+    return 1;
+  }
+  auto *lensPtr = lens->get();
+  if (!sqlBrowse.empty()) {
+    if (const auto r = lensPtr->browse(sqlBrowse); !r) {
+      std::cerr << "Error: browse: " << r.error() << "\n";
+      return 1;
+    }
+  }
+  if (!sqlQuery.empty()) {
+    if (const auto r = lensPtr->query(sqlQuery, {}); !r) {
+      std::cerr << "Error: query: " << r.error() << "\n";
+      return 1;
+    }
+  }
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core(arena);
+  zigzag::ProjectionSession session(std::move(*lens), core);
+  (void)session.refresh();
+  printProjectionTree(uri, session, core);
+  return 0;
+}
+
+void XuzzApp::printProjectionTree(const std::string &label,
+                                  zigzag::ProjectionSession &session,
+                                  zigzag::vortex::VortexCore &core) {
+  auto &arena          = core.arena();
+  const auto dRole     = core.findOrMintDimension("d.role");
+  const auto dMime     = core.findOrMintDimension("d.mime");
+  const auto dContains = core.findOrMintDimension(
+      std::string(zigzag::genericDimName(zigzag::GenericDim::Containment)));
+  const auto dSeq = core.findOrMintDimension(
+      std::string(zigzag::genericDimName(zigzag::GenericDim::Sequence)));
+
+  auto attr = [&](zigzag::CellRef c, zigzag::DimRef d) -> std::string {
+    auto nb = arena.linked(c, d, zigzag::Posward);
+    return nb.has_value() ? arena.textOf(*nb) : std::string{};
+  };
+
+  std::cout << "lens: " << label << " -> " << session.cellCount() << " cells, "
+            << session.roots().size() << " root(s)\n";
+
+  auto printTree = [&](auto &&self, zigzag::CellRef cell, int depth) -> void {
+    std::string indent(static_cast<std::size_t>(depth) * 2, ' ');
+    std::cout << indent << arena.textOf(cell) << "  [" << attr(cell, dRole)
+              << ", " << attr(cell, dMime) << "]\n";
+    auto child = arena.linked(cell, dContains, zigzag::Posward);
+    for (auto cur = child; cur.has_value();
+         cur      = arena.linked(*cur, dSeq, zigzag::Posward)) {
+      self(self, *cur, depth + 1);
+    }
+  };
+  for (const auto root : session.roots()) {
+    printTree(printTree, root, 0);
+  }
+}
+
+/// The interactive half of --lens: a live projection session whose
+/// refreshIfChanged() runs at each frame's quiesced point, re-adopting
+/// the arena into the visualizer when the source moved (the funnel's
+/// app side).
+class LensSurfaceContributor : public gleditor::FrameContributor {
+public:
+  LensSurfaceContributor(std::unique_ptr<zigzag::ProjectionLens> lens,
+                         zigzag::ZigzagVisualizer &viz, std::string label,
+                         xanadu::Store &annotationStore)
+      : surface_(std::move(lens)), annotationStore_(annotationStore),
+        label_(std::move(label)), viz_(viz) {
+    // A lens slice has no engine_; its cell edits route here and dirty
+    // the projection's cell -- lens.commit flushes them to the source.
+    viz_.setOnExternalCellEdit([this](zigzag::CellID id,
+                                      std::string_view text) {
+      const std::lock_guard lock(surfaceMutex_);
+      // The id a gesture carries is the store-minted one; the
+      // session's keyFor only knows the projected doc's ids.
+      const auto projected = viz_.adoptedProjectedId(id);
+      if (!projected.has_value()) {
+        return false;
+      }
+      const auto key =
+          surface_.session().keyFor(static_cast<zigzag::CellRef>(*projected));
+      return key.has_value() &&
+             surface_.session().editContent(*key, text).has_value();
+    });
+  }
+  void drawFrame(gleditor::FrameContext & /*ctx*/) override {
+    // swapLens releases the old session on the event thread; without the
+    // lock a frame could dereference it mid-teardown.
+    const std::lock_guard lock(surfaceMutex_);
+    const bool wasAdopted = adopted_.exchange(true);
+    if (!wasAdopted || surface_.session().refreshIfChanged()) {
+      if (viewSuspended_.load()) {
+        // A transient document (the file picker's tree) owns the slice
+        // view; the refresh above still ran, only the adoption waits.
+        return;
+      }
+      // Keep the reader's cell: a live re-adopt restores whatever is
+      // focused now, a resume (post-picker) the cell suspendView captured,
+      // a swap nothing -- the reader lands on the new source's root.
+      // focusCellId() is a minted-store id; the arena only knows the
+      // projected doc's ids, so the map translates both directions.
+      const auto focus =
+          wasAdopted ? focusedProjectedRef() : resumeFocus_.load();
+      viz_.adoptDocument(
+          zigzag::projectionToZz(label_, surface_.session(), surface_.arena()),
+          label_);
+      if (focus.has_value() && surface_.arena().contains(*focus)) {
+        if (const auto minted = viz_.adoptedMintedId(*focus);
+            minted.has_value()) {
+          viz_.focusCell(static_cast<zigzag::CellRef>(*minted));
+        }
+      }
+      GLEDITOR_LOG_INFO("xuzz.lens", "{} -> {} cells adopted", label_,
+                        surface_.session().cellCount());
+    }
+  }
+  [[nodiscard]] bool busy() const override { return false; }
+
+  /// The session, for callers driving lens verbs (browse/query happen
+  /// before the session wraps the lens; materialize/commit later).
+  [[nodiscard]] zigzag::ProjectionSession &session() {
+    return surface_.session();
+  }
+
+  /// Swap the projected source: arena, core and session are rebuilt in
+  /// one ProjectionSurface::reset (a CellRef from the old surface would
+  /// be a wild address in the new arena). The fresh projection is adopted
+  /// by the next drawFrame -- adopting here would race a queued document
+  /// emission landing on the render thread, and every adoption of this
+  /// view must serialize there. Throws what the projection throws; the
+  /// old surface survives a failed one.
+  LensSurfaceContributor *swapLens(std::unique_ptr<zigzag::ProjectionLens> lens,
+                                   std::string newLabel) {
+    const std::lock_guard lock(surfaceMutex_);
+    surface_.reset(std::move(lens));
+    promotion_.reset(); // it borrows the old surface's SqlLens
+    label_ = std::move(newLabel);
+    resumeFocus_.store(std::nullopt); // a new source lands on its own root
+    adopted_.store(false);
+    viewSuspended_.store(false);
+    return this;
+  }
+
+  /// Pause adoption while a transient document owns the slice view,
+  /// remembering the reader's cell so resumeView() can land them back on
+  /// it; resumeView() then marks the surface for a fresh adopt next frame.
+  void suspendView() {
+    const std::lock_guard lock(surfaceMutex_);
+    resumeFocus_.store(focusedProjectedRef());
+    viewSuspended_.store(true);
+  }
+  void resumeView() {
+    if (viewSuspended_.exchange(false)) {
+      adopted_.store(false);
+    }
+  }
+
+  /// A waitable descriptor for an event loop's wait path -- the lens's
+  /// own change signal (inotify fd on Linux).
+  [[nodiscard]] std::optional<int> waitableFd() const noexcept {
+    const std::lock_guard lock(surfaceMutex_);
+    return surface_.session().lens().waitableFd();
+  }
+
+  /// Materialize the next deferred window page -- the next-page
+  /// gesture. False when nothing is stubbed or the lens isn't windowed.
+  [[nodiscard]] bool materializeNextStub() {
+    const std::lock_guard lock(surfaceMutex_);
+    auto *w =
+        dynamic_cast<zigzag::WindowedLens *>(surface_.session().lensMut());
+    if (w == nullptr) {
+      return false;
+    }
+    const auto stub = w->nextStub();
+    if (!stub.has_value()) {
+      return false;
+    }
+    const auto r = w->materializePage(*stub);
+    if (!r) {
+      return false;
+    }
+    (void)surface_.session().refresh();
+    readoptKeepingFocus();
+    return true;
+  }
+
+  /// The cross-lens "open" gesture: mount the focused filesystem cell's
+  /// delegate lens (GitLens/LogLens/ConfigLens) under it -- a
+  /// RouterLens hop in. Focus stays on the cell it was on.
+  [[nodiscard]] bool openFocusedDelegate() {
+    const std::lock_guard lock(surfaceMutex_);
+    auto *router = routerLens();
+    if (router == nullptr) {
+      return false;
+    }
+    const auto key = focusedKey();
+    if (!key.has_value() || !router->open(*key).has_value()) {
+      return false;
+    }
+    (void)surface_.session().refresh();
+    readoptKeepingFocus();
+    return true;
+  }
+
+  /// The cross-lens "back" gesture: unmount the delegate at or above
+  /// the focus and land the reader on the mount cell it came through.
+  [[nodiscard]] bool backOutOfMount() {
+    const std::lock_guard lock(surfaceMutex_);
+    auto *router = routerLens();
+    if (router == nullptr) {
+      return false;
+    }
+    const auto key = focusedKey();
+    if (!key.has_value()) {
+      return false;
+    }
+    const auto mount = router->mountBoundary(*key);
+    if (!mount.has_value() || !router->unmount(*mount).has_value()) {
+      return false;
+    }
+    (void)surface_.session().refresh();
+    readoptKeepingFocus();
+    // One hop out lands on the mount cell -- the delegate's own cells
+    // just stale-marked, so staying on them would strand the reader.
+    // cellFor answers in the arena's space; focusCell speaks minted.
+    if (const auto cell = surface_.session().cellFor(*mount);
+        cell.has_value()) {
+      if (const auto minted =
+              viz_.adoptedMintedId(static_cast<zigzag::CellID>(*cell));
+          minted.has_value()) {
+        viz_.focusCell(static_cast<zigzag::CellRef>(*minted));
+      }
+    }
+    return true;
+  }
+
+  /// Commit dirty edits through the lens (the write gesture).
+  [[nodiscard]] bool commitDirty() {
+    const std::lock_guard lock(surfaceMutex_);
+    const auto c = surface_.session().commit();
+    GLEDITOR_LOG_INFO("xuzz.lens", "{}: {} dirty edit(s), commit {}", label_,
+                      surface_.session().dirtyCount(),
+                      c.has_value() ? "applied" : c.error().c_str());
+    return c.has_value();
+  }
+
+  /// Promote the focused subject (row) or page into the annotation
+  /// store -- the U-L5 crossing's user half.
+  [[nodiscard]] bool promoteFocused() {
+    const std::lock_guard lock(surfaceMutex_);
+    const auto key = focusedKey();
+    if (!key.has_value()) {
+      return false;
+    }
+    auto *sql = sqlLens();
+    if (sql == nullptr) {
+      return false;
+    }
+    if (!promotion_) {
+      promotion_ =
+          std::make_unique<zigzag::SqlPromotion>(*sql, annotationStore_);
+    }
+    if (const auto r = promotion_->ensureReady(); !r) {
+      return false;
+    }
+    // Subject first, then page -- the same gesture with the envelope
+    // built for the key's own shape.
+    if (const auto s = promotion_->promoteSubject(*key); s.has_value()) {
+      return true;
+    }
+    const auto p = promotion_->promotePage(*key);
+    return p.has_value();
+  }
+
+private:
+  /// The focused minted-store id as the projected doc's own cell ref --
+  /// the translator every focus-derived verb goes through. A gesture
+  /// that landed on a cell the current adoption doesn't map (focus on
+  /// a stale cell after a remint, say) yields no ref and the verb is a
+  /// no-op rather than a wrong-source call.
+  [[nodiscard]] std::optional<zigzag::CellRef> focusedProjectedRef() const {
+    const auto focus = viz_.focusCellId();
+    if (!focus) return std::nullopt;
+    const auto projected = viz_.adoptedProjectedId(*focus);
+    if (!projected.has_value()) {
+      return std::nullopt;
+    }
+    return static_cast<zigzag::CellRef>(*projected);
+  }
+  [[nodiscard]] std::optional<zigzag::ExternalKey> focusedKey() const {
+    const auto ref = focusedProjectedRef();
+    return ref.has_value() ? surface_.session().keyFor(*ref) : std::nullopt;
+  }
+
+  [[nodiscard]] zigzag::SqlLens *sqlLens() {
+    return dynamic_cast<zigzag::SqlLens *>(surface_.session().lensMut());
+  }
+
+  /// The lens as a RouterLens when --lens named a directory -- the
+  /// cross-lens mount/unmount gestures are its verbs.
+  [[nodiscard]] zigzag::RouterLens *routerLens() {
+    return dynamic_cast<zigzag::RouterLens *>(surface_.session().lensMut());
+  }
+
+  /// Re-adopt the projection and restore the reader's cell: refs are
+  /// stable across refreshes, so a still-present focus survives. The
+  /// minted-store id dies with the adoption -- the projected id is the
+  /// thing that carries over and translates back to a fresh minted one.
+  void readoptKeepingFocus() {
+    const auto focus = focusedProjectedRef();
+    viz_.adoptDocument(
+        zigzag::projectionToZz(label_, surface_.session(), surface_.arena()),
+        label_);
+    if (focus.has_value() && surface_.arena().contains(*focus)) {
+      if (const auto minted = viz_.adoptedMintedId(*focus);
+          minted.has_value()) {
+        viz_.focusCell(static_cast<zigzag::CellRef>(*minted));
+      }
+    }
+  }
+
+private:
+  zigzag::ProjectionSurface surface_;
+  /// Serializes surface_/viz_ access: drawFrame is render-thread, the
+  /// verb gestures and swapLens run on the event thread.
+  mutable std::mutex surfaceMutex_;
+  std::unique_ptr<zigzag::SqlPromotion> promotion_;
+  xanadu::Store &annotationStore_;
+  std::string label_;
+  zigzag::ZigzagVisualizer &viz_;
+  std::atomic<bool> adopted_{false};
+  std::atomic<bool> viewSuspended_{false};
+  /// suspendView's captured focus, as a projected (arena-space) ref:
+  /// the minted id would be a wild address in the re-adopted slice.
+  /// optional so "no focus held" is a value, not a magic ref.
+  std::atomic<std::optional<zigzag::CellRef>> resumeFocus_{std::nullopt};
+};
+
+int XuzzApp::executeLensRaster(const std::string &lensPath,
+                               const std::string &sqlBrowse,
+                               const std::string &sqlQuery) {
+  // A sql: URI (or a bare .db path, the shorthand) projects through
+  // SqlLens; anything else stays a FilesystemLens path.
+  if (lensPath.starts_with("sql:") || lensPath.ends_with(".db") ||
+      lensPath.ends_with(".sqlite") || lensPath.ends_with(".sqlite3")) {
+    return executeSqlLensRaster(lensPath, sqlBrowse, sqlQuery);
+  }
+  if (!sqlBrowse.empty() || !sqlQuery.empty()) {
+    std::cerr << "Error: --sql-browse/--sql-query need a sql: lens\n";
+    return 1;
+  }
+  // The scheme'd lenses dispatch through openLensUri (cfg:/log:/git:/
+  // journal:/dir:); a bare path stays the FilesystemLens it always was.
+  if (lensPath.starts_with("cfg:") || lensPath.starts_with("log:") ||
+      lensPath.starts_with("git:") || lensPath.starts_with("journal:") ||
+      lensPath.starts_with("dir:")) {
+    auto lens = zigzag::openLensUri(lensPath);
+    if (!lens) {
+      std::cerr << "Error: " << lens.error() << "\n";
+      return 1;
+    }
+    try {
+      zigzag::ArenaManifold arena;
+      zigzag::vortex::VortexCore core(arena);
+      zigzag::ProjectionSession session(std::move(*lens), core);
+      printProjectionTree(lensPath, session, core);
+      return 0;
+    } catch (const std::exception &err) {
+      std::cerr << "Error projecting lens: " << err.what() << "\n";
+      return 1;
+    }
+  }
+  // A bare path (or a union:/dir: URI) opens through the same dispatch
+  // as the interactive surface.
+  auto lens = zigzag::openLensUri(lensPath);
+  if (!lens) {
+    std::cerr << "Error: " << lens.error() << "\n";
     return 1;
   }
   try {
     zigzag::ArenaManifold arena;
     zigzag::vortex::VortexCore core(arena);
-    zigzag::ProjectionSession session(
-        std::make_unique<zigzag::FilesystemLens>(lensPath), core);
-
-    const auto dRole     = core.findOrMintDimension("d.role");
-    const auto dMime     = core.findOrMintDimension("d.mime");
-    const auto dContains = core.findOrMintDimension(
-        std::string(zigzag::genericDimName(zigzag::GenericDim::Containment)));
-    const auto dSeq = core.findOrMintDimension(
-        std::string(zigzag::genericDimName(zigzag::GenericDim::Sequence)));
-
-    auto attr = [&](zigzag::CellRef c, zigzag::DimRef d) -> std::string {
-      auto nb = arena.linked(c, d, zigzag::Posward);
-      return nb.has_value() ? arena.textOf(*nb) : std::string{};
-    };
-
-    std::cout << "lens: " << lensPath << " -> " << session.cellCount()
-              << " cells, " << session.roots().size() << " root(s)\n";
-
-    // Depth-first print of the projected tree: a cell, then its d.contains
-    // first child and the d.seq sibling chain, indented by depth.
-    auto printTree = [&](auto &&self, zigzag::CellRef cell, int depth) -> void {
-      std::string indent(static_cast<std::size_t>(depth) * 2, ' ');
-      std::cout << indent << arena.textOf(cell) << "  [" << attr(cell, dRole)
-                << ", " << attr(cell, dMime) << "]\n";
-      auto child = arena.linked(cell, dContains, zigzag::Posward);
-      for (auto cur = child; cur.has_value();
-           cur      = arena.linked(*cur, dSeq, zigzag::Posward)) {
-        self(self, *cur, depth + 1);
-      }
-    };
-    for (const auto root : session.roots()) {
-      printTree(printTree, root, 0);
-    }
+    zigzag::ProjectionSession session(std::move(*lens), core);
+    printProjectionTree(lensPath, session, core);
     return 0;
   } catch (const std::exception &err) {
     std::cerr << "Error during lens projection: " << err.what() << "\n";
@@ -580,8 +940,10 @@ int XuzzApp::run(const int argc, char **argv) {
     return executeCheckAuthorship(opts.checkAuthorshipPath);
   }
 
-  if (!opts.lensPath.empty()) {
-    return executeLensRaster(opts.lensPath);
+  // --lens rasters when the run is a raster; an interactive open flows
+  // on and the projected source becomes the slice view below.
+  if (!opts.lensPath.empty() && (opts.headless || opts.rasterMode)) {
+    return executeLensRaster(opts.lensPath, opts.sqlBrowse, opts.sqlQuery);
   }
 
   if (opts.rasterMode) {
@@ -1236,6 +1598,56 @@ int XuzzApp::run(const int argc, char **argv) {
   zigzagPresentation->setPresentationTransformResolver(
       [&views] { return views.presentationTransform(); });
 
+  // A projected source becomes the slice view: the contributor owns the
+  // session and re-adopts it into the visualizer whenever the source
+  // moves (refreshIfChanged at the frame's quiesced point).
+  /// Where the picker opens: the lens's own directory, the last
+  /// pick's parent, else the cwd.
+  std::optional<fs::path> lensPickerDir;
+  std::unique_ptr<LensSurfaceContributor> lensSurface;
+  if (!opts.lensPath.empty()) {
+    auto lens = zigzag::openLensUri(opts.lensPath);
+    if (!lens) {
+      std::cerr << "Error: " << lens.error() << "\n";
+      return 1;
+    }
+    // sql: browse/query args drive the lens before the session wraps it.
+    if (auto *sqlLens = dynamic_cast<zigzag::SqlLens *>(lens->get());
+        sqlLens != nullptr) {
+      if (!opts.sqlBrowse.empty()) {
+        if (const auto r = sqlLens->browse(opts.sqlBrowse); !r) {
+          std::cerr << "Error: browse: " << r.error() << "\n";
+          return 1;
+        }
+      }
+      if (!opts.sqlQuery.empty()) {
+        if (const auto r = sqlLens->query(opts.sqlQuery, {}); !r) {
+          std::cerr << "Error: query: " << r.error() << "\n";
+          return 1;
+        }
+      }
+    }
+    lensSurface = std::make_unique<LensSurfaceContributor>(
+        std::move(*lens), *zigzagPresentation, opts.lensPath,
+        session->store(0));
+    // The picker starts in the open source's own directory: a file
+    // source's parent, a directory source itself.
+    if (const fs::path src{opts.lensPath}; std::filesystem::exists(src)) {
+      lensPickerDir = std::filesystem::is_directory(src)
+                          ? src
+                          : (src.has_parent_path() ? src.parent_path() : src);
+    }
+  }
+
+  // The browse-to-open picker (lens.open-source): a modal FocusScope that
+  // projects a directory into the same slice view the lens surface adopts
+  // into. The object lingers after it finishes -- its pick/cancel handlers
+  // run inside its own keyPressed, so destroying it there is deleting
+  // `this`; the next gesture replaces it, and its scope registration is
+  // what actually comes down on finish.
+  std::unique_ptr<xanadu::ui::LensFilePicker> lensPicker;
+  gleditor::ui::FocusManager::ScopeHandle lensPickerScope;
+
   xanadu::BridgeCoordinator bridgeCoordinator(links, renderer,
                                               *state->accessibility);
   bridgeCoordinator.connectSatelloidNavigation(satelloidOverlay);
@@ -1397,13 +1809,20 @@ int XuzzApp::run(const int argc, char **argv) {
 
   const auto bindZigzag = [&session, &zigzagPresentation, &linkContext,
                            &bridgeCoordinator, &views, &map, &zigzagStoreIndex,
-                           &sliceHeads](RenderState &rState,
-                                        const std::size_t storeIndex,
-                                        const xanadu::MicroversionId &version) {
+                           &sliceHeads, &lensSurface](
+                              RenderState &rState, const std::size_t storeIndex,
+                              const xanadu::MicroversionId &version) {
     if (!zigzagPresentation->sliceHead().isZero()) {
       sliceHeads[zigzagStoreIndex] = zigzagPresentation->sliceHead();
     }
-    zigzagPresentation->bindXanaduStore(session->store(storeIndex), version);
+    // While a lens surface owns the view -- or the picker's transient
+    // document does under suspendView -- a store rebind would clobber
+    // what is showing: the pane keeps the adopted projection. The
+    // bookkeeping below still runs so the next real store view lands
+    // correctly.
+    if (lensSurface == nullptr) {
+      zigzagPresentation->bindXanaduStore(session->store(storeIndex), version);
+    }
     zigzagStoreIndex       = storeIndex;
     sliceHeads[storeIndex] = version;
     map.setStoreIndex(storeIndex);
@@ -1623,6 +2042,9 @@ int XuzzApp::run(const int argc, char **argv) {
   renderer->addFrameContributor(&convergenceOverlay);
   renderer->addPickObserver(&convergenceOverlay);
   renderer->addSpanDecorator(&convergenceOverlay);
+  if (lensSurface) {
+    renderer->addFrameContributor(lensSurface.get());
+  }
 
   state->accessibility->addSource(docSwitcher.get());
   state->accessibility->addSource(&links);
@@ -2516,6 +2938,142 @@ int XuzzApp::run(const int argc, char **argv) {
   app.commands().registerAction(std::string(xanadu::settings::kKeymapBack),
                                 "go to the previous state, losing nothing",
                                 [&views] { views.back(); });
+
+  // The lens verbs stay registered even without --lens: a picker pick
+  // creates the surface lazily, and its RouterLens needs open/back.
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapLensNextPage),
+      "materialize the lens's next deferred page", [&lensSurface] {
+        if (lensSurface != nullptr && lensSurface->materializeNextStub()) {
+          GLEDITOR_LOG_INFO("xuzz.lens", "materialized next page");
+        }
+      });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapLensCommit),
+      "commit the lens's dirty edits to its source", [&lensSurface] {
+        if (lensSurface != nullptr && lensSurface->commitDirty()) {
+          GLEDITOR_LOG_INFO("xuzz.lens", "committed dirty edits");
+        }
+      });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapLensPromote),
+      "promote the focused row or page into the annotation store",
+      [&lensSurface] {
+        if (lensSurface != nullptr && lensSurface->promoteFocused()) {
+          GLEDITOR_LOG_INFO("xuzz.lens", "promoted the focused cell");
+        }
+      });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapLensOpen),
+      "mount the focused file cell's delegate lens (RouterLens)",
+      [&lensSurface] {
+        if (lensSurface != nullptr && lensSurface->openFocusedDelegate()) {
+          GLEDITOR_LOG_INFO("xuzz.lens",
+                            "mounted the focused cell's delegate lens");
+        }
+      });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapLensBack),
+      "unmount the delegate lens at or above the focus", [&lensSurface] {
+        if (lensSurface != nullptr && lensSurface->backOutOfMount()) {
+          GLEDITOR_LOG_INFO("xuzz.lens", "unmounted the delegate lens");
+        }
+      });
+
+  // Browse-to-open: the picker projects a directory tree into the same
+  // slice view the lens surface adopts into, so finding a source and
+  // opening it are two halves of one gesture. Registered without
+  // --lens too -- the pick creates the LensSurfaceContributor lazily.
+  const auto openLensSource = [&] {
+    if (lensPicker != nullptr && !lensPicker->finished()) {
+      return; // already up
+    }
+    const fs::path root = lensPickerDir.value_or(fs::current_path());
+    auto picker         = std::make_unique<xanadu::ui::LensFilePicker>(root);
+    auto *const raw     = picker.get();
+    raw->setLabel("lens source: " + root.string());
+    // The sink hops to the render thread: adoptDocument rewrites the
+    // visualizer's store/engine, which the render loop reads every frame.
+    raw->setDocumentSink(
+        [renderer, zigzagPresentation](zigzag::ZzStructureDocument &&doc) {
+          const auto sourcePath = doc.meta.name;
+          renderer->runWithState([zigzagPresentation, doc = std::move(doc),
+                                  sourcePath](RenderState &) mutable {
+            zigzagPresentation->adoptDocument(std::move(doc), sourcePath);
+          });
+        });
+    // Hand the slice view back to what was showing before the picker:
+    // the live lens's projection, or the bound xanadu store. Every finish
+    // path -- pick, failed pick, cancel -- runs this.
+    const auto restoreSliceView = [&] {
+      if (lensSurface != nullptr) {
+        lensSurface->resumeView();
+      } else {
+        renderer->runWithState([&bindZigzag, &session, &zigzagStoreIndex,
+                                &sliceHeads](RenderState &rState) {
+          const auto it = sliceHeads.find(zigzagStoreIndex);
+          bindZigzag(
+              rState, zigzagStoreIndex,
+              it != sliceHeads.end()
+                  ? it->second
+                  : session->store(zigzagStoreIndex).primaryCurrentVersion());
+        });
+      }
+    };
+    // root is a local: the handler outlives this frame, so it takes a copy.
+    raw->setOnPick([&, root, restoreSliceView](const fs::path &path) {
+      // The picker is already finished and deactivated here; its scope
+      // registration comes down first so no exit below can skip it.
+      lensPickerScope.reset();
+      lensPickerDir = path.has_parent_path() ? path.parent_path() : root;
+      auto lens     = zigzag::openLensUri(path.string());
+      if (!lens) {
+        GLEDITOR_LOG_WARN("xuzz.lens", "cannot open {} as a lens: {}",
+                          path.string(), lens.error());
+        restoreSliceView();
+        return;
+      }
+      const auto label = path.string();
+      try {
+        if (lensSurface != nullptr) {
+          lensSurface->swapLens(std::move(*lens), label);
+        } else {
+          lensSurface = std::make_unique<LensSurfaceContributor>(
+              std::move(*lens), *zigzagPresentation, label, session->store(0));
+          auto *const surface = lensSurface.get();
+          renderer->runWithState([renderer, surface](RenderState &) {
+            renderer->addFrameContributor(surface);
+          });
+        }
+        GLEDITOR_LOG_INFO("xuzz.lens", "opened {} as a lens", label);
+      } catch (const std::exception &err) {
+        GLEDITOR_LOG_WARN("xuzz.lens", "cannot project {}: {}", label,
+                          err.what());
+        restoreSliceView(); // the old surface outlives a failed swap
+      }
+    });
+    raw->setOnCancel([&] {
+      lensPickerScope.reset();
+      restoreSliceView();
+    });
+    if (lensSurface != nullptr) {
+      lensSurface->suspendView();
+    }
+    // A finished picker being replaced may still hold a live registration
+    // (a finish path that skipped its handler); it comes down while the
+    // scope it names is still alive, not after the unique_ptr swap below
+    // destroys it.
+    lensPickerScope.reset();
+    lensPicker      = std::move(picker);
+    lensPickerScope = state->focusManager.registerScope(
+        *raw, {.allowedCommands = {"quit", "std:xuzz/quit"}});
+    raw->open();
+  };
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapLensOpenSource),
+      "browse for a local file or directory and open it as a lens",
+      openLensSource);
+
   app.commands().registerAction(std::string(xanadu::settings::kKeymapNewDoc),
                                 "create a new sovereign document quad",
                                 [&views] { views.newDocument(); });

@@ -54,7 +54,11 @@ struct CliOptions {
   ViewMode viewMode{ViewMode::Unified};
   std::string storePath{"xanadoc"};
   std::string slicePath;
-  std::string lensPath; ///< a filesystem path to project via FilesystemLens
+  std::string lensPath; ///< a filesystem path or sql: URI to project
+  /// With a sql: lens: browse one schema table (name), and/or run one
+  /// read-only statement (text).
+  std::string sqlBrowse;
+  std::string sqlQuery;
   bool rasterMode{false};
   bool quiet{false};
   bool headless{false};

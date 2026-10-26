@@ -43,10 +43,13 @@ inline std::shared_ptr<spdlog::logger> category(const char *name) {
 template <typename... Args>
 void constexpr log_at(const char *category_name, auto level_enum,
                       spdlog::format_string_t<Args...> fmt, Args &&...args) {
-  static const auto gleditorCategoryLogger =
-      gleditor::logging::category(category_name);
-  if (gleditorCategoryLogger->should_log(level_enum)) {
-    gleditorCategoryLogger->log(level_enum, fmt, std::forward<Args>(args)...);
+  // No static: a function-local static binds once per template
+  // instantiation, so every call sharing a signature would log under
+  // whichever category ran first. The registry get() is the cheap
+  // lookup the level guard is meant to precede.
+  const auto logger = gleditor::logging::category(category_name);
+  if (logger->should_log(level_enum)) {
+    logger->log(level_enum, fmt, std::forward<Args>(args)...);
   }
 }
 

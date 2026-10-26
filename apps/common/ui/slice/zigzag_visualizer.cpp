@@ -246,6 +246,12 @@ void ZigzagVisualizer::adoptDocument(
                           : std::make_unique<xanadu::Store>();
   store_            = ownedStore_.get();
   const auto sliced = sliceToStore(doc, *store_);
+  adoptedProjectedToMinted_.clear();
+  adoptedMintedToProjected_.clear();
+  for (const auto &[projected, minted] : sliced.cells) {
+    adoptedProjectedToMinted_.emplace(projected, minted);
+    adoptedMintedToProjected_.emplace(minted, projected);
+  }
   sourceOrigins_.clear();
   pickTargets_.clear();
   pickTargetVersion_.clear();
@@ -689,7 +695,18 @@ bool ZigzagVisualizer::deleteFocusCell() {
 
 ZigzagVisualizer *
 ZigzagVisualizer::updateFocusCellText(const std::string &text) {
-  if (!engine_ || !accursed_cell_focus_) {
+  // A surface that owns the document's write path (a lens projection)
+  // gets the edit exclusively: engine_ under an adopted doc is a throwaway
+  // store, so even a declined external edit must not write there.
+  if (onExternalCellEdit_ && accursed_cell_focus_ &&
+      *accursed_cell_focus_ != 0) {
+    if (onExternalCellEdit_(*accursed_cell_focus_, text)) {
+      rebuildActiveViewTopology();
+      invalidateAccessibility();
+    }
+    return this;
+  }
+  if (!engine_ || !accursed_cell_focus_ || *accursed_cell_focus_ == 0) {
     return this;
   }
   const auto focus = static_cast<CellRef>(*accursed_cell_focus_);
@@ -3505,7 +3522,21 @@ ZigzagVisualizer *ZigzagVisualizer::setKeyHints(std::string here,
 }
 
 ZigzagVisualizer *ZigzagVisualizer::beginCellEdit() {
-  if (!engine_ || !accursed_cell_focus_ ||
+  // The lens-surface path: no engine_, but the hook owns the write --
+  // the initial text is the adopted cell's rendered content.
+  if ((!engine_ || !accursed_cell_focus_) && onExternalCellEdit_) {
+    if (accursed_cell_focus_ && *accursed_cell_focus_ != 0) {
+      if (const auto it = visible_cells_.find(*accursed_cell_focus_);
+          it != visible_cells_.end()) {
+        cellEditText_ = it->second.text;
+        cellEditing_  = true;
+        activate();
+        cellEditWhole_ = !cellEditText_.empty();
+      }
+    }
+    return this;
+  }
+  if (!engine_ || !accursed_cell_focus_ || *accursed_cell_focus_ == 0 ||
       !engine_->findCell(static_cast<CellRef>(*accursed_cell_focus_))) {
     return this;
   }

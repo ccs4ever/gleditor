@@ -267,6 +267,14 @@ VQLCompiler::compileExecutionBlock(const ExecutionBlock &block) {
     if (std::holds_alternative<LetClause>(binding)) {
       const auto &let = std::get<LetClause>(binding);
       std::optional<CellRef> valCell;
+      if (const auto *path = std::get_if<PathExpression>(&let.target);
+          path != nullptr && path->isFunctor) {
+        // Compiled as a path it would bind the cells the functor reaches from
+        // home, not the functor.
+        throw std::invalid_argument(
+            "point-free path functors are not compiled to Vortex yet; run the "
+            "query with --engine direct");
+      }
       if (std::holds_alternative<PathExpression>(let.target)) {
         valCell = compilePathExpression(std::get<PathExpression>(let.target),
                                         core_.home());

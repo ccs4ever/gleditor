@@ -102,10 +102,16 @@ Run runProgram(const std::string &src) {
 //   line             : "token ###\n" for one key
 //   render           : concatenate a line per key, in the fixed key order
 //
-// Entry: openLens the directory, take the root, then over the children:
+// Entry: openLens the directory, unwrap the `Ok` Result, take the first
+// root of the List Cell, then over the children:
 //   map cellText     -> list of entry NAMES
 //   concatMap words  -> every token across every name
 //   render ... keys  -> the histogram text, printed with putStr
+// openLens is typed IO (Result String (List Cell)) (bridge §4, P1): Err
+// prints the refusal, `[]` reports an empty projection. The `[]` alt of
+// `case roots` comes FIRST -- a `;`-separated alt binds to the innermost
+// unparenthesized case, so keeping `(root : _)` last leaves it attached
+// to `case roots` (the bridge doc's §5 dangling-`;` note).
 constexpr const char *kProgramFmt =
     "map f xs = case xs of [] => [] ; (h : t) => f h : map f t ;\n"
     "foldr f z xs = case xs of [] => z ; (h : t) => f h (foldr f z t) ;\n"
@@ -117,8 +123,11 @@ constexpr const char *kProgramFmt =
     "line toks tok = tok ++ \" \" ++ bar (count tok toks) ++ \"\\n\" ;\n"
     "render toks keys = foldr (fn k => fn acc => line toks k ++ acc) \"\" "
     "keys ;\n"
-    "openLens \"%s\" >>= (fn root => "
-    "putStr (render (concatMap words (map cellText (childrenAll root))) "
+    "openLens \"%s\" >>= (fn opened => case opened of "
+    "Err why => putStrLn (\"open: \" ++ why) ; "
+    "Ok roots => case roots of [] => putStrLn \"open: no roots\" ; "
+    "(root : _) => putStr (render "
+    "(concatMap words (map cellText (childrenAll root))) "
     "[\"red\", \"green\", \"blue\"]))";
 
 std::string programFor(const std::filesystem::path &dir) {

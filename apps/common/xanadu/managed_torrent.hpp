@@ -175,6 +175,22 @@ public:
   [[nodiscard]] std::optional<ManagedTorrentStatus>
   getStatus(const InfoHash &hash) const;
 
+  /// One connected peer's snapshot -- the enumerable rank the swarm
+  /// lens lists under each managed torrent.
+  struct PeerInfo {
+    std::string address;       ///< ip:port
+    std::string client;        ///< peer's client id, e.g. "libtorrent/2.0.x"
+    float progress{0.0F};      ///< pieces it holds, 0..1
+    std::int64_t downSpeed{0}; ///< payload bytes/s toward us
+    std::int64_t upSpeed{0};   ///< payload bytes/s from us
+  };
+
+  /// The peers @p hash's swarm is connected to right now. Empty when
+  /// the torrent is unknown or peerless -- a peer disconnects once it
+  /// has nothing left to give, so the rank shrinks as honestly as it
+  /// grows.
+  [[nodiscard]] std::vector<PeerInfo> listPeers(const InfoHash &hash) const;
+
   /**
    * @brief Connect directly to a known peer (useful for testing or private
    * LANs).
