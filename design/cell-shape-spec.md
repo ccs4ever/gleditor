@@ -1,4 +1,4 @@
-# Cell-Shape Specification: One Neighborhood-Match Kernel for the Vortex Frontends (v1.16)
+# Cell-Shape Specification: One Neighborhood-Match Kernel for the Vortex Frontends (v1.17)
 
 A design specification for the **shared cell-shape kernel** — `zigzag/cell_shape.{hpp,cpp}`, beside
 `session_ops.hpp` (`apps/common/xanadu/zigzag/`) in the "one copy of the protocol" role — and for how
@@ -166,7 +166,7 @@ using ShapeExpected =
                                     CellRef)>>;     //   VQL's arbitrary `: expr`
 
 struct ShapeField {
-  DimRef dim;                         // resolved DimRef — name→dim is the frontend's (required)
+  cpp26::optional<DimRef> dim;         // resolved DimRef — nullopt = unresolvable name (fails Require, passes Forbid honestly; the "unresolvable dim" channel can't be expressed by a required DimRef)
   DimVector dir{DimVector::POS};
   bool bidir{false};                  // `~` — either direction satisfies, both must be
                                       // absent under Forbid
@@ -434,9 +434,9 @@ template <CellGraph M>
 cellsMatching(const M &graph, const ShapeExpr &shape,
               cpp26::function_ref<vortex::CellValue(CellRef)> render,
               std::ranges::input_range auto &&candidates,
+              cpp26::function_ref<OptionalCell(CellRef, DimRef, DimVector)> hop,
               cpp26::optional<ShapeBindings &> bindings = std::nullopt,
-              MissingPolicy missing = MissingPolicy::Refuse,
-              cpp26::function_ref<OptionalCell(CellRef, DimRef, DimVector)> hop) {
+              MissingPolicy missing = MissingPolicy::Refuse) {
   return candidates | std::views::filter([&](CellRef c) {
            return shapeMatches(graph, c, shape, render, bindings, missing, hop); }) |
          std::ranges::to<std::vector<CellRef>>();
@@ -548,7 +548,7 @@ case matchShape entry spec of
 | S3 | `vpl/view.hpp` + `vpl/vpl_engine.{hpp,cpp}` + `vpl/{token,lexer,parser}` + `vpl/compiler.{hpp,cpp}` + `vpl/ast.hpp` | `⎕MATCH`/`⎕SHAPE`/`⎕SHAPEIDX` quads (the index-mask form is the array-native one — indices select via `V[idx]` with identity; `⎕MATCH` the fused convenience); **dependency: the Q10 cell-list `VplView`** (`vpl-lens-bridge.md:450`) — the mask yield has no representation without it; spec-string parse through the shared spec-grammar — owned by a new `zigzag/cell_shape_parse.{hpp,cpp}` row (S9 below) — the grammar is:
 
 ```
-shape    := "{" field ("," field)* "}" | "(" field ("," field)* ")" | field ("," field)* | "{}" | "{*}" | "{!*}"
+shape    := "{" field ("," field)* "}" | "(" field ("," field)* ")" | field ("," field)* | "{}" | "{*}" | "{!*}" | "{!*," field ("," field)* "}" | "{*," field ("," field)* "}"
 field    := "!"? dir? dim [":" value | bindName nested?]?
 nested   := shape   # braces or parens — the delimiter is frontend-lexical
 dir      := "+" | "-" | "~"
